@@ -20,7 +20,7 @@ fdb.api_version(630)
 def str_to_tuple(s: str | None):
     if s is None:
         return s
-    return tuple(s.split(','))
+    return tuple(s.split(","))
 
 
 fdb_db = None
@@ -45,27 +45,39 @@ def chunkify(iterable, sz: int):
 
 
 @fdb.transactional
-def write_coverage_chunk(tr, path: Tuple[str, ...], metadata: Tuple[str, ...],
-                         coverage: List[Tuple[Coverage, bool]], initialized: bool) -> bool:
+def write_coverage_chunk(
+    tr,
+    path: Tuple[str, ...],
+    metadata: Tuple[str, ...],
+    coverage: List[Tuple[Coverage, bool]],
+    initialized: bool,
+) -> bool:
     cov_dir = fdb.directory.create_or_open(tr, path)
     if not initialized:
         metadata_dir = fdb.directory.create_or_open(tr, metadata)
-        v = tr[metadata_dir['initialized']]
+        v = tr[metadata_dir["initialized"]]
         initialized = v.present()
     for cov, covered in coverage:
         if not initialized or covered:
-            tr.add(cov_dir.pack((cov.file, cov.line, cov.comment, cov.rare)), struct.pack('<I', 1 if covered else 0))
+            tr.add(
+                cov_dir.pack((cov.file, cov.line, cov.comment, cov.rare)),
+                struct.pack("<I", 1 if covered else 0),
+            )
     return initialized
 
 
 @fdb.transactional
 def set_initialized(tr, metadata: Tuple[str, ...]):
     metadata_dir = fdb.directory.create_or_open(tr, metadata)
-    tr[metadata_dir['initialized']] = fdb.tuple.pack((True,))
+    tr[metadata_dir["initialized"]] = fdb.tuple.pack((True,))
 
 
-def write_coverage(cluster_file: str | None, cov_path: Tuple[str, ...], metadata: Tuple[str, ...],
-                   coverage: OrderedDict[Coverage, bool]):
+def write_coverage(
+    cluster_file: str | None,
+    cov_path: Tuple[str, ...],
+    metadata: Tuple[str, ...],
+    coverage: OrderedDict[Coverage, bool],
+):
     db = open_db(cluster_file)
     assert config.joshua_dir is not None
     initialized: bool = False
@@ -81,12 +93,14 @@ def _read_coverage(tr, cov_path: Tuple[str, ...]) -> OrderedDict[Coverage, int]:
     cov_dir = fdb.directory.create_or_open(tr, cov_path)
     for k, v in tr[cov_dir.range()]:
         file, line, comment, rare = cov_dir.unpack(k)
-        count = struct.unpack('<I', v)[0]
+        count = struct.unpack("<I", v)[0]
         res[Coverage(file, line, comment, rare)] = count
     return res
 
 
-def read_coverage(cluster_file: str | None, cov_path: Tuple[str, ...]) -> OrderedDict[Coverage, int]:
+def read_coverage(
+    cluster_file: str | None, cov_path: Tuple[str, ...]
+) -> OrderedDict[Coverage, int]:
     db = open_db(cluster_file)
     return _read_coverage(db, cov_path)
 
@@ -105,7 +119,7 @@ class Statistics:
 
     @fdb.transactional
     def open_stats_dir(self, tr, app_dir: Tuple[str]):
-        stats_dir = app_dir + ('runtime_stats',)
+        stats_dir = app_dir + ("runtime_stats",)
         return fdb.directory.create_or_open(tr, stats_dir)
 
     @fdb.transactional
@@ -113,14 +127,14 @@ class Statistics:
         result = collections.OrderedDict()
         for k, v in tr[self.stats_dir.range()]:
             test_name = self.stats_dir.unpack(k)[0]
-            runtime, run_count = struct.unpack('<II', v)
+            runtime, run_count = struct.unpack("<II", v)
             result[test_name] = TestStatistics(runtime, run_count)
         return result
 
     @fdb.transactional
     def _write_runtime(self, tr, test_name: str, time: int) -> None:
         key = self.stats_dir.pack((test_name,))
-        tr.add(key, struct.pack('<II', time, 1))
+        tr.add(key, struct.pack("<II", time, 1))
 
     def write_runtime(self, test_name: str, time: int) -> None:
         assert self.db is not None
@@ -128,8 +142,11 @@ class Statistics:
 
 
 class FDBStatFetcher(StatFetcher):
-    def __init__(self, tests: OrderedDict[str, TestDescription],
-                 joshua_dir: Tuple[str] = str_to_tuple(config.joshua_dir)):
+    def __init__(
+        self,
+        tests: OrderedDict[str, TestDescription],
+        joshua_dir: Tuple[str] = str_to_tuple(config.joshua_dir),
+    ):
         super().__init__(tests)
         self.statistics = Statistics(config.cluster_file, joshua_dir)
 

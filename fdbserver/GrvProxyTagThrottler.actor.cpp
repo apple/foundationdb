@@ -40,7 +40,8 @@ void GrvProxyTagThrottler::TagQueue::setRate(double rate) {
 	if (rateInfo.present()) {
 		rateInfo.get().setRate(rate);
 	} else {
-		rateInfo = GrvTransactionRateInfo(rate);
+		rateInfo = GrvTransactionRateInfo(
+		    SERVER_KNOBS->TAG_THROTTLE_RATE_WINDOW, SERVER_KNOBS->TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET, rate);
 	}
 }
 
@@ -112,7 +113,7 @@ void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
 		TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
 		    .suppressFor(60.0)
 		    .detail("NumTags", req.tags.size())
-		    .detail("UsingTag", printable(tag));
+		    .detail("UsingTag", tag);
 	}
 	queues[tag].requests.emplace_back(req);
 }
@@ -311,7 +312,6 @@ ACTOR static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {
 			outBatchPriority.front().reply.send(GetReadVersionReply{});
 			outBatchPriority.pop_front();
 		}
-		TraceEvent("HERE_ServerProcessing").detail("Size", outDefaultPriority.size());
 		while (!outDefaultPriority.empty()) {
 			outDefaultPriority.front().reply.send(GetReadVersionReply{});
 			outDefaultPriority.pop_front();
@@ -376,6 +376,32 @@ TEST_CASE("/GrvProxyTagThrottler/MultiClient") {
 	wait(timeout(waitForAll(clients) && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_MultiClient").detail("Counter", counters["sampleTag"_sr]);
 	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 30.0));
+	return Void();
+}
+
+// Each tag receives 10 transaction/second budget
+TEST_CASE("/GrvProxyTagThrottler/MultiTag") {
+	state GrvProxyTagThrottler throttler(5.0);
+	state TagSet tagSet1;
+	state TagSet tagSet2;
+	state TransactionTagMap<uint32_t> counters;
+	{
+		TransactionTagMap<double> rates;
+		rates["sampleTag1"_sr] = 10.0;
+		rates["sampleTag2"_sr] = 10.0;
+		throttler.updateRates(rates);
+	}
+	tagSet1.addTag("sampleTag1"_sr);
+	tagSet2.addTag("sampleTag2"_sr);
+	state Future<Void> client1 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet1, 5, 20.0, &counters);
+	state Future<Void> client2 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet2, 5, 20.0, &counters);
+	state Future<Void> server = mockServer(&throttler);
+	wait(timeout(client1 && client2 && server, 60.0, Void()));
+	TraceEvent("TagQuotaTest_MultiTag")
+	    .detail("Counter1", counters["sampleTag1"_sr])
+	    .detail("Counter2", counters["sampleTag2"_sr]);
+	ASSERT(isNear(counters["sampleTag1"_sr], 60 * 10.0));
+	ASSERT(isNear(counters["sampleTag2"_sr], 60 * 10.0));
 	return Void();
 }
 
@@ -448,9 +474,9 @@ TEST_CASE("/GrvProxyTagThrottler/Fifo") {
 // Tests that while throughput is low, the tag throttler
 // does not accumulate too much budget.
 //
-// A server is setup to server 10 transactions per second,
+// A server is setup to server 100 transactions per second,
 // then runs idly for 60 seconds. Then a client starts
-// and attempts 20 transactions per second for 60 seconds.
+// and attempts 200 transactions per second for 60 seconds.
 // The server throttles the client to only achieve
 // 10 transactions per second during this 60 second window.
 // If the throttler is allowed to accumulate budget indefinitely
@@ -461,16 +487,16 @@ TEST_CASE("/GrvProxyTagThrottler/LimitedIdleBudget") {
 	state TransactionTagMap<uint32_t> counters;
 	{
 		TransactionTagMap<double> rates;
-		rates["sampleTag"_sr] = 10.0;
+		rates["sampleTag"_sr] = 100.0;
 		throttler.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);
 
 	state Future<Void> server = mockServer(&throttler);
 	wait(delay(60.0));
-	state Future<Void> client = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
+	state Future<Void> client = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet, 1, 200.0, &counters);
 	wait(timeout(client && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_LimitedIdleBudget").detail("Counter", counters["sampleTag"_sr]);
-	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 100.0));
 	return Void();
 }

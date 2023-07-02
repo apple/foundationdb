@@ -28,14 +28,6 @@
 #include <any>
 #include <iostream>
 
-using ContextVariableMap = std::unordered_map<std::string_view, std::any>;
-
-template <class T>
-struct HasVariableMap_t : std::false_type {};
-
-template <class T>
-constexpr bool HasVariableMap = HasVariableMap_t<T>::value;
-
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
@@ -61,23 +53,16 @@ struct LoadContext {
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
 	LoadContext& context() { return *this; }
-
-	template <class Archiver = Ar>
-	std::enable_if_t<HasVariableMap<Archiver>, std::any&> variable(std::string_view name) {
-		return ar->variable(name);
-	}
 };
 
 template <class ReaderImpl>
 class _ObjectReader {
 protected:
 	Optional<ProtocolVersion> mProtocolVersion;
-	std::shared_ptr<ContextVariableMap> variables;
 
 public:
 	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
-	void setContextVariableMap(std::shared_ptr<ContextVariableMap> const& cvm) { variables = cvm; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
@@ -106,10 +91,6 @@ public:
 	void deserialize(Item& item) {
 		deserialize(FileIdentifierFor<Item>::value, item);
 	}
-
-	std::any& variable(std::string_view name) { return variables->at(name); }
-
-	std::any const& variable(std::string_view name) const { return variables->at(name); }
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
@@ -175,6 +156,13 @@ private:
 	Arena _arena;
 };
 
+// A single-use class for serializing an object with a serialize() member function or a serializable trait
+// Allocates from arena by default, with the ability to
+// a) optionally override default allocation function, and/or
+// b) optionally mark parts of memory after use for wiping: i.e. zeroing out
+// both a) and b) requires passing a dedicated function pointer for each operation.
+// Optionally, a pointer to an allocation context shared by both function may be passed.
+// Allocation is expected to happen exactly once during serialization.
 class ObjectWriter {
 	friend struct _IncludeVersion;
 	bool writeProtocolVersion = false;
@@ -184,78 +172,98 @@ class ObjectWriter {
 	}
 	ProtocolVersion mProtocolVersion;
 
-	class AllocateFunctor {
+	class MemoryHelper {
 	public:
-		explicit AllocateFunctor(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter), numAllocations(0) {}
+		explicit MemoryHelper(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter), numAllocations(0) {}
 
-		uint8_t* operator()(const size_t size) {
+		// expected to be called exactly once
+		uint8_t* allocate(const size_t size) {
 			++numAllocations;
 
 			pObjectWriter->size = size + (pObjectWriter->writeProtocolVersion ? sizeof(uint64_t) : 0);
-			if (pObjectWriter->customAllocator != nullptr) {
+			if (pObjectWriter->allocatorFunc) {
 				pObjectWriter->data =
-				    pObjectWriter->customAllocator(pObjectWriter->size, pObjectWriter->customAllocatorContext);
+				    pObjectWriter->allocatorFunc(pObjectWriter->size, pObjectWriter->allocatorContext);
 			} else {
 				pObjectWriter->data = new (pObjectWriter->arena) uint8_t[pObjectWriter->size];
 			}
 			if (pObjectWriter->writeProtocolVersion) {
 				auto v = pObjectWriter->protocolVersion().versionWithFlags();
-				memcpy(pObjectWriter->data, &v, sizeof(uint64_t));
+				::memcpy(pObjectWriter->data, &v, sizeof(uint64_t));
 				return pObjectWriter->data + sizeof(uint64_t);
 			}
 			return pObjectWriter->data;
 		}
 
+		void markForWipe(uint8_t* begin, size_t size) {
+			if (pObjectWriter->markForWipeFunc) {
+				pObjectWriter->markForWipeFunc(begin, size, pObjectWriter->allocatorContext);
+			}
+		}
+
 		int getNumAllocations() const { return numAllocations; }
 
 	private:
-		ObjectWriter* pObjectWriter = nullptr;
-		int numAllocations = 0;
+		ObjectWriter* pObjectWriter;
+		int numAllocations;
 	};
 
-	friend class AllocateFunctor;
+	friend class MemoryHelper;
 
+public:
 	class SaveContext {
 	private:
 		ObjectWriter* ar;
-		AllocateFunctor& allocator;
+		MemoryHelper& memoryHelper;
 
 	public:
-		SaveContext(ObjectWriter* ar, AllocateFunctor& allocator) : ar(ar), allocator(allocator) {}
+		SaveContext(ObjectWriter* ar, MemoryHelper& memoryHelper) : ar(ar), memoryHelper(memoryHelper) {}
 
 		ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
 
 		void addArena(Arena& arena) {}
 
-		uint8_t* allocate(size_t s) { return allocator(s); }
+		uint8_t* allocate(size_t s) { return memoryHelper.allocate(s); }
+
+		void markForWipe(uint8_t* begin, size_t size) { memoryHelper.markForWipe(begin, size); }
 
 		SaveContext& context() { return *this; }
 	};
 
-public:
-	typedef uint8_t* (*CustomAllocatorFunc_t)(const size_t, void*);
+	// takes (object size, allocator context pointer), returns pointer to allocated memory
+	typedef uint8_t* (*AllocatorFuncType)(const size_t, void*);
 
+	// takes (wipe begin pointer, wipe length, allocator context pointer)
+	typedef void (*MarkForWipeFuncType)(uint8_t*, size_t, void*);
+
+	// Overload that enables serializer traits to mark the buffers for wiping (zeroing out) after use.
+	// MarkForWipeFunc shares allocator context with allocatorFunc
+	// Simpler (lambda wrapped in std::function) was avoided by past PR to reduce compilation time
 	template <class VersionOptions>
-	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr), customAllocatorContext(nullptr) {
+	explicit ObjectWriter(AllocatorFuncType allocatorFunc,
+	                      MarkForWipeFuncType markForWipeFunc,
+	                      void* allocatorContext,
+	                      VersionOptions vo)
+	  : arena(), allocatorFunc(allocatorFunc), markForWipeFunc(markForWipeFunc), allocatorContext(allocatorContext),
+	    data(nullptr), size(0) {
 		vo.write(*this);
 	}
 
-	// NOTE: It is known that clang compiler will spend long time on instantiating std::function objects when there is
-	// capture. By downgrading it to a function pointer, the compile time can be reduced. The trade is an additional
-	// void* must be used to carry the captured environment.
 	template <class VersionOptions>
-	explicit ObjectWriter(CustomAllocatorFunc_t customAllocator_, void* customAllocatorContext_, VersionOptions vo)
-	  : customAllocator(customAllocator_), customAllocatorContext(customAllocatorContext_) {
-		vo.write(*this);
-	}
+	explicit ObjectWriter(AllocatorFuncType allocatorFunc, void* allocatorContext, VersionOptions vo)
+	  : ObjectWriter(allocatorFunc, nullptr /*markForWipeFunc*/, allocatorContext, vo) {}
+
+	template <class VersionOptions>
+	explicit ObjectWriter(VersionOptions vo)
+	  : ObjectWriter(nullptr /*allocatorFunc*/, nullptr /*markForWipeFunc*/, nullptr /*allocatorContext*/, vo) {}
 
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
 		ASSERT(data == nullptr); // object serializer can only serialize one object
-		AllocateFunctor allocator(this);
-		SaveContext context(this, allocator);
+		MemoryHelper memoryHelper(this);
+		SaveContext context(this, memoryHelper);
 		save_members(context, file_identifier, items...);
-		ASSERT(allocator.getNumAllocations() == 1);
+		ASSERT(memoryHelper.getNumAllocations() == 1);
 	}
 
 	template <class Item>
@@ -266,7 +274,7 @@ public:
 	StringRef toStringRef() const { return StringRef(data, size); }
 
 	Standalone<StringRef> toString() const {
-		ASSERT(!customAllocator);
+		ASSERT(!allocatorFunc);
 		return Standalone<StringRef>(toStringRef(), arena);
 	}
 
@@ -278,6 +286,7 @@ public:
 	}
 
 	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
+
 	void setProtocolVersion(ProtocolVersion v) {
 		mProtocolVersion = v;
 		ASSERT(mProtocolVersion.isValid());
@@ -285,16 +294,12 @@ public:
 
 private:
 	Arena arena;
-	CustomAllocatorFunc_t customAllocator = nullptr;
-	void* customAllocatorContext = nullptr;
-	uint8_t* data = nullptr;
-	int size = 0;
+	AllocatorFuncType allocatorFunc;
+	MarkForWipeFuncType markForWipeFunc;
+	void* allocatorContext;
+	uint8_t* data;
+	int size;
 };
-
-template <>
-struct HasVariableMap_t<ObjectReader> : std::true_type {};
-template <>
-struct HasVariableMap_t<ArenaObjectReader> : std::true_type {};
 
 // this special case is needed - the code expects
 // Standalone<T> and T to be equivalent for serialization

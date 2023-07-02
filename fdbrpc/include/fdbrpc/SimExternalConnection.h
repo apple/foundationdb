@@ -25,6 +25,7 @@
 #include "flow/FastRef.h"
 #include "flow/network.h"
 #include "flow/flow.h"
+#include "flow/IConnection.h"
 
 #include <boost/asio.hpp>
 

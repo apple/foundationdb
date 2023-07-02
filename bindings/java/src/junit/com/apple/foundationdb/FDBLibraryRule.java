@@ -29,8 +29,6 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * are not available for any reason.
  */
 public class FDBLibraryRule implements BeforeAllCallback {
-	public static final int CURRENT_API_VERSION = 720;
-
 	private final int apiVersion;
 
 	// because FDB is a singleton (currently), this isn't a super-useful cache,
@@ -39,7 +37,7 @@ public class FDBLibraryRule implements BeforeAllCallback {
 
 	public FDBLibraryRule(int apiVersion) { this.apiVersion = apiVersion; }
 
-	public static FDBLibraryRule current() { return new FDBLibraryRule(CURRENT_API_VERSION); }
+	public static FDBLibraryRule current() { return new FDBLibraryRule(ApiVersion.LATEST); }
 
 	public static FDBLibraryRule v63() { return new FDBLibraryRule(630); }
 

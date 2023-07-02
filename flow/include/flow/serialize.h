@@ -32,6 +32,7 @@
 
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/FastAlloc.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
@@ -300,6 +301,37 @@ inline void load(Archive& ar, boost::container::flat_map<K, V>& value) {
 		ar >> p.first >> p.second;
 		value.emplace(p);
 	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class... Variants>
+inline void save(Archive& ar, const std::variant<Variants...> value) {
+	ar << (uint8_t)value.index();
+	std::visit([&](auto& inner) { ar << inner; }, value);
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+namespace {
+template <class Archive, class Value, class Variant, class... Variants>
+inline void loadVariant(Archive& ar, uint8_t index, Value& value) {
+	if (index == 0) {
+		Variant v;
+		ar >> v;
+		value = v;
+	} else if constexpr (sizeof...(Variants) > 0) {
+		loadVariant<Archive, Value, Variants...>(ar, index - 1, value);
+	} else {
+		ASSERT(false);
+	}
+}
+} // anonymous namespace
+
+template <class Archive, class... Variants>
+inline void load(Archive& ar, std::variant<Variants...>& value) {
+	uint8_t index;
+	ar >> index;
+	ASSERT(index < sizeof...(Variants));
+	loadVariant<Archive, std::variant<Variants...>, Variants...>(ar, index, value);
 	ASSERT(ar.protocolVersion().isValid());
 }
 
@@ -781,8 +813,10 @@ struct PacketBuffer : SendBuffer {
 private:
 	int reference_count;
 	uint32_t const size_;
+	uint32_t wipe_begin;
+	uint32_t wipe_len;
 	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 48;
 
 public:
 	double const enqueue_time;
@@ -790,7 +824,9 @@ public:
 	size_t size() const { return size_; }
 
 private:
-	explicit PacketBuffer(size_t size) : reference_count(1), size_(size), enqueue_time(g_network->now()) {
+	explicit PacketBuffer(size_t size)
+	  : reference_count(1), size_(size), wipe_begin(std::numeric_limits<decltype(wipe_begin)>::max()), wipe_len(0),
+	    enqueue_time(g_network->now()) {
 		next = nullptr;
 		bytes_written = bytes_sent = 0;
 		_data = reinterpret_cast<uint8_t*>(this + 1);
@@ -800,14 +836,40 @@ private:
 public:
 	static PacketBuffer* create(size_t size = 0) {
 		size = std::max(size, PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD);
-		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
+		uint8_t* mem = allocateAndMaybeKeepalive(size + PACKET_BUFFER_OVERHEAD);
 		return new (mem) PacketBuffer{ size };
 	}
+
 	PacketBuffer* nextPacketBuffer() { return static_cast<PacketBuffer*>(next); }
+
+	void markForWipe(uint8_t* begin, size_t size) {
+		ASSERT(data() <= begin);
+		if (!size)
+			return;
+		ASSERT(data() + this->size() >= begin + size);
+		uint32_t const this_wipe_begin = uint32_t(begin - data());
+		if (wipe_len == 0) {
+			wipe_begin = this_wipe_begin;
+			wipe_len = (uint32_t)size;
+		} else {
+			// Wipe range already exists. Take a contiguous union of the two ranges.
+			// This means any gaps between ranges will also be wiped
+			uint32_t const this_wipe_end = this_wipe_begin + (uint32_t)size;
+			uint32_t const old_wipe_end = wipe_begin + wipe_len;
+			uint32_t const new_wipe_begin = std::min(wipe_begin, this_wipe_begin);
+			uint32_t const new_wipe_end = std::max(old_wipe_end, this_wipe_end);
+			wipe_begin = new_wipe_begin;
+			wipe_len = new_wipe_end - new_wipe_begin;
+		}
+	}
+
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			if (wipe_len > 0) {
+				::memset(data() + wipe_begin, 0, wipe_len);
+			}
+			freeOrMaybeKeepalive(reinterpret_cast<uint8_t*>(this));
 		}
 	}
 	int bytes_unwritten() const { return size_ - bytes_written; }
@@ -869,7 +931,15 @@ struct PacketWriter {
 	}
 
 	// This is used by MakeSerializeSource::serializePacketWriter
-	static uint8_t* packetWriterAlloc(const size_t size, void* self);
+	static uint8_t* packetWriterAlloc(const size_t size, void* self) {
+		return static_cast<PacketWriter*>(self)->writeBytes(size);
+	}
+
+	// This is used by MakeSerializeSource::serializePacketWriter to mark a part of current PacketBuffer for wiping upon
+	// free Precondition: [begin, begin + size) is part of current buffer (PacketWriter::buffer)
+	static void packetWriterMarkForWipe(uint8_t* begin, size_t size, void* self) {
+		static_cast<PacketWriter*>(self)->buffer->markForWipe(begin, size);
+	}
 
 private:
 	void serializeBytesAcrossBoundary(const void* data, int bytes);
@@ -890,8 +960,14 @@ class MakeSerializeSource : public ISerializeSource {
 public:
 	using value_type = V;
 	void serializePacketWriter(PacketWriter& packetWriter) const override {
-		ObjectWriter objectWriter(
-		    PacketWriter::packetWriterAlloc, &packetWriter, AssumeVersion(packetWriter.protocolVersion()));
+		ObjectWriter::MarkForWipeFuncType markForWipeFunc = nullptr;
+		if (FLOW_KNOBS->WIPE_SENSITIVE_DATA_FROM_PACKET_BUFFER) {
+			markForWipeFunc = &PacketWriter::packetWriterMarkForWipe;
+		}
+		ObjectWriter objectWriter(&PacketWriter::packetWriterAlloc,
+		                          markForWipeFunc,
+		                          &packetWriter,
+		                          AssumeVersion(packetWriter.protocolVersion()));
 
 		// Writes directly into buffer supplied by packetWriter
 		objectWriter.serialize(get());

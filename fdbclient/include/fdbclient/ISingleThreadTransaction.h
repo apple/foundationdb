@@ -74,7 +74,6 @@ public:
 	                                                 KeySelector end,
 	                                                 Key mapper,
 	                                                 GetRangeLimits limits,
-	                                                 int matchIndex = MATCH_INDEX_ALL,
 	                                                 Snapshot = Snapshot::False,
 	                                                 Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
@@ -101,6 +100,7 @@ public:
 	virtual Version getCommittedVersion() const = 0;
 	virtual VersionVector getVersionVector() const = 0;
 	virtual SpanContext getSpanContext() const = 0;
+	virtual double getTagThrottledDuration() const = 0;
 	virtual int64_t getTotalCost() const = 0;
 	virtual int64_t getApproximateSize() const = 0;
 	virtual Future<Standalone<StringRef>> getVersionstamp() = 0;
@@ -111,6 +111,14 @@ public:
 	virtual void debugTransaction(UID dID) = 0;
 	virtual void checkDeferredError() const = 0;
 	virtual void getWriteConflicts(KeyRangeMap<bool>* result) = 0;
+
+	virtual void debugTrace(BaseTraceEvent&& event) = 0;
+	virtual void debugPrint(std::string const& message) = 0;
+
+	template <class... Args>
+	void debugFmtPrint(std::string const& message, Args&&... args) {
+		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
+	};
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;

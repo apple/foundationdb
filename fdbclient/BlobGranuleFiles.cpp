@@ -36,7 +36,6 @@
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
-#include "flow/xxhash.h"
 
 #include "fmt/format.h"
 
@@ -202,6 +201,7 @@ BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKey
 	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
+	                                                   cipherKeysCtx.textCipherKey.baseCipherKCV,
 	                                                   cipherKeysCtx.textCipherKey.salt,
 	                                                   std::numeric_limits<int64_t>::max(),
 	                                                   std::numeric_limits<int64_t>::max());
@@ -209,6 +209,7 @@ BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKey
 	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
+	                                                     cipherKeysCtx.headerCipherKey.baseCipherKCV,
 	                                                     cipherKeysCtx.headerCipherKey.salt,
 	                                                     std::numeric_limits<int64_t>::max(),
 	                                                     std::numeric_limits<int64_t>::max());
@@ -220,9 +221,7 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
                                      const BlobCipherEncryptHeader& header,
                                      const StringRef& ivRef) {
 	// Validate encryption header 'cipherHeader' details sanity
-	if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
-	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
-	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
+	if (header.cipherHeaderDetails.isValid() && header.cipherHeaderDetails != eKeys.headerCipherKey->details()) {
 		TraceEvent(SevError, "EncryptionHeader_CipherHeaderMismatch")
 		    .detail("HeaderDomainId", eKeys.headerCipherKey->getDomainId())
 		    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
@@ -233,9 +232,7 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		throw encrypt_header_metadata_mismatch();
 	}
 	// Validate encryption header 'cipherText' details sanity
-	if (!(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
-	      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
-	      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
+	if (!header.cipherTextDetails.isValid() || header.cipherTextDetails != eKeys.textCipherKey->details()) {
 		TraceEvent(SevError, "EncryptionHeader_CipherTextMismatch")
 		    .detail("TextDomainId", eKeys.textCipherKey->getDomainId())
 		    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
@@ -253,6 +250,24 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		throw encrypt_header_metadata_mismatch();
 	}
 }
+
+void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
+                                     const BlobCipherEncryptHeaderRef& headerRef,
+                                     const StringRef& ivRef) {
+	ASSERT(eKeys.textCipherKey.isValid());
+	EncryptHeaderCipherKCVs kcvs;
+
+	kcvs.textKCV = eKeys.textCipherKey->getBaseCipherKCV();
+	if (eKeys.headerCipherKey.isValid()) {
+		kcvs.headerKCV = eKeys.headerCipherKey->getBaseCipherKCV();
+	}
+	headerRef.validateEncryptionHeaderDetails(eKeys.textCipherKey->details(),
+	                                          eKeys.headerCipherKey.isValid() ? eKeys.headerCipherKey->details()
+	                                                                          : BlobCipherDetails(),
+	                                          kcvs,
+	                                          ivRef);
+}
+
 } // namespace
 
 struct IndexBlock {
@@ -287,6 +302,7 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 
+		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		EncryptBlobCipherAes265Ctr encryptor(
 		    eKeys.textCipherKey,
 		    eKeys.headerCipherKey,
@@ -294,11 +310,12 @@ struct IndexBlockRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
-		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
-		BlobCipherEncryptHeader header;
-		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
-		             ->toStringRef();
-		encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
+		BlobCipherEncryptHeaderRef headerRef;
+		buffer =
+		    encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+		arena.dependsOn(serialized.arena());
+		encryptHeaderRef = serialized;
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(buffer.begin(), buffer.size());
@@ -316,15 +333,12 @@ struct IndexBlockRef {
 			XXH64_hash_t chksum = XXH3_64bits(idxRef.buffer.begin(), idxRef.buffer.size());
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
-
-		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(idxRef.encryptHeaderRef.get());
-
-		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
-
+		StringRef decrypted;
+		BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(idxRef.encryptHeaderRef.get());
+		validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
-		StringRef decrypted =
-		    decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
+		decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -337,7 +351,6 @@ struct IndexBlockRef {
 
 	void init(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx, Arena& arena) {
 		if (encryptHeaderRef.present()) {
-			CODE_PROBE(true, "reading encrypted chunked file");
 			ASSERT(cipherKeysCtx.present());
 
 			decrypt(cipherKeysCtx.get(), *this, arena);
@@ -418,10 +431,11 @@ struct IndexBlobGranuleFileChunkRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
-		BlobCipherEncryptHeader header;
-		chunkRef.buffer =
-		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
-		chunkRef.encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
+		BlobCipherEncryptHeaderRef headerRef;
+		chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+		arena.dependsOn(serialized.arena());
+		chunkRef.encryptHeaderRef = serialized;
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(chunkRef.buffer.begin(), chunkRef.buffer.size());
@@ -442,14 +456,13 @@ struct IndexBlobGranuleFileChunkRef {
 			TraceEvent(SevDebug, "BlobChunkDecrypt_Before").detail("Chksum", chksum);
 		}
 
-		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(chunkRef.encryptHeaderRef.get());
-
-		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
-
+		StringRef decrypted;
+		BlobCipherEncryptHeaderRef headerRef =
+		    BlobCipherEncryptHeaderRef::fromStringRef(chunkRef.encryptHeaderRef.get());
+		validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
-		StringRef decrypted =
-		    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
+		decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -521,7 +534,6 @@ struct IndexBlobGranuleFileChunkRef {
 		dataReader.deserialize(FileIdentifierFor<IndexBlobGranuleFileChunkRef>::value, chunkRef, arena);
 
 		if (chunkRef.encryptHeaderRef.present()) {
-			CODE_PROBE(true, "reading encrypted file chunk");
 			ASSERT(cipherKeysCtx.present());
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decrypt(cipherKeysCtx.get(), chunkRef, arena);
 		} else {
@@ -529,7 +541,6 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (chunkRef.compressionFilter.present()) {
-			CODE_PROBE(true, "reading compressed file chunk");
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decompress(chunkRef, arena);
 		} else if (!chunkRef.chunkBytes.present()) {
 			// 'Encryption' & 'Compression' aren't enabled.
@@ -719,7 +730,8 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
                                const Standalone<GranuleSnapshot>& snapshot,
                                int targetChunkBytes,
                                Optional<CompressionFilter> compressFilter,
-                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
+                               bool isSnapshotSorted) {
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "SerializeChunkedSnapshot")
@@ -743,7 +755,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 
 	for (int i = 0; i < snapshot.size(); i++) {
 		// TODO REMOVE sanity check
-		if (i > 0) {
+		if (i > 0 && isSnapshotSorted) {
 			ASSERT(snapshot[i - 1].key < snapshot[i].key);
 		}
 
@@ -757,7 +769,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
 			// TODO remove validation
-			if (!file.indexBlockRef.block.children.empty()) {
+			if (!file.indexBlockRef.block.children.empty() && isSnapshotSorted) {
 				ASSERT(file.indexBlockRef.block.children.back().key < currentChunk.begin()->key);
 			}
 			file.indexBlockRef.block.children.emplace_back_deep(
@@ -1479,10 +1491,11 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
-                                   StringRef deltaFileData[],
+                                   const std::vector<StringRef>& deltaFileData,
                                    GranuleMaterializeStats& stats) {
 	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
+	Version lastFileVersion = 0;
 
 	// Arena to hold all allocations for applying deltas. Most of it, and the arenas produced by reading the files,
 	// will likely be tossed if there are a significant number of mutations, so we copy at the end instead of doing a
@@ -1521,6 +1534,8 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 			arena.dependsOn(streams.back().arena());
 			stats.snapshotRows += snapshotRows.size();
 		}
+		ASSERT_WE_THINK(lastFileVersion < chunk.snapshotFile.get().fileVersion);
+		lastFileVersion = chunk.snapshotFile.get().fileVersion;
 	} else {
 		ASSERT(!chunk.snapshotFile.present());
 	}
@@ -1528,6 +1543,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
+	ASSERT(chunk.deltaFiles.size() == deltaFileData.size());
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
 		stats.inputBytes += deltaFileData[deltaIdx].size();
 		bool startClear = false;
@@ -1544,6 +1560,9 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 			arena.dependsOn(streams.back().arena());
 		}
 		arena.dependsOn(deltaRows.arena());
+
+		ASSERT_WE_THINK(lastFileVersion < chunk.deltaFiles[deltaIdx].fileVersion);
+		lastFileVersion = chunk.deltaFiles[deltaIdx].fileVersion;
 	}
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
@@ -1551,6 +1570,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	if (!chunk.newDeltas.empty()) {
 		stats.inputBytes += chunk.newDeltas.expectedSize();
 		// TODO REMOVE validation
+		ASSERT_WE_THINK(lastFileVersion < chunk.newDeltas.front().version);
 		ASSERT(beginVersion <= chunk.newDeltas.front().version);
 		ASSERT(readVersion >= chunk.newDeltas.back().version);
 		auto memoryRows = sortMemoryDeltas(chunk.newDeltas, chunk.keyRange, requestRange, beginVersion, readVersion);
@@ -1656,8 +1676,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				}
 			}
 
-			// +1 to avoid UBSAN variable length array of size zero
-			StringRef deltaData[files[chunkIdx].deltaFiles.size() + 1];
+			std::vector<StringRef> deltaData;
+			deltaData.resize(files[chunkIdx].deltaFiles.size());
 			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
 				deltaData[i] =
 				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
@@ -1684,6 +1704,128 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	}
 }
 
+// just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
+RangeResult bgReadSnapshotFile(const StringRef& data,
+                               Optional<KeyRef> tenantPrefix,
+                               Optional<BlobGranuleCipherKeysCtx> encryptionCtx,
+                               const KeyRangeRef& keys) {
+	Standalone<StringRef> fname = "f"_sr;
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> results = loadSnapshotFile(fname, data, keys, encryptionCtx);
+	RangeResult snapshot;
+	snapshot.reserve(snapshot.arena(), results.size());
+	snapshot.arena().dependsOn(results.arena());
+	for (auto& it : results) {
+		// FIXME: remove validation at some point
+		if (tenantPrefix.present()) {
+			ASSERT(it.key.startsWith(tenantPrefix.get()));
+			snapshot.emplace_back(snapshot.arena(), it.key.removePrefix(tenantPrefix.get()), it.value);
+		} else {
+			snapshot.emplace_back(snapshot.arena(), it.key, it.value);
+		}
+	}
+	return snapshot;
+}
+
+// FIXME: refactor if possible, just copy-pasted from loadChunkedDeltaFile for prototyping
+Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& deltaData,
+                                                          Optional<KeyRef> tenantPrefix,
+                                                          Optional<BlobGranuleCipherKeysCtx> encryptionCtx) {
+	Standalone<VectorRef<GranuleMutationRef>> deltas;
+	Standalone<IndexedBlobGranuleFile> file = IndexedBlobGranuleFile::fromFileBytes(deltaData, encryptionCtx);
+
+	ASSERT(file.fileType == DELTA_FILE_TYPE);
+	ASSERT(file.chunkStartOffset > 0);
+
+	// empty delta file
+	if (file.indexBlockRef.block.children.empty()) {
+		return deltas;
+	}
+
+	ASSERT(file.indexBlockRef.block.children.size() >= 2);
+
+	// find range of blocks needed to read
+	ChildBlockPointerRef* currentBlock = file.indexBlockRef.block.children.begin();
+
+	bool lastBlock = false;
+	bool prevClearAfter = false;
+	KeyRef prevClearAfterKey;
+	Version prevClearAfterVersion;
+	while (!lastBlock) {
+		auto nextBlock = currentBlock;
+		nextBlock++;
+		lastBlock = (nextBlock == file.indexBlockRef.block.children.end() - 1);
+
+		Standalone<GranuleSortedDeltas> deltaBlock =
+		    file.getChild<GranuleSortedDeltas>(currentBlock, encryptionCtx, file.chunkStartOffset);
+		ASSERT(!deltaBlock.boundaries.empty());
+		ASSERT(currentBlock->key == deltaBlock.boundaries.front().key);
+
+		for (auto& entry : deltaBlock.boundaries) {
+			if (prevClearAfter) {
+				if (tenantPrefix.present()) {
+					ASSERT(entry.key.startsWith(tenantPrefix.get()));
+					ASSERT(prevClearAfterKey.startsWith(tenantPrefix.get()));
+					deltas.emplace_back(deltas.arena(),
+					                    MutationRef::Type::ClearRange,
+					                    prevClearAfterVersion,
+					                    prevClearAfterKey.removePrefix(tenantPrefix.get()),
+					                    entry.key.removePrefix(tenantPrefix.get()));
+				} else {
+					deltas.emplace_back(deltas.arena(),
+					                    MutationRef::Type::ClearRange,
+					                    prevClearAfterVersion,
+					                    prevClearAfterKey,
+					                    entry.key);
+				}
+			}
+			prevClearAfter = entry.clearVersion.present();
+			if (prevClearAfter) {
+				prevClearAfterVersion = entry.clearVersion.get();
+				prevClearAfterKey = entry.key;
+			}
+
+			for (auto& v : entry.values) {
+				if (v.op == MutationRef::Type::ClearRange) {
+					if (entry.clearVersion.present() && v.version == entry.clearVersion.get()) {
+						// we'll handle that in the next loop with prevClearAfter
+						continue;
+					}
+					if (tenantPrefix.present()) {
+						ASSERT(entry.key.startsWith(tenantPrefix.get()));
+						deltas.emplace_back(deltas.arena(),
+						                    MutationRef::Type::ClearRange,
+						                    v.version,
+						                    entry.key.removePrefix(tenantPrefix.get()),
+						                    keyAfter(entry.key.removePrefix(tenantPrefix.get()), deltas.arena()));
+					} else {
+						deltas.emplace_back(deltas.arena(),
+						                    MutationRef::Type::ClearRange,
+						                    v.version,
+						                    entry.key,
+						                    keyAfter(entry.key, deltas.arena()));
+					}
+
+				} else {
+					ASSERT(v.op == MutationRef::Type::SetValue);
+					if (tenantPrefix.present()) {
+						ASSERT(entry.key.startsWith(tenantPrefix.get()));
+						deltas.emplace_back(deltas.arena(),
+						                    MutationRef::Type::SetValue,
+						                    v.version,
+						                    entry.key.removePrefix(tenantPrefix.get()),
+						                    v.value);
+					} else {
+						deltas.emplace_back(deltas.arena(), MutationRef::Type::SetValue, v.version, entry.key, v.value);
+					}
+				}
+			}
+		}
+		deltas.arena().dependsOn(deltaBlock.arena());
+		currentBlock++;
+	}
+	return deltas;
+}
+
 std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix) {
 	// Start with random bytes to avoid metadata hotspotting
 	// Worker ID for uniqueness and attribution
@@ -1700,23 +1842,27 @@ const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->random
 const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
 
 Standalone<StringRef> getBaseCipher() {
-	Standalone<StringRef> baseCipher = makeString(AES_256_KEY_LENGTH);
+	Standalone<StringRef> baseCipher = makeString(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1));
 	deterministicRandom()->randomBytes(mutateString(baseCipher), baseCipher.size());
 	return baseCipher;
 }
 
-Standalone<StringRef> encryptBaseCipher = getBaseCipher();
+const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
 
 BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
 	BlobGranuleCipherKeysCtx cipherKeysCtx;
+	const EncryptCipherKeyCheckValue cipherKCV =
+	    Sha256KCV().computeKCV(encryptBaseCipher.begin(), encryptBaseCipher.size());
 
 	cipherKeysCtx.textCipherKey.encryptDomainId = encryptDomainId;
 	cipherKeysCtx.textCipherKey.baseCipherId = encryptBaseCipherId;
+	cipherKeysCtx.textCipherKey.baseCipherKCV = cipherKCV;
 	cipherKeysCtx.textCipherKey.salt = encryptSalt;
 	cipherKeysCtx.textCipherKey.baseCipher = StringRef(arena, encryptBaseCipher);
 
 	cipherKeysCtx.headerCipherKey.encryptDomainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 	cipherKeysCtx.headerCipherKey.baseCipherId = encryptBaseCipherId;
+	cipherKeysCtx.headerCipherKey.baseCipherKCV = cipherKCV;
 	cipherKeysCtx.headerCipherKey.salt = encryptSalt;
 	cipherKeysCtx.headerCipherKey.baseCipher = StringRef(arena, encryptBaseCipher);
 
@@ -2017,7 +2163,8 @@ struct KeyValueGen {
 	int targetMutationsPerDelta;
 	KeyRange allRange;
 
-	Version version = 0;
+	// start at higher version to allow snapshot files to have version 1
+	Version version = 10;
 
 	// encryption/compression settings
 	// TODO: possibly different cipher keys or meta context per file?
@@ -2359,7 +2506,9 @@ void checkDeltaRead(const KeyValueGen& kvGen,
                     Version beginVersion,
                     Version readVersion,
                     const Standalone<GranuleDeltas>& data,
-                    StringRef* serialized) {
+                    const std::vector<StringRef>& serialized) {
+	ASSERT_EQ(serialized.size(), 1);
+
 	// expected answer
 	std::map<KeyRef, ValueRef> expectedData;
 	Version lastFileEndVersion = 0;
@@ -2378,7 +2527,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
 	chunk.deltaFiles.emplace_back_deep(
-	    chunk.arena(), filename, 0, serialized->size(), serialized->size(), kvGen.cipherKeys);
+	    chunk.arena(), filename, 0, serialized[0].size(), serialized[0].size(), 1, kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
@@ -2459,13 +2608,14 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	}*/
 	Value serialized = serializeChunkedDeltaFile(
 	    fileNameRef, data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
+	std::vector<StringRef> deltaPtr{ serialized };
 
 	// check whole file
-	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, &serialized);
+	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, deltaPtr);
 
 	for (int i = 0; i < std::min((size_t)100, kvGen.usedKeysList.size() * data.size()); i++) {
 		auto params = randomizeKeyAndVersions(kvGen, data);
-		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, &serialized);
+		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, deltaPtr);
 	}
 
 	return Void();
@@ -2498,8 +2648,13 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	if (beginVersion == 0) {
 		std::string snapshotFilename = randomBGFilename(
 		    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), 0, ".snapshot");
-		chunk.snapshotFile = BlobFilePointerRef(
-		    chunk.arena(), snapshotFilename, 0, serializedSnapshot.size(), serializedSnapshot.size(), kvGen.cipherKeys);
+		chunk.snapshotFile = BlobFilePointerRef(chunk.arena(),
+		                                        snapshotFilename,
+		                                        0,
+		                                        serializedSnapshot.size(),
+		                                        serializedSnapshot.size(),
+		                                        1,
+		                                        kvGen.cipherKeys);
 	}
 	int deltaIdx = 0;
 	while (deltaIdx < serializedDeltas.size() && serializedDeltas[deltaIdx].first < beginVersion) {
@@ -2510,17 +2665,14 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		std::string deltaFilename = randomBGFilename(
 		    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 		size_t fsize = serializedDeltas[deltaIdx].second.size();
-		chunk.deltaFiles.emplace_back_deep(chunk.arena(), deltaFilename, 0, fsize, fsize, kvGen.cipherKeys);
+		chunk.deltaFiles.emplace_back_deep(
+		    chunk.arena(), deltaFilename, 0, fsize, fsize, serializedDeltas[deltaIdx].first, kvGen.cipherKeys);
 		deltaPtrsVector.push_back(serializedDeltas[deltaIdx].second);
 
 		if (serializedDeltas[deltaIdx].first >= readVersion) {
 			break;
 		}
 		deltaIdx++;
-	}
-	StringRef deltaPtrs[deltaPtrsVector.size() + 1];
-	for (int i = 0; i < deltaPtrsVector.size(); i++) {
-		deltaPtrs[i] = deltaPtrsVector[i];
 	}
 
 	// add in memory deltas
@@ -2540,7 +2692,7 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		snapshotPtr = serializedSnapshot;
 	}
 	RangeResult actualData =
-	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs, stats);
+	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrsVector, stats);
 
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
@@ -2679,6 +2831,105 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 		                 serializedSnapshot,
 		                 serializedDeltaFiles,
 		                 inMemoryDeltas);
+	}
+
+	return Void();
+}
+
+namespace {
+MutationsAndVersionRef singleMutation(Version v,
+                                      MutationRef::Type type,
+                                      Arena& ar,
+                                      const StringRef& param1,
+                                      const StringRef& param2) {
+	MutationsAndVersionRef ref(v, v);
+	ref.mutations.emplace_back(ar, type, param1, param2);
+	return ref;
+}
+
+void checkMutations(const Standalone<VectorRef<GranuleMutationRef>>& expected,
+                    const Standalone<VectorRef<GranuleMutationRef>>& actual) {
+	ASSERT(expected.size() == actual.size());
+	for (int i = 0; i < expected.size(); i++) {
+		ASSERT(expected[i].version == actual[i].version);
+		ASSERT(expected[i].type == actual[i].type);
+		ASSERT(expected[i].param1 == actual[i].param1);
+		ASSERT(expected[i].param2 == actual[i].param2);
+	}
+}
+} // namespace
+
+/*
+Input mutations:
+Set A=5 @ 100
+Clear [A - C) @ 200
+Set E=6 @ 300
+Set A=7 @ 400
+Clear [A - E) @ 500
+Clear [E - E\x00) @ 600 (single key clear)
+
+Output mutations:
+Set A=5 @ 100
+Set A=7 @ 400
+Clear [A - A\x00) @ 500
+Clear [A - C) @ 200
+Clear [C - C\x00] @ 500
+Set E=6 @ 300
+Clear [E - E\x00) @ 600
+*/
+TEST_CASE("/blobgranule/files/bgReadDeltaFile") {
+
+	KeyValueGen kvGen;
+	Arena ar;
+	Standalone<StringRef> strA = "A"_sr;
+	Standalone<StringRef> strC = "C"_sr;
+	Standalone<StringRef> strE = "E"_sr;
+
+	Standalone<StringRef> strAfterA = keyAfter(strA);
+	Standalone<StringRef> strAfterE = keyAfter(strE);
+
+	Standalone<StringRef> str5 = "5"_sr;
+	Standalone<StringRef> str6 = "6"_sr;
+	Standalone<StringRef> str7 = "7"_sr;
+
+	bool addTenantPrefix = deterministicRandom()->coinflip();
+	KeyRef tenantPrefix = addTenantPrefix ? "12345678"_sr : ""_sr;
+
+	// make tenant versions
+	Standalone<StringRef> t_strA = strA.withPrefix(tenantPrefix);
+	Standalone<StringRef> t_strC = strC.withPrefix(tenantPrefix);
+	Standalone<StringRef> t_strE = strE.withPrefix(tenantPrefix);
+	Standalone<StringRef> t_strAfterA = strAfterA.withPrefix(tenantPrefix);
+	Standalone<StringRef> t_strAfterE = strAfterE.withPrefix(tenantPrefix);
+
+	Standalone<GranuleDeltas> originalMutations;
+	originalMutations.push_back(ar, singleMutation(100, MutationRef::Type::SetValue, ar, t_strA, str5));
+	originalMutations.push_back(ar, singleMutation(200, MutationRef::Type::ClearRange, ar, t_strA, t_strC));
+	originalMutations.push_back(ar, singleMutation(300, MutationRef::Type::SetValue, ar, t_strE, str6));
+	originalMutations.push_back(ar, singleMutation(400, MutationRef::Type::SetValue, ar, t_strA, str7));
+	originalMutations.push_back(ar, singleMutation(500, MutationRef::Type::ClearRange, ar, t_strA, t_strE));
+	originalMutations.push_back(ar, singleMutation(600, MutationRef::Type::ClearRange, ar, t_strE, t_strAfterE));
+
+	Standalone<VectorRef<GranuleMutationRef>> expectedMutations;
+	expectedMutations.emplace_back(ar, MutationRef::Type::SetValue, 100, strA, str5);
+	expectedMutations.emplace_back(ar, MutationRef::Type::SetValue, 400, strA, str7);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 500, strA, strAfterA);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 200, strA, strC);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 500, strC, strE);
+	expectedMutations.emplace_back(ar, MutationRef::Type::SetValue, 300, strE, str6);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 600, strE, strAfterE);
+
+	for (int chunkSize = 1; chunkSize <= 32 * 1024; chunkSize *= 2) {
+		Value serialized = serializeChunkedDeltaFile(strA,
+		                                             originalMutations,
+		                                             KeyRangeRef(t_strA, t_strAfterE),
+		                                             chunkSize,
+		                                             kvGen.compressFilter,
+		                                             kvGen.cipherKeys);
+		Standalone<VectorRef<GranuleMutationRef>> actualMutations =
+		    bgReadDeltaFile(serialized, addTenantPrefix ? tenantPrefix : Optional<KeyRef>(), kvGen.cipherKeys);
+
+		checkMutations(expectedMutations, actualMutations);
 	}
 
 	return Void();
@@ -2932,18 +3183,18 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
 
 void chunkFromFileSet(const FileSet& fileSet,
                       Standalone<BlobGranuleChunkRef>& chunk,
-                      StringRef* deltaPtrs,
+                      std::vector<StringRef>& deltaPtrs,
                       Version readVersion,
                       Optional<BlobGranuleCipherKeysCtx> keys,
                       int numDeltaFiles) {
 	size_t snapshotSize = std::get<3>(fileSet.snapshotFile).size();
 	chunk.snapshotFile =
-	    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, keys);
+	    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, 1, keys);
 
 	for (int i = 0; i < numDeltaFiles; i++) {
 		size_t deltaSize = std::get<3>(fileSet.deltaFiles[i]).size();
 		chunk.deltaFiles.emplace_back_deep(
-		    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, keys);
+		    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, 2 + i, keys);
 		deltaPtrs[i] = std::get<2>(fileSet.deltaFiles[i]);
 	}
 
@@ -2985,7 +3236,7 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
 	Standalone<BlobGranuleChunkRef> chunk;
 	GranuleMaterializeStats stats;
 	ASSERT(numDeltaFiles >= 0 && numDeltaFiles <= fileSet.deltaFiles.size());
-	StringRef deltaPtrs[numDeltaFiles];
+	std::vector<StringRef> deltaPtrs(numDeltaFiles);
 
 	MutationRef clearAllAtEndMutation;
 	if (clearAllAtEnd) {

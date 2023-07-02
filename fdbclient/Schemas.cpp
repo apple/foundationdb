@@ -143,6 +143,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "coordinator"
                      ]
                   },
+                  "tss":false,
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0,
@@ -151,7 +152,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "ssd",
                      "ssd-1",
                      "ssd-2",
-                     "ssd-redwood-1-experimental",
+                     "ssd-redwood-1",
                      "ssd-rocksdb-v1",
                      "ssd-sharded-rocksdb",
                      "memory",
@@ -583,7 +584,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
                   "fetch_storage_wiggler_stats_timeout",
-                  "fetch_consistency_scan_info_timeout"
+                  "fetch_consistency_scan_status_timeout",
+                  "metacluster_metrics_missing"
                ]
             },
             "issues":[
@@ -791,14 +793,26 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2,
          "log_version":2,
-         "log_engine":1,
+         "log_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
+         ]},
          "log_spill":1,
          "storage_engine":{
          "$enum":[
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -812,7 +826,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -857,18 +871,56 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "cluster_aware"
          ]}
       },
-      "consistency_scan_info":{
-        "consistency_scan_enabled":false,
-        "restart":false,
-        "max_rate":0,
-        "target_interval":0,
-        "bytes_read_prev_round":0,
-        "last_round_start_datetime":"2022-04-20 00:05:05.123 +0000",
-        "last_round_finish_datetime":"1970-01-01 00:00:00.000 +0000",
-        "last_round_start_timestamp":1648857905.123,
-        "last_round_finish_timestamp":0,
-        "smoothed_round_seconds":1,
-        "finished_rounds":1
+      "consistency_scan" : {
+         "configuration" : {
+            "enabled" : true,
+            "max_rate_bytes_per_second" : 50000000,
+            "min_interval_seconds" : 2592000,
+            "min_start_version" : 0,
+            "round_history_days" : 90,
+            "target_interval_seconds" : 2592000
+         },
+         "current_round" : {
+            "complete" : false,
+            "end_datetime" : "1970-01-01 00:00:00.000 +0000",
+            "end_timestamp" : 0,
+            "end_version" : 0,
+            "errors" : 0,
+            "last_end_key" : "",
+            "logical_bytes_scanned" : 0,
+            "replicated_bytes_scanned" : 0,
+            "skippedRanges" : 0,
+            "start_datetime" : "1970-01-01 00:00:00.000 +0000",
+            "start_timestamp" : 0,
+            "start_version" : 0,
+            "last_progress_datetime" : "1970-01-01 00:00:00.000 +0000",
+            "last_progress_timestamp" : 0,
+            "last_progress_version" : 0
+         },
+         "lifetime_stats" : {
+            "errors" : 0,
+            "logical_bytes_scanned" : 0,
+            "replicated_bytes_scanned" : 0
+         },
+         "previous_rounds" : [
+            {
+               "complete" : false,
+               "end_datetime" : "1970-01-01 00:00:00.000 +0000",
+               "end_timestamp" : 0,
+               "end_version" : 0,
+               "errors" : 0,
+               "last_end_key" : "",
+               "logical_bytes_scanned" : 0,
+               "replicated_bytes_scanned" : 0,
+               "skippedRanges" : 0,
+               "start_datetime" : "1970-01-01 00:00:00.000 +0000",
+               "start_timestamp" : 0,
+               "start_version" : 0,
+               "last_progress_datetime" : "1970-01-01 00:00:00.000 +0000",
+               "last_progress_timestamp" : 0,
+               "last_progress_version" : 0
+            }
+         ]
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -886,6 +938,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
+                  "healthy_perpetual_wiggle",
                   "healthy"
                ]
             },
@@ -921,6 +974,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",
+                          "healthy_perpetual_wiggle",
                           "healthy"
                        ]
                     },
@@ -970,6 +1024,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "data_cluster_id" : 12346,
          "num_data_clusters":10
       },
+      "kms_is_healthy": true,
+      "encryption_at_rest": {
+         "ekp_is_healthy": true
+      },
       "tenants":{
          "num_tenants":0,
          "num_tenant_groups":10,
@@ -981,6 +1039,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "expired_age": 0,
          "oldest_id_version": 0,
          "oldest_id_age": 0
+      },
+      "version_epoch":{
+         "enabled": false,
+         "epoch": 0
       }
    },
    "client":{

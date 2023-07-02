@@ -22,6 +22,7 @@
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -50,6 +51,11 @@ struct ValidateStorage : TestWorkload {
 	const bool enabled;
 	bool pass;
 
+	// We disable failure injection because there is an irrelevant issue:
+	// Remote tLog is failed to rejoin to CC
+	// Once this issue is fixed, we should be able to enable the failure injection
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
+
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
 		    .detail("ExpectedValue", printValue(expectedValue))
@@ -68,6 +74,167 @@ struct ValidateStorage : TestWorkload {
 		return _start(this, cx);
 	}
 
+	ACTOR Future<UID> triggerAuditStorageForType(Database cx, AuditType type, std::string context) {
+		// Send audit request until the cluster accepts the request
+		state UID auditId;
+		loop {
+			try {
+				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
+				                                 allKeys,
+				                                 type,
+				                                 /*timeoutSecond=*/300));
+				auditId = auditId_;
+				TraceEvent("TestAuditStorageTriggered")
+				    .detail("Context", context)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "TestAuditStorageError")
+				    .errorUnsuppressed(e)
+				    .detail("Context", context)
+				    .detail("AuditType", type);
+				wait(delay(1));
+			}
+		}
+		return auditId;
+	}
+
+	ACTOR Future<Void> waitAuditStorageUntilComplete(Database cx,
+	                                                 AuditType type,
+	                                                 UID auditId,
+	                                                 std::string context,
+	                                                 bool stopWaitWhenCleared) {
+		state AuditStorageState auditState;
+		loop {
+			try {
+				AuditStorageState auditState_ = wait(getAuditState(cx, type, auditId));
+				auditState = auditState_;
+				if (auditState.getPhase() == AuditPhase::Complete) {
+					break;
+				} else if (auditState.getPhase() == AuditPhase::Running) {
+					TraceEvent("TestAuditStorageWait")
+					    .detail("Context", context)
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					wait(delay(30));
+					continue;
+				} else if (auditState.getPhase() == AuditPhase::Error) {
+					break;
+				} else if (auditState.getPhase() == AuditPhase::Failed) {
+					break;
+				} else {
+					UNREACHABLE();
+				}
+			} catch (Error& e) {
+				if (stopWaitWhenCleared && e.code() == error_code_key_not_found) {
+					break; // this audit has been cleared
+				}
+				TraceEvent("TestAuditStorageWaitError")
+				    .errorUnsuppressed(e)
+				    .detail("Context", context)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type)
+				    .detail("AuditState", auditState.toString());
+				wait(delay(1));
+			}
+		}
+		TraceEvent("TestAuditStorageEnd")
+		    .detail("Context", context)
+		    .detail("AuditID", auditId)
+		    .detail("AuditType", type)
+		    .detail("AuditState", auditState.toString());
+		return Void();
+	}
+
+	ACTOR Future<Void> checkAuditStorageInternalState(Database cx, AuditType type, UID auditId, std::string context) {
+		// Check no audit is in Running or Error phase
+		// Check the number of existing persisted audits is no more than PERSIST_FINISH_AUDIT_COUNT
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res = wait(tr.getRange(auditKeyRange(type), GetRangeLimits()));
+				ASSERT(!res.more);
+				for (int i = 0; i < res.size(); ++i) {
+					AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
+					TraceEvent("TestAuditStorageCheckPersistStateExists")
+					    .detail("Context", context)
+					    .detail("ExistAuditID", existingAuditState.id)
+					    .detail("ExistAuditPhase", existingAuditState.getPhase())
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
+					       existingAuditState.getPhase() == AuditPhase::Failed ||
+					       existingAuditState.getPhase() == AuditPhase::Running);
+				}
+				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
+					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
+					    .detail("ExistCount", res.size())
+					    .detail("Context", context)
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					wait(delay(30));
+					tr.reset();
+					continue;
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestAuditStorageCheckPersistStateError")
+				    .errorUnsuppressed(e)
+				    .detail("Context", context)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
+				wait(tr.onError(e));
+			}
+		}
+		// Check no audit progress metadata exists
+		tr.reset();
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult rangeBasedRes = wait(tr.getRange(auditRangeBasedProgressRangeFor(type), GetRangeLimits()));
+				ASSERT(rangeBasedRes.empty() && !rangeBasedRes.more);
+				RangeResult serverBasedRes =
+				    wait(tr.getRange(auditServerBasedProgressRangeFor(type), GetRangeLimits()));
+				ASSERT(serverBasedRes.empty() && !serverBasedRes.more);
+				break;
+
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "TestAuditStorageCheckPersistProgressStateError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditID", auditId);
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> waitCancelAuditStorageUntilComplete(Database cx, AuditType type, UID auditId) {
+		loop {
+			try {
+				state UID auditId_ = wait(cancelAuditStorage(cx->getConnectionRecord(),
+				                                             type,
+				                                             auditId,
+				                                             /*timeoutSecond=*/300));
+				ASSERT(auditId == auditId_);
+				TraceEvent("TestAuditStorageWaitCancelAuditStorageUntilComplete")
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "TestAuditStorageWaitCancelAuditStorageUntilCompleteError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
+				wait(delay(1));
+			}
+		}
+		return Void();
+	}
+
 	ACTOR Future<Void> _start(ValidateStorage* self, Database cx) {
 		TraceEvent("ValidateStorageTestBegin");
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
@@ -76,46 +243,39 @@ struct ValidateStorage : TestWorkload {
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
-		state UID auditId;
 
-		Version _ = wait(self->populateData(self, cx, &kvs));
+		Version ver = wait(self->populateData(self, cx, &kvs));
 
-		TraceEvent("TestValueWritten");
+		TraceEvent("TestValueWritten").detail("AtVersion", ver);
 
-		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
-		TraceEvent("TestValueVerified");
-
-		loop {
-			try {
-				Optional<UID> auditId_ = wait(timeout(
-				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
-				if (!auditId_.present()) {
-					throw audit_storage_failed();
-				}
-				auditId = auditId_.get();
-				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
-				wait(delay(1));
-			}
+		if (g_network->isSimulated()) {
+			// NOTE: the value will be reset after consistency check
+			disableConnectionFailures("AuditStorage");
 		}
 
-		loop {
-			try {
-				AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
-				if (auditState.getPhase() != AuditPhase::Complete) {
-					ASSERT(auditState.getPhase() == AuditPhase::Running);
-					wait(delay(30));
-				} else {
-					ASSERT(auditState.getPhase() == AuditPhase::Complete);
-					break;
-				}
-			} catch (Error& e) {
-				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
-				wait(delay(1));
-			}
-		}
+		self->testStringToAuditPhaseFunctionality();
+		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone");
+
+		wait(self->testSSUserDataValidation(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
+		TraceEvent("TestAuditStorageValidateValueDone");
+
+		wait(self->testAuditStorageFunctionality(self, cx));
+		TraceEvent("TestAuditStorageFunctionalityDone");
+
+		wait(self->testAuditStorageIDGenerator(self, cx));
+		TraceEvent("TestAuditStorageIDGeneratorDone");
+
+		wait(self->testGetAuditStateWhenNoOngingAudit(self, cx));
+		TraceEvent("TestGetAuditStateDone");
+
+		wait(self->testAuditStorageConcurrentRunForDifferentType(self, cx));
+		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
+
+		wait(self->testAuditStorageConcurrentRunForSameType(self, cx));
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeDone");
+
+		wait(self->testAuditStorageCancellation(self, cx));
+		TraceEvent("TestAuditStorageCancellationDone");
 
 		return Void();
 	}
@@ -148,12 +308,47 @@ struct ValidateStorage : TestWorkload {
 		return version;
 	}
 
-	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {
-		TraceEvent("TestValidateStorageBegin").detail("Range", range);
+	void testStringToAuditPhaseFunctionality() {
+		AuditPhase phase = AuditPhase::Invalid;
+		std::string inputStr = "RUNNING";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Running) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "RUnnING";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Running) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "error";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Error) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "error123";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Invalid) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "123";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Invalid) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "12Failed";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Invalid) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		return;
+	}
+
+	ACTOR Future<Void> testSSUserDataValidation(ValidateStorage* self, Database cx, KeyRange range) {
+		TraceEvent("TestSSUserDataValidationBegin").detail("Range", range);
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
+		state int retryCount = 0;
 		loop {
 			try {
 				state RangeResult shards =
@@ -174,7 +369,7 @@ struct ValidateStorage : TestWorkload {
 					Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
 					ASSERT(serverListValue.present());
 					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-					TraceEvent("TestValidateStorageSendingRequest")
+					TraceEvent("TestSSUserDataValidationSendingRequest")
 					    .detail("Range", range)
 					    .detail("StorageServer", ssi.toString());
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
@@ -183,24 +378,230 @@ struct ValidateStorage : TestWorkload {
 					Optional<AuditStorageState> vResult =
 					    wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
 					if (!vResult.present()) {
-						throw audit_storage_failed();
+						return Void();
 					}
 				}
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
-				try {
-					wait(tr.onError(e));
-				} catch (Error& e) {
-					if (e.code() != error_code_audit_storage_failed && e.code() != error_code_broken_promise) {
-						throw e;
-					}
+				if (retryCount > 5) {
+					TraceEvent(SevWarnAlways, "TestSSUserDataValidationFailed")
+					    .errorUnsuppressed(e)
+					    .detail("Range", range);
+					break;
+				} else {
+					TraceEvent(SevWarn, "TestSSUserDataValidationFailedRetry")
+					    .errorUnsuppressed(e)
+					    .detail("Range", range)
+					    .detail("RetryCount", retryCount);
+					wait(delay(1));
+					retryCount++;
+					continue;
 				}
 			}
 		}
 
-		TraceEvent("TestValidateStorageDone").detail("Range", range);
+		TraceEvent("TestSSUserDataValidationDone").detail("Range", range);
 
+		return Void();
+	}
+
+	ACTOR Future<UID> auditStorageForType(ValidateStorage* self,
+	                                      Database cx,
+	                                      AuditType type,
+	                                      std::string context,
+	                                      bool stopWaitWhenCleared = false) {
+		// Send audit request until the server accepts the request
+		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context));
+		// Wait until the request completes
+		wait(self->waitAuditStorageUntilComplete(cx, type, auditId, context, stopWaitWhenCleared));
+		// Check internal persist state
+		wait(self->checkAuditStorageInternalState(cx, type, auditId, context));
+		return auditId;
+	}
+
+	ACTOR Future<Void> testAuditStorageFunctionality(ValidateStorage* self, Database cx) {
+		UID auditIdA =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageFunctionality"));
+		TraceEvent("TestFunctionalityHADone");
+		UID auditIdB =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageFunctionality"));
+		TraceEvent("TestFunctionalityReplicaDone");
+		UID auditIdC = wait(
+		    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageFunctionality"));
+		TraceEvent("TestFunctionalityShardLocationMetadataDone");
+		UID auditIdD = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality"));
+		TraceEvent("TestFunctionalitySSShardInfoDone");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageIDGenerator(ValidateStorage* self, Database cx) {
+		state AuditType type = AuditType::ValidateReplica;
+		TraceEvent("TestAuditStorageIDGeneratorBegin").detail("AuditType", type);
+		state UID auditIdA = wait(self->auditStorageForType(self, cx, type, "FirstRunInTestIDGenerator"));
+		state UID auditIdB = wait(self->auditStorageForType(self, cx, type, "SecondRunInTestIDGenerator"));
+		if (auditIdA == auditIdB) {
+			TraceEvent(SevError, "TestAuditStorageIDGeneratorError")
+			    .detail("AuditType", type)
+			    .detail("AuditIDA", auditIdA)
+			    .detail("AuditIDB", auditIdB);
+		}
+		TraceEvent("TestAuditStorageIDGeneratorEnd").detail("AuditType", type);
+		;
+		return Void();
+	}
+
+	ACTOR Future<Void> testGetAuditStateWhenNoOngingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
+		TraceEvent("TestGetAuditStateBegin").detail("AuditType", type);
+		;
+		std::vector<AuditStorageState> res1 = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
+		if (res1.size() != 1) {
+			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res1.size());
+		}
+		std::vector<AuditStorageState> res2 =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Invalid));
+		if (res2.size() != 0) {
+			TraceEvent(SevError, "TestExistingInvalidAudit")
+			    .detail("ActualResSize", res2.size())
+			    .detail("InputPhase", AuditPhase::Invalid);
+		}
+		std::vector<AuditStorageState> res3 =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Running));
+		if (res3.size() != 0) {
+			TraceEvent(SevError, "TestExistingRunningAudit")
+			    .detail("ActualResSize", res3.size())
+			    .detail("InputPhase", AuditPhase::Running);
+		}
+		std::vector<AuditStorageState> res4 =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Complete));
+		for (const auto& auditState : res4) {
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
+				    .detail("ActualPhase", auditState.getPhase())
+				    .detail("InputPhase", AuditPhase::Complete);
+			}
+		}
+		std::vector<AuditStorageState> res5 =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Failed));
+		for (const auto& auditState : res5) {
+			if (auditState.getPhase() != AuditPhase::Failed) {
+				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
+				    .detail("ActualPhase", auditState.getPhase())
+				    .detail("InputPhase", AuditPhase::Failed);
+			}
+		}
+		std::vector<AuditStorageState> res6 =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Error));
+		for (const auto& auditState : res6) {
+			if (auditState.getPhase() != AuditPhase::Error) {
+				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
+				    .detail("ActualPhase", auditState.getPhase())
+				    .detail("InputPhase", AuditPhase::Error);
+			}
+		}
+		TraceEvent("TestGetAuditStateEnd").detail("AuditType", type);
+		return Void();
+	}
+
+	ACTOR Future<Void> testGetAuditStateWhenNoOngingAudit(ValidateStorage* self, Database cx) {
+		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateHA));
+		TraceEvent("TestGetAuditStateHADone");
+
+		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateReplica));
+		TraceEvent("TestGetAuditStateReplicaDone");
+
+		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateLocationMetadata));
+		TraceEvent("TestGetAuditStateShardLocationMetadataDone");
+
+		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateStorageServerShard));
+		TraceEvent("TestGetAuditStateSSShardInfoDone");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageConcurrentRunForDifferentType(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeBegin");
+		state std::vector<Future<Void>> fs;
+		state std::vector<UID> auditIds = { UID(), UID(), UID(), UID() };
+		fs.push_back(
+		    store(auditIds[0],
+		          self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestConcurrentRunForDifferentType")));
+		fs.push_back(store(
+		    auditIds[1],
+		    self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestConcurrentRunForDifferentType")));
+		fs.push_back(store(auditIds[2],
+		                   self->auditStorageForType(
+		                       self, cx, AuditType::ValidateLocationMetadata, "TestConcurrentRunForDifferentType")));
+		fs.push_back(store(auditIds[3],
+		                   self->auditStorageForType(
+		                       self, cx, AuditType::ValidateStorageServerShard, "TestConcurrentRunForDifferentType")));
+		wait(waitForAll(fs));
+		fs.clear();
+		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageConcurrentRunForSameType(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeBegin");
+		state std::vector<Future<Void>> fs;
+		state std::vector<UID> auditIds = { UID(), UID(), UID(), UID() };
+		fs.push_back(store(
+		    auditIds[0],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(
+		    auditIds[1],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(
+		    auditIds[2],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(
+		    auditIds[3],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		wait(waitForAll(fs));
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageCancellation(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageCancellationBegin");
+		state UID auditId = wait(self->triggerAuditStorageForType(cx, AuditType::ValidateHA, "TestAuditCancellation"));
+		state std::vector<Future<Void>> fs;
+		fs.push_back(self->waitCancelAuditStorageUntilComplete(cx, AuditType::ValidateHA, auditId));
+		fs.push_back(self->waitCancelAuditStorageUntilComplete(cx, AuditType::ValidateHA, auditId));
+		fs.push_back(self->waitCancelAuditStorageUntilComplete(cx, AuditType::ValidateReplica, auditId));
+		fs.push_back(self->checkAuditStorageInternalState(cx, AuditType::ValidateHA, auditId, "TestAuditCancellation"));
+		fs.push_back(
+		    self->checkAuditStorageInternalState(cx, AuditType::ValidateReplica, auditId, "TestAuditCancellation"));
+		wait(waitForAll(fs));
+		fs.clear();
+		fs.push_back(self->checkAuditStorageInternalState(cx, AuditType::ValidateHA, auditId, "TestAuditCancellation"));
+		fs.push_back(
+		    self->checkAuditStorageInternalState(cx, AuditType::ValidateReplica, auditId, "TestAuditCancellation"));
+		wait(waitForAll(fs));
+		state std::vector<AuditStorageState> currentAuditStates1 =
+		    wait(getAuditStates(cx, AuditType::ValidateHA, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY));
+		for (const auto& auditState : currentAuditStates1) {
+			if (auditState.id == auditId && auditState.getPhase() != AuditPhase::Failed) {
+				TraceEvent(SevError, "TestAuditStorageCancellation1Error")
+				    .detail("AuditType", auditState.getType())
+				    .detail("AuditID", auditId)
+				    .detail("AuditPhase", auditState.getPhase());
+			}
+		}
+		state std::vector<AuditStorageState> currentAuditStates2 =
+		    wait(getAuditStates(cx, AuditType::ValidateReplica, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY));
+		for (const auto& auditState : currentAuditStates2) {
+			if (auditState.id == auditId && auditState.getPhase() != AuditPhase::Failed) {
+				TraceEvent(SevError, "TestAuditStorageCancellation2Error")
+				    .detail("AuditType", auditState.getType())
+				    .detail("AuditID", auditId)
+				    .detail("AuditPhase", auditState.getPhase());
+			}
+		}
+		TraceEvent("TestAuditStorageCancellationEnd");
 		return Void();
 	}
 

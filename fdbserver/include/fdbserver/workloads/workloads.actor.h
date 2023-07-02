@@ -47,6 +47,9 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
 std::vector<std::string> getOption(VectorRef<KeyValueRef> options,
                                    Key key,
                                    std::vector<std::string> defaultValue); // comma-separated strings
+std::vector<int> getOption(VectorRef<KeyValueRef> options,
+                           Key key,
+                           std::vector<int> defaultValue = {}); // comma-separated integers
 bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
@@ -231,7 +234,7 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(UntrustedMode);
+FDB_BOOLEAN_PARAM(UntrustedMode);
 
 template <class Workload>
 struct WorkloadFactory : IWorkloadFactory {
@@ -335,6 +338,7 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 
 	KnobKeyValuePairs overrideKnobs;
+	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
@@ -384,6 +388,10 @@ Future<Void> testExpectedError(Future<Void> test,
                                UID id = UID());
 
 std::string getTestEncryptionFileName();
+
+// This should become a BehaviorInjectionWorkload or perhaps ConfigInjectionWorkload which should be a new class that
+// should represent non-failure behaviors that can be randomly injected into any test run.
+ACTOR Future<Void> customShardConfigWorkload(Database cx);
 
 #include "flow/unactorcompiler.h"
 

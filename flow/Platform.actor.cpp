@@ -44,6 +44,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/asio.hpp>
 
 #include "fmt/format.h"
 
@@ -58,6 +59,12 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Util.h"
+
+// boost uses either std::array or boost::asio::detail::array to store the IPv6 Addresses.
+// Enforce the format of IPAddressStore, which is declared in IPAddress.h, is using the same type
+// to boost.
+static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<uint8_t, 16>>::value,
+              "IPAddressStore must be std::array<uint8_t, 16>");
 
 #ifdef _WIN32
 
@@ -644,7 +651,11 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 #endif
 
 	free = std::min((uint64_t)std::numeric_limits<int64_t>::max(), buf.f_bavail * blockSize);
-	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), buf.f_blocks * blockSize);
+
+	// f_blocks is the total fs space but (f_bfree - f_bavail) is space only available to privileged users
+	// so that amount will be subtracted from the reported total since FDB can't use it.
+	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(),
+	                 (buf.f_blocks - (buf.f_bfree - buf.f_bavail)) * blockSize);
 
 #elif defined(_WIN32)
 	std::string fullPath = abspath(directory);
@@ -3738,38 +3749,71 @@ extern std::atomic<int64_t> net2RunLoopIterations;
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
 
+namespace {
+
 std::atomic<double> checkThreadTime;
+std::mutex loopProfilerThreadMutex;
+std::optional<pthread_t> loopProfilerThread;
+std::atomic<bool> loopProfilerStopRequested = false;
+
+} // namespace
 #endif
 
-volatile thread_local bool profileThread = false;
-volatile thread_local int profilingEnabled = 1;
+// True if this thread is the thread being profiled. Not to be used from the signal handler.
+thread_local bool profileThread = false;
 
-volatile thread_local int64_t numProfilesDeferred = 0;
-volatile thread_local int64_t numProfilesOverflowed = 0;
-volatile thread_local int64_t numProfilesCaptured = 0;
-volatile thread_local bool profileRequested = false;
+// The thread ID of the profiled thread. This can be compared against the current thread ID
+// to see if we are on the profiled thread. Can be used in the signal handler.
+volatile int64_t profileThreadId = -1;
 
-int64_t getNumProfilesDeferred() {
-	return numProfilesDeferred;
+#ifdef __linux__
+struct sigaction chainedAction;
+#endif
+
+volatile bool profilingEnabled = 1;
+volatile thread_local bool flowProfilingEnabled = 1;
+
+volatile int64_t numProfilesDisabled = 0;
+volatile int64_t numProfilesOverflowed = 0;
+volatile int64_t numProfilesCaptured = 0;
+
+int64_t getNumProfilesDisabled() {
+	if (profileThread) {
+		return numProfilesDisabled;
+	} else {
+		return 0;
+	}
 }
 
 int64_t getNumProfilesOverflowed() {
-	return numProfilesOverflowed;
+	if (profileThread) {
+		return numProfilesOverflowed;
+	} else {
+		return 0;
+	}
 }
 
 int64_t getNumProfilesCaptured() {
-	return numProfilesCaptured;
+	if (profileThread) {
+		return numProfilesCaptured;
+	} else {
+		return 0;
+	}
 }
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread) {
-		return;
+	if (chainedAction.sa_handler != SIG_DFL && chainedAction.sa_handler != SIG_IGN &&
+	    chainedAction.sa_handler != nullptr) {
+		chainedAction.sa_handler(sig);
 	}
 
-	if (!profilingEnabled) {
-		profileRequested = true;
-		++numProfilesDeferred;
+	// This is not documented in the POSIX list of signal-safe functions, but numbered syscalls are reported to be
+	// async safe in Linux.
+	if (profileThreadId != syscall(__NR_gettid)) {
+		return;
+	} else if (!profilingEnabled) {
+		++numProfilesDisabled;
 		return;
 	}
 
@@ -3790,28 +3834,37 @@ void profileHandler(int sig) {
 
 	// We can only read the check thread time in a signal handler if the atomic is lock free.
 	// We can't get the time from a timer() call because it's not signal safe.
+#ifndef WITH_SWIFT
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
+#else
+	// FIXME: problem with Swift build: lib/libflow.a(Platform.actor.g.cpp.o):Platform.actor.g.cpp:function
+	// profileHandler(int): error: undefined reference to '__atomic_is_lock_free'
+	ps->timestamp = 0;
+#endif /* WITH_SWIFT */
 
+#if defined(USE_SANITIZER)
+	// In sanitizer builds the workaround implemented in SignalSafeUnwind.cpp is disabled
+	// so calling backtrace may cause a deadlock
+	size_t size = 0;
+#else
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+#endif
 
 	ps->length = size;
 
 	net2backtraces_offset += size + 2;
 #else
-	// No slow task profiling for other platforms!
+// No slow task profiling for other platforms!
 #endif
 }
 
 void setProfilingEnabled(int enabled) {
 #ifdef __linux__
-	if (profileThread && enabled && !profilingEnabled && profileRequested) {
-		profilingEnabled = true;
-		profileRequested = false;
-		pthread_kill(pthread_self(), SIGPROF);
-	} else {
+	if (profileThread) {
 		profilingEnabled = enabled;
 	}
+	flowProfilingEnabled = enabled;
 #else
 	// No profiling for other platforms!
 #endif
@@ -3838,7 +3891,7 @@ void* checkThread(void* arg) {
 	double slowTaskLogInterval = minSlowTaskLogInterval;
 	double saturatedLogInterval = minSaturationLogInterval;
 
-	while (true) {
+	while (!loopProfilerStopRequested) {
 		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
@@ -3958,24 +4011,56 @@ std::string getExecPath() {
 
 void setupRunLoopProfiler() {
 #ifdef __linux__
-	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		chainedAction.sa_handler = SIG_DFL;
+
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
-		initProfiling();
+
 		profileThread = true;
+		profileThreadId = syscall(__NR_gettid);
+		if (profileThreadId < 0) {
+			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
+			    .detail("Reason", "Error getting thread ID")
+			    .GetLastError();
+			return;
+		}
+
+		initProfiling();
 
 		struct sigaction action;
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		sigaction(SIGPROF, &action, nullptr);
+		if (sigaction(SIGPROF, &action, &chainedAction)) {
+			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
+			    .detail("Reason", "Error configuring signal handler")
+			    .GetLastError();
+			return;
+		}
 
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+		{
+			std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+			if (!loopProfilerStopRequested) {
+				loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+			}
+		}
 	}
 #else
 	// No slow task profiling for other platforms!
+#endif
+}
+
+void stopRunLoopProfiler() {
+#ifdef __linux__
+	std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+	loopProfilerStopRequested.store(true);
+	if (loopProfilerThread) {
+		pthread_join(loopProfilerThread.value(), NULL);
+		loopProfilerThread = {};
+	}
 #endif
 }
 

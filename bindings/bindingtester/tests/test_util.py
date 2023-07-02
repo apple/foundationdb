@@ -33,16 +33,20 @@ from bindingtester.known_testers import COMMON_TYPES
 
 
 class RandomGenerator(object):
-    def __init__(self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES):
+    def __init__(
+        self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES
+    ):
         self.max_int_bits = max_int_bits
         self.api_version = api_version
         self.types = list(types)
 
     def random_unicode_str(self, length):
-        return ''.join(self.random_unicode_char() for i in range(0, length))
+        return "".join(self.random_unicode_char() for i in range(0, length))
 
     def random_int(self):
-        num_bits = random.randint(0, self.max_int_bits)  # This way, we test small numbers with higher probability
+        num_bits = random.randint(
+            0, self.max_int_bits
+        )  # This way, we test small numbers with higher probability
 
         max_value = (1 << num_bits) - 1
         min_value = -max_value - 1
@@ -54,11 +58,15 @@ class RandomGenerator(object):
     def random_float(self, exp_bits):
         if random.random() < 0.05:
             # Choose a special value.
-            return random.choice([float('-nan'), float('-inf'), -0.0, 0.0, float('inf'), float('nan')])
+            return random.choice(
+                [float("-nan"), float("-inf"), -0.0, 0.0, float("inf"), float("nan")]
+            )
         else:
             # Choose a value from all over the range of acceptable floats for this precision.
             sign = -1 if random.random() < 0.5 else 1
-            exponent = random.randint(-(1 << (exp_bits - 1)) - 10, (1 << (exp_bits - 1) - 1))
+            exponent = random.randint(
+                -(1 << (exp_bits - 1)) - 10, (1 << (exp_bits - 1) - 1)
+            )
             mantissa = random.random()
 
             result = sign * math.pow(2, exponent) * mantissa
@@ -73,38 +81,38 @@ class RandomGenerator(object):
 
         for i in range(size):
             choice = random.choice(self.types)
-            if choice == 'int':
+            if choice == "int":
                 tup.append(self.random_int())
-            elif choice == 'null':
+            elif choice == "null":
                 tup.append(None)
-            elif choice == 'bytes':
+            elif choice == "bytes":
                 tup.append(self.random_string(random.randint(0, 100)))
-            elif choice == 'string':
+            elif choice == "string":
                 tup.append(self.random_unicode_str(random.randint(0, 100)))
-            elif choice == 'uuid':
-                tup.append(uuid.uuid4())
-            elif choice == 'bool':
+            elif choice == "uuid":
+                tup.append(uuid.UUID(int=random.getrandbits(128)))
+            elif choice == "bool":
                 b = random.random() < 0.5
                 if self.api_version < 500:
                     tup.append(int(b))
                 else:
                     tup.append(b)
-            elif choice == 'float':
+            elif choice == "float":
                 tup.append(fdb.tuple.SingleFloat(self.random_float(8)))
-            elif choice == 'double':
+            elif choice == "double":
                 tup.append(self.random_float(11))
-            elif choice == 'tuple':
+            elif choice == "tuple":
                 length = random.randint(0, max_size - size)
                 if length == 0:
                     tup.append(())
                 else:
                     tup.append(self.random_tuple(length))
-            elif choice == 'versionstamp':
+            elif choice == "versionstamp":
                 if incomplete_versionstamps and random.random() < 0.5:
                     tr_version = fdb.tuple.Versionstamp._UNSET_TR_VERSION
                 else:
                     tr_version = self.random_string(10)
-                user_version = random.randint(0, 0xffff)
+                user_version = random.randint(0, 0xFFFF)
                 tup.append(fdb.tuple.Versionstamp(tr_version, user_version))
             else:
                 assert False
@@ -123,12 +131,19 @@ class RandomGenerator(object):
                 smaller_size = random.randint(1, len(to_add))
                 tuples.append(to_add[:smaller_size])
             else:
-                non_empty = [x for x in enumerate(to_add) if (isinstance(x[1], list) or isinstance(x[1], tuple)) and len(x[1]) > 0]
+                non_empty = [
+                    x
+                    for x in enumerate(to_add)
+                    if (isinstance(x[1], list) or isinstance(x[1], tuple))
+                    and len(x[1]) > 0
+                ]
                 if len(non_empty) > 0 and random.random() < 0.25:
                     # Add a smaller list to test prefixes of nested structures.
                     idx, choice = random.choice(non_empty)
                     smaller_size = random.randint(0, len(to_add[idx]))
-                    tuples.append(to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1:])
+                    tuples.append(
+                        to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1 :]
+                    )
 
         random.shuffle(tuples)
         return tuples
@@ -153,30 +168,40 @@ class RandomGenerator(object):
 
     def random_string(self, length):
         if length == 0:
-            return b''
+            return b""
 
-        return bytes([random.randint(0, 254)] + [random.randint(0, 255) for i in range(0, length - 1)])
+        return bytes(
+            [random.randint(0, 254)]
+            + [random.randint(0, 255) for i in range(0, length - 1)]
+        )
 
     def random_unicode_char(self):
         while True:
             if random.random() < 0.05:
                 # Choose one of these special character sequences.
-                specials = ['\U0001f4a9', '\U0001f63c', '\U0001f3f3\ufe0f\u200d\U0001f308', '\U0001f1f5\U0001f1f2', '\uf8ff',
-                            '\U0002a2b2', '\u05e9\u05dc\u05d5\u05dd']
+                specials = [
+                    "\U0001f4a9",
+                    "\U0001f63c",
+                    "\U0001f3f3\ufe0f\u200d\U0001f308",
+                    "\U0001f1f5\U0001f1f2",
+                    "\uf8ff",
+                    "\U0002a2b2",
+                    "\u05e9\u05dc\u05d5\u05dd",
+                ]
                 return random.choice(specials)
-            c = random.randint(0, 0xffff)
-            if unicodedata.category(chr(c))[0] in 'LMNPSZ':
+            c = random.randint(0, 0xFFFF)
+            if unicodedata.category(chr(c))[0] in "LMNPSZ":
                 return chr(c)
 
 
 def error_string(error_code):
-    return fdb.tuple.pack((b'ERROR', bytes(str(error_code), 'utf-8')))
+    return fdb.tuple.pack((b"ERROR", bytes(str(error_code), "utf-8")))
 
 
 def blocking_commit(instructions):
-    instructions.append('COMMIT')
-    instructions.append('WAIT_FUTURE')
-    instructions.append('RESET')
+    instructions.append("COMMIT")
+    instructions.append("WAIT_FUTURE")
+    instructions.append("RESET")
 
 
 def to_front(instructions, index):
@@ -184,19 +209,19 @@ def to_front(instructions, index):
         pass
     elif index == 1:
         instructions.push_args(1)
-        instructions.append('SWAP')
+        instructions.append("SWAP")
     elif index == 2:
         instructions.push_args(index - 1)
-        instructions.append('SWAP')
+        instructions.append("SWAP")
         instructions.push_args(index)
-        instructions.append('SWAP')
+        instructions.append("SWAP")
     else:
         instructions.push_args(index - 1)
-        instructions.append('SWAP')
+        instructions.append("SWAP")
         instructions.push_args(index)
-        instructions.append('SWAP')
+        instructions.append("SWAP")
         instructions.push_args(index - 1)
-        instructions.append('SWAP')
+        instructions.append("SWAP")
         to_front(instructions, index - 1)
 
 

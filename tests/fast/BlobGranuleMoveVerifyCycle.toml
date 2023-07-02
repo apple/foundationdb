@@ -2,8 +2,6 @@
 testClass = "BlobGranule"
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4]
 
 [[test]]
 testTitle = 'BlobGranuleMoveVerifyCycle'
@@ -45,4 +43,8 @@ testTitle = 'BlobGranuleMoveVerifyCycle'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
     testDuration = 60.0

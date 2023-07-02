@@ -41,8 +41,8 @@ standard API and some knowledge of the contents of the system key space.
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr);
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx);
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority = false);
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority = false);
 ACTOR Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
@@ -67,12 +67,12 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 // necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the
 // given IP.
 ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed = false);
-void excludeServers(Transaction& tr, std::vector<AddressExclusion>& servers, bool failed = false);
+ACTOR Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed = false);
 
 // Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
 // is durable, without necessarily waiting for the servers to be evacuated.
 ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed = false);
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed = false);
+ACTOR Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> localities, bool failed = false);
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
 // IP.  A NetworkAddress() means all servers (don't exclude anything)
@@ -88,13 +88,25 @@ ACTOR Future<Void> includeLocalities(Database cx,
 // the given IP.
 ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass);
 
-// Get the current list of excluded servers
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx);
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr);
+// Get the current list of excluded servers including both "exclude" and "failed".
+ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx);
+ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr);
+
+// Get the current list of excluded servers.
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr);
+
+// Get the current list of failed servers.
+ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr);
 
 // Get the current list of excluded localities
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx);
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr);
+ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Database cx);
+ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr);
+
+// Get the current list of excluded localities.
+ACTOR Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr);
+
+// Get the current list of failed localities.
+ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction* tr);
 
 std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
 
@@ -142,7 +154,12 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
-                               bool async = false);
+                               double timeoutSeconds);
+// Cancel an audit given type and id
+ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                                     AuditType type,
+                                     UID auditId,
+                                     double timeoutSeconds);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
@@ -165,11 +182,6 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
-
-// Set/clear/get the storage quota for the given tenant group
-void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota);
-void clearStorageQuota(Transaction& tr, StringRef tenantGroupName);
-ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName);
 
 #include "flow/unactorcompiler.h"
 #endif

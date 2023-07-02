@@ -53,7 +53,16 @@ class Limiter:
             self.count = count
 
     class UpdateBudgetParams:
-        def __init__(self, time, num_started, num_started_at_priority, min_priority, last_batch, queue_empty, elapsed):
+        def __init__(
+            self,
+            time,
+            num_started,
+            num_started_at_priority,
+            min_priority,
+            last_batch,
+            queue_empty,
+            elapsed,
+        ):
             self.time = time
             self.num_started = num_started
             self.num_started_at_priority = num_started_at_priority
@@ -129,7 +138,9 @@ class TimeLimiter(PositiveBudgetLimiter):
         self.locked_until = 0
 
     def can_start(self, params):
-        return params.time >= self.locked_until and PositiveBudgetLimiter.can_start(self, params)
+        return params.time >= self.locked_until and PositiveBudgetLimiter.can_start(
+            self, params
+        )
 
     def update_budget(self, params):
         # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority, params.last_batch))
@@ -137,9 +148,14 @@ class TimeLimiter(PositiveBudgetLimiter):
         if params.min_priority >= self.priority or params.num_started < self.limit:
             self.limit -= params.num_started
         else:
-            self.limit = min(self.limit, max(self.limit - params.num_started, -params.last_batch))
-            self.locked_until = min(params.time + 2.0,
-                                    max(params.time, self.locked_until) + (params.num_started - self.limit) / self.rate)
+            self.limit = min(
+                self.limit, max(self.limit - params.num_started, -params.last_batch)
+            )
+            self.locked_until = min(
+                params.time + 2.0,
+                max(params.time, self.locked_until)
+                + (params.num_started - self.limit) / self.rate,
+            )
 
         # print('End update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority))
 
@@ -161,7 +177,11 @@ class TimePositiveBudgetLimiter(PositiveBudgetLimiter):
         # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority, params.last_batch))
 
         if params.num_started > self.limit:
-            self.locked_until = min(params.time + 2.0, max(params.time, self.locked_until) + (params.num_started - self.limit) / self.rate)
+            self.locked_until = min(
+                params.time + 2.0,
+                max(params.time, self.locked_until)
+                + (params.num_started - self.limit) / self.rate,
+            )
             self.limit = 0
         else:
             self.limit -= params.num_started
@@ -187,7 +207,9 @@ class SmoothingLimiter(OriginalLimiter):
 
     def update_limit(self, params):
         self.limit = 2.0 * (
-            self.smooth_rate_limit.smooth_total(params.time) - self.smooth_released.smooth_rate(params.time))
+            self.smooth_rate_limit.smooth_total(params.time)
+            - self.smooth_released.smooth_rate(params.time)
+        )
 
     def can_start(self, params):
         return params.num_started + params.count <= self.limit
@@ -203,15 +225,22 @@ class SmoothingBudgetLimiter(SmoothingLimiter):
         self.budget = 0
 
     def update_limit(self, params):
-        release_rate = (
-            self.smooth_rate_limit.smooth_total(params.time) - self.smooth_released.smooth_rate(params.time))
+        release_rate = self.smooth_rate_limit.smooth_total(
+            params.time
+        ) - self.smooth_released.smooth_rate(params.time)
         # self.smooth_filled.set_total(params.time, 1 if release_rate > 0 else 0)
         self.limit = 2.0 * release_rate
 
-        self.proxy_model.results.rate[self.priority][params.time] = self.smooth_rate_limit.smooth_total(params.time)
-        self.proxy_model.results.released[self.priority][params.time] = self.smooth_released.smooth_rate(params.time)
+        self.proxy_model.results.rate[self.priority][
+            params.time
+        ] = self.smooth_rate_limit.smooth_total(params.time)
+        self.proxy_model.results.released[self.priority][
+            params.time
+        ] = self.smooth_released.smooth_rate(params.time)
         self.proxy_model.results.limit[self.priority][params.time] = self.limit
-        self.proxy_model.results.limit_and_budget[self.priority][params.time] = self.limit + self.budget
+        self.proxy_model.results.limit_and_budget[self.priority][params.time] = (
+            self.limit + self.budget
+        )
         self.proxy_model.results.budget[self.priority][params.time] = self.budget
 
         # self.budget = max(0, self.budget + params.elapsed * self.smooth_rate_limit.smooth_total(params.time))
@@ -222,10 +251,16 @@ class SmoothingBudgetLimiter(SmoothingLimiter):
         # print('Update limit: time=%f, priority=%s, limit=%f, rate=%f, released=%f, budget=%f' % (params.time, self.priority, self.limit, self.smooth_rate_limit.smooth_total(params.time), self.smooth_released.smooth_rate(params.time), self.budget))
 
     def can_start(self, params):
-        return params.num_started + params.count <= self.limit + self.budget  # or params.num_started + params.count <= self.budget
+        return (
+            params.num_started + params.count <= self.limit + self.budget
+        )  # or params.num_started + params.count <= self.budget
 
     def update_budget(self, params):
-        self.budget = max(0, self.budget + (self.limit - params.num_started_at_priority) / 2 * params.elapsed)
+        self.budget = max(
+            0,
+            self.budget
+            + (self.limit - params.num_started_at_priority) / 2 * params.elapsed,
+        )
 
         if params.queue_empty:
             self.budget = min(10, self.budget)
@@ -248,14 +283,19 @@ class ProxyModel:
             self.budget = {p: {} for p in priorities}
 
         def init_result(self, priorities, starting_value, duration):
-            return {p: {s: copy.copy(starting_value) for s in range(0, duration)} for p in priorities}
+            return {
+                p: {s: copy.copy(starting_value) for s in range(0, duration)}
+                for p in priorities
+            }
 
     def __init__(self, duration, ratekeeper_model, workload_model, Limiter):
         self.time = 0
         self.log_time = 0
         self.duration = duration
-        self.priority_limiters = {priority: Limiter(priority, ratekeeper_model, self) for priority in
-                                  workload_model.priorities()}
+        self.priority_limiters = {
+            priority: Limiter(priority, ratekeeper_model, self)
+            for priority in workload_model.priorities()
+        }
         self.workload_model = workload_model
         self.request_scheduled = {p: False for p in self.workload_model.priorities()}
 
@@ -270,8 +310,15 @@ class ProxyModel:
         for priority in self.workload_model.priorities():
             next_request = self.workload_model.next_request(self.time, priority)
             assert next_request is not None
-            heapq.heappush(self.tasks, Task(next_request.time,
-                                            lambda next_request=next_request: self.receive_request(next_request)))
+            heapq.heappush(
+                self.tasks,
+                Task(
+                    next_request.time,
+                    lambda next_request=next_request: self.receive_request(
+                        next_request
+                    ),
+                ),
+            )
             self.request_scheduled[priority] = True
 
         while True:  # or len(self.request_queue) > 0:
@@ -299,7 +346,10 @@ class ProxyModel:
 
         next_request = self.workload_model.next_request(self.time, request.priority)
         if next_request is not None and next_request.time < self.duration:
-            heapq.heappush(self.tasks, Task(next_request.time, lambda: self.receive_request(next_request)))
+            heapq.heappush(
+                self.tasks,
+                Task(next_request.time, lambda: self.receive_request(next_request)),
+            )
         else:
             self.request_scheduled[request.priority] = False
 
@@ -317,17 +367,30 @@ class ProxyModel:
             request = self.request_queue[0]
 
             if not self.priority_limiters[request.priority].can_start(
-                    Limiter.CanStartParams(self.time, current_started, request.count)):
+                Limiter.CanStartParams(self.time, current_started, request.count)
+            ):
                 break
 
             min_priority = request.priority
             last_batch = request.count
 
-            if self.workload_model.request_completed(request) and not self.request_scheduled[request.priority]:
-                next_request = self.workload_model.next_request(self.time, request.priority)
+            if (
+                self.workload_model.request_completed(request)
+                and not self.request_scheduled[request.priority]
+            ):
+                next_request = self.workload_model.next_request(
+                    self.time, request.priority
+                )
                 assert next_request is not None
-                heapq.heappush(self.tasks, Task(next_request.time,
-                                                lambda next_request=next_request: self.receive_request(next_request)))
+                heapq.heappush(
+                    self.tasks,
+                    Task(
+                        next_request.time,
+                        lambda next_request=next_request: self.receive_request(
+                            next_request
+                        ),
+                    ),
+                )
                 self.request_scheduled[request.priority] = True
 
             current_started += request.count
@@ -335,7 +398,9 @@ class ProxyModel:
 
             heapq.heappop(self.request_queue)
             self.results.started[request.priority][int(self.time)] += request.count
-            self.results.latencies[request.priority][int(self.time)].append(self.time - request.time)
+            self.results.latencies[request.priority][int(self.time)].append(
+                self.time - request.time
+            )
 
         if len(self.request_queue) == 0:
             min_priority = Priority.BATCH
@@ -343,15 +408,27 @@ class ProxyModel:
         for priority, limiter in self.priority_limiters.items():
             started_at_priority = sum([v for p, v in started.items() if p <= priority])
             limiter.update_budget(
-                Limiter.UpdateBudgetParams(self.time, current_started, started_at_priority, min_priority, last_batch,
-                                           len(self.request_queue) == 0 or self.request_queue[0].priority > priority,
-                                           elapsed))
+                Limiter.UpdateBudgetParams(
+                    self.time,
+                    current_started,
+                    started_at_priority,
+                    min_priority,
+                    last_batch,
+                    len(self.request_queue) == 0
+                    or self.request_queue[0].priority > priority,
+                    elapsed,
+                )
+            )
 
         for priority in self.workload_model.priorities():
             self.results.unprocessed_queue_sizes[priority][int(self.time)].append(
-                self.workload_model.workload_models[priority].outstanding)
+                self.workload_model.workload_models[priority].outstanding
+            )
 
         current_time = self.time
 
         delay = 0.001
-        heapq.heappush(self.tasks, Task(self.time + delay, lambda: self.process_requests(current_time)))
+        heapq.heappush(
+            self.tasks,
+            Task(self.time + delay, lambda: self.process_requests(current_time)),
+        )

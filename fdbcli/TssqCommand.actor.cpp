@@ -22,7 +22,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/SystemData.h"
 
 #include "flow/Arena.h"

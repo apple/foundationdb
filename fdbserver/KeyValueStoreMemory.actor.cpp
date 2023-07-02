@@ -19,11 +19,13 @@
  */
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/DeltaTree.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueContainer.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -34,6 +36,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
+#define ENCRYPTION_ENABLED_BIT 31
+static_assert(sizeof(uint32_t) == 4);
 
 template <typename Container>
 class KeyValueStoreMemory final : public IKeyValueStore, NonCopyable {
@@ -130,7 +134,7 @@ public:
 		}
 	}
 
-	void clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) override {
+	void clear(KeyRangeRef range, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;
@@ -273,10 +277,6 @@ public:
 		}
 
 		result.more = rowLimit == 0 || byteLimit <= 0;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		return result;
 	}
 
@@ -290,6 +290,12 @@ public:
 
 	int uncommittedBytes() { return queue.totalSize(); }
 
+	// KeyValueStoreMemory does not support encryption-at-rest in general, despite it supports encryption
+	// when being used as TxnStateStore backend.
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
 private:
 	enum OpType {
 		OpSet,
@@ -301,7 +307,7 @@ private:
 		OpCommit, // only in log, not in queue
 		OpRollback, // only in log, not in queue
 		OpSnapshotItemDelta,
-		OpEncrypted
+		OpEncrypted_Deprecated // deprecated since we now store the encryption status in the first bit of the opType
 	};
 
 	struct OpRef {
@@ -312,7 +318,7 @@ private:
 		size_t expectedSize() const { return p1.expectedSize() + p2.expectedSize(); }
 	};
 	struct OpHeader {
-		int op;
+		uint32_t op;
 		int len1, len2;
 	};
 
@@ -455,39 +461,56 @@ private:
 		return total;
 	}
 
-	// Data format for normal operation:
-	// +-------------+-------------+-------------+--------+--------+
-	// | opType      | len1        | len2        | param2 | param2 |
-	// | sizeof(int) | sizeof(int) | sizeof(int) | len1   | len2   |
-	// +-------------+-------------+-------------+--------+--------+
+	static bool isOpEncrypted(OpHeader* header) { return header->op >> ENCRYPTION_ENABLED_BIT == 1; }
+
+	static void setEncryptFlag(OpHeader* header, bool set) {
+		if (set) {
+			header->op |= (1UL << ENCRYPTION_ENABLED_BIT);
+		} else {
+			header->op &= ~(1UL << ENCRYPTION_ENABLED_BIT);
+		}
+	}
+
+	// NOTE: The first bit of opType indicates whether the entry is encrypted or not. This is fine for backwards
+	// compatability since the first bit was never used previously
 	//
-	// However, if the operation is encrypted:
-	// +-------------+-------------+-------------+---------------------------------+-------------+--------+--------+
-	// | OpEncrypted | len1        | len2        | BlobCipherEncryptHeader         | opType      | param1 | param2 |
-	// | sizeof(int) | sizeof(int) | sizeof(int) | sizeof(BlobCipherEncryptHeader) | sizeof(int) | len1   | len2   |
-	// +-------------+-------------+-------------+---------------------------------+-------------+--------+--------+
-	// |                                plaintext                                  |           encrypted           |
-	// +-----------------------------------------------------------------------------------------------------------+
+	// Unencrypted data format:
+	// +-------------+-------------+-------------+--------+--------+-----------+
+	// | opType      | len1        | len2        | param2 | param2 |   \x01    |
+	// | sizeof(int) | sizeof(int) | sizeof(int) | len1   | len2   |  1 byte   |
+	// +-------------+-------------+-------------+--------+--------+-----------+
+	//
+	// Encrypted data format:
+	// +-------------+-------+---------+------------+-----------------------------+--------+--------+------------+
+	// |   opType    |len1   | len2    | headerSize | BlobCipherEncryptHeader     | param1 | param2 |    \x01    |
+	// |  s(uint32)  | s(int)| s(int)  | s(uint16)  |  s(BlobCipherEncryptHeader) | len1   | len2   |   1 byte   |
+	// +-------------+-------+---------+------------+-----------------------------+--------+--------+------------+
+	// |                                plaintext                                 |    encrypted    |            |
+	// +--------------------------------------------------------------------------+-----------------+------------+
 	//
 	IDiskQueue::location log_op(OpType op, StringRef v1, StringRef v2) {
 		// Metadata op types to be excluded from encryption.
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
+		uint32_t opType = (uint32_t)op;
+		// Make sure the first bit of the optype is empty
+		ASSERT(opType >> ENCRYPTION_ENABLED_BIT == 0);
 		if (!enableEncryption || metaOps.count(op) > 0) {
-			OpHeader h = { (int)op, v1.size(), v2.size() };
+			OpHeader h = { opType, v1.size(), v2.size() };
 			log->push(StringRef((const uint8_t*)&h, sizeof(h)));
 			log->push(v1);
 			log->push(v2);
 		} else {
-			OpHeader h = { (int)OpEncrypted, v1.size(), v2.size() };
+			OpHeader h = { opType, v1.size(), v2.size() };
+			// Set the first bit of the header to 1 to indicate that the log entry is encrypted
+			setEncryptFlag(&h, true);
 			log->push(StringRef((const uint8_t*)&h, sizeof(h)));
 
-			uint8_t* plaintext = new uint8_t[sizeof(int) + v1.size() + v2.size()];
-			*(int*)plaintext = op;
+			uint8_t* plaintext = new uint8_t[v1.size() + v2.size()];
 			if (v1.size()) {
-				memcpy(plaintext + sizeof(int), v1.begin(), v1.size());
+				memcpy(plaintext, v1.begin(), v1.size());
 			}
 			if (v2.size()) {
-				memcpy(plaintext + sizeof(int) + v1.size(), v2.begin(), v2.size());
+				memcpy(plaintext + v1.size(), v2.begin(), v2.size());
 			}
 
 			ASSERT(cipherKeys.cipherTextKey.isValid());
@@ -497,12 +520,17 @@ private:
 			    cipherKeys.cipherHeaderKey,
 			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			    BlobCipherMetrics::KV_MEMORY);
-			BlobCipherEncryptHeader cipherHeader;
+			uint16_t encryptHeaderSize;
+			// TODO: If possible we want to avoid memcpy to the disk log by using the same arena used by IDiskQueue
 			Arena arena;
-			StringRef ciphertext =
-			    cipher.encrypt(plaintext, sizeof(int) + v1.size() + v2.size(), &cipherHeader, arena)->toStringRef();
-			log->push(StringRef((const uint8_t*)&cipherHeader, BlobCipherEncryptHeader::headerSize));
-			log->push(ciphertext);
+			BlobCipherEncryptHeaderRef headerRef;
+			StringRef cipherText = cipher.encrypt(plaintext, v1.size() + v2.size(), &headerRef, arena);
+			Standalone<StringRef> headerRefStr = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+			encryptHeaderSize = headerRefStr.size();
+			ASSERT(encryptHeaderSize > 0);
+			log->push(StringRef((const uint8_t*)&encryptHeaderSize, sizeof(encryptHeaderSize)));
+			log->push(headerRefStr);
+			log->push(cipherText);
 		}
 		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
@@ -510,19 +538,38 @@ private:
 	// In case the op data is not encrypted, simply read the operands and the zero fill flag.
 	// Otherwise, decrypt the op type and data.
 	ACTOR static Future<Standalone<StringRef>> readOpData(KeyValueStoreMemory* self,
-	                                                      OpHeader* h,
+	                                                      OpHeader h,
 	                                                      bool* isZeroFilled,
-	                                                      int* zeroFillSize) {
+	                                                      int* zeroFillSize,
+	                                                      bool encryptedOp) {
+		ASSERT(!isOpEncrypted(&h));
 		// Metadata op types to be excluded from encryption.
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
-		if (metaOps.count((OpType)h->op) == 0) {
+		if (metaOps.count((OpType)h.op) == 0) {
 			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
-			ASSERT_EQ(h->op == OpEncrypted, self->enableEncryption);
+			ASSERT_EQ(encryptedOp, self->enableEncryption);
 		}
-		state int remainingBytes = h->len1 + h->len2 + 1;
-		if (h->op == OpEncrypted) {
+		// if encrypted op read the header size
+		state uint16_t encryptHeaderSize = 0;
+		if (encryptedOp) {
+			state Standalone<StringRef> headerSizeStr = wait(self->log->readNext(sizeof(encryptHeaderSize)));
+			ASSERT(headerSizeStr.size() <= sizeof(encryptHeaderSize));
+			// Partial read on the header size
+			memset(&encryptHeaderSize, 0, sizeof(encryptHeaderSize));
+			memcpy(&encryptHeaderSize, headerSizeStr.begin(), headerSizeStr.size());
+			if (headerSizeStr.size() < sizeof(encryptHeaderSize)) {
+				CODE_PROBE(true, "zero fill partial encryption header size", probe::decoration::rare);
+				*zeroFillSize =
+				    (sizeof(encryptHeaderSize) - headerSizeStr.size()) + encryptHeaderSize + h.len1 + h.len2 + 1;
+			}
+			if (*zeroFillSize > 0) {
+				return headerSizeStr;
+			}
+		}
+		state int remainingBytes = h.len1 + h.len2 + 1;
+		if (encryptedOp) {
 			// encryption header, plus the real (encrypted) op type
-			remainingBytes += BlobCipherEncryptHeader::headerSize + sizeof(int);
+			remainingBytes += encryptHeaderSize;
 		}
 		state Standalone<StringRef> data = wait(self->log->readNext(remainingBytes));
 		ASSERT(data.size() <= remainingBytes);
@@ -530,23 +577,21 @@ private:
 		if (*zeroFillSize == 0) {
 			*isZeroFilled = (data[data.size() - 1] == 0);
 		}
-		if (h->op != OpEncrypted || *zeroFillSize > 0 || *isZeroFilled) {
+		if (!encryptedOp || *zeroFillSize > 0 || *isZeroFilled) {
 			return data;
 		}
-		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
-		DecryptBlobCipherAes256Ctr cipher(
-		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
-		Arena arena;
-		StringRef plaintext = cipher
-		                          .decrypt(data.begin() + BlobCipherEncryptHeader::headerSize,
-		                                   sizeof(int) + h->len1 + h->len2,
-		                                   cipherHeader,
-		                                   arena)
-		                          ->toStringRef();
-		h->op = *(int*)plaintext.begin();
-		return Standalone<StringRef>(plaintext.substr(sizeof(int)), arena);
+		state Arena arena;
+		state StringRef plaintext;
+		state BlobCipherEncryptHeaderRef cipherHeaderRef =
+		    BlobCipherEncryptHeaderRef::fromStringRef(StringRef(data.begin(), encryptHeaderSize));
+		TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+		    self->db, cipherHeaderRef, BlobCipherMetrics::KV_MEMORY));
+		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
+		                                  cipherKeys.cipherHeaderKey,
+		                                  cipherHeaderRef.getIV(),
+		                                  BlobCipherMetrics::KV_MEMORY);
+		plaintext = cipher.decrypt(data.begin() + encryptHeaderSize, h.len1 + h.len2, cipherHeaderRef, arena);
+		return Standalone<StringRef>(plaintext, arena);
 	}
 
 	ACTOR static Future<Void> recover(KeyValueStoreMemory* self, bool exactRecovery) {
@@ -579,6 +624,7 @@ private:
 
 			try {
 				loop {
+					state bool encryptedOp = false;
 					{
 						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
 						if (data.size() != sizeof(OpHeader)) {
@@ -588,9 +634,11 @@ private:
 								memset(&h, 0, sizeof(OpHeader));
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
-								if (h.op == OpEncrypted) {
-									// encryption header, plus the real (encrypted) op type
-									zeroFillSize += BlobCipherEncryptHeader::headerSize + sizeof(int);
+								if (isOpEncrypted(&h)) {
+									// encrypt header size + encryption header
+									// If it's a partial header we assume the header size is 0 (this is fine since we
+									// don't read the header in this case)
+									zeroFillSize += 0 + sizeof(uint16_t);
 								}
 							}
 							TraceEvent("KVSMemRecoveryComplete", self->id)
@@ -602,8 +650,13 @@ private:
 							break;
 						}
 						h = *(OpHeader*)data.begin();
+						encryptedOp = isOpEncrypted(&h);
+						// Reset the first bit to 0 so the op can be read properly
+						setEncryptFlag(&h, false);
+						ASSERT(h.op != OpEncrypted_Deprecated);
 					}
-					state Standalone<StringRef> data = wait(readOpData(self, &h, &isZeroFilled, &zeroFillSize));
+					state Standalone<StringRef> data =
+					    wait(readOpData(self, h, &isZeroFilled, &zeroFillSize, encryptedOp));
 					if (zeroFillSize > 0) {
 						TraceEvent("KVSMemRecoveryComplete", self->id)
 						    .detail("Reason", "data specified by header does not exist")
@@ -974,8 +1027,8 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
+		TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestSystemEncryptCipherKeys(
+		    self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();
 	}

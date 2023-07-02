@@ -46,6 +46,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool stopBackup;
 	bool checkBeginVersion;
 	bool clearBackupAgentKeys;
+	Standalone<StringRef> blobManifestUrl;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
@@ -57,6 +58,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		stopBackup = getOption(options, "stopBackup"_sr, false);
 		checkBeginVersion = getOption(options, "checkBeginVersion"_sr, false);
 		clearBackupAgentKeys = getOption(options, "clearBackupAgentKeys"_sr, false);
+		blobManifestUrl = getOption(options, "blobManifestUrl"_sr, ""_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -157,6 +159,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (self->submitOnly) {
 			TraceEvent("IBackupSubmitAttempt").log();
 			try {
+				Optional<std::string> blobManifestUrl;
+				if (!self->blobManifestUrl.empty()) {
+					blobManifestUrl = self->blobManifestUrl.toString();
+				}
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
 				                                    {},
@@ -167,7 +173,9 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    true,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
-				                                    IncrementalBackupOnly::True));
+				                                    IncrementalBackupOnly::True,
+				                                    {},
+				                                    blobManifestUrl));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {

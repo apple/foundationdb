@@ -29,27 +29,27 @@ import fdb
 def initialize_logger_level(logging_level):
     logger = get_logger()
 
-    assert logging_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
 
-    if logging_level == 'DEBUG':
+    if logging_level == "DEBUG":
         logger.setLevel(logging.DEBUG)
-    elif logging_level == 'INFO':
+    elif logging_level == "INFO":
         logger.setLevel(logging.INFO)
-    elif logging_level == 'WARNING':
+    elif logging_level == "WARNING":
         logger.setLevel(logging.WARNING)
-    elif logging_level == 'ERROR':
+    elif logging_level == "ERROR":
         logger.setLevel(logging.ERROR)
 
 
 def get_logger():
-    return logging.getLogger('foundationdb.bindingtester')
+    return logging.getLogger("foundationdb.bindingtester")
 
 
 # Attempts to get the name associated with a process termination signal
 def signal_number_to_name(signal_num):
     name = []
     for key in signal.__dict__.keys():
-        if key.startswith('SIG') and getattr(signal, key) == signal_num:
+        if key.startswith("SIG") and getattr(signal, key) == signal_num:
             name.append(key)
     if len(name) == 1:
         return name[0]
@@ -58,11 +58,11 @@ def signal_number_to_name(signal_num):
 
 
 def import_subclasses(filename, module_path):
-    for f in glob.glob(os.path.join(os.path.dirname(filename), '*.py')):
+    for f in glob.glob(os.path.join(os.path.dirname(filename), "*.py")):
         fn = os.path.basename(f)
-        if fn == '__init__.py':
+        if fn == "__init__.py":
             continue
-        __import__('%s.%s' % (module_path, os.path.splitext(fn)[0]))
+        __import__("%s.%s" % (module_path, os.path.splitext(fn)[0]))
 
 
 # Attempts to unpack a subspace
@@ -73,4 +73,6 @@ def subspace_to_tuple(subspace):
         return fdb.tuple.unpack(subspace.key())
     except Exception as e:
         get_logger().debug(e)
-        raise Exception('The binding tester does not support subspaces with non-tuple raw prefixes')
+        raise Exception(
+            "The binding tester does not support subspaces with non-tuple raw prefixes"
+        )

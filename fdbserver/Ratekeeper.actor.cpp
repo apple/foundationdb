@@ -247,6 +247,24 @@ public:
 		}
 	}
 
+	ACTOR static Future<bool> checkAnyBlobRanges(Database db) {
+		state Transaction tr(db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				// FIXME: check if any active ranges. This still returns true if there are inactive ranges, but it
+				// mostly serves its purpose to allow setting blob_granules_enabled=1 on a cluster that has no blob
+				// workers currently.
+				RangeResult anyData = wait(tr.getRange(blobRangeKeys, 1));
+				return !anyData.empty();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
@@ -257,6 +275,7 @@ public:
 
 		loop {
 			while (!self->configuration.blobGranulesEnabled) {
+				// FIXME: clear blob worker state if granules were previously enabled?
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 			}
 
@@ -267,8 +286,9 @@ public:
 			                  (SERVER_KNOBS->METRIC_UPDATE_RATE * FLOW_KNOBS->DELAY_JITTER_OFFSET);
 			if (++workerFetchCount == fetchAmount || blobWorkerDead) {
 				workerFetchCount = 0;
-				std::vector<BlobWorkerInterface> _blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
-				blobWorkers = _blobWorkers;
+				state Future<bool> anyBlobRangesCheck = checkAnyBlobRanges(self->db);
+				wait(store(blobWorkers, getBlobWorkers(self->db, true, &grv)));
+				wait(store(self->anyBlobRanges, anyBlobRangesCheck));
 			} else {
 				grv = self->maxVersion;
 			}
@@ -333,7 +353,9 @@ public:
 					TraceEvent("RkMinBlobWorkerVersion")
 					    .detail("BWVersion", minVer)
 					    .detail("MaxVer", self->maxVersion)
-					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID());
+					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID())
+					    .detail("BMBlocked",
+					            now() - self->unblockedAssignmentTime >= SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL);
 				}
 			}
 			wait(blobWorkerDelay);
@@ -498,13 +520,17 @@ public:
 
 						bool returningTagsToProxy{ false };
 						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-							reply.proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
-							returningTagsToProxy =
-							    reply.proxyThrottledTags.present() && reply.proxyThrottledTags.get().size() > 0;
+							auto proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
+							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+								returningTagsToProxy = proxyThrottledTags.size() > 0;
+								reply.proxyThrottledTags = std::move(proxyThrottledTags);
+							}
 						} else {
-							reply.clientThrottledTags = self.tagThrottler->getClientRates();
-							returningTagsToProxy =
-							    reply.clientThrottledTags.present() && reply.clientThrottledTags.get().size() > 0;
+							auto clientThrottledTags = self.tagThrottler->getClientRates();
+							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+								returningTagsToProxy = clientThrottledTags.size() > 0;
+								reply.clientThrottledTags = std::move(clientThrottledTags);
+							}
 						}
 						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}
@@ -635,7 +661,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
-    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()) {
+    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
@@ -897,7 +923,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
+	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
 		if (!blobWorkerVersionHistory.empty()) {
@@ -1338,7 +1364,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 			maxCost = cost;
 		}
 	}
-	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
+	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
@@ -1365,11 +1391,13 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 
 Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
 	auto const storageQueue = getStorageQueueBytes();
-	if (storageQueue < storageTargetBytes - storageSpringBytes) {
-		return {};
+	// TODO: Remove duplicate calculation from Ratekeeper::updateRate
+	double inverseResult = std::min(
+	    2.0, (storageQueue - storageTargetBytes + storageSpringBytes) / static_cast<double>(storageSpringBytes));
+	if (inverseResult > 0) {
+		return 1.0 / inverseResult;
 	} else {
-		return std::max(
-		    0.0, static_cast<double>((storageTargetBytes + storageSpringBytes) - storageQueue) / storageSpringBytes);
+		return {};
 	}
 }
 

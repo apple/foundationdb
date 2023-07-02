@@ -68,7 +68,6 @@ public:
 	                                                       const KeySelectorRef& end,
 	                                                       const StringRef& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
@@ -120,6 +119,7 @@ public:
 	// later if they are not really needed.
 	virtual ThreadFuture<VersionVector> getVersionVector() = 0;
 	virtual ThreadFuture<SpanContext> getSpanContext() = 0;
+	virtual ThreadFuture<double> getTagThrottledDuration() = 0;
 	virtual ThreadFuture<int64_t> getTotalCost() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
@@ -140,6 +140,14 @@ public:
 	virtual bool isValid() { return true; }
 
 	virtual Optional<TenantName> getTenant() = 0;
+
+	virtual void debugTrace(BaseTraceEvent&& event) = 0;
+	virtual void debugPrint(std::string const& message) = 0;
+
+	template <class... Args>
+	void debugFmtPrint(std::string const& message, Args&&... args) {
+		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
+	};
 };
 
 class ITenant {
@@ -153,11 +161,13 @@ public:
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
 
 	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+	virtual ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -200,11 +210,13 @@ public:
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
 
 	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+	virtual ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;

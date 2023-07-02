@@ -46,10 +46,13 @@ struct BlobWorkerStats {
 	Counter fullRejections;
 	Counter forceFlushCleanups;
 	Counter readDrivenCompactions;
+	Counter oldFeedSnapshots;
+	Counter blockInFlightSnapshots;
 
-	int numRangesAssigned;
-	int mutationBytesBuffered;
+	int64_t numRangesAssigned;
+	int64_t mutationBytesBuffered;
 	int activeReadRequests;
+	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
 	Version cfVersionLag;
@@ -61,10 +64,11 @@ struct BlobWorkerStats {
 	LatencySample deltaBlobWriteLatencySample;
 	LatencySample reSnapshotLatencySample;
 	LatencySample readLatencySample;
+	LatencySample deltaUpdateSample;
 
 	Reference<FlowLock> initialSnapshotLock;
-	Reference<FlowLock> resnapshotLock;
-	Reference<FlowLock> deltaWritesLock;
+	Reference<FlowLock> resnapshotBudget;
+	Reference<FlowLock> deltaWritesBudget;
 
 	Future<Void> logger;
 
@@ -72,8 +76,8 @@ struct BlobWorkerStats {
 	explicit BlobWorkerStats(UID id,
 	                         double interval,
 	                         Reference<FlowLock> initialSnapshotLock,
-	                         Reference<FlowLock> resnapshotLock,
-	                         Reference<FlowLock> deltaWritesLock,
+	                         Reference<FlowLock> resnapshotBudget,
+	                         Reference<FlowLock> deltaWritesBudget,
 	                         double sampleLoggingInterval,
 	                         double fileOpLatencySketchAccuracy,
 	                         double requestLatencySketchAccuracy)
@@ -93,6 +97,7 @@ struct BlobWorkerStats {
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc),
 	    forceFlushCleanups("ForceFlushCleanups", cc), readDrivenCompactions("ReadDrivenCompactions", cc),
+	    oldFeedSnapshots("OldFeedSnapshots", cc), blockInFlightSnapshots("BlockInFlightSnapshots", cc),
 	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0),
 	    minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0),
 	    snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
@@ -102,8 +107,9 @@ struct BlobWorkerStats {
 	    deltaBlobWriteLatencySample("DeltaBlobWriteMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),
-	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock),
-	    deltaWritesLock(deltaWritesLock) {
+	    deltaUpdateSample("DeltaUpdateMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
+	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
+	    deltaWritesBudget(deltaWritesBudget) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
@@ -115,10 +121,10 @@ struct BlobWorkerStats {
 		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });
 		specialCounter(cc, "InitialSnapshotsActive", [this]() { return this->initialSnapshotLock->activePermits(); });
 		specialCounter(cc, "InitialSnapshotsWaiting", [this]() { return this->initialSnapshotLock->waiters(); });
-		specialCounter(cc, "ReSnapshotsActive", [this]() { return this->resnapshotLock->activePermits(); });
-		specialCounter(cc, "ReSnapshotsWaiting", [this]() { return this->resnapshotLock->waiters(); });
-		specialCounter(cc, "DeltaFileWritesActive", [this]() { return this->deltaWritesLock->activePermits(); });
-		specialCounter(cc, "DeltaFileWritesWaiting", [this]() { return this->deltaWritesLock->waiters(); });
+		specialCounter(cc, "ReSnapshotBytesActive", [this]() { return this->resnapshotBudget->activePermits(); });
+		specialCounter(cc, "ReSnapshotBytesWaiting", [this]() { return this->resnapshotBudget->waiters(); });
+		specialCounter(cc, "DeltaFileWriteBytesActive", [this]() { return this->deltaWritesBudget->activePermits(); });
+		specialCounter(cc, "DeltaFileWriteBytesWaiting", [this]() { return this->deltaWritesBudget->waiters(); });
 
 		logger = cc.traceCounters("BlobWorkerMetrics", id, interval, "BlobWorkerMetrics");
 	}

@@ -33,6 +33,9 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	// All backup data goes into a single bucket
 	std::string m_bucket;
 
+	// if not used for backup, don't prefix paths with fdbbackup-specific logic
+	bool isBackup;
+
 	std::string dataPath(const std::string& path);
 
 	// Get the path of the backups's index entry
@@ -44,7 +47,8 @@ public:
 	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
 	                           const std::string& name,
 	                           const S3BlobStoreEndpoint::ParametersT& params,
-	                           const Optional<std::string>& encryptionKeyFileName);
+	                           const Optional<std::string>& encryptionKeyFileName,
+	                           bool isBackup);
 
 	void addref() override;
 	void delref() override;

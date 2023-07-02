@@ -29,8 +29,9 @@ def relative_entropy(p, q):
     difference = 0.0
     for i in range(len(p)):
         if p[i] != 0.0 and q[i] != 0.0:
-            difference += (p[i] * np.log2(p[i]/q[i]))
+            difference += p[i] * np.log2(p[i] / q[i])
     return difference
+
 
 # jensen-shannon divergence (or symmetric relative entropy)
 def relative_entropy_symmetric(dd1, dd2):
@@ -44,13 +45,22 @@ def relative_entropy_symmetric(dd1, dd2):
 
     return 0.5 * relative_entropy(p, m) + 0.5 * relative_entropy(q, m)
 
+
 # setup cmdline args
 parser = argparse.ArgumentParser(description="Compares two DDSketch distributions")
-parser.add_argument('--txn1', help='Transaction type for first file', required=True, type=str)
-parser.add_argument('--txn2', help='Transaction type for second file', required=True, type=str)
-parser.add_argument('--file1', help='Path to first ddsketch json', required=True, type=str)
-parser.add_argument('--file2', help="Path to second ddsketch json'", required=True, type=str)
-parser.add_argument("--op", help='Operation name', type=str)
+parser.add_argument(
+    "--txn1", help="Transaction type for first file", required=True, type=str
+)
+parser.add_argument(
+    "--txn2", help="Transaction type for second file", required=True, type=str
+)
+parser.add_argument(
+    "--file1", help="Path to first ddsketch json", required=True, type=str
+)
+parser.add_argument(
+    "--file2", help="Path to second ddsketch json'", required=True, type=str
+)
+parser.add_argument("--op", help="Operation name", type=str)
 args = parser.parse_args()
 
 f1 = open(args.file1)
@@ -58,7 +68,10 @@ f2 = open(args.file2)
 data1 = json.load(f1)
 data2 = json.load(f2)
 
-if data1[args.txn1][args.op]["errorGuarantee"] != data2[args.txn2][args.op]["errorGuarantee"]:
+if (
+    data1[args.txn1][args.op]["errorGuarantee"]
+    != data2[args.txn2][args.op]["errorGuarantee"]
+):
     print("ERROR: The sketches have different error guarantees and cannot be compared!")
     exit()
 

@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbserver/ResolverBug.h"
 
 struct ConflictSet;
 ConflictSet* newConflictSet();
@@ -63,6 +64,12 @@ private:
 	// Stores the map: a transaction -> conflicted transactions' indices
 	std::map<int, VectorRef<int>>* conflictingKeyRangeMap;
 	Arena* resolveBatchReplyArena;
+	std::shared_ptr<ResolverBug> bugs = SimBugInjector().get<ResolverBug>(ResolverBugID());
+
+	// bug injection
+	bool ignoreTooOld() const;
+	bool ignoreWriteSet() const;
+	bool ignoreReadSet() const;
 
 	void checkIntraBatchConflicts();
 	void combineWriteConflictRanges();

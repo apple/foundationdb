@@ -28,7 +28,7 @@ async def configure_fdbserver(cluster_file: str):
 async def spawn_fdbservers(
     num_processes: int,
     directory: lib.work_directory.WorkDirectory,
-    cluster_file: str,
+    cluster_file: Union[str, None],
     port: Union[int, None] = None,
 ):
     fdb_processes = {"handlers": [], "processes": []}
@@ -72,9 +72,9 @@ class FDBServerLocalCluster:
         self._num_processes: int = num_processes
         self._work_directory: Union[str, None] = work_directory
         self._cluster_file: Union[str, None] = cluster_file
-        self._port: int = port
+        self._port: int = port or FDB_DEFAULT_PORT
 
-        self._processes = None
+        self._processes = {"processes": [], "handlers": []}
 
     @property
     def work_directory(self) -> Union[str, None]:
@@ -94,19 +94,16 @@ class FDBServerLocalCluster:
 
     @property
     def processes(self):
-        """Processes
-        """
+        """Processes"""
         return self._processes["processes"]
 
     @property
     def handlers(self):
-        """Handlers
-        """
+        """Handlers"""
         return self._processes["handlers"]
 
     def terminate(self):
-        """Terminate the cluster
-        """
+        """Terminate the cluster"""
         # Send SIGTERM
         logger.debug("Sending SIGTERM")
         for process in self.processes:
@@ -134,6 +131,8 @@ class FDBServerLocalCluster:
 
         await configure_fdbserver(self._cluster_file)
         logger.info("FoundationDB ready to use")
+
+        return self.processes
 
     async def __aenter__(self):
         """Enter the context

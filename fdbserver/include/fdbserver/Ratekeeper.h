@@ -72,7 +72,7 @@ public:
 	StorageQueuingMetricsReply lastReply;
 	bool acceptingRequests;
 	limitReason_t limitReason;
-	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
+	std::vector<BusyTagInfo> busiestReadTags, busiestWriteTags;
 
 	StorageQueueInfo(const UID& id, const LocalityData& locality);
 	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
@@ -206,6 +206,7 @@ class Ratekeeper {
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
 	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
+	bool anyBlobRanges;
 	Optional<Key> remoteDC;
 
 	double getRecoveryDuration(Version ver) const {

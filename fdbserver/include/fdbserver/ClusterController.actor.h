@@ -33,12 +33,14 @@
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
+
+#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -147,8 +149,8 @@ public:
 		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
-		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		MetaclusterMetrics metaclusterMetrics;
+		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
+		metacluster::MetaclusterMetrics metaclusterMetrics;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -202,7 +204,6 @@ public:
 			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.encryptKeyProxy = interf;
 			newInfo.client.encryptKeyProxy = interf;
 			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
@@ -232,7 +233,6 @@ public:
 			} else if (t == ProcessClass::BlobMigratorClass) {
 				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
@@ -333,8 +333,8 @@ public:
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobMigrator.present() &&
 		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().encryptKeyProxy.present() &&
-		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
+		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
 		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}
@@ -2971,16 +2971,28 @@ public:
 		for (int i = 0; i < req.disconnectedPeers.size(); ++i) {
 			disconnectedPeersString += (i == 0 ? "" : " ") + req.disconnectedPeers[i].toString();
 		}
+		std::string recoveredPeersString;
+		for (int i = 0; i < req.recoveredPeers.size(); ++i) {
+			recoveredPeersString += (i == 0 ? "" : " ") + req.recoveredPeers[i].toString();
+		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
 		    .detail("DegradedPeers", degradedPeersString)
-		    .detail("DisconnectedPeers", disconnectedPeersString);
+		    .detail("DisconnectedPeers", disconnectedPeersString)
+		    .detail("RecoveredPeers", recoveredPeersString);
 
 		double currentTime = now();
 
 		// Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
 		// `workerHealth`.
 		if (workerHealth.find(req.address) == workerHealth.end()) {
+			if (req.degradedPeers.empty() && req.disconnectedPeers.empty()) {
+				// This request doesn't report any new degradation. Although there may contain recovered peer, since
+				// `workerHealth` doesn't record any information on this address, those recovered peers have already
+				// been considered recovered.
+				return;
+			}
+
 			workerHealth[req.address] = {};
 			for (const auto& degradedPeer : req.degradedPeers) {
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
@@ -2990,12 +3002,24 @@ public:
 				workerHealth[req.address].disconnectedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
+			// We can return directly here since we just created the health info for this address and there shouldn't be
+			// any recovered peers.
 			return;
 		}
 
 		// The incoming worker already exists in `workerHealth`.
 
 		auto& health = workerHealth[req.address];
+
+		// Remove any recovered peers.
+		for (const auto& peer : req.recoveredPeers) {
+			TraceEvent("ClusterControllerReceivedPeerRecovering")
+			    .suppressFor(10.0)
+			    .detail("Worker", req.address)
+			    .detail("Peer", peer);
+			health.degradedPeers.erase(peer);
+			health.disconnectedPeers.erase(peer);
+		}
 
 		// Update the worker's degradedPeers.
 		for (const auto& peer : req.degradedPeers) {
@@ -3168,25 +3192,34 @@ public:
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo& dbi = db.serverInfo->get();
-		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList,
-		                                      bool skipSatellite) -> bool {
+		auto transactionWorkerInList =
+		    [&dbi](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
 			for (const auto& server : serverList) {
 				if (dbi.master.addresses().contains(server)) {
 					return true;
 				}
 
 				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (!logSet.isLocal) {
-						// We don't check server degradation for remote TLogs since it is not on the transaction system
-						// critical path.
-						continue;
-					}
 					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 						continue;
 					}
-					for (const auto& tlog : logSet.tLogs) {
-						if (tlog.present() && tlog.interf().addresses().contains(server)) {
-							return true;
+
+					if (skipRemote && !logSet.isLocal) {
+						continue;
+					}
+
+					if (!logSet.isLocal) {
+						// Only check log routers in the remote region.
+						for (const auto& logRouter : logSet.logRouters) {
+							if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
+								return true;
+							}
+						}
+					} else {
+						for (const auto& tlog : logSet.tLogs) {
+							if (tlog.present() && tlog.interf().addresses().contains(server)) {
+								return true;
+							}
 						}
 					}
 				}
@@ -3213,10 +3246,13 @@ public:
 			return false;
 		};
 
-		// Check if transaction system contains degraded/disconnected servers. For satellite, we only check for
-		// disconnection since the latency between prmary and satellite is across WAN and may not be very stable.
-		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true) ||
-		       transactionWorkerInList(degradationInfo.disconnectedServers, /*skipSatellite=*/false);
+		// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
+		// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+		// stable.
+		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
+		       transactionWorkerInList(degradationInfo.disconnectedServers,
+		                               /*skipSatellite=*/false,
+		                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded

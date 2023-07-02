@@ -100,6 +100,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.clear(normalKeys);
 				for (auto& r : getSystemBackupRanges()) {
 					tr.clear(r);
@@ -120,21 +121,16 @@ struct RestoreBackupWorkload : TestWorkload {
 
 		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys
-			VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
-			state std::vector<Future<Version>> restores;
-			for (int i = 0; i < systemBackupRanges.size(); i++) {
-				restores.push_back((self->backupAgent.restore(cx,
-				                                              cx,
-				                                              "system_restore"_sr,
-				                                              Key(self->backupContainer->getURL()),
-				                                              self->backupContainer->getProxy(),
-				                                              WaitForComplete::True,
-				                                              ::invalidVersion,
-				                                              Verbose::True,
-				                                              systemBackupRanges[i])));
-			}
-			waitForAll(restores);
-			// restore non-system keys
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       "system_restore"_sr,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       getSystemBackupRanges(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True)));
+			// restore user data
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
 			                                       self->tag,

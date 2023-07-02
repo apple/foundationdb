@@ -31,6 +31,11 @@
 #define FLOW_THREAD_SAFE 0
 
 #include <stdlib.h>
+#if defined(__cplusplus)
+#include <ctime>
+#else
+#include <time.h>
+#endif
 
 #define FDB_EXIT_SUCCESS 0
 #define FDB_EXIT_ERROR 1
@@ -288,7 +293,14 @@ double timer_monotonic(); // Returns a high precision monotonic clock which is a
                           // at startup, but might not be a globally accurate time.
 uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
-void getLocalTime(const time_t* timep, struct tm* result);
+void getLocalTime(const
+#if defined(__cplusplus)
+                  std::time_t
+#else
+                  time_t
+#endif
+                      * timep,
+                  struct tm* result);
 
 // get GMT time string from an epoch seconds double
 std::string epochsToGMTString(double epochs);
@@ -779,8 +791,8 @@ inline static int clz(uint32_t value) {
 #define clz __builtin_clz
 #endif
 
-// These return thread local counts
-int64_t getNumProfilesDeferred();
+// These return 0 unless run on the network thread
+int64_t getNumProfilesDisabled();
 int64_t getNumProfilesOverflowed();
 int64_t getNumProfilesCaptured();
 
@@ -815,6 +827,7 @@ void registerCrashHandlerCallback(void (*f)());
 void registerCrashHandler();
 
 void setupRunLoopProfiler();
+void stopRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()

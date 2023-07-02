@@ -23,10 +23,16 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/TaskPriority.h"
 #include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/simulator.h"
+
+#ifdef WITH_SWIFT
+#include <swift/bridging>
+#endif /* WITH_SWIFT */
 
 // Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
@@ -129,12 +135,19 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
+    // Swift can't call method that takes in a universal references (U&&),
+    // so provide a callable `send` method that copies the value.
+    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
+        sav->send(valueCopy);
+    }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
+  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
 		sav->addFutureRef();
@@ -693,6 +706,10 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		if constexpr (IsPublic) {
 			if (!message.verify()) {
 				if constexpr (HasReply<T>) {
+					TraceEvent(SevWarnAlways, "UnauthorizedAccessPrevented"_audit)
+					    .detail("RequestType", typeid(T).name())
+					    .detail("ClientIP", FlowTransport::transport().currentDeliveryPeerAddress())
+					    .log();
 					message.reply.sendError(permission_denied());
 				}
 			} else {
@@ -821,8 +838,8 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			// FIXME: buggify only in simulation/not during speed up simulation?
-			if (disc.isReady() || BUGGIFY_WITH_PROB(0.01)) {
+			if (disc.isReady() ||
+			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
 				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
 					p.sendError(unauthorized_attempt());
 				} else {
@@ -880,7 +897,7 @@ public:
 
 	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
 
-	FutureStream<T> getFuture() const {
+	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() const {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}

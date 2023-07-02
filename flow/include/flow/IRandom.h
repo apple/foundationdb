@@ -125,6 +125,11 @@ struct scalar_traits<UID> : std::true_type {
 	}
 };
 
+template <>
+struct Traceable<UID> : std::true_type {
+	static std::string toString(const UID& value) { return format("%016llx", value.first()); }
+};
+
 namespace std {
 template <>
 class hash<UID> {
@@ -159,14 +164,13 @@ public:
 
 	template <class C>
 	void randomShuffle(C& container) {
-		randomShuffle(container, container.size());
+		randomShuffle(container, 0, container.size());
 	}
 
 	template <class C>
-	void randomShuffle(C& container, size_t shuffleLen) {
-		int s = shuffleLen > container.size() ? container.size() : shuffleLen;
-		for (int i = 0; i < s; i++) {
-			int j = randomInt(i, s);
+	void randomShuffle(C& container, size_t start, size_t end) {
+		for (int i = start; i < end; i++) {
+			int j = randomInt(i, end);
 			if (i != j) {
 				std::swap(container[i], container[j]);
 			}
@@ -209,5 +213,10 @@ Reference<IRandom> nondeterministicRandom();
 // determinism of the simulator. This is useful for things like generating random UIDs for debug transactions.
 // WARNING: This is not thread safe and must not be called from any other thread than the network thread!
 Reference<IRandom> debugRandom();
+
+// Workaround for https://github.com/apple/swift/issues/62354
+inline int64_t swift_get_randomInt64(Reference<IRandom> random, int64_t min, int64_t maxPlusOne) {
+	return random->randomInt64(min, maxPlusOne);
+}
 
 #endif

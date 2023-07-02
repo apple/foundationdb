@@ -167,6 +167,15 @@ ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange
 	});
 }
 
+ThreadFuture<bool> ThreadSafeDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRangeBlocking(range);
+	});
+}
+
 ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
@@ -192,6 +201,17 @@ ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& key
 	return onMainThread([=]() -> Future<Version> {
 		db->checkDeferredError();
 		return db->verifyBlobRange(range, version);
+	});
+}
+
+ThreadFuture<bool> ThreadSafeDatabase::flushBlobRange(const KeyRangeRef& keyRange,
+                                                      bool compact,
+                                                      Optional<Version> version) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->flushBlobRange(range, compact, version);
 	});
 }
 
@@ -245,7 +265,7 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
-	return onMainThread([tenant]() -> Future<int64_t> { return tenant->id(); });
+	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getIdFuture(); });
 }
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
@@ -277,6 +297,16 @@ ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) 
 	});
 }
 
+ThreadFuture<bool> ThreadSafeTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->blobbifyRangeBlocking(range, Reference<Tenant>::addRef(tenant));
+	});
+}
+
 ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db->db;
 	KeyRange range = keyRange;
@@ -305,6 +335,18 @@ ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRa
 		db->checkDeferredError();
 		db->addref();
 		return db->verifyBlobRange(range, version, Reference<Tenant>::addRef(tenant));
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::flushBlobRange(const KeyRangeRef& keyRange,
+                                                    bool compact,
+                                                    Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->flushBlobRange(range, compact, version, Reference<Tenant>::addRef(tenant));
 	});
 }
 
@@ -456,7 +498,6 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
                                                                       const KeySelectorRef& end,
                                                                       const StringRef& mapper,
                                                                       GetRangeLimits limits,
-                                                                      int matchIndex,
                                                                       bool snapshot,
                                                                       bool reverse) {
 	KeySelector b = begin;
@@ -464,9 +505,9 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
 	Key h = mapper;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeResult> {
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<MappedRangeResult> {
 		tr->checkDeferredError();
-		return tr->getMappedRange(b, e, h, limits, matchIndex, Snapshot{ snapshot }, Reverse{ reverse });
+		return tr->getMappedRange(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
@@ -654,6 +695,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	});
 }
 
+ThreadFuture<double> ThreadSafeTransaction::getTagThrottledDuration() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<double> {
+		tr->checkDeferredError();
+		return tr->getTagThrottledDuration();
+	});
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getTotalCost() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> {
@@ -730,6 +779,19 @@ ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept
 void ThreadSafeTransaction::reset() {
 	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr]() { tr->reset(); });
+}
+
+void ThreadSafeTransaction::debugTrace(BaseTraceEvent&& ev) {
+	if (ev.isEnabled()) {
+		ISingleThreadTransaction* tr = this->tr;
+		std::shared_ptr<BaseTraceEvent> evPtr = std::make_shared<BaseTraceEvent>(std::move(ev));
+		onMainThreadVoid([tr, evPtr]() { tr->debugTrace(std::move(*evPtr)); });
+	}
+};
+
+void ThreadSafeTransaction::debugPrint(std::string const& message) {
+	ISingleThreadTransaction* tr = this->tr;
+	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
 }
 
 extern const char* getSourceVersion();

@@ -28,6 +28,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/FaultInjection.h"
 #include "flow/DeterministicRandom.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
@@ -336,17 +337,17 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				ASSERT(self->machines.size());
 				Optional<Standalone<StringRef>> target = self->machines.back().dcId();
 
-				ISimulator::KillType kt = ISimulator::Reboot;
+				ISimulator::KillType kt = ISimulator::KillType::Reboot;
 				if (!self->reboot) {
 					int killType = deterministicRandom()->randomInt(0, 3); // FIXME: enable disk stalls
 					if (killType == 0)
-						kt = ISimulator::KillInstantly;
+						kt = ISimulator::KillType::KillInstantly;
 					else if (killType == 1)
-						kt = ISimulator::InjectFaults;
+						kt = ISimulator::KillType::InjectFaults;
 					else if (killType == 2)
-						kt = ISimulator::RebootAndDelete;
+						kt = ISimulator::KillType::RebootAndDelete;
 					else
-						kt = ISimulator::FailDisk;
+						kt = ISimulator::KillType::FailDisk;
 				}
 				TraceEvent("Assassination")
 				    .detail("TargetDatacenter", target)
@@ -362,12 +363,12 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				ASSERT(self->targetIds.size() == 1);
 				auto target = self->targetIds.front();
 
-				auto kt = ISimulator::KillInstantly;
+				auto kt = ISimulator::KillType::KillInstantly;
 				TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
 
 				g_simulator->killDataHall(target, kt);
 			} else if (self->killAll) {
-				state ISimulator::KillType kt = ISimulator::RebootProcessAndSwitch;
+				state ISimulator::KillType kt = ISimulator::KillType::RebootProcessAndSwitch;
 				TraceEvent("Assassination").detail("KillType", kt);
 				g_simulator->killAll(kt, true);
 				g_simulator->toggleGlobalSwitchCluster();
@@ -408,7 +409,9 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 						wait(success(
 						    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
-					} else if (BUGGIFY_WITH_PROB(0.005)) {
+					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
+						// don't do this in restarting test, since test could exit before it is unset, and restarted
+						// test would never unset it
 						CODE_PROBE(true, "Disable DD for all storage server failures");
 						self->ignoreSSFailures =
 						    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
@@ -428,7 +431,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						if (deterministicRandom()->random01() > 0.5) {
 							g_simulator->rebootProcess(targetMachine.zoneId(), deterministicRandom()->random01() > 0.5);
 						} else {
-							g_simulator->killZone(targetMachine.zoneId(), ISimulator::Reboot);
+							g_simulator->killZone(targetMachine.zoneId(), ISimulator::KillType::Reboot);
 						}
 					} else {
 						auto randomDouble = deterministicRandom()->random01();
@@ -437,19 +440,19 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						    .detail("RandomValue", randomDouble);
 						if (randomDouble < 0.33) {
 							TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
-							g_simulator->killZone(targetMachine.zoneId(), ISimulator::RebootAndDelete);
+							g_simulator->killZone(targetMachine.zoneId(), ISimulator::KillType::RebootAndDelete);
 						} else {
-							auto kt = ISimulator::KillInstantly;
+							auto kt = ISimulator::KillType::KillInstantly;
 							if (self->allowFaultInjection) {
 								if (randomDouble < 0.50) {
-									kt = ISimulator::InjectFaults;
+									kt = ISimulator::KillType::InjectFaults;
 								}
 								// FIXME: enable disk stalls
 								/*
 								if( randomDouble < 0.56 ) {
-								    kt = ISimulator::InjectFaults;
+								    kt = ISimulator::KillType::InjectFaults;
 								} else if( randomDouble < 0.66 ) {
-								    kt = ISimulator::FailDisk;
+								    kt = ISimulator::KillType::FailDisk;
 								}
 								*/
 							}

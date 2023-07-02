@@ -158,7 +158,13 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need
 				// to make sure that a majority of coordinators know that. SOMEDAY: Wait briefly to see if other
 				// coordinators will tell us they already know, to save communication?
-				wait(changeLeaderCoordinators(coordinators, leader.get().first.serializedInfo));
+				// NOTE: If a majority of coordinators (in the current connection string) have failed then we can
+				// end up waiting here indefinitely. Try to make progress in that scenario by proceeding with the
+				// connection string that we have received. Not a great solution, but can help in certain scenarios.
+				choose {
+					when(wait(changeLeaderCoordinators(coordinators, leader.get().first.serializedInfo))) {}
+					when(wait(delay(20))) {}
+				}
 
 				if (!hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")

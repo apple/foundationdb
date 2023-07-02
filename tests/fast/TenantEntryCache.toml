@@ -4,6 +4,7 @@ tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'TenantEntryCacheTest'
+clearAfterTest = false
 
     [[test.workload]]
     testName = 'TenantEntryCache'

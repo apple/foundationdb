@@ -41,6 +41,7 @@ struct BlobConnectionProvider : NonCopyable, ReferenceCounted<BlobConnectionProv
 
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(std::string blobUrl);
 
+	// FIXME: make this function dedupe location connections/providers across location ids
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(Standalone<BlobMetadataDetailsRef> blobMetadata);
 };
 

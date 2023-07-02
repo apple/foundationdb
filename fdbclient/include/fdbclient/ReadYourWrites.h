@@ -27,6 +27,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RYWIterator.h"
 #include "fdbclient/ISingleThreadTransaction.h"
+#include "flow/WipedString.h"
 #include <list>
 
 // SOMEDAY: Optimize getKey to avoid using getRange
@@ -114,7 +115,6 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
-	                                         int matchIndex,
 	                                         Snapshot = Snapshot::False,
 	                                         Reverse = Reverse::False) override;
 
@@ -150,6 +150,7 @@ public:
 	VersionVector getVersionVector() const override { return tr.getVersionVector(); }
 	SpanContext getSpanContext() const override { return tr.getSpanContext(); }
 
+	double getTagThrottledDuration() const override { return tr.getTagThrottledDuration(); }
 	int64_t getTotalCost() const override { return tr.getTotalCost(); }
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
@@ -220,6 +221,12 @@ public:
 	template <typename Type>
 	using FutureT = Future<Type>;
 
+	virtual void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
+
+	std::vector<BaseTraceEvent> debugTraces;
+	std::vector<std::string> debugMessages;
+
 private:
 	friend class RYWImpl;
 
@@ -269,6 +276,7 @@ private:
 	void applyPersistentOptions();
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+	std::vector<std::pair<FDBTransactionOptions::Option, Optional<WipedString>>> sensitivePersistentOptions;
 	ReadYourWritesTransactionOptions options;
 };
 

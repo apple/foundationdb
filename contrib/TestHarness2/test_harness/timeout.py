@@ -18,7 +18,9 @@ def files_matching(path: Path, pattern: Pattern, recurse: bool = True) -> List[P
     return res
 
 
-def dirs_with_files_matching(path: Path, pattern: Pattern, recurse: bool = True) -> List[Path]:
+def dirs_with_files_matching(
+    path: Path, pattern: Pattern, recurse: bool = True
+) -> List[Path]:
     res: List[Path] = []
     sub_directories: List[Path] = []
     has_file = False
@@ -36,25 +38,33 @@ def dirs_with_files_matching(path: Path, pattern: Pattern, recurse: bool = True)
     return res
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser('TestHarness Timeout', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        "TestHarness Timeout", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     config.build_arguments(parser)
     args = parser.parse_args()
     config.extract_args(args)
     valgrind_files: List[Path] = []
     if config.use_valgrind:
-        valgrind_files = files_matching(Path.cwd(), re.compile(r'valgrind.*\.xml'))
+        valgrind_files = files_matching(Path.cwd(), re.compile(r"valgrind.*\.xml"))
 
-    for directory in dirs_with_files_matching(Path.cwd(), re.compile(r'trace.*\.(json|xml)'), recurse=True):
+    for directory in dirs_with_files_matching(
+        Path.cwd(), re.compile(r"trace.*\.(json|xml)"), recurse=True
+    ):
         trace_files = TraceFiles(directory)
         for files in trace_files.items():
             if config.use_valgrind:
                 for valgrind_file in valgrind_files:
-                    summary = Summary(Path('bin/fdbserver'), was_killed=True)
+                    summary = Summary(Path("bin/fdbserver"), was_killed=True)
                     summary.valgrind_out_file = valgrind_file
                     summary.summarize_files(files)
                     summary.out.dump(sys.stdout)
             else:
-                summary = Summary(Path('bin/fdbserver'), was_killed=True, long_running=config.long_running)
+                summary = Summary(
+                    Path("bin/fdbserver"),
+                    was_killed=True,
+                    long_running=config.long_running,
+                )
                 summary.summarize_files(files)
                 summary.out.dump(sys.stdout)

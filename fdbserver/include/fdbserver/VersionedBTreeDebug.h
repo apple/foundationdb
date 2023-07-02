@@ -32,10 +32,13 @@ extern FILE* g_debugStream;
 // Knob to disable XOR encryption for unit tests that aren't compatible with XOR encryption.
 extern bool g_allowXOREncryptionInSimulation;
 
+// Applies filters for when debug lines should be printed, defined in
+// .cpp so it avoids a rebuild.
 bool enableRedwoodDebug();
 
+// debug_printf_always() always outputs the line regardless of REDWOOD_DEBUG or enableRedwoodDebug() filters
 #define debug_printf_always(...)                                                                                       \
-	if (enableRedwoodDebug()) {                                                                                        \
+	{                                                                                                                  \
 		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
 		std::string msg = format(__VA_ARGS__);                                                                         \
 		fputs(addPrefix(prefix, msg).c_str(), g_debugStream);                                                          \
@@ -48,8 +51,15 @@ bool enableRedwoodDebug();
 
 #if defined(NO_INTELLISENSE)
 #if REDWOOD_DEBUG
-#define debug_printf debug_printf_always
+
+// debug_print() only outputs the line if the enableRedwoodDebug() pass.
+#define debug_printf(...)                                                                                              \
+	if (enableRedwoodDebug()) {                                                                                        \
+		debug_printf_always(__VA_ARGS__);                                                                              \
+	}
 #else
+
+// Completely compile out debug statements if REDWOOD_DEBUG is off.
 #define debug_printf debug_printf_noop
 #endif
 #else

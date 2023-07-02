@@ -338,7 +338,7 @@ namespace actorcompiler
                 {
                     throw new Exception("Internal error: Invalid source line (0)");
                 }
-                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "TEST_CASE")
+                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "SWIFT_ACTOR" || tokens[i].Value == "TEST_CASE")
                 {
                     int end;
                     var actor = ParseActor(i, out end);
@@ -836,12 +836,19 @@ namespace actorcompiler
 
         Statement ParseIfStatement(TokenRange toks)
         {
-            var expr = toks.Consume("if")
-                           .First(NonWhitespace)
+            toks = toks.Consume("if");
+            toks = toks.SkipWhile(Whitespace);
+            bool constexpr = toks.First().Value == "constexpr";
+            if(constexpr) {
+               toks = toks.Consume("constexpr").SkipWhile(Whitespace);
+            }
+
+            var expr = toks.First(NonWhitespace)
                            .Assert("Expected (", t => t.Value == "(")
                            .GetMatchingRangeIn(toks);
             return new IfStatement {
                 expression = str(NormalizeWhitespace(expr)),
+                constexpr = constexpr,
                 ifBody = ParseCompoundStatement(range(expr.End+1, toks.End))
                 // elseBody will be filled in later if necessary by ParseElseStatement
             };
@@ -1038,7 +1045,7 @@ namespace actorcompiler
             actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
             if (actor.isForwardDeclaration) {
                 heading = toSemicolon;
-                if (head_token.Value == "ACTOR") {
+                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR") {
                     ParseActorHeading(actor, heading);
                 } else {
                     head_token.Assert("ACTOR expected!", t => false);
@@ -1048,7 +1055,7 @@ namespace actorcompiler
                 var body = range(heading.End+1, tokens.Length)
                     .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-                if (head_token.Value == "ACTOR")
+                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR")
                 {
                     ParseActorHeading(actor, heading);
                 }

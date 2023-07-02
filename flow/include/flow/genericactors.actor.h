@@ -24,8 +24,10 @@
 // version.
 #include "flow/FastRef.h"
 #include "flow/network.h"
+#include "flow/swift_support.h"
 #include <utility>
 #include <functional>
+#include <unordered_set>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 #define FLOW_GENERICACTORS_ACTOR_G_H
 #include "flow/genericactors.actor.g.h"
@@ -111,6 +113,21 @@ std::vector<T> parseStringToVector(std::string str, char delim) {
 		T item;
 		tokenStream >> item;
 		result.push_back(item);
+	}
+	return result;
+}
+
+template <class T>
+std::unordered_set<T> parseStringToUnorderedSet(std::string str, char delim) {
+	std::unordered_set<T> result;
+	std::stringstream stream(str);
+	std::string token;
+	while (stream.good()) {
+		getline(stream, token, delim);
+		std::istringstream tokenStream(token);
+		T item;
+		tokenStream >> item;
+		result.emplace(item);
 	}
 	return result;
 }
@@ -312,8 +329,8 @@ Future<Void> holdWhileVoid(X object, Future<T> what) {
 }
 
 // Assign the future value of what to out
-template <class T>
-Future<Void> store(T& out, Future<T> what) {
+template <class T, class X>
+Future<Void> store(X& out, Future<T> what) {
 	return map(what, [&out](T const& v) {
 		out = v;
 		return Void();
@@ -464,7 +481,7 @@ Future<Void> filter(FutureStream<T> input, F pred, PromiseStream<T> output) {
 	loop {
 		try {
 			T nextInput = waitNext(input);
-			if (func(nextInput))
+			if (pred(nextInput))
 				output.send(nextInput);
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
@@ -733,8 +750,17 @@ private:
 	V value;
 };
 
+// FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
+#define SWIFT_CXX_REF_ASYNCVAR                                                                                         \
+	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("release:immortal")))
+// // TODO(swift): https://github.com/apple/swift/issues/62456 can't support retain/release funcs that are templates
+// themselfes
+//    __attribute__((swift_attr("retain:addref_AsyncVar")))   \
+//    __attribute__((swift_attr("release:delref_AsyncVar")))
+
 template <class V>
-class AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
+class SWIFT_CXX_REF_ASYNCVAR AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
 public:
 	AsyncVar() : value() {}
 	AsyncVar(V const& v) : value(v) {}
@@ -745,6 +771,7 @@ public:
 	}
 
 	V const& get() const { return value; }
+	V getCopy() const __attribute__((swift_attr("import_unsafe"))) { return value; }
 	Future<Void> onChange() const { return nextChange.getFuture(); }
 	void set(V const& v) {
 		if (v != value)
@@ -1293,6 +1320,13 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 	return chooseActor(lhs, rhs);
 }
 
+ACTOR template <class T>
+Future<T> joinWith(Future<T> f, Future<Void> other) {
+	wait(other);
+	T t = wait(f);
+	return t;
+}
+
 // wait <interval> then call what() in a loop forever
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
@@ -1300,6 +1334,15 @@ Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPri
 		when(wait(delay(interval, taskID))) {
 			what();
 		}
+	}
+}
+
+ACTOR template <class Func>
+Future<Void> checkUntil(double checkInterval, Func f, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	loop {
+		wait(delay(checkInterval, taskID));
+		if (f())
+			return Void();
 	}
 }
 
@@ -1315,7 +1358,8 @@ Future<Void> recurringAsync(
                                 // value AND/OR actor functor taking longer than expected to return, could cause actor
                                 // functor to run with no-delay
     double initialDelay, // Initial delay interval
-    TaskPriority taskID = TaskPriority::DefaultDelay) {
+    TaskPriority taskID = TaskPriority::DefaultDelay,
+    bool jittered = false) {
 
 	wait(delay(initialDelay));
 
@@ -1327,12 +1371,20 @@ Future<Void> recurringAsync(
 		if (absoluteIntervalDelay) {
 			wait(val);
 			// Ensure subsequent actorFunc executions observe client supplied delay interval.
-			wait(delay(interval));
+			if (jittered) {
+				wait(delayJittered(interval));
+			} else {
+				wait(delay(interval));
+			}
 		} else {
 			// Guarantee at-least client supplied interval delay; two possible scenarios:
 			// 1. The actorFunc executions finishes before 'interval' delay
 			// 2. The actorFunc executions takes > 'interval' delay.
-			wait(val && delay(interval));
+			if (jittered) {
+				wait(val && delayJittered(interval));
+			} else {
+				wait(val && delay(interval));
+			}
 		}
 	}
 }
@@ -1406,13 +1458,19 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 // The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
 // called Lock.
 //
+// The default behavior is that if a Lock is droppped without error or release, existing and future
+// waiters will see a broken_promise exception.
+//
+// If hangOnDroppedMutex is true, then if a Lock is dropped without error or release, existing and
+// future waiters will never be signaled or see an error, equivalent to waiting on Never().
+//
 // Usage:
 //   Lock lock = wait(mutex.take());
 //   lock.release();  // Next waiter will get the lock, OR
 //   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
 //   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
 struct FlowMutex {
-	FlowMutex() { lastPromise.send(Void()); }
+	FlowMutex(bool hangOnDroppedMutex = false) : hangOnDroppedMutex(hangOnDroppedMutex) { lastPromise.send(Void()); }
 
 	bool available() const { return lastPromise.isSet(); }
 
@@ -1429,10 +1487,14 @@ struct FlowMutex {
 		Lock newLock;
 		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
 		lastPromise = newLock.promise;
+		if (hangOnDroppedMutex) {
+			return brokenPromiseToNever(f);
+		}
 		return f;
 	}
 
 private:
+	bool hangOnDroppedMutex;
 	Promise<Void> lastPromise;
 };
 

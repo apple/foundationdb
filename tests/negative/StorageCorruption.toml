@@ -1,0 +1,21 @@
+[[test]]
+testTitle = "StorageCorruption"
+
+[[test.workload]]
+testName = "StorageCorruption"
+corruptionProbability = 0.001
+testDuration = 60.0
+
+[[test.workload]]
+testName = 'ReadWrite'
+testDuration = 60.0
+transactionsPerSecond = 200
+writesPerTransactionA = 5
+readsPerTransactionA = 1
+writesPerTransactionB = 10
+readsPerTransactionB = 1
+alpha = 0.5
+nodeCount = 10000
+valueBytes = 128
+discardEdgeMeasurements = false
+warmingDelay = 10.0

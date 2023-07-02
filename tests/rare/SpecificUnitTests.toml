@@ -1,4 +1,7 @@
 # This is modified by scripted testing tools to specify specific unit tests
+[[knobs]]
+rocksdb_empty_range_check=false
+
 [[test]]
 testTitle = 'UnitTests'
 useDB = false
@@ -8,4 +11,4 @@ runSetup=false
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = 'noSim/'
+    testsMatching = '/'

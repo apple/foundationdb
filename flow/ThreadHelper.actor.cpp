@@ -19,6 +19,7 @@
  */
 
 #include <string>
+#include <thread>
 
 #include "flow/flow.h"
 #include "flow/network.h"

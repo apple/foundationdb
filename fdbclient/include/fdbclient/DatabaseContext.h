@@ -38,6 +38,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -220,6 +221,44 @@ struct OverlappingChangeFeedsInfo {
 	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
 };
 
+struct ChangeFeedCacheRange {
+	Key tenantPrefix;
+	Key rangeId;
+	KeyRange range;
+
+	ChangeFeedCacheRange(Key tenantPrefix, Key rangeId, KeyRange range)
+	  : tenantPrefix(tenantPrefix), rangeId(rangeId), range(range) {}
+	ChangeFeedCacheRange(std::tuple<Key, Key, KeyRange> range)
+	  : tenantPrefix(std::get<0>(range)), rangeId(std::get<1>(range)), range(std::get<2>(range)) {}
+
+	bool operator==(const ChangeFeedCacheRange& rhs) const {
+		return tenantPrefix == rhs.tenantPrefix && rangeId == rhs.rangeId && range == rhs.range;
+	}
+};
+
+struct ChangeFeedCacheData : ReferenceCounted<ChangeFeedCacheData> {
+	Version version = -1; // The first version durably stored in the cache
+	Version latest =
+	    -1; // The last version durably store in the cache; this version will not be readable from disk before a commit
+	Version popped = -1; // The popped version of this change feed
+	bool active = false;
+	double inactiveTime = 0;
+};
+
+namespace std {
+template <>
+struct hash<ChangeFeedCacheRange> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(ChangeFeedCacheRange const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.rangeId));
+		boost::hash_combine(seed, hashFunc(range.range.begin));
+		boost::hash_combine(seed, hashFunc(range.range.end));
+		return seed;
+	}
+};
+} // namespace std
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -286,8 +325,11 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	bool isCurrentGrvProxy(UID proxyId) const;
-	Future<Void> onProxiesChanged() const;
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
+	// Get storage stats of a storage server from the cached healthy metrics if now() - lastUpdate < maxStaleness.
+	// Otherwise, ask GRVProxy for the up-to-date health metrics.
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	// Pass a valid `trState` with `hasTenant() == true` to make the function tenant-aware.
 	Future<StorageMetrics> getStorageMetrics(
@@ -313,6 +355,10 @@ public:
 	                                                          Optional<int> const& minSplitBytes = {});
 
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getHotRangeMetrics(StorageServerInterface ssi,
+	                                                                          KeyRange const& keys,
+	                                                                          ReadHotSubRangeRequest::SplitType type,
+	                                                                          int splitCount);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected
@@ -393,7 +439,8 @@ public:
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true,
 	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False },
-	                                 bool encrypted = false);
+	                                 bool encrypted = false,
+	                                 Future<Key> tenantPrefix = Key());
 
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
@@ -406,6 +453,7 @@ public:
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
 	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
+	Future<bool> blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
 	                                                                int rangeLimit,
@@ -413,6 +461,10 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<Reference<Tenant>> tenant = {});
+	Future<bool> flushBlobRange(const KeyRange& range,
+	                            bool compact,
+	                            Optional<Version> version,
+	                            Optional<Reference<Tenant>> tenant = {});
 	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:
@@ -505,6 +557,17 @@ public:
 	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
+	IKeyValueStore* storage = nullptr;
+	Future<Void> changeFeedStorageCommitter;
+	Future<Void> initializeChangeFeedCache = Void();
+	int64_t uncommittedCFBytes = 0;
+	Reference<AsyncVar<bool>> commitChangeFeedStorage;
+
+	std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>> changeFeedCaches;
+	std::unordered_map<Key, std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>>> rangeId_cacheData;
+
+	void setStorage(IKeyValueStore* storage);
+
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 	Version getMinimumChangeFeedVersion();
 	void setDesiredChangeFeedVersion(Version v);
@@ -553,6 +616,8 @@ public:
 	Counter transactionsCommitCompleted;
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
+	Counter transactionBlobGranuleLocationRequests;
+	Counter transactionBlobGranuleLocationRequestsCompleted;
 	Counter transactionStatusRequests;
 	Counter transactionTenantLookupRequests;
 	Counter transactionTenantLookupRequestsCompleted;
@@ -706,7 +771,12 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
-	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
+	TenantMode getTenantMode() const {
+		CODE_PROBE(clientInfo->get().grvProxies.empty() || clientInfo->get().grvProxies[0].provisional,
+		           "Accessing tenant mode in provisional ClientDBInfo",
+		           probe::decoration::rare);
+		return clientInfo->get().tenantMode;
+	}
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
@@ -749,6 +819,14 @@ public:
 	// { "InitializationError" : <error code> }
 	Standalone<StringRef> getClientStatus();
 
+	// Gets a database level backoff delay future, time in seconds.
+	Future<Void> getBackoff() const { return backoffDelay > 0.0 ? delay(backoffDelay) : Future<Void>(Void()); }
+
+	// Updates internal Backoff state when a request fails or succeeds.
+	// E.g., commit_proxy_memory_limit_exceeded error means the database is overloaded
+	// and the client should back off more significantly than transaction-level errors.
+	void updateBackoff(const Error& err);
+
 private:
 	using WatchMapKey = std::pair<int64_t, Key>;
 	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
@@ -770,6 +848,9 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+	double backoffDelay = 0.0;
+
+	void initializeSpecialCounters();
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.

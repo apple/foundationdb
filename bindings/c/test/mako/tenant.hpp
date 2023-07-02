@@ -21,6 +21,7 @@
 #include <cassert>
 #include <map>
 #include <string>
+#include <vector>
 #include "fdb_api.hpp"
 #include "utils.hpp"
 
@@ -28,7 +29,8 @@ namespace mako {
 
 std::map<std::string, std::string> generateAuthorizationTokenMap(int tenants,
                                                                  std::string public_key_id,
-                                                                 std::string private_key_pem);
+                                                                 std::string private_key_pem,
+                                                                 const std::vector<int64_t>& tenant_ids);
 
 inline std::string getTenantNameByIndex(int index) {
 	assert(index >= 0);

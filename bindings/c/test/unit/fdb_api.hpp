@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -80,7 +80,7 @@ protected:
 class Int64Future : public Future {
 public:
 	// Call this function instead of fdb_future_get_int64 when using the
-	// Int64Future type. It's behavior is identical to fdb_future_get_int64.
+	// Int64Future type. Its behavior is identical to fdb_future_get_int64.
 	fdb_error_t get(int64_t* out);
 
 private:
@@ -89,10 +89,22 @@ private:
 	Int64Future(FDBFuture* f) : Future(f) {}
 };
 
+class DoubleFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_double when using the
+	// DoubleFuture type. Its behavior is identical to fdb_future_get_double.
+	fdb_error_t get(double* out);
+
+private:
+	friend class Transaction;
+	friend class Database;
+	DoubleFuture(FDBFuture* f) : Future(f) {}
+};
+
 class KeyFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_key when using the KeyFuture
-	// type. It's behavior is identical to fdb_future_get_key.
+	// type. Its behavior is identical to fdb_future_get_key.
 	fdb_error_t get(const uint8_t** out_key, int* out_key_length);
 
 private:
@@ -105,7 +117,7 @@ private:
 class ValueFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_value when using the
-	// ValueFuture type. It's behavior is identical to fdb_future_get_value.
+	// ValueFuture type. Its behavior is identical to fdb_future_get_value.
 	fdb_error_t get(fdb_bool_t* out_present, const uint8_t** out_value, int* out_value_length);
 
 private:
@@ -116,7 +128,7 @@ private:
 class StringArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_string_array when using the
-	// StringArrayFuture type. It's behavior is identical to
+	// StringArrayFuture type. Its behavior is identical to
 	// fdb_future_get_string_array.
 	fdb_error_t get(const char*** out_strings, int* out_count);
 
@@ -128,7 +140,7 @@ private:
 class KeyValueArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_keyvalue_array when using
-	// the KeyValueArrayFuture type. It's behavior is identical to
+	// the KeyValueArrayFuture type. Its behavior is identical to
 	// fdb_future_get_keyvalue_array.
 	fdb_error_t get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
 
@@ -152,7 +164,7 @@ private:
 class KeyRangeArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_keyrange_array when using
-	// the KeyRangeArrayFuture type. It's behavior is identical to
+	// the KeyRangeArrayFuture type. Its behavior is identical to
 	// fdb_future_get_keyrange_array.
 	fdb_error_t get(const FDBKeyRange** out_keyranges, int* out_count);
 
@@ -164,7 +176,7 @@ private:
 class GranuleSummaryArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_granule_summary_array when using
-	// the GranuleSummaryArrayFuture type. It's behavior is identical to
+	// the GranuleSummaryArrayFuture type. Its behavior is identical to
 	// fdb_future_get_granule_summary_array.
 	fdb_error_t get(const FDBGranuleSummary** out_summaries, int* out_count);
 
@@ -193,7 +205,7 @@ protected:
 class KeyValueArrayResult : public Result {
 public:
 	// Call this function instead of fdb_result_get_keyvalue_array when using
-	// the KeyValueArrayREsult type. It's behavior is identical to
+	// the KeyValueArrayREsult type. Its behavior is identical to
 	// fdb_result_get_keyvalue_array.
 	fdb_error_t get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
 
@@ -276,8 +288,11 @@ public:
 	// Returns a future which will be set to the approximate transaction size so far.
 	Int64Future get_approximate_size();
 
-	// Returns a future which will be set tot the transaction's total cost so far.
+	// Returns a future which will be set to the transaction's total cost so far.
 	Int64Future get_total_cost();
+
+	// Returns a future which will be set to the transaction's tag throttling duration.
+	DoubleFuture get_tag_throttled_duration();
 
 	// Returns a future which will be set to the versionstamp which was used by
 	// any versionstamp operations in the transaction.
@@ -329,7 +344,6 @@ public:
 	                                           int target_bytes,
 	                                           FDBStreamingMode mode,
 	                                           int iteration,
-	                                           int matchIndex,
 	                                           fdb_bool_t snapshot,
 	                                           fdb_bool_t reverse);
 

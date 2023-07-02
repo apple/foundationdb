@@ -40,6 +40,7 @@ def retry_with_timeout(seconds):
                     tr = db.create_transaction()
 
         return wrapper
+
     return decorator
 
 
@@ -53,7 +54,7 @@ def test_cancellation(db):
         tr.cancel()
         try:
             tr.commit().wait()  # should throw
-            raise TestError('Basic cancellation unit test failed.')
+            raise TestError("Basic cancellation unit test failed.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -69,7 +70,7 @@ def test_cancellation(db):
             tr.commit().wait()  # should not throw
         except fdb.FDBError as e:
             if e.code == 1025:
-                raise TestError('Cancellation survived reset.')
+                raise TestError("Cancellation survived reset.")
             else:
                 raise
 
@@ -81,13 +82,13 @@ def test_cancellation(db):
         tr.cancel()
         try:
             tr.on_error(fdb.FDBError(1007)).wait()  # should throw
-            raise TestError('on_error() did not notice cancellation.')
+            raise TestError("on_error() did not notice cancellation.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
         try:
             tr.commit().wait()  # should throw
-            raise TestError('Cancellation did not survive on_error().')
+            raise TestError("Cancellation did not survive on_error().")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -97,7 +98,7 @@ def test_cancellation(db):
     # (4) Cancellation works with weird operations
     @retry_with_timeout(default_timeout)
     def txn4(tr):
-        tr[b'foo']
+        tr[b"foo"]
         tr.cancel()
         try:
             tr.get_read_version().wait()  # should throw
@@ -118,21 +119,21 @@ def test_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn1(tr):
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_retry_limit(1)
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(1) Retry limit was ignored.')
+            raise TestError("(1) Retry limit was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_retry_limit(1)
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(1) Transaction not cancelled after error.')
+            raise TestError("(1) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -143,18 +144,18 @@ def test_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn2(tr):
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(2) Retry limit was ignored.')
+            raise TestError("(2) Retry limit was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         tr.reset()
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
 
     txn2(db)
@@ -163,16 +164,16 @@ def test_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn3(tr):
         tr.options.set_retry_limit(0)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(3) Retry limit was ignored.')
+            raise TestError("(3) Retry limit was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         tr.reset()
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
 
     txn3(db)
@@ -180,41 +181,41 @@ def test_retry_limits(db):
     # (4) Retries accumulate when limits are turned off, and are respected retroactively
     @retry_with_timeout(default_timeout)
     def txn4(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
         tr.options.set_retry_limit(1)
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(4) Retry limit was ignored.')
+            raise TestError("(4) Retry limit was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         tr.reset()
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_retry_limit(1)
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_retry_limit(2)
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_retry_limit(3)
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_retry_limit(4)
         tr.on_error(err).wait()  # should not throw
         tr.options.set_retry_limit(4)
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(4) Retry limit was ignored.')
+            raise TestError("(4) Retry limit was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         tr.options.set_retry_limit(4)
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(4) Transaction not cancelled after error.')
+            raise TestError("(4) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -225,20 +226,20 @@ def test_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn5(tr):
         tr.options.set_retry_limit(2)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(5) Retry limit was ignored.')
+            raise TestError("(5) Retry limit was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         try:
-            tr[b'foo'] = b'bar'
+            tr[b"foo"] = b"bar"
             tr.on_error(err).wait()  # should throw
-            raise TestError('(5) Transaction not cancelled after error.')
+            raise TestError("(5) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -253,19 +254,19 @@ def test_db_retry_limits(db):
     # (1) Basic retry limit
     @retry_with_timeout(default_timeout)
     def txn1(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(1) Retry limit from database was ignored.')
+            raise TestError("(1) Retry limit from database was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(1) Transaction not cancelled after error.')
+            raise TestError("(1) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -276,21 +277,21 @@ def test_db_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn2(tr):
         tr.options.set_retry_limit(2)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(2) Retry limit from transaction was ignored.')
+            raise TestError("(2) Retry limit from transaction was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(2) Transaction not cancelled after error.')
+            raise TestError("(2) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -303,19 +304,19 @@ def test_db_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn3(tr):
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(3) Retry limit from transaction was ignored.')
+            raise TestError("(3) Retry limit from transaction was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(3) Transaction not cancelled after error.')
+            raise TestError("(3) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -326,30 +327,30 @@ def test_db_retry_limits(db):
     @retry_with_timeout(default_timeout)
     def txn4(tr):
         tr.options.set_retry_limit(1)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(4) Retry limit from transaction was ignored.')
+            raise TestError("(4) Retry limit from transaction was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         tr.reset()
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(4) Retry limit from database was ignored.')
+            raise TestError("(4) Retry limit from database was ignored.")
         except fdb.FDBError as e:
             if e.code != err.code:
                 raise
         try:
             tr.on_error(err).wait()  # should throw
-            raise TestError('(4) Transaction not cancelled after error.')
+            raise TestError("(4) Transaction not cancelled after error.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
@@ -436,7 +437,7 @@ def test_timeouts(db):
     # (6) Timeout will fire "retroactively"
     @retry_with_timeout(default_timeout)
     def txn6(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(1)
         tr.options.set_timeout(10)
         try:
@@ -451,11 +452,11 @@ def test_timeouts(db):
     # (7) Transaction reset also resets time from which timeout is measured
     @retry_with_timeout(default_timeout)
     def txn7(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(1)
         start = time.time()
         tr.reset()
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_timeout(500)
         try:
             tr.commit().wait()  # should not throw, but could if commit were slow:
@@ -470,10 +471,10 @@ def test_timeouts(db):
     # (8) on_error() does not reset time from which timeout is measured
     @retry_with_timeout(default_timeout)
     def txn8(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(1)
         tr.on_error(fdb.FDBError(1007)).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_timeout(100)
         try:
             tr.commit().wait()  # should throw
@@ -487,9 +488,9 @@ def test_timeouts(db):
     # (9) Timeouts can be unset
     @retry_with_timeout(default_timeout)
     def txn9(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_timeout(100)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_timeout(0)
         time.sleep(1)
         tr.commit().wait()  # should not throw
@@ -499,7 +500,7 @@ def test_timeouts(db):
     # (10) Unsetting a timeout after it has fired doesn't help
     @retry_with_timeout(default_timeout)
     def txn10(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.options.set_timeout(100)
         time.sleep(1)
         tr.options.set_timeout(0)
@@ -517,15 +518,17 @@ def test_timeouts(db):
     def txn11(tr):
         for i in range(2):
             tr.options.set_timeout(1500)
-            tr.set_read_version(0x7ffffffffffffff0)
-            _ = tr[b'foo']
+            tr.set_read_version(0x7FFFFFFFFFFFFFF0)
+            _ = tr[b"foo"]
             try:
                 tr.commit().wait()
                 tr.reset()
             except fdb.FDBError as e:
                 if i == 0:
                     if e.code != 1009:  # future_version
-                        raise fdb.FDBError(1007)  # Something weird happened; raise a retryable error so we run this transaction again
+                        raise fdb.FDBError(
+                            1007
+                        )  # Something weird happened; raise a retryable error so we run this transaction again
                     else:
                         tr.on_error(e).wait()
                 elif i == 1 and e.code != 1031:
@@ -554,10 +557,10 @@ def test_db_timeouts(db):
     # (2) Timeout after on_error
     @retry_with_timeout(default_timeout)
     def txn2(tr):
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
         time.sleep(1)
-        _ = tr[b'foo']
+        _ = tr[b"foo"]
         try:
             tr.commit().wait()  # should throw
             raise TestError("(2) Timeout didn't fire.")
@@ -572,9 +575,9 @@ def test_db_timeouts(db):
     def txn3(tr):
         tr.options.set_timeout(1000)
         time.sleep(0.75)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        _ = tr[b'foo']
+        _ = tr[b"foo"]
         time.sleep(0.75)
         try:
             tr.commit().wait()  # should throw
@@ -589,7 +592,7 @@ def test_db_timeouts(db):
     @retry_with_timeout(default_timeout)
     def txn4(tr):
         tr.options.set_timeout(100)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(0.2)
         try:
             tr.commit().wait()  # should throw
@@ -604,7 +607,7 @@ def test_db_timeouts(db):
     @retry_with_timeout(default_timeout)
     def txn5(tr):
         tr.options.set_timeout(100)
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(0.2)
         try:
             tr.commit().wait()  # should throw
@@ -613,10 +616,10 @@ def test_db_timeouts(db):
             if e.code != 1031:
                 raise
         tr.reset()
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(0.2)
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo'] = b'bar'
+        tr[b"foo"] = b"bar"
         time.sleep(0.8)
         try:
             tr.commit().wait()  # should throw
@@ -638,13 +641,13 @@ def test_combinations(db):
         tr.cancel()
         try:
             tr.on_error(fdb.FDBError(1007)).wait()  # should throw
-            raise TestError('on_error() did not notice cancellation.')
+            raise TestError("on_error() did not notice cancellation.")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise
         try:
             tr.commit().wait()  # should throw
-            raise TestError('Cancellation did not survive on_error().')
+            raise TestError("Cancellation did not survive on_error().")
         except fdb.FDBError as e:
             if e.code != 1025:
                 raise

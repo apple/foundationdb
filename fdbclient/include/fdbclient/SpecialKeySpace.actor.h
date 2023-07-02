@@ -303,7 +303,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
+	bool supportsTenants() const override {
+		CODE_PROBE(true, "Accessing conflicting keys in tenant");
+		return true;
+	};
 };
 
 class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -312,7 +315,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
+	bool supportsTenants() const override {
+		CODE_PROBE(true, "Accessing read conflict ranges in tenant");
+		return true;
+	};
 };
 
 class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -321,7 +327,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
+	bool supportsTenants() const override {
+		CODE_PROBE(true, "Accessing write conflict ranges in tenant");
+		return true;
+	};
 };
 
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {

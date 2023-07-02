@@ -30,13 +30,23 @@ struct StorageServerShard {
 	constexpr static FileIdentifier file_identifier = 4028358;
 
 	enum ShardState {
-		NotAssigned = 0,
-		MovingIn = 1,
-		ReadWritePending = 2,
-		ReadWrite = 3,
+		NotAssigned = 0, // The key range is not assiged to the storage server.
+		Adding = 1, // A new shard is being moved to the storage server.
+		ReadWritePending = 2, // The shard is waiting for the `ReadWrite` state to be persisted.
+		ReadWrite = 3, // Shard is read-write.
+		MovingIn = 4, // Same as `Adding`, but the shard is being moved in via physical shard move.
+		Error = 5, // Something is wrong.
 	};
 
 	StorageServerShard() = default;
+	StorageServerShard(KeyRange range,
+	                   Version version,
+	                   const uint64_t id,
+	                   const uint64_t desiredId,
+	                   ShardState shardState,
+	                   Optional<UID> moveInShardId)
+	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState),
+	    moveInShardId(moveInShardId) {}
 	StorageServerShard(KeyRange range,
 	                   Version version,
 	                   const uint64_t id,
@@ -57,25 +67,35 @@ struct StorageServerShard {
 		switch (ss) {
 		case NotAssigned:
 			return "NotAssigned";
-		case MovingIn:
-			return "MovingIn";
+		case Adding:
+			return "Adding";
 		case ReadWritePending:
 			return "ReadWritePending";
 		case ReadWrite:
 			return "ReadWrite";
+		case MovingIn:
+			return "MovingIn";
+		case Error:
+			return "Error";
 		}
+
 		return "InvalidState";
 	}
 
 	std::string toString() const {
-		return "StorageServerShard: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		       " [Shard ID]: " + format("%016llx", this->id) + " [Version]: " + std::to_string(version) +
-		       " [State]: " + getShardStateString() + " [Desired Shard ID]: " + format("%016llx", this->desiredId);
+		std::string res = "StorageServerShard: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  " [Shard ID]: " + format("%016llx", this->id) + " [Version]: " + std::to_string(version) +
+		                  " [State]: " + getShardStateString() +
+		                  " [Desired Shard ID]: " + format("%016llx", this->desiredId);
+		if (moveInShardId.present()) {
+			res += " [MoveInShard ID]: " + this->moveInShardId.get().toString();
+		}
+		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, version, id, desiredId, shardState);
+		serializer(ar, range, version, id, desiredId, shardState, moveInShardId);
 	}
 
 	KeyRange range;
@@ -83,6 +103,7 @@ struct StorageServerShard {
 	uint64_t id; // The actual shard ID.
 	uint64_t desiredId; // The intended shard ID.
 	int8_t shardState;
+	Optional<UID> moveInShardId; // If present, it is the associated MoveInShardMetaData.
 };
 
 #endif

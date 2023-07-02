@@ -82,7 +82,12 @@ class DistributionRateModel(RateModel):
         self.rate = None
 
     def get_rate(self, time):
-        if self.frequency == 0 or int((time - self.last_change) / self.frequency) > int(self.last_change / self.frequency) or self.rate is None:
+        if (
+            self.frequency == 0
+            or int((time - self.last_change) / self.frequency)
+            > int(self.last_change / self.frequency)
+            or self.rate is None
+        ):
             self.last_change = time
             self.rate = self.distribution()
 

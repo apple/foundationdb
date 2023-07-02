@@ -24,6 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/SimpleIni.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/Status.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -58,7 +59,8 @@ public: // ctor & dtor
 		maxSnapDelay = getOption(options, "maxSnapDelay"_sr, 25.0);
 		testID = getOption(options, "testID"_sr, 0);
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
-		retryLimit = getOption(options, "retryLimit"_sr, 5);
+		// default behavior is to retry until success
+		retryLimit = getOption(options, "retryLimit"_sr, -1);
 		g_simulator->allowLogSetKills = false;
 		{
 			double duplicateSnapshotProbability = getOption(options, "duplicateSnapshotProbability"_sr, 0.1);
@@ -93,6 +95,13 @@ public: // workload functions
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// Data movement is not allowed while taking snapshot
+		// FIXME: the data movement should be delayed while taking snapshots, the workload at present doesn't know the
+		// DD is disabled by the snapshot
+		out.insert("RandomMoveKeys");
+	}
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
@@ -157,17 +166,30 @@ public: // workload functions
 						wait(delay(deterministicRandom()->random01()));
 						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
 					}
-					wait(status);
+					ErrorOr<Void> statusErr = wait(errorOr(status));
+					if (statusErr.isError() && statusErr.getError().code() != error_code_duplicate_snapshot_request) {
+						// First request is expected to fail with duplicate_snapshot_request error
+						// Any other errors should be thrown
+						throw statusErr.getError();
+					}
+					if (self->attemptDuplicateSnapshot) {
+						// If duplicate, the first request is discarded, wait for the latest one
+						wait(duplicateSnapStatus);
+					}
 					break;
 				} catch (Error& e) {
-					TraceEvent("SnapCreateError").error(e);
+					TraceEvent("SnapTestCreateError")
+					    .error(e)
+					    .detail("SnapUID", self->snapUID)
+					    .detail("Duplicate", self->attemptDuplicateSnapshot);
 					++retry;
-					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
+					// snap v2 can fail for many reasons, so retry until specified times and then fail it
 					if (self->retryLimit != -1 && retry > self->retryLimit) {
 						snapFailed = true;
 						break;
 					}
-					wait(delay(5.0));
+					// increase the retry wait time to avoid endless retry where DD is always disabled by snapshot
+					wait(delay(retry * SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP));
 				}
 			}
 			CSimpleIni ini;

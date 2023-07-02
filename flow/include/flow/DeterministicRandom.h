@@ -30,7 +30,13 @@
 
 #include <random>
 
-class DeterministicRandom final : public IRandom, public ReferenceCounted<DeterministicRandom> {
+// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+#define SWIFT_CXX_REF_DETERMINISTICRANDOM                                                                              \
+	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:addref_DeterministicRandom")))      \
+	__attribute__((swift_attr("release:delref_DeterministicRandom")))
+
+class SWIFT_CXX_REF_DETERMINISTICRANDOM DeterministicRandom final : public IRandom,
+                                                                    public ReferenceCounted<DeterministicRandom> {
 private:
 	std::mt19937 random;
 	uint64_t next;
@@ -54,5 +60,15 @@ public:
 	void addref() override;
 	void delref() override;
 };
+
+// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+inline void addref_DeterministicRandom(DeterministicRandom* ptr) {
+	addref(ptr);
+}
+
+// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+inline void delref_DeterministicRandom(DeterministicRandom* ptr) {
+	delref(ptr);
+}
 
 #endif

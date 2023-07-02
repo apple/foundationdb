@@ -142,3 +142,48 @@ TEST_CASE("/flow/actorCollection/chooseWhen") {
 	}
 	return Void();
 }
+
+ACTOR Future<Void> failIfNotCancelled() {
+	wait(delay(0));
+	ASSERT(false);
+	return Void();
+}
+
+// test contract that actors are cancelled when the actor collection is cleared
+TEST_CASE("/flow/actorCollection/testCancel") {
+	state ActorCollection actorCollection(false);
+	int actors = deterministicRandom()->randomInt(1, 1000);
+	for (int i = 0; i < actors; i++) {
+		actorCollection.add(failIfNotCancelled());
+	}
+	actorCollection.clear(false);
+	wait(delay(0));
+	return Void();
+}
+
+ACTOR Future<Void> failedActor() {
+	throw operation_failed();
+}
+
+// test contract that even if the actor collection has stopped and new actors are added to the promise stream, they are
+// all cancelled when resetting actor
+TEST_CASE("/flow/actorCollection/testCancelPromiseStream") {
+	state ActorCollection actorCollection(false);
+	int actors = deterministicRandom()->randomInt(1, 500);
+	for (int i = 0; i < actors; i++) {
+		actorCollection.add(failIfNotCancelled());
+	}
+	// this actor should cause the actorCollection actor to exit, meaning the new futures just build up in the promise
+	// stream
+	actorCollection.add(failedActor());
+	for (int i = 0; i < actors; i++) {
+		actorCollection.add(failIfNotCancelled());
+	}
+	// Instead of doing actorCollection.clear(false) we reinitialize to also clear the promise stream. Otherwise on
+	// resetting the actor collection actor, the new actors will be pulled from the promise stream into the new instance
+	// Note that this test fails on the assert in failIfNotCancelled() when this is replaced with
+	// actorCollection.clear(false).
+	actorCollection = ActorCollection(false);
+	wait(delay(0));
+	return Void();
+}

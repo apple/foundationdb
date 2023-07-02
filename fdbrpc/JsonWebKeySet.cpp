@@ -28,9 +28,6 @@
 #include "fdbrpc/Base64Encode.h"
 #include "fdbrpc/Base64Decode.h"
 #include "fdbrpc/JsonWebKeySet.h"
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>

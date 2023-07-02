@@ -152,6 +152,10 @@ struct OpenDatabaseRequest {
 	}
 };
 
+// Instantiated in NativeAPI.actor.cpp
+extern template class RequestStream<OpenDatabaseRequest, false>;
+extern template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
+
 struct SystemFailureStatus {
 	constexpr static FileIdentifier file_identifier = 3194108;
 	NetworkAddressList addresses;

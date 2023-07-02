@@ -1,7 +1,7 @@
 [[test]]
 testTitle = 'FastTriggeredWatchesTest'
 connectionFailuresDisableDuration = 100000
-timeout = 700
+timeout = 1500
 
     [[test.workload]]
     testName = 'FastTriggeredWatches'

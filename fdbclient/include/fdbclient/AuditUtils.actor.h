@@ -32,15 +32,42 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState);
-ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState);
+struct MoveKeyLockInfo {
+	UID prevOwner, myOwner, prevWrite;
+};
+
+ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
+ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
+ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
+ACTOR Future<Void> persistAuditState(Database cx,
+                                     AuditStorageState auditState,
+                                     std::string context,
+                                     MoveKeyLockInfo lock,
+                                     bool ddEnabled);
 ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
-ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
+                                                            AuditType auditType,
+                                                            bool newFirst,
+                                                            Optional<int> num = Optional<int>(),
+                                                            Optional<AuditPhase> phase = Optional<AuditPhase>());
 
-ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState);
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range);
-
-StringRef auditTypeToString(const AuditType type);
-
+ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
+                                                                  AuditType type,
+                                                                  UID auditId,
+                                                                  KeyRange range);
+ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState auditState);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
+                                                                   AuditType type,
+                                                                   UID auditId,
+                                                                   UID auditServerId,
+                                                                   KeyRange range);
+ACTOR Future<Void> clearAuditMetadataForType(Database cx,
+                                             AuditType auditType,
+                                             UID maxAuditIdToClear,
+                                             int numFinishAuditToKeep);
+ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
+ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
+AuditPhase stringToAuditPhase(std::string auditPhaseStr);
 #include "flow/unactorcompiler.h"
 #endif

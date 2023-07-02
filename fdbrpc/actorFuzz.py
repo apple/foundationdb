@@ -34,7 +34,7 @@ class Context:
         return self.random.randint(100000, 999999)
 
 
-class InfiniteLoop (Exception):
+class InfiniteLoop(Exception):
     pass
 
 
@@ -69,7 +69,7 @@ def indent(cx):
     return "\t" * cx.indent
 
 
-class F (object):
+class F(object):
     def unreachable(self):
         return False
 
@@ -77,7 +77,7 @@ class F (object):
         return False
 
 
-class hashF (F):
+class hashF(F):
     def __init__(self, cx):
         self.cx = cx
         self.uniqueID = cx.uniqueID()
@@ -116,7 +116,7 @@ class compoundF(F):
         return any(c.containsbreak() for c in self.children)
 
 
-class loopF (F):
+class loopF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
@@ -128,13 +128,18 @@ class loopF (F):
 
     def __str__(self):
         if self.forever:
-            return (indent(self.cx) + "loop {\n" +
-                    str(self.body) +
-                    indent(self.cx) + "}\n")
+            return (
+                indent(self.cx) + "loop {\n" + str(self.body) + indent(self.cx) + "}\n"
+            )
         else:
-            return (indent(self.cx) + "state int i%d; for(i%d = 0; i%d < 5; i%d++) {\n" % ((self.uniqueID,) * 4) +
-                    str(self.body) +
-                    indent(self.cx) + "}\n")
+            return (
+                indent(self.cx)
+                + "state int i%d; for(i%d = 0; i%d < 5; i%d++) {\n"
+                % ((self.uniqueID,) * 4)
+                + str(self.body)
+                + indent(self.cx)
+                + "}\n"
+            )
 
     def eval(self, ecx):
         if self.forever:
@@ -159,7 +164,7 @@ class loopF (F):
         return self.forever and not self.body.containsbreak()
 
 
-class rangeForF (F):
+class rangeForF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
@@ -170,17 +175,24 @@ class rangeForF (F):
 
     def __str__(self):
         return (
-            indent(self.cx) +
-            ("\n" + indent(self.cx)).join([
-                "state std::vector<int> V;",
-                "V.push_back(1);",
-                "V.push_back(2);",
-                "V.push_back(3);",
-                "for( auto i : V ) {\n",
-            ]).replace("V", "list%d" % self.uniqueID) +
-            indent(self.cx) + "\t(void)i;\n" + # Suppress -Wunused-variable warning in generated code
-            str(self.body) +
-            indent(self.cx) + "}\n")
+            indent(self.cx)
+            + ("\n" + indent(self.cx))
+            .join(
+                [
+                    "state std::vector<int> V;",
+                    "V.push_back(1);",
+                    "V.push_back(2);",
+                    "V.push_back(3);",
+                    "for( auto i : V ) {\n",
+                ]
+            )
+            .replace("V", "list%d" % self.uniqueID)
+            + indent(self.cx)
+            + "\t(void)i;\n"
+            + str(self.body)  # Suppress -Wunused-variable warning in generated code
+            + indent(self.cx)
+            + "}\n"
+        )
 
     def eval(self, ecx):
         for i in range(1, 4):
@@ -196,7 +208,7 @@ class rangeForF (F):
         return False
 
 
-class ifF (F):
+class ifF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
@@ -206,16 +218,20 @@ class ifF (F):
         if cx.random.random() < 0.5:
             ccx = copy.copy(cx)
             ccx.indent += 1
-            self.elsebody = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
+            self.elsebody = compoundF(
+                ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)]
+            )
         else:
             self.elsebody = None
 
     def __str__(self):
-        s = (indent(self.cx) + "if ( (++ifstate&1) == %d ) {\n" % self.toggle +
-             str(self.ifbody))
+        s = (
+            indent(self.cx)
+            + "if ( (++ifstate&1) == %d ) {\n" % self.toggle
+            + str(self.ifbody)
+        )
         if self.elsebody:
-            s += (indent(self.cx) + "} else {\n" +
-                  str(self.elsebody))
+            s += indent(self.cx) + "} else {\n" + str(self.elsebody)
         s += indent(self.cx) + "}\n"
         return s
 
@@ -230,13 +246,17 @@ class ifF (F):
             return OK
 
     def unreachable(self):
-        return self.elsebody and self.ifbody.unreachable() and self.elsebody.unreachable()
+        return (
+            self.elsebody and self.ifbody.unreachable() and self.elsebody.unreachable()
+        )
 
     def containsbreak(self):
-        return self.ifbody.containsbreak() or (self.elsebody and self.elsebody.containsbreak())
+        return self.ifbody.containsbreak() or (
+            self.elsebody and self.elsebody.containsbreak()
+        )
 
 
-class tryF (F):
+class tryF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
@@ -247,12 +267,16 @@ class tryF (F):
         self.catch = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
 
     def __str__(self):
-        return (indent(self.cx) + "try {\n" +
-                str(self.body) +
-                indent(self.cx) + "} catch (...) {\n" +
-                str(self.catch) +
-                indent(self.cx) + "}\n"
-                )
+        return (
+            indent(self.cx)
+            + "try {\n"
+            + str(self.body)
+            + indent(self.cx)
+            + "} catch (...) {\n"
+            + str(self.catch)
+            + indent(self.cx)
+            + "}\n"
+        )
 
     def eval(self, ecx):
         ecx.infinityCheck()
@@ -312,14 +336,16 @@ class waitF(F):
 
     def __str__(self):
         return (
-            indent(self.cx) + "int input = waitNext( inputStream );\n" +
-            indent(self.cx) + "outputStream.send( input + %d );\n" % self.uniqueID
+            indent(self.cx)
+            + "int input = waitNext( inputStream );\n"
+            + indent(self.cx)
+            + "outputStream.send( input + %d );\n" % self.uniqueID
         )
 
     def eval(self, ecx):
         ecx.infinityCheck()
         input = ecx.inp()
-        ecx.out((input + self.uniqueID) & 0xffffffff)
+        ecx.out((input + self.uniqueID) & 0xFFFFFFFF)
         return OK
 
 
@@ -343,7 +369,7 @@ class throwF2(throwF):
         return indent(self.cx) + "throw_operation_failed();\n"
 
     def unreachable(self):
-        return False         # The actor compiler doesn't know the function never returns
+        return False  # The actor compiler doesn't know the function never returns
 
 
 class throwF3(throwF):
@@ -351,7 +377,7 @@ class throwF3(throwF):
         return indent(self.cx) + "wait( error ); // throw operation_failed()\n"
 
     def unreachable(self):
-        return False         # The actor compiler doesn't know that 'error' always contains an error
+        return False  # The actor compiler doesn't know that 'error' always contains an error
 
 
 class returnF(F):
@@ -373,10 +399,10 @@ class returnF(F):
 
 def fuzzCode(cx):
     choices = [loopF, rangeForF, tryF, doubleF, ifF]
-    if (cx.indent < 2):
+    if cx.indent < 2:
         choices = choices * 2
     choices += [waitF, returnF]
-    if (cx.inLoop):
+    if cx.inLoop:
         choices += [breakF, continueF]
     choices = choices * 3 + [throwF, throwF2, throwF3]
     return cx.random.choice(choices)
@@ -387,12 +413,17 @@ def randomActor(index):
         cx = Context()
         cx.indent += 1
         actor = fuzzCode(cx)(cx)
-        actor = compoundF(cx, [actor, returnF(cx)])   # Add a return at the end if the end is reachable
+        actor = compoundF(
+            cx, [actor, returnF(cx)]
+        )  # Add a return at the end if the end is reachable
         name = "actorFuzz%d" % index
-        text = ("ACTOR Future<int> %s( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {\n" % name
-                + "\tstate int ifstate = 0;\n"
-                + str(actor)
-                + "}")
+        text = (
+            "ACTOR Future<int> %s( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {\n"
+            % name
+            + "\tstate int ifstate = 0;\n"
+            + str(actor)
+            + "}"
+        )
         ecx = actor.ecx = ExecContext((i + 1) * 1000 for i in range(1000000))
         try:
             result = actor.eval(ecx)
@@ -411,7 +442,8 @@ def randomActor(index):
 
         return actor
 
-header='''
+
+header = """
 /*
  * ActorFuzz.actor.cpp
  *
@@ -432,15 +464,18 @@ header='''
  * limitations under the License.
  */
 
-'''
+"""
 
 
 testCaseCount = 30
 outputFile = open("ActorFuzz.actor.cpp", "wt")
 print(header, file=outputFile)
-print('// THIS FILE WAS GENERATED BY actorFuzz.py; DO NOT MODIFY IT DIRECTLY\n', file=outputFile)
+print(
+    "// THIS FILE WAS GENERATED BY actorFuzz.py; DO NOT MODIFY IT DIRECTLY\n",
+    file=outputFile,
+)
 print('#include "fdbrpc/ActorFuzz.h"\n', file=outputFile)
-print('#ifndef WIN32\n', file=outputFile)
+print("#ifndef WIN32\n", file=outputFile)
 
 actors = [randomActor(i) for i in range(testCaseCount)]
 
@@ -449,8 +484,11 @@ for actor in actors:
 
 print("std::pair<int,int> actorFuzzTests() {\n\tint testsOK = 0;", file=outputFile)
 for actor in actors:
-    print('\ttestsOK += testFuzzActor( &%s, "%s", {%s} );' % (actor.name, actor.name, ','.join(str(e) for e in actor.ecx.output)),
-          file=outputFile)
+    print(
+        '\ttestsOK += testFuzzActor( &%s, "%s", {%s} );'
+        % (actor.name, actor.name, ",".join(str(e) for e in actor.ecx.output)),
+        file=outputFile,
+    )
 print("\treturn std::make_pair(testsOK, %d);\n}" % len(actors), file=outputFile)
-print('#endif // WIN32\n', file=outputFile)
+print("#endif // WIN32\n", file=outputFile)
 outputFile.close()

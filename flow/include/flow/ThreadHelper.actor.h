@@ -743,7 +743,26 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
-// The allow anonymous_future type is used to prevent misuse of ThreadFutures.
+// The removeArenaFromStandalone() actors simulate the behavior of DLApi. In this case,
+// the memory is not owned by the Standalone. If the `future` goes out of scope, subsequent
+// access to the memory via the returned standalone will be invalid.
+ACTOR template <typename T>
+Future<Standalone<T>> removeArenaFromStandalone(Future<Standalone<T>> future) {
+	Standalone<T> _ = wait(future);
+	return Standalone<T>(future.get(), Arena());
+}
+
+ACTOR template <typename T>
+Future<Optional<Standalone<T>>> removeArenaFromStandalone(Future<Optional<Standalone<T>>> future) {
+	Optional<Standalone<T>> val = wait(future);
+	if (val.present()) {
+		return Standalone<T>(future.get().get(), Arena());
+	} else {
+		return Optional<Standalone<T>>();
+	}
+}
+
+// The allow_anonymous_future type is used to prevent misuse of ThreadFutures.
 // For Standalone types, the memory in some cases is actually stored in the ThreadFuture object,
 // in which case we expect the caller to keep that ThreadFuture around until the result is no
 // longer needed.
@@ -768,7 +787,11 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     ThreadFuture<T>& threadFuture) {
-	return safeThreadFutureToFutureImpl(threadFuture);
+	Future<T> f = safeThreadFutureToFutureImpl(threadFuture);
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(f);
+	}
+	return f;
 }
 
 template <class T>
@@ -781,7 +804,9 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     Future<T>& future) {
-	// Do nothing
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(future);
+	}
 	return future;
 }
 

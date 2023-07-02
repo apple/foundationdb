@@ -18,15 +18,16 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <memory>
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -40,6 +41,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
+#include "flow/Histogram.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -169,6 +171,19 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Counter splitRequests;
 	int numLogs;
 
+	// End-to-end server latency of resolver requests.
+	Reference<Histogram> resolverLatencyDist;
+
+	// Queue wait times, per request.
+	Reference<Histogram> queueWaitLatencyDist;
+
+	// Actual work, per req request.
+	Reference<Histogram> computeTimeDist;
+
+	// Distribution of waiters in queue.
+	// 0 or 1 will be most common, but higher values are interesting.
+	Reference<Histogram> queueDepthDist;
+
 	Future<Void> logger;
 
 	EncryptionAtRestMode encryptMode;
@@ -185,7 +200,12 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    resolvedStateTransactions("ResolvedStateTransactions", cc),
 	    resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc),
 	    resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
-	    splitRequests("SplitRequests", cc) {
+	    splitRequests("SplitRequests", cc),
+	    resolverLatencyDist(Histogram::getHistogram("Resolver"_sr, "Latency"_sr, Histogram::Unit::milliseconds)),
+	    queueWaitLatencyDist(Histogram::getHistogram("Resolver"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
+	    computeTimeDist(Histogram::getHistogram("Resolver"_sr, "ComputeTime"_sr, Histogram::Unit::milliseconds)),
+	    // Distribution of queue depths, with knowledge that Histogram has 32 buckets, and each bucket will have size 1.
+	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
@@ -195,6 +215,31 @@ struct Resolver : ReferenceCounted<Resolver> {
 	~Resolver() { destroyConflictSet(conflictSet); }
 };
 } // namespace
+
+ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
+	loop {
+		if (self->recentStateTransactionsInfo.size() &&
+		    proxyInfo->lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
+			self->neededVersion.set(std::max(self->neededVersion.get(), prevVersion));
+		}
+
+		// Update queue depth metric before waiting. Check if we're going to be one of the waiters or not.
+		int waiters = self->version.numWaiting();
+		if (self->version.get() < prevVersion) {
+			waiters++;
+		}
+		self->queueDepthDist->sampleRecordCounter(waiters);
+
+		choose {
+			when(wait(self->version.whenAtLeast(prevVersion))) {
+				// Update queue depth metric after waiting.
+				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
+				return Void();
+			}
+			when(wait(self->checkNeededVersion.onTrigger())) {}
+		}
+	}
+}
 
 ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
                                 ResolveTransactionBatchRequest req,
@@ -212,7 +257,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+		        db, metadataDomainIds, BlobCipherMetrics::TLOG));
 		cipherKeys = cks;
 	}
 
@@ -246,27 +292,23 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck");
 	}
 
-	loop {
-		if (self->recentStateTransactionsInfo.size() &&
-		    proxyInfo.lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
-			self->neededVersion.set(std::max(self->neededVersion.get(), req.prevVersion));
-		}
-
-		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) {
-				break;
-			}
-			when(wait(self->checkNeededVersion.onTrigger())) {}
-		}
-	}
+	wait(versionReady(self.getPtr(), &proxyInfo, req.prevVersion));
 
 	if (check_yield(TaskPriority::DefaultEndpoint)) {
 		wait(delay(0, TaskPriority::Low) || delay(SERVER_KNOBS->COMMIT_SLEEP_TIME)); // FIXME: Is this still right?
 		g_network->setCurrentTask(TaskPriority::DefaultEndpoint);
 	}
 
+	// Time until now has been spent waiting in the queue to do actual work.
+	double queueWaitEndTime = g_network->timer();
+	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
+
 	if (self->version.get() ==
 	    req.prevVersion) { // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+		// This is the beginning of the compute phase of the
+		// resolver. There's no wait before it's done.
+		const double beginComputeTime = g_network->timer();
+
 		++self->resolveBatchStart;
 		self->resolvedTransactions += req.transactions.size();
 		self->resolvedBytes += req.transactions.expectedSize();
@@ -352,7 +394,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			stateTransactions.push_back_deep(
 			    stateTransactions.arena(),
 			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
-			                        req.transactions[t].mutations));
+			                        req.transactions[t].mutations,
+			                        req.transactions[t].tenantIds));
 
 			// for (const auto& m : req.transactions[t].mutations)
 			//	DEBUG_MUTATION("Resolver", req.version, m, self->dbgid);
@@ -463,6 +506,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			self->checkNeededVersion.trigger();
 		}
 
+		// Measure the time spent doing actual work in the resolver.
+		const double endComputeTime = g_network->timer();
+		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
+
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
 	} else {
@@ -486,6 +533,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// CODE_PROBE(true, "No prior proxy requests");
 		req.reply.send(Never());
 	}
+
+	// Measure server-side RPC latency from the time a request was
+	// received to time the response was sent.
+	const double endTime = g_network->timer();
+	self->resolverLatencyDist->sampleSeconds(endTime - req.requestTime());
 
 	++self->resolveBatchOut;
 
@@ -642,7 +694,8 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 				SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, ENCRYPT_HEADER_DOMAIN_ID
 			};
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-			    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
+			    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+			        db, metadataDomainIds, BlobCipherMetrics::TLOG));
 			cipherKeys = cks;
 		}
 		wait(processCompleteTransactionStateRequest(

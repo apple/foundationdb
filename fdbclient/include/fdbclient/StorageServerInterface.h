@@ -453,7 +453,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	int matchIndex;
 	Optional<TagSet> tags;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
@@ -480,7 +479,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
-		           matchIndex,
 		           arena);
 	}
 };
@@ -639,24 +637,31 @@ struct StorageMetrics {
 	// FIXME: currently, iosPerKSecond is not used in DataDistribution calculations.
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
+	int64_t opsReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL << 60;
 
+	// the read load model coming from both read ops and read bytes
+	int64_t readLoadKSecond() const;
+
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
 		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
-		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
+		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
 		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
+		opsReadPerKSecond += rhs.opsReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
 		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
+		opsReadPerKSecond -= rhs.opsReadPerKSecond;
 	}
 	template <class F>
 	void operator*=(F f) {
@@ -664,12 +669,15 @@ struct StorageMetrics {
 		bytesWrittenPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
+		opsReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
+	bool allZero() const {
+		return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond && !opsReadPerKSecond;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond);
+		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond, opsReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -698,15 +706,17 @@ struct StorageMetrics {
 
 	bool operator==(StorageMetrics const& rhs) const {
 		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond &&
-		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond;
+		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond == rhs.opsReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
+		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld, OpReadPerKSec: %lld",
 		              bytes,
 		              bytesWrittenPerKSecond,
 		              iosPerKSecond,
-		              bytesReadPerKSecond);
+		              bytesReadPerKSecond,
+		              opsReadPerKSecond);
 	}
 };
 
@@ -714,9 +724,11 @@ struct WaitMetricsRequest {
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
+	Arena arena;
 	// Setting the tenantInfo makes the request tenant-aware.
 	TenantInfo tenantInfo;
-	Arena arena;
+	// Set `minVersion` to a version where the tenant info was read. Not needed for non-tenant-aware request.
+	Version minVersion = 0;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
@@ -725,14 +737,15 @@ struct WaitMetricsRequest {
 
 	WaitMetricsRequest() {}
 	WaitMetricsRequest(TenantInfo tenantInfo,
+	                   Version minVersion,
 	                   KeyRangeRef const& keys,
 	                   StorageMetrics const& min,
 	                   StorageMetrics const& max)
-	  : tenantInfo(tenantInfo), keys(arena, keys), min(min), max(max) {}
+	  : tenantInfo(tenantInfo), minVersion(minVersion), keys(arena, keys), min(min), max(max) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, tenantInfo, arena);
+		serializer(ar, keys, min, max, reply, tenantInfo, minVersion, arena);
 	}
 };
 
@@ -740,10 +753,11 @@ struct SplitMetricsReply {
 	constexpr static FileIdentifier file_identifier = 11530792;
 	Standalone<VectorRef<KeyRef>> splits;
 	StorageMetrics used;
+	bool more = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, splits, used);
+		serializer(ar, splits, used, more);
 	}
 };
 
@@ -783,20 +797,30 @@ struct ReadHotRangeWithMetrics {
 	// The density for key range [A,C) is 30 * 100 / 200 = 15
 	double density;
 	// How many bytes of data was sent in a period of time because of read requests.
-	double readBandwidth;
+	double readBandwidthSec;
+
+	int64_t bytes; // storage bytes
+	double readOpsSec; // an interpolated value over sampling interval
 
 	ReadHotRangeWithMetrics() = default;
 	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
-	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
+	  : keys(keys), density(density), readBandwidthSec(readBandwidth) {}
+
+	ReadHotRangeWithMetrics(KeyRangeRef const& keys, int64_t bytes, double readBandwidth, double readOpsKSec)
+	  : keys(keys), density(readBandwidth / std::max((int64_t)1, bytes)), readBandwidthSec(readBandwidth), bytes(bytes),
+	    readOpsSec(readOpsKSec) {}
 
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
-	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthSec(rhs.readBandwidthSec), bytes(rhs.bytes),
+	    readOpsSec(rhs.readOpsSec) {}
 
-	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+	int expectedSize() const {
+		return keys.expectedSize() + sizeof(density) + sizeof(readBandwidthSec) + sizeof(bytes) + sizeof(readOpsSec);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, density, readBandwidth);
+		serializer(ar, keys, density, readBandwidthSec, bytes, readOpsSec);
 	}
 };
 
@@ -811,16 +835,22 @@ struct ReadHotSubRangeReply {
 };
 struct ReadHotSubRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10259266;
+	enum SplitType : uint8_t { BYTES, READ_BYTES, READ_OPS };
+
 	Arena arena;
 	KeyRangeRef keys;
 	ReplyPromise<ReadHotSubRangeReply> reply;
 
+	uint8_t type = SplitType::BYTES;
+	int chunkCount = 1;
+
 	ReadHotSubRangeRequest() {}
-	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
+	  : keys(arena, keys), type(type), chunkCount(chunkCount) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply, arena);
+		serializer(ar, keys, reply, type, chunkCount, arena);
 	}
 };
 
@@ -1138,34 +1168,38 @@ struct GetStorageMetricsRequest {
 	}
 };
 
+// Tracks the busyness of tags on individual storage servers.
+struct BusyTagInfo {
+	constexpr static FileIdentifier file_identifier = 4528694;
+	TransactionTag tag;
+	double rate{ 0.0 };
+	double fractionalBusyness{ 0.0 };
+
+	BusyTagInfo() = default;
+	BusyTagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
+	  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+
+	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tag, rate, fractionalBusyness);
+	}
+};
+
 struct StorageQueuingMetricsReply {
-	struct TagInfo {
-		constexpr static FileIdentifier file_identifier = 4528694;
-		TransactionTag tag;
-		double rate{ 0.0 };
-		double fractionalBusyness{ 0.0 };
-
-		TagInfo() = default;
-		TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
-		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
-
-		template <class Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, tag, rate, fractionalBusyness);
-		}
-	};
-
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
-	int64_t bytesDurable, bytesInput;
+	int64_t bytesDurable{ 0 }, bytesInput{ 0 };
 	StorageBytes storageBytes;
 	Version version; // current storage server version
 	Version durableVersion; // latest version durable on storage server
-	double cpuUsage;
-	double diskUsage;
+	double cpuUsage{ 0.0 };
+	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<TagInfo> busiestTags;
+	std::vector<BusyTagInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

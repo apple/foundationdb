@@ -32,14 +32,18 @@
 
 namespace {
 
-ACTOR Future<bool> printBlobHistory(Database db, Key key, Optional<Version> version) {
+ACTOR Future<bool> printBlobHistory(Database db,
+                                    Optional<Reference<Tenant>> tenant,
+                                    Optional<TenantMapEntry> tenantEntry,
+                                    Key key,
+                                    Optional<Version> version) {
 	fmt::print("Printing blob history for {0}", key.printable());
 	if (version.present()) {
 		fmt::print(" @ {0}", version.get());
 	}
 	fmt::print("\n");
 
-	state Transaction tr(db);
+	state Transaction tr(db, tenant);
 	state KeyRange activeGranule;
 	state KeyRange queryRange(KeyRangeRef(key, keyAfter(key)));
 	loop {
@@ -56,14 +60,19 @@ ACTOR Future<bool> printBlobHistory(Database db, Key key, Optional<Version> vers
 			wait(tr.onError(e));
 		}
 	}
+	if (tenant.present()) {
+		activeGranule = activeGranule.withPrefix(tenant.get()->prefix());
+	}
+
 	fmt::print("Active granule: [{0} - {1})\n", activeGranule.begin.printable(), activeGranule.end.printable());
 
 	// get latest history entry for range
+	state Transaction tr2(db);
 	state GranuleHistory history;
 	loop {
 		try {
 			RangeResult result =
-			    wait(tr.getRange(blobGranuleHistoryKeyRangeFor(activeGranule), 1, Snapshot::False, Reverse::True));
+			    wait(tr2.getRange(blobGranuleHistoryKeyRangeFor(activeGranule), 1, Snapshot::False, Reverse::True));
 			ASSERT(result.size() <= 1);
 
 			if (result.empty()) {
@@ -77,7 +86,7 @@ ACTOR Future<bool> printBlobHistory(Database db, Key key, Optional<Version> vers
 
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			wait(tr2.onError(e));
 		}
 	}
 
@@ -119,7 +128,7 @@ ACTOR Future<bool> printBlobHistory(Database db, Key key, Optional<Version> vers
 
 		loop {
 			try {
-				Optional<Value> parentHistoryValue = wait(tr.get(parentHistoryKey));
+				Optional<Value> parentHistoryValue = wait(tr2.get(parentHistoryKey));
 				foundParent = parentHistoryValue.present();
 				if (foundParent) {
 					std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(parentHistoryKey);
@@ -128,7 +137,7 @@ ACTOR Future<bool> printBlobHistory(Database db, Key key, Optional<Version> vers
 				}
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr2.onError(e));
 			}
 		}
 		if (!foundParent) {
@@ -153,17 +162,15 @@ ACTOR Future<bool> blobKeyCommandActor(Database localDb,
 		return false;
 	}
 
-	ASSERT(tokens[1] == "history"_sr);
-
-	Key key;
-	Optional<Version> version;
-
+	Optional<Reference<Tenant>> tenant;
 	if (tenantEntry.present()) {
-		key = tokens[2].withPrefix(tenantEntry.get().prefix);
-	} else {
-		key = tokens[2];
+		tenant = Reference<Tenant>(new Tenant(tenantEntry.get().id));
 	}
 
+	ASSERT(tokens[1] == "history"_sr);
+
+	Key key = tokens[2];
+	Optional<Version> version;
 	if (tokens.size() > 3) {
 		Version v;
 		int n = 0;
@@ -178,7 +185,7 @@ ACTOR Future<bool> blobKeyCommandActor(Database localDb,
 		fmt::print("No blob history for system keyspace\n", key.printable());
 		return false;
 	} else {
-		bool result = wait(printBlobHistory(localDb, key, version));
+		bool result = wait(printBlobHistory(localDb, tenant, tenantEntry, key, version));
 		return result;
 	}
 }

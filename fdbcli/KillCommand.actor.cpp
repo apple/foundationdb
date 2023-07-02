@@ -105,6 +105,8 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 				        "fetch latest addresses.\n",
 				        addressesStr.c_str());
 			} else {
+				// delay in case the network queue is not flush before the client exits
+				wait(delay(3.0));
 				printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 			}
 		}

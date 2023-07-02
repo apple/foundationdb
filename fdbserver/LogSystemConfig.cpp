@@ -87,8 +87,8 @@ bool TLogSet::isEqualIds(TLogSet const& r) const {
 
 bool OldTLogConf::operator==(const OldTLogConf& rhs) const {
 	return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
-	       logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && pseudoLocalities == rhs.pseudoLocalities &&
-	       epoch == rhs.epoch;
+	       recoverAt == rhs.recoverAt && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
 }
 
 bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {

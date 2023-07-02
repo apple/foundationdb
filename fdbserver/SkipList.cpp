@@ -816,21 +816,46 @@ struct TransactionInfo {
 	bool reportConflictingKeys;
 };
 
+bool ConflictBatch::ignoreTooOld() const {
+	return bugs && deterministicRandom()->random01() < bugs->ignoreTooOldProbability;
+}
+
+bool ConflictBatch::ignoreReadSet() const {
+	return bugs && deterministicRandom()->random01() < bugs->ignoreReadSetProbability;
+}
+
+bool ConflictBatch::ignoreWriteSet() const {
+	return bugs && deterministicRandom()->random01() < bugs->ignoreWriteSetProbability;
+}
+
 void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOldestVersion) {
 	const int t = transactionCount++;
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
 	info->reportConflictingKeys = tr.report_conflicting_keys;
+	bool tooOld = tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size();
+	if (tooOld && ignoreTooOld()) {
+		bugs->hit();
+		tooOld = false;
+	}
 
-	if (tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size()) {
+	if (tooOld) {
 		info->tooOld = true;
 	} else {
 		info->tooOld = false;
-		info->readRanges.resize(arena, tr.read_conflict_ranges.size());
-		info->writeRanges.resize(arena, tr.write_conflict_ranges.size());
+		if (!ignoreReadSet()) {
+			info->readRanges.resize(arena, tr.read_conflict_ranges.size());
+		} else {
+			bugs->hit();
+		}
+		if (!ignoreWriteSet()) {
+			info->writeRanges.resize(arena, tr.write_conflict_ranges.size());
+		} else {
+			bugs->hit();
+		}
 
-		for (int r = 0; r < tr.read_conflict_ranges.size(); r++) {
+		for (int r = 0; r < info->readRanges.size(); r++) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
 			points.emplace_back(range.begin, true, false, t, &info->readRanges[r].first);
 			points.emplace_back(range.end, false, false, t, &info->readRanges[r].second);
@@ -843,7 +868,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 			                                                                   : nullptr,
 			                                        tr.report_conflicting_keys ? resolveBatchReplyArena : nullptr);
 		}
-		for (int r = 0; r < tr.write_conflict_ranges.size(); r++) {
+		for (int r = 0; r < info->writeRanges.size(); r++) {
 			const KeyRangeRef& range = tr.write_conflict_ranges[r];
 			points.emplace_back(range.begin, true, true, t, &info->writeRanges[r].first);
 			points.emplace_back(range.end, false, true, t, &info->writeRanges[r].second);

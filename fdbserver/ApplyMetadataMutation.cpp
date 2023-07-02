@@ -19,13 +19,13 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -86,8 +86,16 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_),
-	    provisionalCommitProxy(provisionalCommitProxy_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
+	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -98,7 +106,15 @@ public:
 	    cipherKeys(cipherKeys_), encryptMode(encryptMode), txnStateStore(resolverData_.txnStateStore),
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 private:
 	// The following variables are incoming parameters
@@ -139,6 +155,7 @@ private:
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
 	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
@@ -604,7 +621,14 @@ private:
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 			for (const auto& ssID : checkpoint.src) {
-				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
+				Optional<Value> tagValue = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
+				if (!tagValue.present()) {
+					TraceEvent(SevWarn, "CheckpointServerTagNotFound", dbgid)
+					    .detail("StorageServerID", ssID)
+					    .detail("Checkpoint", checkpoint.toString());
+					continue;
+				}
+				const Tag tag = decodeServerTagValue(tagValue.get());
 				MutationRef privatized = m;
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
@@ -672,7 +696,16 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
-			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+			TenantMapEntry tenantEntry;
+			if (initialCommit) {
+				CODE_PROBE(true, "Recovering tenant from txn state store");
+				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
+				tenantEntry.setId(txnStateStoreEntry.id);
+				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
+				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
+			} else {
+				tenantEntry = TenantMapEntry::decode(m.param2);
+			}
 
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
@@ -687,9 +720,18 @@ private:
 					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
 				}
 			}
+			if (lockedTenants) {
+				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					CODE_PROBE(true, "ApplyMetadataMutation unlock tenant");
+					lockedTenants->erase(tenantEntry.id);
+				} else {
+					CODE_PROBE(true, "ApplyMetadataMutation lock tenant");
+					lockedTenants->insert(tenantEntry.id);
+				}
+			}
 
 			if (!initialCommit) {
-				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				txnStateStore->set(KeyValueRef(m.param1, tenantEntry.toTxnStateStoreEntry().encode()));
 			}
 
 			// For now, this goes to all storage servers.
@@ -712,18 +754,30 @@ private:
 		}
 	}
 
+	template <bool Versioned>
+	void reportMetaclusterRegistration(ValueRef value) {
+		MetaclusterRegistrationEntryImpl<Versioned> entry = MetaclusterRegistrationEntryImpl<Versioned>::decode(value);
+
+		TraceEvent("SetMetaclusterRegistration", dbgid)
+		    .detail("ClusterType", entry.clusterType)
+		    .detail("MetaclusterID", entry.metaclusterId)
+		    .detail("MetaclusterName", entry.metaclusterName)
+		    .detail("ClusterID", entry.id)
+		    .detail("ClusterName", entry.name)
+		    .detail("MetaclusterVersion", entry.version);
+	}
+
 	void checkSetMetaclusterRegistration(MutationRef m) {
-		if (m.param1 == MetaclusterMetadata::metaclusterRegistration().key) {
-			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
+		if (m.param1 == metacluster::metadata::metaclusterRegistration().key) {
+			if (MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites) {
+				reportMetaclusterRegistration<false>(m.param2);
+			} else {
+				CODE_PROBE(true, "Writing metacluster registration with version validation");
+				reportMetaclusterRegistration<true>(m.param2);
+			}
 
-			TraceEvent("SetMetaclusterRegistration", dbgid)
-			    .detail("ClusterType", entry.clusterType)
-			    .detail("MetaclusterID", entry.metaclusterId)
-			    .detail("MetaclusterName", entry.metaclusterName)
-			    .detail("ClusterID", entry.id)
-			    .detail("ClusterName", entry.name);
-
-			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
+			Optional<Value> value =
+			    txnStateStore->readValue(metacluster::metadata::unversionedMetaclusterRegistration().key).get();
 			if (!initialCommit) {
 				txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -1119,6 +1173,17 @@ private:
 				}
 
 				tenantMap->erase(startItr, endItr);
+
+				if (lockedTenants) {
+					auto startItr = startId.present()
+					                    ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), startId.get())
+					                    : lockedTenants->end();
+					auto endItr = endId.present()
+					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
+					                  : lockedTenants->end();
+					CODE_PROBE(startItr != endItr, "Deleting locked tenant");
+					lockedTenants->erase(startItr, endItr);
+				}
 			}
 
 			if (!initialCommit) {
@@ -1152,12 +1217,13 @@ private:
 	}
 
 	void checkClearMetaclusterRegistration(KeyRangeRef range) {
-		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
+		if (range.contains(metacluster::metadata::metaclusterRegistration().key)) {
 			TraceEvent("ClearMetaclusterRegistration", dbgid);
 
-			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
+			Optional<Value> value =
+			    txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key).get();
 			if (!initialCommit) {
-				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+				txnStateStore->clear(singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 			}
 
 			if (value.present()) {

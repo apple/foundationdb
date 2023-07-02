@@ -35,7 +35,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // must be last include
 
-struct ResolutionBalancer {
+struct __attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))
+__attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
 	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
 	Version resolverChangesVersion = invalidVersion;
 	std::set<UID> resolverNeedingChanges;

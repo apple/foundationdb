@@ -24,9 +24,6 @@
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>

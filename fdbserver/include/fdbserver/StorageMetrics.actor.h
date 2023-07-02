@@ -36,6 +36,7 @@ const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
 const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
 const StringRef FETCH_KEYS_BYTES_HISTOGRAM = "FetchKeysSize"_sr;
 const StringRef FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = "FetchKeysBandwidth"_sr;
+const StringRef FETCH_KEYS_BYTES_PER_COMMIT_HISTOGRAM = "FetchKeysBytesPerCommit"_sr;
 const StringRef TLOG_CURSOR_READS_LATENCY_HISTOGRAM = "TLogCursorReadsLatency"_sr;
 const StringRef SS_VERSION_LOCK_LATENCY_HISTOGRAM = "SSVersionLockLatency"_sr;
 const StringRef EAGER_READS_LATENCY_HISTOGRAM = "EagerReadsLatency"_sr;
@@ -63,7 +64,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 	explicit TransientStorageMetricSample(int64_t metricUnitsPerSample) : StorageMetricSample(metricUnitsPerSample) {}
 
-	int64_t addAndExpire(KeyRef key, int64_t metric, double expiration);
+	int64_t addAndExpire(const Key& key, int64_t metric, double expiration);
 
 	int64_t erase(KeyRef key);
 	void erase(KeyRangeRef keys);
@@ -73,8 +74,10 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	void poll();
 
 private:
-	bool roll(KeyRef key, int64_t metric) const;
-	int64_t add(KeyRef key, int64_t metric);
+	bool roll(int64_t metric) const;
+
+	// return the sampled metric delta
+	int64_t add(const Key& key, int64_t metric);
 };
 
 struct StorageServerMetrics {
@@ -84,22 +87,24 @@ struct StorageServerMetrics {
 	// FIXME: iops is not effectively tested, and is not used by data distribution
 	TransientStorageMetricSample iopsSample, bytesWriteSample;
 	TransientStorageMetricSample bytesReadSample;
+	TransientStorageMetricSample opsReadSample;
 
 	StorageServerMetrics()
 	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
 	    bytesWriteSample(SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE),
-	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
+	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE),
+	    opsReadSample(SERVER_KNOBS->OPS_READ_UNITES_PER_SAMPLE) {}
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
 
-	void notify(KeyRef key, StorageMetrics& metrics);
+	void notify(const Key& key, StorageMetrics& metrics);
 
-	void notifyBytesReadPerKSecond(KeyRef key, int64_t in);
+	void notifyBytesReadPerKSecond(const Key& key, int64_t in);
 
 	void notifyBytes(RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
 	                 int64_t bytes);
 
-	void notifyBytes(KeyRef key, int64_t bytes);
+	void notifyBytes(const KeyRef& key, int64_t bytes);
 
 	void notifyNotReadable(KeyRangeRef keys);
 
@@ -129,10 +134,7 @@ struct StorageServerMetrics {
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
-	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard,
-	                                                      double readDensityRatio,
-	                                                      int64_t baseChunkSize,
-	                                                      int64_t minShardReadBandwidthPerKSeconds) const;
+	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, int chunkCount, uint8_t splitType) const;
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
@@ -140,20 +142,35 @@ struct StorageServerMetrics {
 
 	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
 
+	[[maybe_unused]] std::vector<ReadHotRangeWithMetrics> _getReadHotRanges(
+	    KeyRangeRef shard,
+	    double readDensityRatio,
+	    int64_t baseChunkSize,
+	    int64_t minShardReadBandwidthPerKSeconds) const;
+
 private:
 	static void collapse(KeyRangeMap<int>& map, KeyRef const& key);
 	static void add(KeyRangeMap<int>& map, KeyRangeRef const& keys, int delta);
 };
 
-// Contains information about whether or not a key-value pair should be included in a byte sample
-// Also contains size information about the byte sample
+// Contains information about whether or not a key-value pair should be included in a byte sample.
+//
+// The invariant holds:
+//    probability * sampledSize == size
 struct ByteSampleInfo {
+	// True if we've decided to sample this key-value pair.
 	bool inSample;
 
-	// Actual size of the key value pair
+	// Actual size of the key value pair.
 	int64_t size;
 
-	// The recorded size of the sample (max of bytesPerSample, size)
+	// Probability that the key-value pair will be sampled.
+	// This is a function of key and value sizes.
+	// The goal is to sample ~1/BYTE_SAMPLING_FACTOR of the key-value space,
+	// which by default is 1/250th.
+	double probability;
+
+	// The recorded size of the sample (max of bytesPerSample, size).
 	int64_t sampledSize;
 };
 
@@ -163,6 +180,33 @@ ByteSampleInfo isKeyValueInSample(KeyRef key, int64_t totalKvSize);
 inline ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
 	return isKeyValueInSample(keyValue.key, keyValue.key.size() + keyValue.value.size());
 }
+
+struct CommonStorageCounters {
+	CounterCollection cc;
+	// read ops
+	Counter finishedQueries, bytesQueried;
+
+	// write ops
+	// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
+	// and cleared from the memory, we do not subtract it but add it to bytesDurable.
+	Counter bytesInput;
+	// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
+	// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
+	// and the lengths of both parameters.
+	Counter mutationBytes;
+	Counter mutations, setMutations, clearRangeMutations;
+
+	// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
+	Counter bytesFetched;
+	// The number of key-value pairs fetched by fetchKeys()
+	Counter kvFetched;
+
+	// name and id are the inputs to CounterCollection initialization. If metrics provided, the caller should guarantee
+	// the lifetime of metrics is longer than this counter
+	CommonStorageCounters(const std::string& name,
+	                      const std::string& id,
+	                      const StorageServerMetrics* metrics = nullptr);
+};
 
 class IStorageMetricsService {
 public:
@@ -180,6 +224,10 @@ public:
 	virtual Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) = 0;
 
 	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
+
+	virtual void getSplitMetrics(const SplitMetricsRequest& req) = 0;
+
+	virtual void getHotRangeMetrics(const ReadHotSubRangeRequest& req) = 0;
 
 	// NOTE: also need to have this function but template can't be a virtual so...
 	// template <class Reply>
@@ -204,22 +252,19 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					self->metrics.splitMetrics(req);
+					self->getSplitMetrics(req);
 				}
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				self->getStorageMetrics(req);
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
+				self->getHotRangeMetrics(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
+				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||
+				    (req.tenantInfo.hasTenant() &&
+				     !self->isReadable(req.keys.withPrefix(req.tenantInfo.prefix.get())))) {
 					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {

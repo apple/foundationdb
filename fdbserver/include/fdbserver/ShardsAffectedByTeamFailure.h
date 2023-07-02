@@ -78,6 +78,7 @@ public:
 	//       intersecting shards.
 
 	int getNumberOfShards(UID ssID) const;
+	int getNumberOfShards(Team team) const;
 	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
 

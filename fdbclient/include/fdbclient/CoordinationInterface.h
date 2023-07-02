@@ -88,6 +88,11 @@ public:
 
 	size_t getNumberOfCoordinators() const { return coords.size() + hostnames.size(); }
 
+	// Determine the local source IP used to connect to the cluster by connecting to the first available coordinator.
+	// Throw bind_failed() if no connection attempts were successful.
+	// This function blocks on connection attempts.
+	IPAddress determineLocalSourceIP() const;
+
 	bool operator==(const ClusterConnectionString& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}
@@ -104,7 +109,7 @@ public:
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+FDB_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 
 // A record that stores the connection string used to connect to a cluster. This record can be updated when a cluster
 // notifies a connected party that the connection string has changed.
@@ -265,6 +270,7 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+	bool internal{ true };
 
 	bool verify() const { return true; }
 
@@ -278,7 +284,8 @@ struct OpenDatabaseCoordRequest {
 		           clusterKey,
 		           coordinators,
 		           reply,
-		           hostnames);
+		           hostnames,
+		           internal);
 	}
 };
 
@@ -315,6 +322,9 @@ struct ProtocolInfoRequest {
 	constexpr static FileIdentifier file_identifier = 13261233;
 	ReplyPromise<ProtocolInfoReply> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
 		                                                            ProtocolVersion::withStableInterfaces() } };
+
+	bool verify() const noexcept { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);

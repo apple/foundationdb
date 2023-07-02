@@ -39,9 +39,16 @@ set(options_file ${PROJECT_BINARY_DIR}/bindings/python/fdb/fdboptions.py)
 vexillographer_compile(TARGET fdb_python_options LANG python OUT ${options_file}
   OUTPUT ${options_file})
 
+if(NOT DEFINED FDB_API_VERSION_FILE)
+  message(FATAL_ERROR "Missing definitions of API versions")
+endif()
+include(${FDB_API_VERSION_FILE})
+set(apiversion_file ${CMAKE_CURRENT_BINARY_DIR}/fdb/apiversion.py)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdb/apiversion.py.cmake ${apiversion_file})
+
 add_dependencies(python_binding fdb_python_options)
 
-set(out_files "${out_files};${options_file}")
+set(out_files "${out_files};${options_file};${apiversion_file}")
 # TODO[mpilman]: it is not clear whether we want to have rpms for python
 #install(FILES ${out_files} DESTINATION ${FDB_PYTHON_INSTALL_DIR} COMPONENT python)
 
@@ -75,3 +82,14 @@ add_custom_command(OUTPUT ${package_file}
 add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
+
+if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
+
+  add_fdbclient_test(
+    NAME python_unit_tests
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit_tests.py
+            --cluster-file @CLUSTER_FILE@ --verbose
+    DISABLE_LOG_DUMP
+  )
+
+endif() # NOT OPEN_FOR_IDE AND NOT USE_SANITIZER

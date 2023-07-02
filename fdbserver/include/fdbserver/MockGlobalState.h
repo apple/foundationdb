@@ -21,20 +21,22 @@
 #ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H
 #define FOUNDATIONDB_MOCKGLOBALSTATE_H
 
-#include "StorageMetrics.actor.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/KeyLocationService.h"
-#include "SimulatedCluster.h"
-#include "ShardsAffectedByTeamFailure.h"
+#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
+
+constexpr const char* MOCK_DD_TEST_CLASS = "MockDD";
 
 struct MockGlobalStateTester;
 
 // the status is roughly order by transition order, except for UNSET and EMPTY
 enum class MockShardStatus {
-	EMPTY = 0, // data loss
-	UNSET,
+	UNSET = 0,
+	EMPTY, // data loss
 	INFLIGHT,
 	FETCHED, // finish fetch but not change the serverKey mapping. Only can be set by MSS itself.
 	COMPLETED
@@ -61,11 +63,13 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 }
 
 class MockStorageServerImpl;
-class MockStorageServer : public IStorageMetricsService {
+class MockStorageServer : public IStorageMetricsService, public ReferenceCounted<MockStorageServer> {
 	friend struct MockGlobalStateTester;
 	friend class MockStorageServerImpl;
 
 	ActorCollection actors;
+
+	CommonStorageCounters counters{ /*name=*/"", /*id=*/"", &metrics };
 
 public:
 	struct ShardInfo {
@@ -82,6 +86,22 @@ public:
 	};
 
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
+
+	// 100k/s small reads = 100% CPU
+	// 500MB/s of read throughput = 100% CPU
+	// 50k/s random small writes = 100% CPU
+	// 100MB/s write throughput = 100% CPU
+	// assume above operation will saturate the CPU linearly. We can change the model to a better one in the future.
+	static constexpr double DEFAULT_READ_OP_CPU_MULTIPLIER = 100.0 / 100000;
+	static constexpr double DEFAULT_WRITE_OP_CPU_MULTIPLIER = 100.0 / 50000;
+	static constexpr double DEFAULT_READ_BYTE_CPU_MULTIPLIER = 100.0 / 500000000;
+	static constexpr double DEFAULT_WRITE_BYTE_CPU_MULTIPLIER = 100.0 / 100000000;
+
+	// can be set by workloads
+	double read_op_cpu_multiplier = DEFAULT_READ_OP_CPU_MULTIPLIER;
+	double write_op_cpu_multiplier = DEFAULT_WRITE_OP_CPU_MULTIPLIER;
+	double read_byte_cpu_multiplier = DEFAULT_READ_BYTE_CPU_MULTIPLIER;
+	double write_byte_cpu_multiplier = DEFAULT_WRITE_BYTE_CPU_MULTIPLIER;
 
 	// control plane statistics associated with a real storage server
 	uint64_t totalDiskSpace = DEFAULT_DISK_SPACE, usedDiskSpace = DEFAULT_DISK_SPACE;
@@ -100,7 +120,8 @@ public:
 	MockStorageServer() = default;
 
 	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : totalDiskSpace(usedDiskSpace + availableDiskSpace), usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
+	  : counters("MockStorageServer", ssi.id().toString()), totalDiskSpace(usedDiskSpace + availableDiskSpace),
+	    usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
 
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
 	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
@@ -111,9 +132,10 @@ public:
 	bool allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const;
 
 	// change the status of range. This function may result in split to make the shard boundary align with range.begin
-	// and range.end. In this case, if restrictSize==true, the sum of the split shard size is strictly equal to the old
-	// large shard. Otherwise, the size are randomly generated between (min_shard_size, max_shard_size)
-	void setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize);
+	// and range.end. If split happened, the shard size will be equally split.
+	void setShardStatus(const KeyRangeRef& range, MockShardStatus status);
+
+	void coalesceCompletedRange(const KeyRangeRef& range);
 
 	// this function removed an aligned range from server
 	void removeShard(const KeyRangeRef& range);
@@ -128,6 +150,10 @@ public:
 	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
+
+	void getSplitMetrics(const SplitMetricsRequest& req) override;
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override;
 
 	template <class Reply>
 	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
@@ -170,18 +196,14 @@ public:
 	// trigger the asynchronous fetch keys operation
 	void signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes);
 
+	HealthMetrics::StorageStats getStorageStats() const;
+
 protected:
 	PromiseStream<FetchKeysParams> fetchKeysRequests;
 
-	void threeWayShardSplitting(const KeyRangeRef& outerRange,
-	                            const KeyRangeRef& innerRange,
-	                            uint64_t outerRangeSize,
-	                            bool restrictSize);
+	void threeWayShardSplitting(const KeyRangeRef& outerRange, const KeyRangeRef& innerRange, uint64_t outerRangeSize);
 
-	void twoWayShardSplitting(const KeyRangeRef& range,
-	                          const KeyRef& splitPoint,
-	                          uint64_t rangeSize,
-	                          bool restrictSize);
+	void twoWayShardSplitting(const KeyRangeRef& range, const KeyRef& splitPoint, uint64_t rangeSize);
 
 	// Assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	int64_t estimateRangeTotalBytes(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes);
@@ -196,13 +218,40 @@ protected:
 
 	// Update byte sample as if clear a whole range
 	void byteSampleApplyClear(KeyRangeRef const& range);
+
+	double calculateCpuUsage() const;
 };
 
 class MockGlobalStateImpl;
 
+namespace mock {
+// This struct is only used in mock DD. For convenience of tracking the cluster topology and generating correct process
+// locality
+struct TopologyObject {
+	enum Type { PROCESS, MACHINE, ZONE, DATA_HALL, DATA_CENTER } type;
+	// corresponding to LocalityData field for each type
+	Standalone<StringRef> topoId;
+	std::shared_ptr<TopologyObject> parent;
+	std::vector<std::shared_ptr<TopologyObject>> children;
+	TopologyObject(Type type, Standalone<StringRef> id, std::shared_ptr<TopologyObject> parent = nullptr)
+	  : type(type), topoId(id), parent(parent) {}
+};
+
+struct Process : public TopologyObject {
+	LocalityData locality;
+	std::vector<StorageServerInterface> ssInterfaces;
+	Process(LocalityData locality, Standalone<StringRef> id, std::shared_ptr<TopologyObject> parent = nullptr)
+	  : TopologyObject(PROCESS, id, parent), locality(locality) {}
+};
+} // namespace mock
+
 class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 	friend class MockGlobalStateImpl;
+
+	std::vector<std::shared_ptr<mock::TopologyObject>> clusterLayout;
+	std::vector<std::shared_ptr<mock::Process>> processes;
+	std::vector<std::shared_ptr<mock::Process>> seedProcesses;
 
 	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
 
@@ -211,7 +260,7 @@ public:
 	// In-memory counterpart of the `keyServers` in system keyspace
 	Reference<ShardsAffectedByTeamFailure> shardMapping;
 	// In-memory counterpart of the `serverListKeys` in system keyspace
-	std::map<UID, MockStorageServer> allServers;
+	std::map<UID, Reference<MockStorageServer>> allServers;
 	DatabaseConfiguration configuration;
 
 	// user defined parameters for mock workload purpose
@@ -221,23 +270,29 @@ public:
 
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
 
+	// A globally shared state
+	static std::shared_ptr<MockGlobalState>& g_mockState();
+
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
+	void initializeClusterLayout(const BasicSimulationConfig&);
 	void initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
 	                                  uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
+	// create a storage server interface on each process
+	void addStoragePerProcess(uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 
 	void addStorageServer(StorageServerInterface server, uint64_t diskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 
 	// check methods
 	/* Shard status contract:
 	 * Shard is static.
-	 * * In mgs.shardMapping, the destination teams is empty for the given shard;
+	 * * In sharedMgs.shardMapping, the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Completed
 	 * Shard is in-flight.
-	 * * In mgs.shardMapping,the destination teams is non-empty for a given shard;
+	 * * In sharedMgs.shardMapping,the destination teams is non-empty for a given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Completed
 	 * * For each MSS belonging to the destination teams, mss.serverKeys[shard] = InFlight | Fetched | Completed
 	 * Shard is lost.
-	 * * In mgs.shardMapping,  the destination teams is empty for the given shard;
+	 * * In sharedMgs.shardMapping,  the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Empty
 	 */
 	bool serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard = false);
@@ -245,13 +300,13 @@ public:
 
 	/* Server status contract:
 	 * Server X  is removed
-	 * * mgs.shardMapping doesn’t have any information about X
-	 * * mgs.allServer doesn’t contain X
+	 * * sharedMgs.shardMapping doesn’t have any information about X
+	 * * sharedMgs.allServer doesn’t contain X
 	 * Server X is healthy
-	 * * mgs.allServer[X] is existed
+	 * * sharedMgs.allServer[X] is existed
 	 * Server X is failed but haven’t been removed (a temporary status between healthy and removed)
-	 * * mgs.shardMapping doesn’t have any information about X
-	 * * mgs.allServer[X] is existed
+	 * * sharedMgs.shardMapping doesn’t have any information about X
+	 * * sharedMgs.allServer[X] is existed
 	 */
 	bool allShardsRemovedFromServer(const UID& serverId);
 
@@ -284,6 +339,8 @@ public:
 	                                                               Optional<UID> debugID,
 	                                                               UseProvisionalProxies useProvisionalProxies,
 	                                                               Version version) override;
+
+	int getRangeSize(KeyRangeRef const& range);
 
 	// data ops - the key is not accurate, only the shard the key locate in matters.
 

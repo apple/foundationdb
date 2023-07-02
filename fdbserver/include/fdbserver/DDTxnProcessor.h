@@ -26,7 +26,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MockGlobalState.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(SkipDDModeCheck);
+FDB_BOOLEAN_PARAM(SkipDDModeCheck);
 
 struct InitialDataDistribution;
 struct DDShardInfo;
@@ -59,11 +59,16 @@ public:
 	virtual Database context() const = 0;
 	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
-	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
 	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
 		return std::vector<DDRangeLocations>();
 	}
+
+	virtual Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const = 0;
 
 	// get the storage server list and Process class, only throw transaction non-retryable exceptions
 	virtual Future<ServerWorkerInfos> getServerListAndProcessClasses() = 0;
@@ -79,7 +84,7 @@ public:
 
 	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(const UID& ddId) const { return MoveKeysLock(); }
 
-	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const = 0;
 
 	virtual Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
 	                                       const std::vector<Optional<Key>>& remoteIds,
@@ -94,12 +99,10 @@ public:
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
 
 	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
-		return ddEnabledState->isDDEnabled();
+		return ddEnabledState->isEnabled();
 	};
 
-	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
-		return Never();
-	};
+	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const = 0;
 
 	// Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
 	// Changes to keyServer and serverKey must happen symmetrically in this function.
@@ -135,11 +138,13 @@ public:
 
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
-	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
+	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const = 0;
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
 	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
+
+	virtual Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -224,6 +229,13 @@ public:
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
+
+	Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
+
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
@@ -292,6 +304,23 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
+
+	Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const override {
+		return Never();
+	}
+
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
+
+	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
+
+	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
+
+	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override { return Optional<Value>(); }
+
+	Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);

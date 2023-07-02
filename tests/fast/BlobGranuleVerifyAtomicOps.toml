@@ -4,8 +4,6 @@ blobGranulesEnabled = true
 allowDefaultTenant = false
 injectTargetedSSRestart = true
 injectSSDelay = true
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
 
 [[test]]
 testTitle = 'BlobGranuleVerifyAtomicOps'
@@ -40,4 +38,8 @@ testTitle = 'BlobGranuleVerifyAtomicOps'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
     testDuration = 30.0

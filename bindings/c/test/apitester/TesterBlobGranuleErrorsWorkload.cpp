@@ -44,7 +44,9 @@ private:
 		OP_CANCEL_BLOBBIFY,
 		OP_CANCEL_UNBLOBBIFY,
 		OP_CANCEL_PURGE,
-		OP_LAST = OP_CANCEL_PURGE
+		OP_CANCEL_FLUSH,
+		OP_FLUSH_TOO_OLD,
+		OP_LAST = OP_FLUSH_TOO_OLD
 	};
 
 	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
@@ -122,14 +124,10 @@ private:
 
 	void randomPurgeUnalignedOp(TTaskFct cont) {
 		// blobbify/unblobbify need to be aligned to blob range boundaries, so this should always fail
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execOperation(
-		    [this, begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().purgeBlobGranules(begin, end, -2, false).eraseType();
+		    [this, keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().purgeBlobGranules(keyRange.beginKey, keyRange.endKey, -2, false).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [this, ctx, f]() {
@@ -144,16 +142,12 @@ private:
 
 	void randomBlobbifyUnalignedOp(bool blobbify, TTaskFct cont) {
 		// blobbify/unblobbify need to be aligned to blob range boundaries, so this should always return false
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto success = std::make_shared<bool>(false);
 		execOperation(
-		    [begin, end, blobbify, success](auto ctx) {
-			    fdb::Future f = blobbify ? ctx->db().blobbifyRange(begin, end).eraseType()
-			                             : ctx->db().unblobbifyRange(begin, end).eraseType();
+		    [keyRange, blobbify, success](auto ctx) {
+			    fdb::Future f = blobbify ? ctx->db().blobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType()
+			                             : ctx->db().unblobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, success]() {
@@ -169,101 +163,114 @@ private:
 	}
 
 	void randomCancelGetGranulesOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execTransaction(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomCancelGetRangesOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execOperation(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().listBlobbifiedRanges(begin, end, 1000).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().listBlobbifiedRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomCancelVerifyOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execOperation(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f =
+			        ctx->db().verifyBlobRange(keyRange.beginKey, keyRange.endKey, -2 /* latest version*/).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomCancelSummarizeOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execTransaction(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->tx().summarizeBlobGranules(begin, end, -2, 1000).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f =
+			        ctx->tx().summarizeBlobGranules(keyRange.beginKey, keyRange.endKey, -2, 1000).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomCancelBlobbifyOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execOperation(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().blobbifyRange(begin, end).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f;
+			    if (Random::get().randomBool(0.5)) {
+				    f = ctx->db().blobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType();
+			    } else {
+				    f = ctx->db().blobbifyRangeBlocking(keyRange.beginKey, keyRange.endKey).eraseType();
+			    }
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomCancelUnblobbifyOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execOperation(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().unblobbifyRange(begin, end).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().unblobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomCancelPurgeOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execOperation(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().purgeBlobGranules(begin, end, -2, false).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().purgeBlobGranules(keyRange.beginKey, keyRange.endKey, -2, false).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelFlushOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		fdb::native::fdb_bool_t compact = Random::get().randomBool(0.5);
+		execOperation(
+		    [keyRange, compact](auto ctx) {
+			    fdb::Future f = ctx->db().flushBlobRange(keyRange.beginKey, keyRange.endKey, compact, -2).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomFlushTooOldOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		fdb::native::fdb_bool_t compact = Random::get().randomBool(0.5);
+
+		auto success = std::make_shared<bool>(false);
+		execOperation(
+		    [keyRange, compact, success](auto ctx) {
+			    // version of 1 should be too old
+			    fdb::Future f = ctx->db().flushBlobRange(keyRange.beginKey, keyRange.endKey, compact, 1).eraseType();
+			    ctx->continueAfter(
+			        f,
+			        [ctx, f, success]() {
+				        *success = f.get<fdb::future_var::Bool>();
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, cont, success]() {
+			    ASSERT(!(*success));
+			    schedule(cont);
+		    });
 	}
 
 	void randomOperation(TTaskFct cont) override {
@@ -307,6 +314,12 @@ private:
 			randomCancelUnblobbifyOp(cont);
 			break;
 		case OP_CANCEL_PURGE:
+			randomCancelPurgeOp(cont);
+			break;
+		case OP_CANCEL_FLUSH:
+			randomCancelPurgeOp(cont);
+			break;
+		case OP_FLUSH_TOO_OLD:
 			randomCancelPurgeOp(cont);
 			break;
 		}

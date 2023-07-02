@@ -26,8 +26,8 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbclient/StorageServerInterface.h" // for TenantInfo - should we refactor that elsewhere?
 
 struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
@@ -332,15 +332,19 @@ struct FlushGranuleRequest {
 	int64_t managerEpoch;
 	KeyRange granuleRange;
 	Version flushVersion;
+	bool compactAfter;
 	ReplyPromise<Void> reply;
 
-	FlushGranuleRequest() : managerEpoch(-1), flushVersion(invalidVersion) {}
-	explicit FlushGranuleRequest(int64_t managerEpoch, KeyRange granuleRange, Version flushVersion)
-	  : managerEpoch(managerEpoch), granuleRange(granuleRange), flushVersion(flushVersion) {}
+	FlushGranuleRequest() : managerEpoch(-1), flushVersion(invalidVersion), compactAfter(false) {}
+	explicit FlushGranuleRequest(int64_t managerEpoch, KeyRange granuleRange, Version flushVersion, bool compactAfter)
+	  : managerEpoch(managerEpoch), granuleRange(granuleRange), flushVersion(flushVersion), compactAfter(compactAfter) {
+	}
+
+	void setRange(const KeyRangeRef& range) { granuleRange = range; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, managerEpoch, granuleRange, flushVersion, reply);
+		serializer(ar, managerEpoch, granuleRange, flushVersion, compactAfter, reply);
 	}
 };
 

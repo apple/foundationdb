@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -88,8 +91,8 @@ struct StorageQuotaWorkload : TestWorkload {
 		state int64_t quota = size - 1;
 
 		// Check that the quota set/get functions work as expected.
-		wait(setStorageQuotaHelper(cx, self->group, quota));
-		state Optional<int64_t> quotaRead = wait(getStorageQuotaHelper(cx, self->group));
+		wait(setStorageQuota(cx, self->group, quota));
+		state Optional<int64_t> quotaRead = wait(getStorageQuota(cx, self->group));
 		ASSERT(quotaRead.present() && quotaRead.get() == quota);
 
 		if (!SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
@@ -109,9 +112,9 @@ struct StorageQuotaWorkload : TestWorkload {
 		// Increase the quota or clear the quota. Check that writes to both the tenants are now able to commit.
 		if (deterministicRandom()->coinflip()) {
 			quota = size * 2;
-			wait(setStorageQuotaHelper(cx, self->group, quota));
+			wait(setStorageQuota(cx, self->group, quota));
 		} else {
-			wait(clearStorageQuotaHelper(cx, self->group));
+			wait(clearStorageQuota(cx, self->group));
 		}
 		state bool committed1 = wait(tryWrite(self, cx, self->tenant, /*bypassQuota=*/false, /*expectOk=*/true));
 		ASSERT(committed1);
@@ -144,42 +147,30 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> setStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName, int64_t quota) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				setStorageQuota(tr, tenantGroupName, quota);
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	static Future<Void> setStorageQuota(Database cx, TenantGroupName tenantGroupName, int64_t quota) {
+		return runRYWTransactionVoid(cx,
+		                             [tenantGroupName = tenantGroupName,
+		                              quota = quota](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			                             tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			                             TenantMetadata::storageQuota().set(tr, tenantGroupName, quota);
+			                             return Void();
+		                             });
 	}
 
-	ACTOR static Future<Void> clearStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				clearStorageQuota(tr, tenantGroupName);
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	static Future<Void> clearStorageQuota(Database cx, TenantGroupName tenantGroupName) {
+		return runRYWTransactionVoid(
+		    cx, [tenantGroupName = tenantGroupName](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			    TenantMetadata::storageQuota().erase(tr, tenantGroupName);
+			    return Void();
+		    });
 	}
 
-	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantGroupName));
-				return quota;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	static Future<Optional<int64_t>> getStorageQuota(Database cx, TenantGroupName tenantGroupName) {
+		return runRYWTransaction(cx, [tenantGroupName = tenantGroupName](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return TenantMetadata::storageQuota().get(tr, tenantGroupName);
+		});
 	}
 
 	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self,

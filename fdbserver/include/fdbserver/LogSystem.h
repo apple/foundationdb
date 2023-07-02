@@ -504,6 +504,8 @@ struct ILogSystem {
 
 	virtual bool remoteStorageRecovered() const = 0;
 
+	virtual void purgeOldRecoveredGenerations() = 0;
+
 	virtual Future<Void> onCoreStateChanged() const = 0;
 	// Returns if and when the output of toCoreState() would change (for example, when older logs can be discarded from
 	// the state)
@@ -555,7 +557,7 @@ struct ILogSystem {
 	// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is
 	// correspondingly less expensive)
 
-	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) = 0;
+	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag, bool useSatellite) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before
 	// sending them to the log router.

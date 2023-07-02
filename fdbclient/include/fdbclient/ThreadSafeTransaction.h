@@ -64,11 +64,13 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -101,11 +103,13 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
@@ -161,7 +165,6 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
-	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
@@ -211,6 +214,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -232,6 +236,9 @@ public:
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
+
+	void debugTrace(BaseTraceEvent&&) override;
+	void debugPrint(std::string const& message) override;
 
 private:
 	ISingleThreadTransaction* tr;

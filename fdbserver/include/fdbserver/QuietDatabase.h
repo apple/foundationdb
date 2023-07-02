@@ -44,6 +44,9 @@ Future<std::vector<StorageServerInterface>> getStorageServers(Database const& cx
 Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database const& cx,
                                                         bool const& use_system_priority = false,
                                                         Version* const& grv = nullptr);
+Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database const& cx,
+                                                               bool const& use_system_priority = false,
+                                                               Version* const& grv = nullptr);
 Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                                               int const& flags = 0);
 Future<WorkerInterface> getMasterWorker(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
@@ -61,5 +64,8 @@ Future<std::pair<std::vector<WorkerInterface>, int>>
 getStorageWorkers(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo, bool const& localOnly);
 Future<std::vector<WorkerInterface>> getCoordWorkers(Database const& cx,
                                                      Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
+
+Future<Void> enableConsistencyScanInSim(Database const& db);
+Future<Void> disableConsistencyScanInSim(Database const& db, bool const& waitForCompletion);
 
 #endif

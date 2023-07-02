@@ -24,9 +24,6 @@
  */
 
 #if defined(HAVE_OPENSSL)
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/md5.h>
 #elif !defined(_MD5_H)
 #define _MD5_H

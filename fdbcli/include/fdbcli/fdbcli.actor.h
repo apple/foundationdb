@@ -33,18 +33,31 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
+constexpr char msgTypeKey[] = "type";
+constexpr char msgClusterKey[] = "cluster";
+constexpr char msgClusterTypeKey[] = "cluster_type";
+constexpr char msgMetaclusterName[] = "metacluster_name";
+constexpr char msgMetaclusterKey[] = "metacluster";
+constexpr char msgDataClustersKey[] = "data_clusters";
+constexpr char msgCapacityKey[] = "capacity";
+constexpr char msgAllocatedKey[] = "allocated";
+constexpr char msgTenantIdPrefixKey[] = "tenant_id_prefix";
+constexpr char msgErrorKey[] = "error";
+
 struct CommandHelp {
 	std::string usage;
 	std::string short_desc;
 	std::string long_desc;
 	CommandHelp() {}
-	CommandHelp(const char* u, const char* s, const char* l) : usage(u), short_desc(s), long_desc(l) {}
+	CommandHelp(const char* usage, const char* short_desc, const char* long_desc)
+	  : usage(usage), short_desc(short_desc), long_desc(long_desc) {}
 };
 
 void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
@@ -126,6 +139,9 @@ inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/managemen
 
 // get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
+// get all storages' interface
+ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
+                                              std::map<std::string, StorageServerInterface>* interfaces);
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
@@ -188,6 +204,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
                                            std::vector<StringRef> tokens);
 // Retrieve audit storage status
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
+ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
@@ -220,6 +237,11 @@ ACTOR Future<bool> blobKeyCommandActor(Database localDb,
                                        std::vector<StringRef> tokens);
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
+// hotrange command
+ACTOR Future<bool> hotRangeCommandActor(Database localDb,
+                                        Reference<IDatabase> db,
+                                        std::vector<StringRef> tokens,
+                                        std::map<std::string, StorageServerInterface>* storage_interface);
 
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
@@ -264,6 +286,15 @@ ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringR
 ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
 // targetversion command
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// idempotencyids command
+ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> tokens);
+
+// rangeconfig command
+ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);
+
+// debug commands: getlocation, getall
+ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
 
 } // namespace fdb_cli
 

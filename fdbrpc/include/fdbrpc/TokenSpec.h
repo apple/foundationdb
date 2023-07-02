@@ -28,6 +28,8 @@
 
 namespace authz {
 
+using TenantId = int64_t;
+
 enum class Algorithm : int {
 	RS256,
 	ES256,
@@ -67,7 +69,7 @@ struct BasicTokenSpec {
 	OptionalType<uint64_t> expiresAtUnixTime; // exp
 	OptionalType<uint64_t> notBeforeUnixTime; // nbf
 	OptionalType<StringType> tokenId; // jti
-	OptionalType<VectorType<StringType>> tenants; // tenants
+	OptionalType<VectorType<TenantId>> tenants; // tenants
 	// signature part
 	StringType signature;
 };

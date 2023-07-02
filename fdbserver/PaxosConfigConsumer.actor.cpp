@@ -307,6 +307,9 @@ class GetCommittedVersionQuorum {
 				wait(self->updateNode(self, committedVersions, quorumVersion.versions, lastCompacted, cfi));
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw;
+			}
 			// Count a timeout as a reply.
 			++self->totalRepliesReceived;
 			// TraceEvent("ConsumerGetCommittedVersionError").error(e)

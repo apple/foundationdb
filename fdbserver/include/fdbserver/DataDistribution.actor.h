@@ -36,6 +36,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -163,7 +164,13 @@ struct RelocateShard {
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 
+	void setParentRange(KeyRange const& parent);
+	Optional<KeyRange> getParentRange() const;
+
 private:
+	// If this rs comes from a splitting, parent range is the original range.
+	Optional<KeyRange> parent_range;
+
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
@@ -196,15 +203,15 @@ private:
 public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
-	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
 	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                      int topK = 1,
-	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minBytesReadPerKSecond = 0)
-	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+	                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                      double minReadLoadPerKSecond = 0)
+	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
+	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
 	}
 
@@ -220,8 +227,8 @@ private:
 	// larger read density means higher score
 	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
 	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
-		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
-		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+		return a.metrics.readLoadKSecond() / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.readLoadKSecond() / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
 };
 
@@ -242,11 +249,11 @@ struct GetMetricsListRequest {
 // For each shard (key-range) move, PhysicalShardCollection decides which physical shard and corresponding team(s) to
 // move The current design of PhysicalShardCollection assumes that there exists at most two teamCollections
 // TODO: unit test needed
-FDB_DECLARE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
-FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
-FDB_DECLARE_BOOLEAN_PARAM(InOverSizePhysicalShard);
-FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardAvailable);
-FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
+FDB_BOOLEAN_PARAM(InAnonymousPhysicalShard);
+FDB_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
+FDB_BOOLEAN_PARAM(InOverSizePhysicalShard);
+FDB_BOOLEAN_PARAM(PhysicalShardAvailable);
+FDB_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 struct ShardMetrics {
 	StorageMetrics metrics;
@@ -478,7 +485,9 @@ struct DDShardInfo {
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
-	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
+	InitialDataDistribution()
+	  : dataMoveMap(std::make_shared<DataMove>()),
+	    userRangeConfig(makeReference<DDConfiguration::RangeConfigMapSnapshot>(allKeys.begin, allKeys.end)) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
@@ -487,9 +496,11 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
+	std::vector<UID> toCleanDataMoveTombstone;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
+	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
 
 // Holds the permitted size and IO Bounds for a shard
@@ -511,53 +522,11 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
 
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
-
-// FIXME(xwang): Delete Old DD Actors once the refactoring is done
-/////////////////////////////// Old DD Actors //////////////////////////////////////
-#ifndef __INTEL_COMPILER
-#pragma region Old DD Actors
-#endif
+bool ddLargeTeamEnabled();
 
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
-
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Reference<IDDTxnProcessor> db,
-                                           PromiseStream<RelocateShard> output,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           Reference<PhysicalShardCollection> physicalShardCollection,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
-                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId,
-                                           KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled,
-                                           Optional<Reference<TenantCache>> ddTenantCache);
-
-ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollections,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         Reference<PhysicalShardCollection> physicalShardCollection,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         const DDEnabledState* ddEnabledState);
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif

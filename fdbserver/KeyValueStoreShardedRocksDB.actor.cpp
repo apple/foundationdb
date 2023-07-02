@@ -1,3 +1,4 @@
+#include "fdbclient/FDBTypes.h"
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbclient/KeyRangeMap.h"
@@ -13,6 +14,7 @@
 #include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/rate_limiter.h>
+#include <rocksdb/advanced_options.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
@@ -26,10 +28,12 @@
 #endif
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
+#include "fdbserver/FDBRocksDBVersion.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/UnitTest.h"
 
 #include <memory>
 #include <tuple>
@@ -37,15 +41,17 @@
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
+#include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be 7.7.3.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
-              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
+// Enforcing rocksdb version.
+static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
+               ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
+              "Unsupported rocksdb version.");
 
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
@@ -105,6 +111,14 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 	}
 }
 
+ACTOR Future<Void> forwardError(Future<int> input) {
+	int errorCode = wait(input);
+	if (errorCode == error_code_success) {
+		return Never();
+	}
+	throw Error::fromCode(errorCode);
+}
+
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
 // inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
@@ -114,10 +128,13 @@ class RocksDBErrorListener : public rocksdb::EventListener {
 public:
 	RocksDBErrorListener(){};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
+		if (!bg_error)
+			return;
 		TraceEvent(SevError, "ShardedRocksDBBGError")
 		    .detail("Reason", getErrorReason(reason))
 		    .detail("ShardedRocksDBSeverity", bg_error->severity())
 		    .detail("Status", bg_error->ToString());
+
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
@@ -126,14 +143,14 @@ public:
 		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
 		// All background errors will be treated as storage engine failure. Send the error to storage server.
 		if (bg_error->IsIOError()) {
-			errorPromise.sendError(io_error());
+			errorPromise.send(error_code_io_error);
 		} else if (bg_error->IsCorruption()) {
-			errorPromise.sendError(file_corrupt());
+			errorPromise.send(error_code_file_corrupt);
 		} else {
-			errorPromise.sendError(unknown_error());
+			errorPromise.send(error_code_unknown_error);
 		}
 	}
-	Future<Void> getFuture() {
+	Future<int> getFuture() {
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
@@ -141,11 +158,11 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		errorPromise.send(Never());
+		errorPromise.send(error_code_success);
 	}
 
 private:
-	ThreadReturnPromise<Void> errorPromise;
+	ThreadReturnPromise<int> errorPromise;
 	std::mutex mutex;
 };
 
@@ -167,10 +184,14 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
 		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+		liveFileMetaData.directory = fileMetaData.directory;
 		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
@@ -179,12 +200,15 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
 		liveFileMetaData.num_entries = fileMetaData.num_entries;
 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.smallest = fileMetaData.smallest;
+		liveFileMetaData.largest = fileMetaData.largest;
+		liveFileMetaData.file_type = rocksdb::kTableFile;
+		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.db_path = fileMetaData.db_path;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
@@ -193,32 +217,40 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	return metaData;
 }
 
-void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData& metaData) {
+void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData* metaData) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
-	rocksCF.dbComparatorName = metaData.db_comparator_name;
-	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
-		LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.name = fileMetaData.name;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
-		rocksCF.sstFiles.push_back(liveFileMetaData);
+	if (metaData != nullptr) {
+		rocksCF.dbComparatorName = metaData->db_comparator_name;
+		for (const rocksdb::LiveFileMetaData& fileMetaData : metaData->files) {
+			LiveFileMetaData liveFileMetaData;
+			liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+			liveFileMetaData.directory = fileMetaData.directory;
+			liveFileMetaData.file_number = fileMetaData.file_number;
+			liveFileMetaData.file_type = static_cast<int>(fileMetaData.file_type);
+			liveFileMetaData.size = fileMetaData.size;
+			liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+			liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+			liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+			liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+			liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+			liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+			liveFileMetaData.largestkey = fileMetaData.largestkey;
+			liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+			liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+			liveFileMetaData.num_entries = fileMetaData.num_entries;
+			liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+			liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+			liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+			liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+			liveFileMetaData.smallest = fileMetaData.smallest;
+			liveFileMetaData.largest = fileMetaData.largest;
+			liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+			liveFileMetaData.name = fileMetaData.name;
+			liveFileMetaData.db_path = fileMetaData.db_path;
+			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+			liveFileMetaData.level = fileMetaData.level;
+			rocksCF.sstFiles.push_back(liveFileMetaData);
+		}
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
 	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
@@ -275,7 +307,7 @@ const char* ShardOpToString(ShardOp op) {
 }
 void logShardEvent(StringRef name, ShardOp op, Severity severity = SevInfo, const std::string& message = "") {
 	TraceEvent e(severity, "ShardedRocksDBKVSShardEvent");
-	e.detail("Name", name).detail("Action", ShardOpToString(op));
+	e.detail("ShardId", name).detail("Action", ShardOpToString(op));
 	if (!message.empty()) {
 		e.detail("Message", message);
 	}
@@ -286,7 +318,10 @@ void logShardEvent(StringRef name,
                    Severity severity = SevInfo,
                    const std::string& message = "") {
 	TraceEvent e(severity, "ShardedRocksDBKVSShardEvent");
-	e.detail("Name", name).detail("Action", ShardOpToString(op)).detail("Begin", range.begin).detail("End", range.end);
+	e.detail("ShardId", name)
+	    .detail("Action", ShardOpToString(op))
+	    .detail("Begin", range.begin)
+	    .detail("End", range.end);
 	if (message != "") {
 		e.detail("Message", message);
 	}
@@ -302,15 +337,77 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+rocksdb::CompactionPri getCompactionPriority() {
+	switch (SERVER_KNOBS->ROCKSDB_COMPACTION_PRI) {
+	case 0:
+		return rocksdb::CompactionPri::kByCompensatedSize;
+	case 1:
+		return rocksdb::CompactionPri::kOldestLargestSeqFirst;
+	case 2:
+		return rocksdb::CompactionPri::kOldestSmallestSeqFirst;
+	case 3:
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	case 4:
+		return rocksdb::CompactionPri::kRoundRobin;
+	default:
+		TraceEvent(SevWarn, "InvalidCompactionPriority").detail("KnobValue", SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	}
+}
+
+rocksdb::WALRecoveryMode getWalRecoveryMode() {
+	switch (SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE) {
+	case 0:
+		return rocksdb::WALRecoveryMode::kTolerateCorruptedTailRecords;
+	case 1:
+		return rocksdb::WALRecoveryMode::kAbsoluteConsistency;
+	case 2:
+		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
+	case 3:
+		return rocksdb::WALRecoveryMode::kSkipAnyCorruptedRecords;
+	default:
+		TraceEvent(SevWarn, "InvalidWalRecoveryMode").detail("KnobValue", SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE);
+		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
+	}
+}
+
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
+	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
+	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+
+	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	}
+	if (SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	}
+
 	// Compact sstables when there's too much deleted stuff.
-	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
+	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
+		// Creates a factory of a table property collector that marks a SST
+		// file as need-compaction when it observe at least "D" deletion
+		// entries in any "N" consecutive entries, or the ratio of tombstone
+		// entries >= deletion_ratio.
+
+		// @param sliding_window_size "N". Note that this number will be
+		//     round up to the smallest multiple of 128 that is no less
+		//     than the specified size.
+		// @param deletion_trigger "D".  Note that even when "N" is changed,
+		//     the specified number for "D" will not be changed.
+		// @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
+		//     based on deletion ratio. Disabled by default.
+		options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(
+			SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
+			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
+			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO) };
+	}
 
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
@@ -345,27 +442,56 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
+	options.compaction_pri = getCompactionPriority();
+
 	return options;
 }
 
 rocksdb::Options getOptions() {
-	rocksdb::Options options({}, getCFOptions());
+	rocksdb::Options options;
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
+	options.atomic_flush = SERVER_KNOBS->ROCKSDB_ATOMIC_FLUSH;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
+	options.wal_recovery_mode = getWalRecoveryMode();
+	options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
+	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
 	options.max_background_jobs = SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS;
+
+	// The following two fields affect how archived logs will be deleted.
+	// 1. If both set to 0, logs will be deleted asap and will not get into
+	//    the archive.
+	// 2. If WAL_ttl_seconds is 0 and WAL_size_limit_MB is not 0,
+	//    WAL files will be checked every 10 min and if total size is greater
+	//    then WAL_size_limit_MB, they will be deleted starting with the
+	//    earliest until size_limit is met. All empty files will be deleted.
+	// 3. If WAL_ttl_seconds is not 0 and WAL_size_limit_MB is 0, then
+	//    WAL files will be checked every WAL_ttl_seconds / 2 and those that
+	//    are older than WAL_ttl_seconds will be deleted.
+	// 4. If both are not 0, WAL files will be checked every 10 min and both
+	//    checks will be performed with ttl being first.
+	options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSDB_WAL_TTL_SECONDS;
+	options.WAL_size_limit_MB = SERVER_KNOBS->ROCKSDB_WAL_SIZE_LIMIT_MB;
 
 	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
 	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
+	if (SERVER_KNOBS->ROCKSDB_LOG_LEVEL_DEBUG) {
+		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
+	}
+	options.max_log_file_size = SERVER_KNOBS->ROCKSDB_MAX_LOG_FILE_SIZE;
+	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
+
+	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
+	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	return options;
 }
 
@@ -373,6 +499,7 @@ rocksdb::Options getOptions() {
 rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
+	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 	return options;
 }
 
@@ -384,8 +511,8 @@ struct ReadIterator {
 	KeyRange keyRange;
 	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
 
-	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, const rocksdb::ReadOptions& options)
-	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
+	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db)
+	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(getReadOptions(), cf)) {}
 	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, const KeyRange& range)
 	  : index(index), inUse(true), creationTime(now()), keyRange(range) {
 		auto options = getReadOptions();
@@ -412,11 +539,9 @@ gets deleted as the ref count becomes 0.
 class ReadIteratorPool {
 public:
 	ReadIteratorPool(rocksdb::DB* db, rocksdb::ColumnFamilyHandle* cf, const std::string& path)
-	  : db(db), cf(cf), index(0), iteratorsReuseCount(0), readRangeOptions(getReadOptions()) {
+	  : db(db), cf(cf), index(0), iteratorsReuseCount(0) {
 		ASSERT(db);
 		ASSERT(cf);
-		readRangeOptions.background_purge_on_iterator_cleanup = true;
-		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 		TraceEvent(SevVerbose, "ShardedRocksReadIteratorPool")
 		    .detail("Path", path)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
@@ -444,7 +569,7 @@ public:
 				}
 			}
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions);
+			ReadIterator iter(cf, index, db);
 			iteratorsMap.insert({ index, iter });
 			return iter;
 		} else {
@@ -490,7 +615,6 @@ private:
 	std::unordered_map<int, ReadIterator>::iterator it;
 	rocksdb::DB* db;
 	rocksdb::ColumnFamilyHandle* cf;
-	rocksdb::ReadOptions readRangeOptions;
 	std::mutex mutex;
 	// incrementing counter for every new iterator creation, to uniquely identify the iterator in returnIterator().
 	uint64_t index;
@@ -513,6 +637,8 @@ ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetc
 // DataShard represents a key range (logical shard) in FDB. A DataShard is assigned to a specific physical shard.
 struct DataShard {
 	DataShard(KeyRange range, PhysicalShard* physicalShard) : range(range), physicalShard(physicalShard) {}
+
+	bool initialized() const;
 
 	KeyRange range;
 	PhysicalShard* physicalShard;
@@ -538,6 +664,7 @@ struct PhysicalShard {
 			logRocksDBError(status, "AddCF");
 			return status;
 		}
+		logShardEvent(id, ShardOp::OPEN);
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 		this->isInitialized.store(true);
 		return status;
@@ -549,51 +676,67 @@ struct PhysicalShard {
 		rocksdb::Status status;
 		if (format == DataMoveRocksCF) {
 			rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
-			rocksdb::ImportColumnFamilyOptions importOptions;
-			importOptions.move_files = true;
-			status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
-
-			if (!status.ok()) {
-				logRocksDBError(status, "RocksImportColumnFamily");
+			if (metaData.files.empty()) {
+				TraceEvent(SevInfo, "RocksDBRestoreEmptyShard")
+				    .detail("ShardId", id)
+				    .detail("CheckpointID", checkpoint.checkpointID);
+				status = db->CreateColumnFamily(getCFOptions(), id, &cf);
+			} else {
+				TraceEvent(SevInfo, "RocksDBRestoreCF");
+				rocksdb::ImportColumnFamilyOptions importOptions;
+				importOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
+				status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
+				TraceEvent(SevInfo, "RocksDBRestoreCFEnd").detail("Status", status.ToString());
 			}
 		} else if (format == RocksDBKeyValues) {
+			ASSERT(cf != nullptr);
 			std::vector<std::string> sstFiles;
 			const RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(checkpoint);
 			for (const auto& file : rcp.fetchedFiles) {
-				TraceEvent(SevDebug, "RocksDBRestoreFile")
-				    .detail("Shard", id)
-				    .detail("CheckpointID", checkpoint.checkpointID)
-				    .detail("File", file.toString());
-				sstFiles.push_back(file.path);
+				if (file.path != emptySstFilePath) {
+					sstFiles.push_back(file.path);
+				}
 			}
 
+			TraceEvent(SevDebug, "RocksDBRestoreFiles")
+			    .detail("Shard", id)
+			    .detail("CheckpointID", checkpoint.checkpointID)
+			    .detail("Files", describe(sstFiles));
+
 			if (!sstFiles.empty()) {
-				ASSERT(cf != nullptr);
 				rocksdb::IngestExternalFileOptions ingestOptions;
-				ingestOptions.move_files = true;
-				ingestOptions.write_global_seqno = false;
-				ingestOptions.verify_checksums_before_ingest = true;
+				ingestOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
+				ingestOptions.verify_checksums_before_ingest = SERVER_KNOBS->ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
 				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
-				if (!status.ok()) {
-					logRocksDBError(status, "RocksIngestExternalFile");
-				}
 			} else {
 				TraceEvent(SevWarn, "RocksDBServeRestoreEmptyRange")
-				    .detail("Shard", id)
+				    .detail("ShardId", id)
 				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
 				    .detail("Checkpoint", checkpoint.toString());
 			}
-			TraceEvent(SevInfo, "RocksDBServeRestoreEnd")
-			    .detail("Shard", id)
-			    .detail("Checkpoint", checkpoint.toString());
+			TraceEvent(SevInfo, "PhysicalShardRestoredFiles")
+			    .detail("ShardId", id)
+			    .detail("CFName", cf->GetName())
+			    .detail("Checkpoint", checkpoint.toString())
+			    .detail("RestoredFiles", describe(sstFiles));
 		} else {
 			throw not_implemented();
 		}
 
-		if (status.ok() && !this->isInitialized) {
-			readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
-			this->isInitialized.store(true);
+		TraceEvent(status.ok() ? SevInfo : SevWarnAlways, "PhysicalShardRestoreEnd")
+		    .detail("Status", status.ToString())
+		    .detail("Shard", id)
+		    .detail("CFName", cf == nullptr ? "" : cf->GetName())
+		    .detail("Checkpoint", checkpoint.toString());
+		if (status.ok()) {
+			if (!this->isInitialized) {
+				readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
+				this->isInitialized.store(true);
+			} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+				this->readIterPool->update();
+			}
 		}
+
 		return status;
 	}
 
@@ -614,6 +757,11 @@ struct PhysicalShard {
 		return res;
 	}
 
+	bool shouldFlush() {
+		return SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0 &&
+		       numRangeDeletions > SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT;
+	}
+
 	std::string toString() {
 		std::string ret = "[ID]: " + this->id + ", [CF]: ";
 		if (initialized()) {
@@ -630,11 +778,7 @@ struct PhysicalShard {
 		readIterPool.reset();
 
 		// Deleting default column family is not allowed.
-		if (id == DEFAULT_CF_NAME) {
-			return;
-		}
-
-		if (deletePending) {
+		if (deletePending && id != DEFAULT_CF_NAME) {
 			auto s = db->DropColumnFamily(cf);
 			if (!s.ok()) {
 				logRocksDBError(s, "DestroyShard");
@@ -659,6 +803,7 @@ struct PhysicalShard {
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
 	std::atomic<bool> isInitialized;
+	uint64_t numRangeDeletions = 0;
 	double deleteTimeSec;
 };
 
@@ -718,11 +863,29 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 	return accumulatedBytes;
 }
 
+struct Counters {
+	CounterCollection cc;
+	Counter immediateThrottle;
+	Counter failedToAcquire;
+	Counter convertedRangeDeletions;
+
+	Counters()
+	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc),
+	    convertedRangeDeletions("ConvertedRangeDeletions", cc) {}
+};
+
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path, UID logId, const rocksdb::Options& options)
-	  : path(path), logId(logId), dbOptions(options), dataShardMap(nullptr, specialKeys.end) {}
+	ShardManager(std::string path,
+	             UID logId,
+	             const rocksdb::Options& options,
+	             std::shared_ptr<RocksDBErrorListener> errorListener,
+	             Counters* cc)
+	  : path(path), logId(logId), dbOptions(options), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end),
+	    counters(cc) {
+		dbOptions.listeners.push_back(errorListener);
+	}
 
 	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
 	                                             Future<Void> openFuture,
@@ -733,7 +896,7 @@ public:
 		try {
 			wait(openFuture);
 			loop {
-				wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+				wait(delay(SERVER_KNOBS->ROCKSDB_CF_METRICS_DELAY));
 				if (rState->closing) {
 					break;
 				}
@@ -745,9 +908,18 @@ public:
 					if (!shard->initialized()) {
 						continue;
 					}
+					uint64_t liveDataSize = 0;
+					ASSERT(shard->db->GetIntProperty(
+					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
+					TraceEvent(SevInfo, "PhysicalShardCFSize")
+					    .detail("ShardId", id)
+					    .detail("LiveDataSize", liveDataSize);
+
 					std::string propValue = "";
 					ASSERT(shard->db->GetProperty(shard->cf, rocksdb::DB::Properties::kCFStats, &propValue));
-					TraceEvent(SevInfo, "PhysicalShardCFStats").detail("ShardId", id).detail("Detail", propValue);
+					TraceEvent(SevInfo, "PhysicalShardCFStats")
+					    .detail("PhysicalShardID", id)
+					    .detail("Detail", propValue);
 
 					// Get compression ratio for each level.
 					rocksdb::ColumnFamilyMetaData cfMetadata;
@@ -774,8 +946,18 @@ public:
 	}
 
 	rocksdb::Status init() {
+		const double start = now();
 		// Open instance.
-		TraceEvent(SevInfo, "ShardedRocksShardManagerInitBegin", this->logId).detail("DataPath", path);
+		TraceEvent(SevInfo, "ShardedRocksDBInitBegin", this->logId).detail("DataPath", path);
+		if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
+			// Set rate limiter to a higher rate to avoid blocking storage engine initialization.
+			auto rateLimiter = rocksdb::NewGenericRateLimiter((int64_t)5 << 30, // 5GB
+			                                                  100 * 1000, // refill_period_us
+			                                                  10, // fairness
+			                                                  rocksdb::RateLimiter::Mode::kWritesOnly,
+			                                                  SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
+			dbOptions.rate_limiter = std::shared_ptr<rocksdb::RateLimiter>(rateLimiter);
+		}
 		std::vector<std::string> columnFamilies;
 		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
 
@@ -785,15 +967,12 @@ public:
 			if (name == METADATA_SHARD_ID) {
 				foundMetadata = true;
 			}
-			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor(name, cfOptions));
 		}
-
-		ASSERT(foundMetadata || descriptors.size() == 0);
 
 		// Add default column family if it's a newly opened database.
 		if (descriptors.size() == 0) {
-			descriptors.push_back(
-			    rocksdb::ColumnFamilyDescriptor{ DEFAULT_CF_NAME, rocksdb::ColumnFamilyOptions(dbOptions) });
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor("default", cfOptions));
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
@@ -802,6 +981,8 @@ public:
 			logRocksDBError(status, "Open");
 			return status;
 		}
+
+		TraceEvent("ShardedRocksDBOpen").detail("Duraton", now() - start).detail("NumCFs", descriptors.size());
 
 		if (foundMetadata) {
 			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
@@ -815,7 +996,7 @@ public:
 				}
 				physicalShards[shard->id] = shard;
 				columnFamilyMap[handle->GetID()] = handle;
-				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId).detail("PhysicalShard", shard->id);
+				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId).detail("ShardId", shard->id);
 			}
 
 			std::set<std::string> unusedShards(columnFamilies.begin(), columnFamilies.end());
@@ -828,7 +1009,7 @@ public:
 				const int bytes = readRangeInDb(metadataShard.get(),
 				                                keyRange,
 				                                std::max(2, SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT),
-				                                UINT16_MAX,
+				                                SERVER_KNOBS->SHARD_METADATA_SCAN_BYTES_LIMIT,
 				                                &metadata);
 				if (bytes <= 0) {
 					break;
@@ -841,7 +1022,7 @@ public:
 					                  metadata[i + 1].key.removePrefix(shardMappingPrefix));
 					TraceEvent(SevVerbose, "DecodeShardMapping", this->logId)
 					    .detail("Range", range)
-					    .detail("Name", name);
+					    .detail("ShardId", name);
 
 					// Empty name indicates the shard doesn't belong to the SS/KVS.
 					if (name.empty()) {
@@ -877,13 +1058,13 @@ public:
 			}
 
 			for (const auto& name : unusedShards) {
-				TraceEvent(SevDebug, "UnusedShardName", logId).detail("Name", name);
 				auto it = physicalShards.find(name);
 				ASSERT(it != physicalShards.end());
 				auto shard = it->second;
 				if (shard->dataShards.size() == 0) {
 					shard->deleteTimeSec = now();
 					pendingDeletionShards.push_back(name);
+					TraceEvent(SevInfo, "UnusedPhysicalShard", logId).detail("ShardId", name);
 				}
 			}
 			if (unusedShards.size() > 0) {
@@ -892,6 +1073,9 @@ public:
 		} else {
 			// DB is opened with default shard.
 			ASSERT(handles.size() == 1);
+			// Clear the entire key space.
+			rocksdb::WriteOptions options;
+			db->DeleteRange(options, handles[0], toSlice(allKeys.begin), toSlice(specialKeys.end));
 
 			// Add SpecialKeys range. This range should not be modified.
 			std::shared_ptr<PhysicalShard> defaultShard =
@@ -903,8 +1087,7 @@ public:
 			physicalShards[defaultShard->id] = defaultShard;
 
 			// Create metadata shard.
-			auto metadataShard =
-			    std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, rocksdb::ColumnFamilyOptions(dbOptions));
+			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, cfOptions);
 			metadataShard->init();
 			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
@@ -913,7 +1096,6 @@ public:
 			writeBatch = std::make_unique<rocksdb::WriteBatch>();
 			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 			persistRangeMapping(specialKeys, true);
-			rocksdb::WriteOptions options;
 			status = db->Write(options, writeBatch.get());
 			if (!status.ok()) {
 				return status;
@@ -926,7 +1108,12 @@ public:
 		writeBatch = std::make_unique<rocksdb::WriteBatch>();
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
-		TraceEvent(SevInfo, "ShardedRocksShardManagerInitEnd", this->logId).detail("DataPath", path);
+		if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
+			dbOptions.rate_limiter->SetBytesPerSecond(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC);
+		}
+		TraceEvent(SevInfo, "ShardedRocksDBInitEnd", this->logId)
+		    .detail("DataPath", path)
+		    .detail("Duration", now() - start);
 		return status;
 	}
 
@@ -994,24 +1181,33 @@ public:
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
-		TraceEvent(SevInfo, "ShardedRocksAddRangeBegin", this->logId)
-		    .detail("Range", range)
-		    .detail("PhysicalShardID", id);
+		TraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->logId).detail("Range", range).detail("ShardId", id);
 
 		// Newly added range should not overlap with any existing range.
 		auto ranges = dataShardMap.intersectingRanges(range);
 
 		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-			if (it.value() != nullptr && it.value()->physicalShard->id != id) {
-				TraceEvent(SevError, "ShardedRocksAddOverlappingRanges")
-				    .detail("IntersectingRange", it->range())
-				    .detail("DataShardRange", it->value()->range)
-				    .detail("PhysicalShard", it->value()->physicalShard->toString());
+			if (it.value()) {
+				if (it.value()->physicalShard->id == id) {
+					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					    .detail("ErrorType", "RangeAlreadyExist")
+					    .detail("IntersectingRange", it->range())
+					    .detail("DataShardRange", it->value()->range)
+					    .detail("ExpectedShardId", id)
+					    .detail("PhysicalShardID", it->value()->physicalShard->toString());
+				} else {
+					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					    .detail("ErrorType", "ConflictingRange")
+					    .detail("IntersectingRange", it->range())
+					    .detail("DataShardRange", it->value()->range)
+					    .detail("ExpectedShardId", id)
+					    .detail("PhysicalShardID", it->value()->physicalShard->toString());
+				}
+				return nullptr;
 			}
 		}
 
-		auto [it, inserted] = physicalShards.emplace(
-		    id, std::make_shared<PhysicalShard>(db, id, rocksdb::ColumnFamilyOptions(dbOptions)));
+		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
 		activePhysicalShardIds.emplace(id);
@@ -1022,16 +1218,13 @@ public:
 
 		validate();
 
-		TraceEvent(SevInfo, "ShardedRocksAddRangeEnd", this->logId)
-		    .detail("Range", range)
-		    .detail("PhysicalShardID", id);
+		TraceEvent(SevInfo, "ShardedRocksDBRangeAdded", this->logId).detail("Range", range).detail("ShardId", id);
 
 		return shard.get();
 	}
 
 	std::vector<std::string> removeRange(KeyRange range) {
-		TraceEvent(SevInfo, "ShardedRocksRemoveRangeBegin", this->logId).detail("Range", range);
-
+		TraceEvent(SevVerbose, "ShardedRocksRemoveRangeBegin", this->logId).detail("Range", range);
 		std::vector<std::string> shardIds;
 
 		std::vector<DataShard*> newShards;
@@ -1048,21 +1241,30 @@ public:
 			auto existingShard = it.value()->physicalShard;
 			auto shardRange = it.range();
 
-			TraceEvent(SevDebug, "ShardedRocksRemoveRange")
-			    .detail("Range", range)
-			    .detail("IntersectingRange", shardRange)
-			    .detail("DataShardRange", it.value()->range)
-			    .detail("PhysicalShard", existingShard->toString());
-
+			if (SERVER_KNOBS->ROCKSDB_EMPTY_RANGE_CHECK && existingShard->initialized()) {
+				// Enable consistency validation.
+				RangeResult rangeResult;
+				auto bytesRead = readRangeInDb(existingShard, range, 1, UINT16_MAX, &rangeResult);
+				if (bytesRead > 0) {
+					TraceEvent(SevError, "ShardedRocksDBRangeNotEmpty")
+					    .detail("ShardId", existingShard->toString())
+					    .detail("Range", range)
+					    .detail("DataShardRange", shardRange);
+					// Force clear range.
+					writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+					dirtyShards->insert(it.value()->physicalShard);
+				}
+			}
 			ASSERT(it.value()->range == shardRange); // Ranges should be consistent.
+
 			if (range.contains(shardRange)) {
 				existingShard->dataShards.erase(shardRange.begin.toString());
 				TraceEvent(SevInfo, "ShardedRocksRemovedRange")
 				    .detail("Range", range)
 				    .detail("RemovedRange", shardRange)
-				    .detail("PhysicalShard", existingShard->toString());
+				    .detail("ShardId", existingShard->toString());
 				if (existingShard->dataShards.size() == 0) {
-					TraceEvent(SevDebug, "ShardedRocksDB").detail("EmptyShardId", existingShard->id);
+					TraceEvent(SevInfo, "ShardedRocksDBEmptyShard").detail("ShardId", existingShard->id);
 					shardIds.push_back(existingShard->id);
 					existingShard->deleteTimeSec = now();
 					pendingDeletionShards.push_back(existingShard->id);
@@ -1076,9 +1278,11 @@ public:
 			if (shardRange.begin < range.begin) {
 				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(shardRange.begin, range.begin)), existingShard);
+
 				newShards.push_back(dataShard.get());
 				const std::string msg = "Shrink shard from " + Traceable<KeyRangeRef>::toString(shardRange) + " to " +
 				                        Traceable<KeyRangeRef>::toString(dataShard->range);
+
 				existingShard->dataShards[shardRange.begin.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE, SevInfo, msg);
 			}
@@ -1086,9 +1290,11 @@ public:
 			if (shardRange.end > range.end) {
 				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
+
 				newShards.push_back(dataShard.get());
 				const std::string msg = "Shrink shard from " + Traceable<KeyRangeRef>::toString(shardRange) + " to " +
 				                        Traceable<KeyRangeRef>::toString(dataShard->range);
+
 				existingShard->dataShards[range.end.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE, SevInfo, msg);
 			}
@@ -1160,7 +1366,7 @@ public:
 		dirtyShards->insert(it.value()->physicalShard);
 	}
 
-	void clearRange(KeyRangeRef range) {
+	void clearRange(KeyRangeRef range, std::set<Key>* keysSet) {
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
@@ -1168,7 +1374,42 @@ public:
 				TraceEvent(SevDebug, "ShardedRocksDB").detail("ClearNonExistentRange", it.range());
 				continue;
 			}
-			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+
+			auto physicalShard = it.value()->physicalShard;
+
+			// TODO: Disable this once RocksDB is upgraded to a version with range delete improvement.
+			if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS && systemKeys.contains(range)) {
+				auto scanRange = it.range() & range;
+				auto beginSlice = toSlice(scanRange.begin);
+				auto endSlice = toSlice(scanRange.end);
+
+				rocksdb::ReadOptions options = getReadOptions();
+				options.iterate_lower_bound = &beginSlice;
+				options.iterate_upper_bound = &endSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, physicalShard->cf));
+				cursor->Seek(beginSlice);
+				while (cursor->Valid() && toStringRef(cursor->key()) < toStringRef(endSlice)) {
+					writeBatch->Delete(physicalShard->cf, cursor->key());
+					cursor->Next();
+				}
+				if (!cursor->status().ok()) {
+					// if readrange iteration fails, then do a deleteRange.
+					writeBatch->DeleteRange(physicalShard->cf, beginSlice, endSlice);
+				} else {
+
+					auto key = keysSet->lower_bound(scanRange.begin);
+					while (key != keysSet->end() && *key < scanRange.end) {
+						writeBatch->Delete(physicalShard->cf, toSlice(*key));
+						++key;
+					}
+				}
+				++counters->convertedRangeDeletions;
+			} else {
+				writeBatch->DeleteRange(physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+				++physicalShard->numRangeDeletions;
+			}
+
+			// TODO: Skip clear range and compaction when entire CF is cleared.
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -1250,7 +1491,22 @@ public:
 		return existingShards;
 	}
 
+	void flushShard(std::string shardId) {
+		auto it = physicalShards.find(shardId);
+		if (it == physicalShards.end()) {
+			return;
+		}
+		rocksdb::FlushOptions fOptions;
+		fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
+		fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
+
+		db->Flush(fOptions, it->second->cf);
+	}
+
 	void closeAllShards() {
+		if (dbOptions.rate_limiter != nullptr) {
+			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
+		}
 		columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
@@ -1263,10 +1519,16 @@ public:
 	}
 
 	void destroyAllShards() {
-		columnFamilyMap.clear();
-		for (auto& [_, shard] : physicalShards) {
-			shard->deletePending = true;
+		if (dbOptions.rate_limiter != nullptr) {
+			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
 		}
+		auto metadataShard = getMetaDataShard();
+		KeyRange metadataRange = prefixRange(shardMappingPrefix);
+		rocksdb::WriteOptions options;
+		db->DeleteRange(options, physicalShards["default"]->cf, toSlice(allKeys.begin), toSlice(specialKeys.end));
+		db->DeleteRange(options, metadataShard->cf, toSlice(metadataRange.begin), toSlice(metadataRange.end));
+
+		columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
 		auto s = db->Close();
@@ -1274,7 +1536,7 @@ public:
 			logRocksDBError(s, "Close");
 			return;
 		}
-		s = rocksdb::DestroyDB(path, getOptions());
+		s = rocksdb::DestroyDB(path, dbOptions);
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyDB");
 		}
@@ -1286,6 +1548,14 @@ public:
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* getAllShards() { return &physicalShards; }
 
 	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* getColumnFamilyMap() { return &columnFamilyMap; }
+
+	std::vector<rocksdb::ColumnFamilyHandle*> getColumnFamilies() {
+		std::vector<rocksdb::ColumnFamilyHandle*> res;
+		for (auto& [id, cf] : columnFamilyMap) {
+			res.push_back(cf);
+		}
+		return res;
+	}
 
 	size_t numPhysicalShards() const { return physicalShards.size(); };
 
@@ -1302,7 +1572,29 @@ public:
 		return dataMap;
 	}
 
+	CoalescedKeyRangeMap<std::string> getExistingRanges() {
+		CoalescedKeyRangeMap<std::string> existingRanges;
+		existingRanges.insert(allKeys, "");
+		for (auto it : dataShardMap.intersectingRanges(allKeys)) {
+			if (!it.value()) {
+				continue;
+			}
+
+			if (it.value()->physicalShard->id == "kvs-metadata") {
+				continue;
+			}
+
+			existingRanges.insert(it.range(), it.value()->physicalShard->id);
+		}
+		return existingRanges;
+	}
+
 	void validate() {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO <= 0 ||
+		    deterministicRandom()->random01() > SERVER_KNOBS->SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO) {
+			return;
+		}
+
 		TraceEvent(SevVerbose, "ShardedRocksValidateShardManager", this->logId);
 		for (auto s = dataShardMap.ranges().begin(); s != dataShardMap.ranges().end(); ++s) {
 			TraceEvent e(SevVerbose, "ShardedRocksValidateDataShardMap", this->logId);
@@ -1315,6 +1607,10 @@ public:
 				e.detail("Shard", "Empty");
 			}
 			if (shard != nullptr) {
+				if (shard->range != static_cast<KeyRangeRef>(s->range())) {
+					TraceEvent(SevWarnAlways, "ShardRangeMismatch").detail("Range", s->range());
+				}
+
 				ASSERT(shard->range == static_cast<KeyRangeRef>(s->range()));
 				ASSERT(shard->physicalShard != nullptr);
 				auto it = shard->physicalShard->dataShards.find(shard->range.begin.toString());
@@ -1328,6 +1624,7 @@ private:
 	const std::string path;
 	const UID logId;
 	rocksdb::Options dbOptions;
+	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	std::unordered_set<std::string> activePhysicalShardIds;
@@ -1337,6 +1634,7 @@ private:
 	std::unique_ptr<std::set<PhysicalShard*>> dirtyShards;
 	KeyRangeMap<DataShard*> dataShardMap;
 	std::deque<std::string> pendingDeletionShards;
+	Counters* counters;
 };
 
 class RocksDBMetrics {
@@ -1469,7 +1767,8 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		{ "BloomFilterUseful", rocksdb::BLOOM_FILTER_USEFUL, 0 },
 		{ "BloomFilterFullPositive", rocksdb::BLOOM_FILTER_FULL_POSITIVE, 0 },
 		{ "BloomFilterTruePositive", rocksdb::BLOOM_FILTER_FULL_TRUE_POSITIVE, 0 },
-		{ "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
+		// Deprecated in RocksDB 8.0
+		// { "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
 		{ "MemtableHit", rocksdb::MEMTABLE_HIT, 0 },
 		{ "MemtableMiss", rocksdb::MEMTABLE_MISS, 0 },
 		{ "GetHitL0", rocksdb::GET_HIT_L0, 0 },
@@ -1482,8 +1781,9 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		{ "CountDBPrev", rocksdb::NUMBER_DB_PREV, 0 },
 		{ "BloomFilterPrefixChecked", rocksdb::BLOOM_FILTER_PREFIX_CHECKED, 0 },
 		{ "BloomFilterPrefixUseful", rocksdb::BLOOM_FILTER_PREFIX_USEFUL, 0 },
-		{ "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
-		{ "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
+		// Deprecated in RocksDB 8.0
+		// { "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
+		// { "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
 		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
 		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
 		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
@@ -1899,12 +2199,57 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
+	ACTOR static Future<Void> doRestore(ShardedRocksDBKeyValueStore* self,
+	                                    std::string shardId,
+	                                    std::vector<KeyRange> ranges,
+	                                    std::vector<CheckpointMetaData> checkpoints) {
+		for (const KeyRange& range : ranges) {
+			std::vector<DataShard*> shards = self->shardManager.getDataShardsByRange(range);
+			if (!shards.empty()) {
+				TraceEvent te(SevWarnAlways, "RestoreRangesNotEmpty", self->id);
+				te.detail("Range", range);
+				te.detail("RestoreShardID", shardId);
+				for (int i = 0; i < shards.size(); ++i) {
+					te.detail("DataShard-" + std::to_string(i), shards[i]->range);
+				}
+				te.log();
+				throw failed_to_restore_checkpoint();
+			}
+		}
+		for (const KeyRange& range : ranges) {
+			self->shardManager.addRange(range, shardId);
+		}
+		const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
+		TraceEvent(sevDm, "ShardedRocksRestoreAddRange", self->id)
+		    .detail("Ranges", describe(ranges))
+		    .detail("ShardID", shardId)
+		    .detail("Checkpoints", describe(checkpoints));
+		PhysicalShard* ps = self->shardManager.getPhysicalShardForAllRanges(ranges);
+		ASSERT(ps != nullptr);
+		auto a = new Writer::RestoreAction(&self->shardManager, ps, self->path, shardId, ranges, checkpoints);
+		auto res = a->done.getFuture();
+		self->writeThread->post(a);
+
+		try {
+			wait(res);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			for (const KeyRange& range : ranges) {
+				self->shardManager.removeRange(range);
+			}
+			throw;
+		}
+
+		return Void();
+	}
+
 	struct Writer : IThreadPoolReceiver {
 		const UID logId;
 		int threadIndex;
 		std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
 		std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
-		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
 		double sampleStartTime;
 
 		explicit Writer(UID logId,
@@ -1912,14 +2257,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap,
 		                std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
 		  : logId(logId), threadIndex(threadIndex), columnFamilyMap(columnFamilyMap), rocksDBMetrics(rocksDBMetrics),
-		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
-		                    ? rocksdb::NewGenericRateLimiter(
-		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
-		                          100 * 1000, // refill_period_us
-		                          10, // fairness
-		                          rocksdb::RateLimiter::Mode::kWritesOnly,
-		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
-		                    : nullptr),
 		    sampleStartTime(now()) {}
 
 		~Writer() override {}
@@ -1941,15 +2278,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
 			const FlowLock* fetchLock;
-			std::shared_ptr<RocksDBErrorListener> errorListener;
 
 			OpenAction(ShardManager* shardManager,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
-			           const FlowLock* fetchLock,
-			           std::shared_ptr<RocksDBErrorListener> errorListener)
-			  : shardManager(shardManager), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
-			    errorListener(errorListener) {}
+			           const FlowLock* fetchLock)
+			  : shardManager(shardManager), metrics(metrics), readLock(readLock), fetchLock(fetchLock) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -2107,11 +2441,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			for (auto shard : *(a.dirtyShards)) {
-				shard->readIterPool->update();
+			if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+				for (auto shard : *(a.dirtyShards)) {
+					shard->readIterPool->update();
+				}
 			}
 
-			a.done.send(Void());
 			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
 				for (const auto& [id, range] : deletes) {
 					auto cf = columnFamilyMap->find(id);
@@ -2123,6 +2458,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
+			// Check for number of range deletes in shards.
+			// TODO: Disable this once RocksDB is upgraded to a version with range delete improvement.
+			if (SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0) {
+				rocksdb::FlushOptions fOptions;
+				fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
+				fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
+
+				for (auto shard : (*a.dirtyShards)) {
+					if (shard->shouldFlush()) {
+						TraceEvent("FlushCF")
+						    .detail("PhysicalShardId", shard->id)
+						    .detail("NumRangeDeletions", shard->numRangeDeletions);
+						a.db->Flush(fOptions, shard->cf);
+						shard->numRangeDeletions = 0;
+					}
+				}
+			}
+
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
 				rocksDBMetrics->getCommitActionHistogram()->sampleSeconds(currTime - commitBeginTime);
@@ -2130,6 +2483,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			sample();
+
+			a.done.send(Void());
 		}
 
 		struct CloseAction : TypedAction<Writer, CloseAction> {
@@ -2163,25 +2518,36 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(CheckpointAction& a) {
-			TraceEvent(SevInfo, "ShardedRocksDBServeCheckpointBegin", logId)
+			TraceEvent(SevInfo, "ShardedRocksCheckpointBegin", logId)
+			    .detail("CheckpointID", a.request.checkpointID)
 			    .detail("Version", a.request.version)
 			    .detail("Ranges", describe(a.request.ranges))
 			    .detail("Format", static_cast<int>(a.request.format))
 			    .detail("CheckpointDir", a.request.checkpointDir);
 
+			rocksdb::Status s;
+			rocksdb::Checkpoint* checkpoint = nullptr;
+
 			PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.request.ranges);
 			if (ps == nullptr) {
+				TraceEvent(SevInfo, "ShardedRocksCheckpointInvalidPhysicalShard", logId)
+				    .detail("CheckpointID", a.request.checkpointID)
+				    .detail("Version", a.request.version)
+				    .detail("Ranges", describe(a.request.ranges))
+				    .detail("Format", static_cast<int>(a.request.format))
+				    .detail("CheckpointDir", a.request.checkpointDir);
 				a.reply.sendError(failed_to_create_checkpoint());
 				return;
 			}
 
-			rocksdb::Checkpoint* checkpoint = nullptr;
-			rocksdb::Status s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
-			if (!s.ok()) {
-				logRocksDBError(s, "Checkpoint");
-				a.reply.sendError(statusToError(s));
-				return;
-			}
+			TraceEvent(SevDebug, "ShardedRocksCheckpointCF", logId)
+			    .detail("CFName", ps->cf->GetName())
+			    .detail("CheckpointID", a.request.checkpointID)
+			    .detail("Version", a.request.version)
+			    .detail("Ranges", describe(a.request.ranges))
+			    .detail("PhysicalShardRanges", describe(ps->getAllRanges()))
+			    .detail("Format", static_cast<int>(a.request.format))
+			    .detail("CheckpointDir", a.request.checkpointDir);
 
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = getReadOptions();
@@ -2189,8 +2555,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    readOptions, a.shardManager->getSpecialKeysShard()->cf, toSlice(persistVersion), &value);
 
 			if (!s.ok() && !s.IsNotFound()) {
-				logRocksDBError(s, "Checkpoint");
-				a.reply.sendError(statusToError(s));
+				logRocksDBError(s, "ShardedRocksCheckpointReadPersistVersion");
+				a.reply.sendError(failed_to_create_checkpoint());
 				return;
 			}
 
@@ -2198,29 +2564,95 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			                            ? latestVersion
 			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 
-			TraceEvent(SevDebug, "ShardedRocksDBServeCheckpointVersion", logId)
+			TraceEvent(SevDebug, "ShardedRocksCheckpointVersion", logId)
 			    .detail("CheckpointVersion", a.request.version)
 			    .detail("PersistVersion", version);
 			ASSERT(a.request.version == version || a.request.version == latestVersion);
 
-			CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
-			const std::string& checkpointDir = abspath(a.request.checkpointDir);
+			CheckpointMetaData res(a.request.ranges, version, a.request.format, a.request.checkpointID);
+			s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
+			if (!s.ok()) {
+				logRocksDBError(s, "CreateRocksDBCheckpoint");
+				a.reply.sendError(failed_to_create_checkpoint());
+				return;
+			}
 
+			const std::string& checkpointDir = abspath(a.request.checkpointDir);
+			platform::eraseDirectoryRecursive(checkpointDir);
 			if (a.request.format == DataMoveRocksCF) {
-				rocksdb::ExportImportFilesMetaData* pMetadata;
-				platform::eraseDirectoryRecursive(checkpointDir);
+				rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
 				s = checkpoint->ExportColumnFamily(ps->cf, checkpointDir, &pMetadata);
 				if (!s.ok()) {
-					logRocksDBError(s, "ExportColumnFamily");
-					a.reply.sendError(statusToError(s));
+					logRocksDBError(s, "CheckpointExportColumnFamily");
+					a.reply.sendError(failed_to_create_checkpoint());
 					return;
 				}
 
-				populateMetaData(&res, *pMetadata);
+				populateMetaData(&res, pMetadata);
+				rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
 				delete pMetadata;
-				TraceEvent(SevInfo, "ShardedRocksDBServeCheckpointSuccess", logId)
-				    .detail("CheckpointMetaData", res.toString())
-				    .detail("RocksDBCF", getRocksCF(res).toString());
+				if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
+					rocksdb::ImportColumnFamilyOptions importOptions;
+					importOptions.move_files = false;
+					rocksdb::ColumnFamilyHandle* handle;
+					const std::string cfName = deterministicRandom()->randomAlphaNumeric(8);
+					s = a.shardManager->getDb()->CreateColumnFamilyWithImport(
+					    getCFOptions(), cfName, importOptions, metadata, &handle);
+					if (!s.ok()) {
+						TraceEvent(SevError, "ShardedRocksCheckpointValidateImportError", logId)
+						    .detail("Status", s.ToString())
+						    .detail("CheckpointID", a.request.checkpointID)
+						    .detail("Ranges", describe(a.request.ranges))
+						    .detail("CheckDir", a.request.checkpointDir)
+						    .detail("CheckpointVersion", a.request.version)
+						    .detail("PersistVersion", version);
+						a.reply.sendError(failed_to_create_checkpoint());
+						return;
+					}
+
+					auto options = getReadOptions();
+					rocksdb::Iterator* oriIter = a.shardManager->getDb()->NewIterator(options, ps->cf);
+					rocksdb::Iterator* resIter = a.shardManager->getDb()->NewIterator(options, handle);
+					oriIter->SeekToFirst();
+					resIter->SeekToFirst();
+					while (oriIter->Valid() && resIter->Valid()) {
+						if (oriIter->key().compare(resIter->key()) != 0 ||
+						    oriIter->value().compare(resIter->value()) != 0) {
+							TraceEvent(SevError, "ShardedRocksCheckpointValidateError", logId)
+							    .detail("KeyInDB", toStringRef(oriIter->key()))
+							    .detail("ValueInDB", toStringRef(oriIter->value()))
+							    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+							    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+
+							a.reply.sendError(failed_to_create_checkpoint());
+							return;
+						}
+						oriIter->Next();
+						resIter->Next();
+					}
+					if (oriIter->Valid() || resIter->Valid()) {
+						a.reply.sendError(failed_to_create_checkpoint());
+						return;
+					}
+					delete oriIter;
+					delete resIter;
+
+					s = a.shardManager->getDb()->DropColumnFamily(handle);
+					if (!s.ok()) {
+						logRocksDBError(s, "CheckpointDropColumnFamily");
+						a.reply.sendError(failed_to_create_checkpoint());
+						return;
+					}
+					s = a.shardManager->getDb()->DestroyColumnFamilyHandle(handle);
+					if (!s.ok()) {
+						logRocksDBError(s, "CheckpointDestroyColumnFamily");
+						a.reply.sendError(failed_to_create_checkpoint());
+						return;
+					}
+					TraceEvent(SevDebug, "ShardedRocksCheckpointValidateSuccess", logId)
+					    .detail("CheckpointVersion", a.request.version)
+					    .detail("PersistVersion", version);
+				}
 			} else {
 				if (checkpoint != nullptr) {
 					delete checkpoint;
@@ -2229,24 +2661,30 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
+			res.setState(CheckpointMetaData::Complete);
+			res.dir = a.request.checkpointDir;
+			a.reply.send(res);
+
 			if (checkpoint != nullptr) {
 				delete checkpoint;
 			}
-			res.setState(CheckpointMetaData::Complete);
-			a.reply.send(res);
+			TraceEvent(SevInfo, "ShardedRocksCheckpointEnd", logId).detail("Checkpoint", res.toString());
 		}
 
 		struct RestoreAction : TypedAction<Writer, RestoreAction> {
 			RestoreAction(ShardManager* shardManager,
+			              PhysicalShard* ps,
 			              const std::string& path,
 			              const std::string& shardId,
 			              const std::vector<KeyRange>& ranges,
 			              const std::vector<CheckpointMetaData>& checkpoints)
-			  : shardManager(shardManager), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints) {}
+			  : shardManager(shardManager), ps(ps), path(path), shardId(shardId), ranges(ranges),
+			    checkpoints(checkpoints) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
 			ShardManager* shardManager;
+			PhysicalShard* ps;
 			const std::string path;
 			const std::string shardId;
 			std::vector<KeyRange> ranges;
@@ -2261,7 +2699,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(!a.checkpoints.empty());
 
-			PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			// PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			PhysicalShard* ps = a.ps;
 			ASSERT(ps != nullptr);
 
 			const CheckpointFormat format = a.checkpoints[0].getFormat();
@@ -2277,6 +2716,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
 			if (format == DataMoveRocksCF) {
+				if (a.checkpoints.size() > 1) {
+					TraceEvent(SevError, "ShardedRocksDBRestoreMultipleCFs", logId)
+					    .detail("Path", a.path)
+					    .detail("Checkpoints", describe(a.checkpoints));
+					a.done.sendError(failed_to_restore_checkpoint());
+					return;
+				}
 				CheckpointMetaData& checkpoint = a.checkpoints.front();
 				std::sort(a.ranges.begin(), a.ranges.end(), KeyRangeRef::ArbitraryOrder());
 				std::sort(checkpoint.ranges.begin(), checkpoint.ranges.end(), KeyRangeRef::ArbitraryOrder());
@@ -2310,8 +2756,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				status = ps->restore(a.checkpoints[0]);
 
 				if (!status.ok()) {
-					logRocksDBError(status, "Restore");
-					a.done.sendError(statusToError(status));
+					a.done.sendError(failed_to_restore_checkpoint());
 					return;
 				} else {
 					ASSERT(ps->initialized());
@@ -2330,6 +2775,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("RestoreRanges", describe(a.ranges))
 						    .detail("ClearExtraRange", cRange);
 						writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
+						status = a.shardManager->getDb()->Write(options, &writeBatch);
+						if (!status.ok()) {
+							logRocksDBError(status, "RestoreClearnExtraRanges");
+							a.done.sendError(statusToError(status));
+							return;
+						}
 					}
 				}
 			} else if (format == RocksDBKeyValues) {
@@ -2339,6 +2790,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				std::vector<RocksDBCheckpointKeyValues> rkvs;
 				for (const auto& checkpoint : a.checkpoints) {
 					rkvs.push_back(getRocksKeyValuesCheckpoint(checkpoint));
+					ASSERT(!rkvs.back().fetchedFiles.empty());
 					for (const auto& file : rkvs.back().fetchedFiles) {
 						fetchedRanges.push_back(file.range);
 					}
@@ -2367,6 +2819,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
 					    .detail("Reason", "RestoreFilesRangesMismatch")
 					    .detail("Ranges", describe(a.ranges))
+					    .setMaxFieldLength(1000)
 					    .detail("FetchedFiles", describe(rkvs));
 					a.done.sendError(failed_to_restore_checkpoint());
 					return;
@@ -2378,6 +2831,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Checkpoints", describe(a.checkpoints))
 					    .detail("PhysicalShard", ps->toString());
 					status = ps->init();
+					if (!status.ok()) {
+						logRocksDBError(status, "RestoreInitPhysicalShard");
+						a.done.sendError(statusToError(status));
+						return;
+					}
+					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
 				}
 				if (!status.ok()) {
 					logRocksDBError(status, "RestoreInitPhysicalShard");
@@ -2398,7 +2857,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 
 				if (!status.ok()) {
-					logRocksDBError(status, "RestoreIngestFile");
+					TraceEvent(SevWarnAlways, "ShardedRocksRestoreError", logId).detail("Status", status.ToString());
 					for (const auto& range : a.ranges) {
 						writeBatch.DeleteRange(ps->cf, toSlice(range.begin), toSlice(range.end));
 					}
@@ -2416,7 +2875,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("PhysicalShard", ps->toString())
 						    .detail("RestoreRanges", describe(a.ranges));
 					}
-					a.done.sendError(statusToError(status));
+					a.done.sendError(failed_to_restore_checkpoint());
 					return;
 				}
 			} else if (format == RocksDB) {
@@ -2424,25 +2883,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			// Persist ShardedRocks shard mapping metadata.
-			for (const KeyRange& range : a.ranges) {
-				a.shardManager->populateRangeMappingMutations(&writeBatch, range, /*isAdd=*/true);
-			}
-
-			status = a.shardManager->getDb()->Write(options, &writeBatch);
-			if (!status.ok()) {
-				logRocksDBError(status, "RestorePersistMetaData");
-				a.done.sendError(statusToError(status));
-				return;
-			}
-			TraceEvent(SevDebug, "ShardedRocksRestoredMetaDataPersisted", logId)
-			    .detail("Path", a.path)
-			    .detail("Checkpoints", describe(a.checkpoints));
-			a.shardManager->getMetaDataShard()->refreshReadIteratorPool();
-			a.done.send(Void());
 			TraceEvent(SevInfo, "ShardedRocksDBRestoreEnd", logId)
 			    .detail("Path", a.path)
 			    .detail("Checkpoints", describe(a.checkpoints));
+			a.done.send(Void());
 		}
 	};
 
@@ -2475,14 +2919,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			PhysicalShard* shard;
+			ReadType type;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValueAction(KeyRef key, PhysicalShard* shard, Optional<UID> debugID)
-			  : key(key), shard(shard), debugID(debugID), startTime(timer_monotonic()),
+			ReadValueAction(KeyRef key, PhysicalShard* shard, ReadType type, Optional<UID> debugID)
+			  : key(key), shard(shard), type(type), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
 			}
@@ -2500,12 +2945,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValueTimeout) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+			    readBeginTime - a.startTime > readValueTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", readValueTimeout);
-				a.result.sendError(key_value_store_deadline_exceeded());
+				if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+					a.result.sendError(server_overloaded());
+				} else {
+					a.result.sendError(key_value_store_deadline_exceeded());
+				}
 				return;
 			}
 
@@ -2513,7 +2963,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto options = getReadOptions();
 
 			auto db = a.shard->db;
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
@@ -2553,14 +3003,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			int maxLength;
 			PhysicalShard* shard;
+			ReadType type;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), shard(shard), debugID(debugID), startTime(timer_monotonic()),
+			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, ReadType type, Optional<UID> debugID)
+			  : key(key), maxLength(maxLength), shard(shard), type(type), debugID(debugID),
+			    startTime(timer_monotonic()),
 			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			                      ? true
 			                      : false){};
@@ -2580,19 +3032,25 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValuePrefixTimeout) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+			    readBeginTime - a.startTime > readValuePrefixTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", readValuePrefixTimeout);
-				a.result.sendError(key_value_store_deadline_exceeded());
+
+				if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+					a.result.sendError(server_overloaded());
+				} else {
+					a.result.sendError(key_value_store_deadline_exceeded());
+				}
 				return;
 			}
 
 			rocksdb::PinnableSlice value;
 			auto options = getReadOptions();
 			auto db = a.shard->db;
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
@@ -2635,12 +3093,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			KeyRange keys;
 			std::vector<std::pair<PhysicalShard*, KeyRange>> shardRanges;
 			int rowLimit, byteLimit;
+			ReadType type;
 			double startTime;
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
+			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit, ReadType type)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
 				std::set<PhysicalShard*> usedShards;
@@ -2663,12 +3122,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readRangeTimeout) {
+			if (shouldThrottle(a.type, a.keys.begin) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+			    readBeginTime - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
-				a.result.sendError(key_value_store_deadline_exceeded());
+
+				if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+					a.result.sendError(server_overloaded());
+				} else {
+					a.result.sendError(key_value_store_deadline_exceeded());
+				}
 				return;
 			}
 
@@ -2710,21 +3175,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 
-				if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && timer_monotonic() - a.startTime > readRangeTimeout) {
+				if (shouldThrottle(a.type, a.keys.begin) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+				    timer_monotonic() - a.startTime > readRangeTimeout) {
 					TraceEvent(SevInfo, "ShardedRocksDBTimeout")
 					    .detail("Action", "ReadRange")
 					    .detail("ShardsRead", numShards)
 					    .detail("BytesRead", accumulatedBytes);
-					a.result.sendError(key_value_store_deadline_exceeded());
+
+					if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+						a.result.sendError(server_overloaded());
+					} else {
+						a.result.sendError(key_value_store_deadline_exceeded());
+					}
 					return;
 				}
 			}
 
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			if (result.more) {
-				result.readThrough = result[result.size() - 1].key;
-			}
 			a.result.send(result);
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
@@ -2739,15 +3207,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	};
 
-	struct Counters {
-		CounterCollection cc;
-		Counter immediateThrottle;
-		Counter failedToAcquire;
-
-		Counters()
-		  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc) {}
-	};
-
 	// Persist shard mappinng key range should not be in shardMap.
 	explicit ShardedRocksDBKeyValueStore(const std::string& path, UID id)
 	  : rState(std::make_shared<ShardedRocksDBState>()), path(path), id(id),
@@ -2755,8 +3214,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
-	    dbOptions(getOptions()), shardManager(path, id, dbOptions),
+	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(forwardError(errorListener->getFuture())),
+	    dbOptions(getOptions()), shardManager(path, id, dbOptions, errorListener, &counters),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
@@ -2794,14 +3253,36 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->refreshHolder.cancel();
 		self->cleanUpJob.cancel();
 
-		wait(self->readThreads->stop());
+		try {
+			wait(self->readThreads->stop());
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseReadThreadError").errorUnsuppressed(e);
+		}
+
+		TraceEvent("CloseKeyValueStore").detail("DeleteKVS", deleteOnClose);
 		auto a = new Writer::CloseAction(&self->shardManager, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
-		wait(f);
-		wait(self->writeThread->stop());
-		if (self->closePromise.canBeSet())
+		try {
+			wait(f);
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseActionError").errorUnsuppressed(e);
+		}
+
+		try {
+			wait(self->writeThread->stop());
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
+		}
+
+		if (deleteOnClose && directoryExists(self->path)) {
+			TraceEvent(SevWarn, "DirectoryNotEmpty", self->id).detail("Path", self->path);
+			platform::eraseDirectoryRecursive(self->path);
+		}
+
+		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
+		}
 		delete self;
 	}
 
@@ -2822,8 +3303,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			// of opening and closing multiple rocksdb instances, we reconcile the shard map using persist shard
 			// mapping data.
 		} else {
-			auto a = std::make_unique<Writer::OpenAction>(
-			    &shardManager, metrics, &readSemaphore, &fetchSemaphore, errorListener);
+			auto a = std::make_unique<Writer::OpenAction>(&shardManager, metrics, &readSemaphore, &fetchSemaphore);
 			openFuture = a->done.getFuture();
 			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
@@ -2845,13 +3325,19 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	void set(KeyValueRef kv, const Arena*) override { shardManager.put(kv.key, kv.value); }
+	void set(KeyValueRef kv, const Arena*) override {
+		shardManager.put(kv.key, kv.value);
+		if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS && systemKeys.contains(kv.key)) {
+			keysSet.insert(kv.key);
+		}
+	}
 
-	void clear(KeyRangeRef range, const StorageServerMetrics*, const Arena*) override {
+	void clear(KeyRangeRef range, const Arena*) override {
 		if (range.singleKeyRange()) {
 			shardManager.clear(range.begin);
+			keysSet.erase(range.begin);
 		} else {
-			shardManager.clearRange(range);
+			shardManager.clearRange(range, &keysSet);
 		}
 	}
 
@@ -2877,10 +3363,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                                  shardManager.getWriteBatch(),
 		                                  shardManager.getDirtyShards(),
 		                                  shardManager.getColumnFamilyMap());
+		keysSet.clear();
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
 	}
+
+	void flushShard(std::string shardId) { return shardManager.flushShard(shardId); }
 
 	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
 		if (semaphore.waiters() > maxWaiters) {
@@ -2932,7 +3421,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValueAction(key, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValueAction(key, shard->physicalShard, type, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2942,7 +3431,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, type, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2965,7 +3454,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, type, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2975,7 +3464,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, type, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -3012,7 +3501,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, keys.begin)) {
-			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
+			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit, type);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -3022,7 +3511,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 		checkWaiters(semaphore, maxWaiters);
 
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit);
+		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit, type);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -3040,11 +3529,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 				auto shards = shardManager->getPendingDeletionShards(cleanUpDelay);
-				auto a = new Writer::RemoveShardAction(shards);
-				Future<Void> f = a->done.getFuture();
-				writeThread->post(a);
-				TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
-				wait(f);
+				if (shards.size() > 0) {
+					auto a = new Writer::RemoveShardAction(shards);
+					Future<Void> f = a->done.getFuture();
+					writeThread->post(a);
+					TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
+					wait(f);
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -3075,22 +3566,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> restore(const std::string& shardId,
 	                     const std::vector<KeyRange>& ranges,
 	                     const std::vector<CheckpointMetaData>& checkpoints) override {
-		for (const KeyRange& range : ranges) {
-			std::vector<DataShard*> shards = shardManager.getDataShardsByRange(range);
-			if (!shards.empty()) {
-				TraceEvent(SevWarnAlways, "RestoreRangesNotEmpty", id)
-				    .detail("Range", range)
-				    .detail("RestoreShardID", shardId);
-				throw failed_to_restore_checkpoint();
-			}
-		}
-		for (const KeyRange& range : ranges) {
-			shardManager.addRange(range, shardId);
-		}
-		auto a = new Writer::RestoreAction(&shardManager, path, shardId, ranges, checkpoints);
-		auto res = a->done.getFuture();
-		writeThread->post(a);
-		return res;
+		return doRestore(this, shardId, ranges, checkpoints);
 	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }
@@ -3102,15 +3578,22 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
 
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
+	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
+
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;
+	std::shared_ptr<RocksDBErrorListener> errorListener;
 	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;
 	UID id;
+	std::set<Key> keysSet;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	std::shared_ptr<RocksDBErrorListener> errorListener;
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
@@ -3124,6 +3607,55 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> cleanUpJob;
 };
 
+ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
+	state std::string checkpointDir = "checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
+	platform::eraseDirectoryRecursive(checkpointDir);
+	CheckpointRequest request(
+	    latestVersion, ranges, DataMoveRocksCF, deterministicRandom()->randomUniqueID(), checkpointDir);
+	state CheckpointMetaData checkpoint = wait(kvStore->checkpoint(request));
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+
+	TraceEvent(SevDebug, "ShardedRocksCheckpointTest")
+	    .detail("Checkpoint", checkpoint.toString())
+	    .detail("ColumnFamily", rocksCF.toString());
+
+	state std::string rocksDBRestoreDir = "sharded-rocks-restore" + deterministicRandom()->randomAlphaNumeric(5);
+	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
+	state IKeyValueStore* restoreKv = keyValueStoreShardedRocksDB(
+	    rocksDBRestoreDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
+	wait(restoreKv->init());
+	try {
+		const std::string shardId = "restoredShard";
+		wait(restoreKv->restore(shardId, ranges, { checkpoint }));
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "TestRestoreCheckpointError")
+		    .errorUnsuppressed(e)
+		    .detail("Checkpoint", checkpoint.toString());
+		throw;
+	}
+
+	state int i = 0;
+	for (; i < ranges.size(); ++i) {
+		state RangeResult restoreResult = wait(restoreKv->readRange(ranges[i]));
+		RangeResult result = wait(kvStore->readRange(ranges[i]));
+		ASSERT(!restoreResult.more && !result.more);
+		ASSERT(restoreResult.size() == result.size());
+		for (int i = 0; i < result.size(); ++i) {
+			TraceEvent(SevDebug, "ReadKeyValueFromRestoredRocks")
+			    .detail("Key", result[i].key)
+			    .detail("Value", result[i].value)
+			    .detail("RestoreKey", restoreResult[i].key)
+			    .detail("RestoreValue", restoreResult[i].value);
+			ASSERT(result[i].key == restoreResult[i].key);
+			ASSERT(result[i].value == restoreResult[i].value);
+		}
+	}
+
+	Future<Void> restoreKvClose = restoreKv->onClosed();
+	restoreKv->close();
+	wait(restoreKvClose);
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
@@ -3157,6 +3689,7 @@ TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
 	wait(closed);
+	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
 
@@ -3185,6 +3718,7 @@ TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
 	wait(closed);
+	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
 
@@ -3343,7 +3877,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 		kvStore->dispose();
 		wait(closed);
 	}
-
+	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
 
@@ -3450,6 +3984,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 		kvStore->dispose();
 		wait(closed);
 	}
+	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
 
@@ -3599,7 +4134,7 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 		kvStore->dispose();
 		wait(closed);
 	}
-
+	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
 
@@ -3696,6 +4231,279 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 	platform::eraseDirectoryRecursive(checkpointDir);
 
+	return Void();
+}
+
+TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
+	state std::string rocksDBTestDir = "sharded-rocks-checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
+	state std::map<Key, Value> kvs({ { "ab"_sr, "TestValueAB"_sr },
+	                                 { "ad"_sr, "TestValueAD"_sr },
+	                                 { "b"_sr, "TestValueB"_sr },
+	                                 { "ba"_sr, "TestValueBA"_sr },
+	                                 { "c"_sr, "TestValueC"_sr },
+	                                 { "d"_sr, "TestValueD"_sr },
+	                                 { "e"_sr, "TestValueE"_sr },
+	                                 { "h"_sr, "TestValueH"_sr },
+	                                 { "ha"_sr, "TestValueHA"_sr } });
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state std::string shardId = "shard_1";
+	state std::string emptyShardId = "shard_2";
+	state KeyRangeRef rangeK(""_sr, "k"_sr);
+	state KeyRangeRef rangeKz("z1"_sr, "z3"_sr);
+	// // Add some ranges.
+	std::vector<Future<Void>> addRangeFutures;
+	addRangeFutures.push_back(kvStore->addRange(rangeK, shardId));
+	addRangeFutures.push_back(kvStore->addRange(rangeKz, emptyShardId));
+	kvStore->persistRangeMapping(rangeK, true);
+	kvStore->persistRangeMapping(rangeKz, true);
+	wait(waitForAll(addRangeFutures));
+	wait(kvStore->commit(false));
+
+	for (const auto& [k, v] : kvs) {
+		kvStore->set(KeyValueRef(k, v));
+	}
+	wait(kvStore->commit(false));
+	kvStore->clear(KeyRangeRef(""_sr, "z"_sr));
+	wait(kvStore->commit(false));
+
+	state Error err;
+	try {
+		wait(testCheckpointRestore(kvStore, { rangeK }));
+	} catch (Error& e) {
+		TraceEvent(SevError, "TestCheckpointRestoreError").errorUnsuppressed(e);
+		err = e;
+	}
+	// This will fail once RocksDB is upgraded to 8.1.
+	// ASSERT(err.code() == error_code_failed_to_restore_checkpoint);
+
+	try {
+		wait(testCheckpointRestore(kvStore, { rangeKz }));
+	} catch (Error& e) {
+		TraceEvent("TestCheckpointRestoreError").errorUnsuppressed(e);
+		err = e;
+	}
+
+	std::vector<Future<Void>> closes;
+	closes.push_back(kvStore->onClosed());
+	kvStore->close();
+	wait(waitForAll(closes));
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	return Void();
+}
+
+TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
+	state std::string localFile = "rocksdb-sst-file-dump.sst";
+	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	// Write nothing to sst file
+	sstWriter->open(localFile);
+	bool anyFileCreated = sstWriter->finish();
+	ASSERT(!anyFileCreated);
+	// Write kvs1 to sst file
+	state std::map<Key, Value> kvs1({ { "a"_sr, "1"_sr },
+	                                  { "ab"_sr, "12"_sr },
+	                                  { "ad"_sr, "14"_sr },
+	                                  { "b"_sr, "2"_sr },
+	                                  { "ba"_sr, "21"_sr },
+	                                  { "c"_sr, "3"_sr },
+	                                  { "d"_sr, "4"_sr },
+	                                  { "e"_sr, "5"_sr },
+	                                  { "h"_sr, "8"_sr },
+	                                  { "ha"_sr, "81"_sr } });
+	sstWriter = newRocksDBSstFileWriter();
+	sstWriter->open(localFile);
+	for (const auto& [key, value] : kvs1) {
+		sstWriter->write(key, value);
+	}
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
+	// Write kvs2 to the same sst file where kvs2 keys are different from kvs1
+	state std::map<Key, Value> kvs2({ { "fa"_sr, "61"_sr },
+	                                  { "fab"_sr, "612"_sr },
+	                                  { "fad"_sr, "614"_sr },
+	                                  { "fb"_sr, "62"_sr },
+	                                  { "fba"_sr, "621"_sr },
+	                                  { "fc"_sr, "63"_sr },
+	                                  { "fd"_sr, "64"_sr },
+	                                  { "fe"_sr, "65"_sr },
+	                                  { "fh"_sr, "68"_sr },
+	                                  { "fha"_sr, "681"_sr } });
+	sstWriter->open(localFile);
+	for (const auto& [key, value] : kvs2) {
+		sstWriter->write(key, value);
+	}
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
+	// Write kvs3 to the same sst file where kvs3 modifies values of kvs2
+	state std::map<Key, Value> kvs3({ { "fa"_sr, "1"_sr },
+	                                  { "fab"_sr, "12"_sr },
+	                                  { "fad"_sr, "14"_sr },
+	                                  { "fb"_sr, "2"_sr },
+	                                  { "fba"_sr, "21"_sr },
+	                                  { "fc"_sr, "3"_sr },
+	                                  { "fd"_sr, "4"_sr },
+	                                  { "fe"_sr, "5"_sr },
+	                                  { "fh"_sr, "8"_sr },
+	                                  { "fha"_sr, "81"_sr } });
+	sstWriter->open(localFile);
+	for (const auto& [key, value] : kvs3) {
+		sstWriter->write(key, value);
+	}
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
+	// Check: sst only contains kv of kvs3
+	rocksdb::Status status;
+	rocksdb::IngestExternalFileOptions ingestOptions;
+	rocksdb::DB* db;
+	rocksdb::Options options;
+	options.create_if_missing = true;
+	status = rocksdb::DB::Open(options, "testdb", &db);
+	ASSERT(status.ok());
+	status = db->IngestExternalFile({ localFile }, ingestOptions);
+	ASSERT(status.ok());
+	std::string value;
+	for (const auto& [key, targetValue] : kvs1) {
+		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
+		ASSERT(status.IsNotFound());
+	}
+	for (const auto& [key, targetValue] : kvs2) {
+		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
+		ASSERT(value != targetValue.toString());
+	}
+	for (const auto& [key, targetValue] : kvs3) {
+		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
+		ASSERT(status.ok());
+		ASSERT(value == targetValue.toString());
+	}
+	delete db;
+	return Void();
+}
+
+TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
+	state int deleteCount = params.getInt("deleteCount").orDefault(20000);
+	std::cout << "delete count: " << deleteCount << "\n";
+
+	state std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state KeyRef shardPrefix = "\xffprefix/"_sr;
+	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
+	state int i = 0;
+	state std::string key1;
+	state std::string key2;
+	for (; i < deleteCount; ++i) {
+		key1 = format("\xffprefix/%d", i);
+		key2 = format("\xffprefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+	}
+
+	std::cout << "start flush\n";
+	auto rocksdb = (ShardedRocksDBKeyValueStore*)kvStore;
+	rocksdb->flushShard("shard-1");
+	std::cout << "flush complete\n";
+
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
+
+	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	std::cout << "Restarted.\n";
+	i = 0;
+
+	for (; i < deleteCount; ++i) {
+		key1 = format("\xffprefix/%d", i);
+		key2 = format("\xffprefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+		if (i % 100 == 0) {
+			std::cout << "Commit: " << i << "\n";
+		}
+	}
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	ASSERT(!directoryExists(rocksDBTestDir));
+	return Void();
+}
+
+TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
+	state int deleteCount = params.getInt("deleteCount").orDefault(20000);
+	std::cout << "delete count: " << deleteCount << "\n";
+
+	state std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state KeyRef shardPrefix = "prefix/"_sr;
+	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
+	state int i = 0;
+	state std::string key1;
+	state std::string key2;
+	for (; i < deleteCount; ++i) {
+		key1 = format("prefix/%d", i);
+		key2 = format("prefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+	}
+
+	std::cout << "start flush\n";
+	auto rocksdb = (ShardedRocksDBKeyValueStore*)kvStore;
+	rocksdb->flushShard("shard-1");
+	std::cout << "flush complete\n";
+
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
+
+	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	std::cout << "Restarted.\n";
+	i = 0;
+	for (; i < deleteCount; ++i) {
+		key1 = format("prefix/%d", i);
+		key2 = format("prefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+		if (i % 100 == 0) {
+			std::cout << "Commit: " << i << "\n";
+		}
+	}
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
 } // namespace

@@ -26,6 +26,7 @@
 #define FDBRPC_TSS_COMPARISON_H
 
 #include "fdbrpc/Stats.h"
+#include <unordered_map>
 
 // refcounted + noncopyable because both DatabaseContext and individual endpoints share ownership
 struct DetailedTSSMismatch {

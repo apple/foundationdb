@@ -21,7 +21,7 @@
 // Unit tests for the FoundationDB C API.
 
 #include "fdb_c_options.g.h"
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -269,7 +269,6 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
                                       int target_bytes,
                                       FDBStreamingMode mode,
                                       int iteration,
-                                      int matchIndex,
                                       fdb_bool_t snapshot,
                                       fdb_bool_t reverse) {
 	fdb::MappedKeyValueArrayFuture f1 = tr.get_mapped_range(begin_key_name,
@@ -286,7 +285,6 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 	                                                        target_bytes,
 	                                                        mode,
 	                                                        iteration,
-	                                                        matchIndex,
 	                                                        snapshot,
 	                                                        reverse);
 
@@ -961,11 +959,7 @@ std::map<std::string, std::string> fillInRecords(int n) {
 	return data;
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId,
-                                           int endId,
-                                           fdb::Transaction& tr,
-                                           std::string mapper,
-                                           int matchIndex) {
+GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, std::string mapper) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
@@ -979,19 +973,14 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
-	    /* matchIndex */ matchIndex,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId,
-                                           int endId,
-                                           fdb::Transaction& tr,
-                                           int matchIndex,
-                                           bool allMissing) {
+GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, bool allMissing) {
 	std::string mapper =
 	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
-	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
+	return getMappedIndexEntries(beginId, endId, tr, mapper);
 }
 
 TEST_CASE("versionstamp_unit_test") {
@@ -1070,16 +1059,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		const double r = deterministicRandom()->random01();
-		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
-			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
-			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
-			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
-		}
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, false);
+		auto result = getMappedIndexEntries(beginId, endId, tr, false);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -1094,15 +1074,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
 			const auto& mkv = result.mkvs[i];
-			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			} else {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			}
+			CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			CHECK(EMPTY.compare(mkv.value) == 0);
 			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
@@ -1124,16 +1096,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		const double r = deterministicRandom()->random01();
-		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
-			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
-			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
-			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
-		}
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, true);
+		auto result = getMappedIndexEntries(beginId, endId, tr, true);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -1148,15 +1111,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
 			const auto& mkv = result.mkvs[i];
-			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			}
+			CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			CHECK(EMPTY.compare(mkv.value) == 0);
 		}
 		break;
@@ -1176,7 +1131,6 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
-	    /* matchIndex */ MATCH_INDEX_ALL,
 	    /* snapshot */ true, // Set snapshot to true
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
@@ -1196,7 +1150,6 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
-	    /* matchIndex */ MATCH_INDEX_ALL,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
@@ -1225,7 +1178,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
 	};
 	assertNotTuple(mapper);
 	fdb::Transaction tr(db);
-	auto result = getMappedIndexEntries(1, 3, tr, mapper, MATCH_INDEX_ALL);
+	auto result = getMappedIndexEntries(1, 3, tr, mapper);
 	ASSERT(result.err == error_code_mapper_not_tuple);
 }
 
@@ -1929,6 +1882,30 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 		int64_t out_version;
 		fdb_check(tr.get_committed_version(&out_version));
 		CHECK(out_version >= 0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
+	fdb::Transaction tr(db);
+	while (1) {
+		fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		fdb::DoubleFuture f2 = tr.get_tag_throttled_duration();
+		err = wait_future(f2);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		double tagThrottledDuration;
+		fdb_check(f2.get(&tagThrottledDuration));
+		CHECK(tagThrottledDuration >= 0.0);
 		break;
 	}
 }

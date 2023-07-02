@@ -10,6 +10,7 @@ import os.path
 import sys
 
 import lib.local_cluster
+import lib.fdb_process
 
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,8 @@ async def run_fdbservers(num_processes, work_dir, cluster_file, port):
     async with lib.local_cluster.FDBServerLocalCluster(
         num_processes, work_dir, cluster_file, port
     ):
-        await asyncio.sleep(20)
+        while True:
+            await asyncio.sleep(1)
 
 
 def main():

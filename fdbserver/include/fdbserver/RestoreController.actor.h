@@ -238,7 +238,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	                                                                   int rangeIdx,
 	                                                                   const std::vector<RestoreFileFR>& logFiles) {
 		double size = 0;
-		TraceEvent(SevDebug, "FastRestoreGetVersionSize")
+		TraceEvent(SevVerbose, "FastRestoreGetVersionSize")
 		    .detail("PreviousVersion", prevVersion)
 		    .detail("NextVersion", nextVersion)
 		    .detail("RangeFiles", rangeFiles.size())
@@ -246,7 +246,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		    .detail("LogFiles", logFiles.size());
 		ASSERT(prevVersion <= nextVersion);
 		while (rangeIdx < rangeFiles.size()) {
-			TraceEvent(SevDebug, "FastRestoreGetVersionSize").detail("RangeFile", rangeFiles[rangeIdx].toString());
+			TraceEvent(SevVerbose, "FastRestoreGetVersionSize").detail("RangeFile", rangeFiles[rangeIdx].toString());
 			if (rangeFiles[rangeIdx].version < nextVersion) {
 				ASSERT(rangeFiles[rangeIdx].version >= prevVersion);
 				size += rangeFiles[rangeIdx].fileSize;

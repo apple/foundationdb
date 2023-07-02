@@ -113,6 +113,7 @@ protected:
 	fdb::Key randomNotExistingKey(std::optional<int> tenantId);
 	fdb::Key randomExistingKey(std::optional<int> tenantId);
 	fdb::Key randomKey(double existingKeyRatio, std::optional<int> tenantId);
+	fdb::KeyRange randomNonEmptyKeyRange();
 
 	// Chooses a random tenant from the available tenants (or an empty optional if tenants aren't used in the test)
 	std::optional<int> randomTenant();
@@ -134,12 +135,12 @@ protected:
 	// Generic BlobGranules setup.
 	void setupBlobGranules(TTaskFct cont);
 	void blobbifyTenant(std::optional<int> tenantId, std::shared_ptr<std::atomic<int>> blobbifiedCount, TTaskFct cont);
-	void verifyTenant(std::optional<int> tenantId, std::shared_ptr<std::atomic<int>> blobbifiedCount, TTaskFct cont);
 
 private:
 	void populateDataTx(TTaskFct cont, std::optional<int> tenantId);
 	void populateTenantData(TTaskFct cont, std::optional<int> tenantId);
 	void createTenants(TTaskFct cont);
+	void createTenantsIfNecessary(TTaskFct cont);
 
 	void clearTenantData(TTaskFct cont, std::optional<int> tenantId);
 

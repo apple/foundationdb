@@ -21,6 +21,9 @@
 #include "flow/Arena.h"
 
 #include "flow/UnitTest.h"
+#include "flow/ScopeExit.h"
+
+#include "flow/config.h"
 
 // We don't align memory properly, and we need to tell lsan about that.
 extern "C" const char* __lsan_default_options(void) {
@@ -133,8 +136,6 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
 }
 
-FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
-
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
 		allowAccess(impl.getPtr());
@@ -176,6 +177,9 @@ void ArenaBlock::delref() {
 	}
 }
 
+bool ArenaBlock::isSecure() const {
+	return secure;
+}
 bool ArenaBlock::isTiny() const {
 	return tinySize != NOT_TINY;
 }
@@ -233,6 +237,15 @@ size_t ArenaBlock::estimatedTotalSize() const {
 		return size();
 	}
 	return totalSizeEstimate;
+}
+
+void ArenaBlock::wipeUsed() {
+	int dataOffset = isTiny() ? TINY_HEADER : sizeof(ArenaBlock);
+	void* dataBegin = (char*)getData() + dataOffset;
+	int dataSize = used() - dataOffset;
+	makeDefined(dataBegin, dataSize);
+	::memset(dataBegin, 0, dataSize);
+	makeNoAccess(dataBegin, dataSize);
 }
 
 // just for debugging:
@@ -314,7 +327,7 @@ void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t 
 	}
 }
 
-void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
+void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
 	ArenaBlock* b = self.getPtr();
 	allowAccess(b);
 	if (!self || self->unused() < bytes) {
@@ -324,6 +337,8 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	}
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
+	if (isSecure)
+		b->secure = 1;
 	disallowAccess(b);
 	makeUndefined(result, bytes);
 	return result;
@@ -332,6 +347,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
+	// all blocks are initialized with no-wipe by default. allocate() sets it, if needed.
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		static_assert(sizeof(ArenaBlock) <= 32); // Need to allocate at least sizeof(ArenaBlock) for an ArenaBlock*. See
 		                                         // https://github.com/apple/foundationdb/issues/6753
@@ -345,6 +361,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			INSTRUMENT_ALLOCATE("Arena64");
 		}
 		b->tinyUsed = TINY_HEADER;
+		b->secure = 0;
 
 	} else {
 		int reqSize = dataSize + sizeof(ArenaBlock);
@@ -369,38 +386,40 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)new uint8_t[512];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(512);
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)new uint8_t[1024];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(1024);
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)new uint8_t[2048];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(2048);
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)new uint8_t[4096];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(4096);
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)new uint8_t[8192];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(8192);
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
 			b->totalSizeEstimate = b->bigSize;
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
+			b->secure = 0;
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
 #endif
-			b = (ArenaBlock*)new uint8_t[reqSize];
+			b = (ArenaBlock*)allocateAndMaybeKeepalive(reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->totalSizeEstimate = b->bigSize;
 			b->bigUsed = sizeof(ArenaBlock);
+			b->secure = 0;
 
 #if !DEBUG_DETERMINISM
 			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
@@ -468,6 +487,9 @@ void ArenaBlock::destroy() {
 }
 
 void ArenaBlock::destroyLeaf() {
+	if (secure) {
+		wipeUsed();
+	}
 	if (isTiny()) {
 		if (tinySize <= 32) {
 			FastAllocator<32>::release(this);
@@ -484,26 +506,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 		}
 	}
 }
@@ -972,5 +994,48 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 	checkOptional<true>(Optional<TestOptionalMapClass*>(ptr));
 	delete ptr;
 
+	return Void();
+}
+
+TEST_CASE("/flow/Arena/Secure") {
+	auto& rng = *deterministicRandom();
+	auto sizes = std::vector<int>{ 1 };
+	for (auto i = 2; i <= ArenaBlock::LARGE * 2; i *= 2) {
+		sizes.push_back(i);
+		// randomly select one value between this pow2 and the next
+		sizes.push_back(rng.randomInt(sizes.back() + 1, sizes.back() * 2));
+	}
+	// temporarily disable allocation tracing: runs with hugeArenaSample seems to cause test to fail for some reason
+	g_allocation_tracing_disabled++;
+	auto reenableAllocTracingOnUnwind = ScopeExit([]() { g_allocation_tracing_disabled--; });
+	for (auto iter = 0; iter < 100; iter++) {
+		auto const allocsPerArena = rng.randomInt(1, 80);
+		std::vector<std::pair<uint8_t*, int>> buffers;
+		// below scope object keeps deallocated memory alive to test if wipe-after-use behaves correctly
+		auto keepaliveScope = keepalive_allocator::ActiveScope{};
+		{
+			Arena arena;
+			for (auto i = 0; i < allocsPerArena; i++) {
+				auto const len = sizes[rng.randomInt(0, sizes.size())];
+				auto const buf = new (arena, WipeAfterUse{}) uint8_t[len];
+				for (auto i = 0; i < len; i++)
+					buf[i] = rng.randomInt(1, 256);
+				buffers.push_back(std::make_pair(buf, len));
+			}
+		}
+		// make sure the buffers have been zeroed out
+		for (auto const& buffer : buffers) {
+			auto buf = buffer.first;
+			auto len = buffer.second;
+			makeDefined(buf, len);
+			auto poisonOnUnwind = ScopeExit([buf, len]() { makeNoAccess(buf, len); });
+			for (auto i = 0; i < len; i++) {
+				if (buf[i] != 0) {
+					fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
+					ASSERT(false);
+				}
+			}
+		}
+	}
 	return Void();
 }

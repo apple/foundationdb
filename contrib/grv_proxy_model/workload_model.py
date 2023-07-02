@@ -38,7 +38,9 @@ class Request:
 
 
 class PriorityWorkloadModel:
-    def __init__(self, priority, rate_model, batch_model, generator, max_outstanding=1e9):
+    def __init__(
+        self, priority, rate_model, batch_model, generator, max_outstanding=1e9
+    ):
         self.priority = priority
         self.rate_model = rate_model
         self.batch_model = batch_model
@@ -127,89 +129,105 @@ class DistributionRequestGenerator(RequestGenerator):
 
 predefined_workloads = {}
 
-predefined_workloads['slow_exponential'] = WorkloadModel(
+predefined_workloads["slow_exponential"] = WorkloadModel(
     {
-        Priority.DEFAULT: PriorityWorkloadModel(Priority.DEFAULT,
-                                                rate_model.FixedRateModel(100),
-                                                DistributionBatchGenerator(Distribution.fixed, 1),
-                                                DistributionRequestGenerator(Distribution.exponential),
-                                                max_outstanding=100
-                                                )
-    })
+        Priority.DEFAULT: PriorityWorkloadModel(
+            Priority.DEFAULT,
+            rate_model.FixedRateModel(100),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.exponential),
+            max_outstanding=100,
+        )
+    }
+)
 
-predefined_workloads['fixed_uniform'] = WorkloadModel(
+predefined_workloads["fixed_uniform"] = WorkloadModel(
     {
-        Priority.SYSTEM: PriorityWorkloadModel(Priority.SYSTEM,
-                                               rate_model.FixedRateModel(0),
-                                               DistributionBatchGenerator(Distribution.fixed, 1),
-                                               DistributionRequestGenerator(Distribution.uniform),
-                                               max_outstanding=10
-                                               ),
-        Priority.DEFAULT: PriorityWorkloadModel(Priority.DEFAULT,
-                                                rate_model.FixedRateModel(95),
-                                                DistributionBatchGenerator(Distribution.fixed, 10),
-                                                DistributionRequestGenerator(Distribution.uniform),
-                                                max_outstanding=200
-                                                ),
-        Priority.BATCH: PriorityWorkloadModel(Priority.BATCH,
-                                              rate_model.FixedRateModel(1),
-                                              DistributionBatchGenerator(Distribution.uniform, 500),
-                                              DistributionRequestGenerator(Distribution.uniform),
-                                              max_outstanding=200
-                                              )
-    })
+        Priority.SYSTEM: PriorityWorkloadModel(
+            Priority.SYSTEM,
+            rate_model.FixedRateModel(0),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=10,
+        ),
+        Priority.DEFAULT: PriorityWorkloadModel(
+            Priority.DEFAULT,
+            rate_model.FixedRateModel(95),
+            DistributionBatchGenerator(Distribution.fixed, 10),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=200,
+        ),
+        Priority.BATCH: PriorityWorkloadModel(
+            Priority.BATCH,
+            rate_model.FixedRateModel(1),
+            DistributionBatchGenerator(Distribution.uniform, 500),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=200,
+        ),
+    }
+)
 
-predefined_workloads['batch_starvation'] = WorkloadModel(
+predefined_workloads["batch_starvation"] = WorkloadModel(
     {
-        Priority.SYSTEM: PriorityWorkloadModel(Priority.SYSTEM,
-                                               rate_model.FixedRateModel(1),
-                                               DistributionBatchGenerator(Distribution.fixed, 1),
-                                               DistributionRequestGenerator(Distribution.uniform),
-                                               max_outstanding=10
-                                               ),
-        Priority.DEFAULT: PriorityWorkloadModel(Priority.DEFAULT,
-                                                rate_model.IntervalRateModel([(0, 50), (60, 150), (120, 90)]),
-                                                DistributionBatchGenerator(Distribution.fixed, 1),
-                                                DistributionRequestGenerator(Distribution.uniform),
-                                                max_outstanding=200
-                                                ),
-        Priority.BATCH: PriorityWorkloadModel(Priority.BATCH,
-                                              rate_model.FixedRateModel(100),
-                                              DistributionBatchGenerator(Distribution.fixed, 1),
-                                              DistributionRequestGenerator(Distribution.uniform),
-                                              max_outstanding=200
-                                              )
-    })
+        Priority.SYSTEM: PriorityWorkloadModel(
+            Priority.SYSTEM,
+            rate_model.FixedRateModel(1),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=10,
+        ),
+        Priority.DEFAULT: PriorityWorkloadModel(
+            Priority.DEFAULT,
+            rate_model.IntervalRateModel([(0, 50), (60, 150), (120, 90)]),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=200,
+        ),
+        Priority.BATCH: PriorityWorkloadModel(
+            Priority.BATCH,
+            rate_model.FixedRateModel(100),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=200,
+        ),
+    }
+)
 
-predefined_workloads['default_low_high_low'] = WorkloadModel(
+predefined_workloads["default_low_high_low"] = WorkloadModel(
     {
-        Priority.SYSTEM: PriorityWorkloadModel(Priority.SYSTEM,
-                                               rate_model.FixedRateModel(0),
-                                               DistributionBatchGenerator(Distribution.fixed, 1),
-                                               DistributionRequestGenerator(Distribution.uniform),
-                                               max_outstanding=10
-                                               ),
-        Priority.DEFAULT: PriorityWorkloadModel(Priority.DEFAULT,
-                                                rate_model.IntervalRateModel([(0, 100), (60, 300), (120, 100)]),
-                                                DistributionBatchGenerator(Distribution.fixed, 1),
-                                                DistributionRequestGenerator(Distribution.uniform),
-                                                max_outstanding=200
-                                                ),
-        Priority.BATCH: PriorityWorkloadModel(Priority.BATCH,
-                                              rate_model.FixedRateModel(0),
-                                              DistributionBatchGenerator(Distribution.fixed, 1),
-                                              DistributionRequestGenerator(Distribution.uniform),
-                                              max_outstanding=200
-                                              )
-    })
+        Priority.SYSTEM: PriorityWorkloadModel(
+            Priority.SYSTEM,
+            rate_model.FixedRateModel(0),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=10,
+        ),
+        Priority.DEFAULT: PriorityWorkloadModel(
+            Priority.DEFAULT,
+            rate_model.IntervalRateModel([(0, 100), (60, 300), (120, 100)]),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=200,
+        ),
+        Priority.BATCH: PriorityWorkloadModel(
+            Priority.BATCH,
+            rate_model.FixedRateModel(0),
+            DistributionBatchGenerator(Distribution.fixed, 1),
+            DistributionRequestGenerator(Distribution.uniform),
+            max_outstanding=200,
+        ),
+    }
+)
 
 for rate in [83, 100, 180, 190, 200]:
-    predefined_workloads['default%d' % rate] = WorkloadModel(
+    predefined_workloads["default%d" % rate] = WorkloadModel(
         {
-            Priority.DEFAULT: PriorityWorkloadModel(Priority.DEFAULT,
-                                                    rate_model.FixedRateModel(rate),
-                                                    DistributionBatchGenerator(Distribution.fixed, 1),
-                                                    DistributionRequestGenerator(Distribution.exponential),
-                                                    max_outstanding=1000
-                                                    )
-        })
+            Priority.DEFAULT: PriorityWorkloadModel(
+                Priority.DEFAULT,
+                rate_model.FixedRateModel(rate),
+                DistributionBatchGenerator(Distribution.fixed, 1),
+                DistributionRequestGenerator(Distribution.exponential),
+                max_outstanding=1000,
+            )
+        }
+    )

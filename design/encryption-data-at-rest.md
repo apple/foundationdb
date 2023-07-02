@@ -5,7 +5,6 @@
 The proposed solution is `able to handle` the following attacks:
 
 * An attacker, if able to get access to any FDB cluster host or attached disk, would not be able to read the persisted data. Further, for cloud deployments, returning a cloud instance back to the cloud provider will prevent the cloud provider from reading the contents of data stored on the disk.
-
 * Data stored on a lost or stolen FDB host persistent disk storage device can’t be recovered.
 
 The proposed solution `will not be able` to handle the following attacks:
@@ -20,15 +19,19 @@ FoundationDB being a multi-model, easily scalable and fault-tolerant, with an ab
 Data encryption support is a table-stake feature for modern day enterprise service offerings in the cloud. Customers expect, and at times warrant, that their data and metadata be fully encrypted using the latest security standards. The goal of this document includes:
 
 * Discuss detailed design to support data at-rest encryption support for data stored in FDB clusters. Encrypting data in-transit and/or in-memory caches at various layers in the query execution pipeline (inside and external to FDB) is out of the scope of this feature.
-
 * Isolation guarantees: the encryption domain matches with `tenant` partition semantics supported by FDB clusters. Tenants are discrete namespaces in FDB that serve as transaction domains. A tenant is a `identifier` that maps to a `prefix` within the data-FDB cluster, and all operations within a tenant are implicitly bound within a `tenant-prefix`. Refer to `Multi-Tenant FoundationDB API` documentation more details. However, it is possible to use a single encryption key for the whole cluster, in case `tenant partitioning` isn’t available.
-
 * Ease of integration with external Key Management Services enabling persisting, caching, and lookup of encryption keys. 
 
-## Config Knobs
+## Configuration
 
-* `ServerKnob::ENABLE_ENCRYPION` allows enable/disable encryption feature.
-* `ServerKnob::ENCRYPTION_MODE` controls the encryption mode supported. The current scheme supports `AES-256-CTR` encryption mode.
+A cluster encryption at-rest properties needs to be configured at the time of database creation, once property is set, it cannot be modified (sticky). Supported modes include:
+
+* `domain_aware`: follows per-tenant encryption semantics.
+* `cluster_aware`: follows per-cluster encryption semantics.
+
+Following command option needs to be provided to enable encryption at-rest for a newly created database:
+
+`configure new encryption_at_rest_mode={disabled|domain_aware|cluster_aware}`
 
 ## Encryption Mode
 
@@ -48,7 +51,6 @@ UID  = Host local random generated number
 UID is an 8 byte host-local random number. Another option would have been a simple host-local incrementing counter, however, the scheme runs the risk of repeated encryption-key generation on cluster/process restarts.
 
 * An encryption key derived using the above formula will be cached (in-memory) for a short time interval (10 mins, for instance). The encryption-key is immutable, but, the TTL approach allows refreshing encryption key by reaching out to External Encryption KeyManagement solutions, hence, supporting “restricting lifetime of an encryption” feature if implemented by Encryption Key Management solution.
-
 * Initialization Vector (IV) selection would be random.
 
 ## Architecture
@@ -108,55 +110,41 @@ Below diagram depicts the end-to-end encryption workflow detailing various modul
 
 An FDB client would insert data i.e. plaintext {key, value} in a FDB cluster for persistence. 
 
-### KMS-Connector
-
-A non-FDB process running on FDB cluster hosts enables an FDB cluster to interact with external Encryption Key Managements services. Salient features includes:
-
-* An external (non-FDB) standalone process implementing a REST server.
-
-* Abstracts organization specific KeyManagementService integration details. The proposed design ensures ease of integration given limited infrastructure needed to implement a local/remote REST server. 
-
-* Ensure organization specific code is implemented outside the FDB codebase.
-
-* The KMS-Connector process is launched and maintained by the FDBMonitor. The process needs to handle the following REST endpoint:
-    1. GET - http://localhost/getEncryptionKey 
-
-	Define a single interface returning “encryption key string in plaintext” and accepting an 
-    JSON input which can be customized as needed:
-
-```json
-    json_input_payload
-    {
-        “Version”     : int     // version
-        “KeyId”       : keyId   // string
-    }
-```
-
-Few benefits of the above proposed schemes are:
-* JSON input format is extensible (adding new fields is backward compatible).
-
-* Popular Cloud KMS “getPublicKey” API accepts “keyId” as a string, hence, API should be easy to integrate.
-
-    1. AWS: https://docs.aws.amazon.com/cli/latest/reference/kms/get-public-key.html
-    2. GCP: https://cloud.google.com/kms/docs/retrieve-public-key   
-
-`Future improvements`: FDBMonitor at present will launch one KMS-Connector process per FDB cluster host. Though multiple KMS-Connector processes are launched, only one process (collocated with EncryptKeyServer) would consume cluster resources. In future, possible enhancements could be: 
-
-* Enable FDBMonitor to launch “N” (configurable) processes per cluster.
-* Enable the FDB cluster to manage external processes as well.
-
 ### Encrypt KeyServer
 
 Salient features include:
 
 * New FDB role/process to allow fetching of encryption keys from external KeyManagementService interfaces. The process connects to the KMS-Connector REST interface to fetch desired encryption keys.
-
-* On an encryption-key fetch from KMS-Connector, it applies HMAC derivative function to generate a new encryption key and cache it in-memory. The in-memory cache is used to serve encryption key fetch requests from other FDB processes. 
+* On an encryption-key fetch from KMS-Connector, it applies HMAC derivative function to generate a new encryption key and cache it in-memory. The in-memory cache is used to serve encryption key fetch requests from other FDB processes.
 
 
 Given encryption keys will be needed as part of cluster-recovery, this process/role needs to be recruited at the start of the cluster-recovery process (just after the “master/sequencer” process/role recruitment). All other FDB processes will interact with this process to obtain encryption keys needed to encrypt and/or decrypt the data payload. 
 
-`Note`: An alternative would be to incorporate the functionality into the ClusterController process itself, however, having clear responsibility separation would make design more flexible and extensible in future if needed. 
+`Note`: An alternative would be to incorporate the functionality into the ClusterController process itself, however, having clear responsibility separation would make design more flexible and extensible in future if needed.
+
+### KMS-Connector
+
+Implements a native FDB KMS framework allowing multiple interfaces to co-existing and enabling FDB <-> KMS communication. Salient features:
+
+* Abstract `KmsConnector` class, the class enables a specilization implementation to implement `actor` supporting desired communication protocol.
+* `KmsConnectorInterface` defines the supported endpoints allowing EncryptKeyProxy to fetch/refresh encryption keys.
+* `--kms-connector-type` configuration parameter supplied via `foundationdb.conf` controls the runtime selection of KmsConnector selection.
+
+### **RESTKmsConnector**
+
+Implements REST protocol communication support to interact with external KMS.
+
+The `foundationdb.conf` needs to be updated to supply following configuration parameters:
+
+* `--discover-kms-conn-url-file`: local filesystem file-path defining the URL to connect with KMS on startup. FDB support periodic refreshes of KMS URLs if supported.
+* `--kms-conn-validation-token-details`: local file system file(s) detailing the validation tokens needed by KMS to authorize FDB <-> GS communication.
+* `--kms-conn-get-encryption-keys-endpoint`: KMS REST endpoint to fetch encryption keys by `baseCipherIds`
+* `--kms-conn-get-latest-encryption-keys-endpoint`: KMS REST endpoint to fetch latest encryption keys for a given `encryption domain id`
+
+### **SimKmsConnector**
+
+Implements a standalone only KMS connector designed specifically to meet simulation and/or performance needs. The connector doesn't send any RPC calls, however, implements an `actor` backed by `stable encryption key vault` provider; the simulated vault supports process restarts. All Encryption at-rest simulation tests uses SimKmsConnector.
+
 
 ### Commit Proxies (CPs)
 
@@ -174,7 +162,7 @@ UID    = Host local random generated number
 
 The Transaction State Store (commonly referred as TxnStateStore) is a Key-Value datastore used by FDB to store metadata about the database itself for bootstrap purposes. The data stored in this store plays a critical role in: guiding the transaction system to persist writes (storage tags to mutations at CPs), and managing FDB internal data movement. The TxnStateStore data gets encrypted with the desired encryption key before getting persisted on the disk queues. 
 
-As part of encryption, every Mutation would be appended by a plaintext `BlobCipherEncryptHeader` to assist decrypting the information for reads.
+As part of encryption, every Mutation would be appended by a plaintext `BlobCipherEncryptHeaderRef` to assist decrypting the information for reads.
 
 CPs would cache (in-memory) recently used encryption-keys to optimize network traffic due to encryption related operations. Further, the caching would improve overall performance, avoiding frequent RPC calls to EncryptKeyServer which may eventually become a scalability bottleneck. Each encryption-key in the cache has a short Time-To-Live (10 mins) and on expiry the process will interact with the EncryptKeyServer to fetch the required encryption-keys. The same caching policy is followed by the Redwood Storage Server and the Backup File processes too. 
 
@@ -228,6 +216,12 @@ To assist reads, FDB processes (StorageServers, Backup Files workers) will be mo
 
 * The FDB process will interact with Encrypt KeyServer to fetch the desired base encryption key corresponding to the key-id persisted in the encryption header.
 * Reconstruct the encryption key and decrypt the data block.
+
+## Configurable Encryption support
+
+`BlobCipherEncryptHeaderRef` on-disk format allows supporting more than one encryption scheme at the same time. Also, extending support for more encryption schemes in future can be done without involving data migration; `perpetual wiggle` over the period of time will transform existing stored data encryption scheme to a newer one. However, there exists no metrics exposing percentage of data encrypted using a given scheme(s) at the moment.
+
+**TODO** Encryption scheme support is limited to `AES-256-CTR`.
 
 ## Future Work
 

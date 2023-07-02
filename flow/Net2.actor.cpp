@@ -24,15 +24,21 @@
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
 #include <memory>
+#include <string_view>
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
-#define BOOST_DATE_TIME_NO_LIB
-#define BOOST_REGEX_NO_LIB
-#include <boost/asio.hpp>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
 #endif
+#ifndef BOOST_DATE_TIME_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#endif
+#include <boost/asio.hpp>
 #include "boost/asio/ssl.hpp"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
@@ -44,6 +50,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
@@ -55,6 +62,8 @@
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -108,7 +117,6 @@ DESCR struct SlowTask {
 
 namespace N2 { // No indent, it's the whole file
 
-class Net2;
 class Peer;
 class Connection;
 
@@ -165,6 +173,7 @@ public:
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
 	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
+	void _swiftEnqueue(void* task) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -253,11 +262,21 @@ public:
 
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
+		swift::Job* _Nullable swiftJob = nullptr;
 		PromiseTask() {}
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
+		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
 		void operator()() {
+#ifdef WITH_SWIFT
+			if (auto job = swiftJob) {
+				swift_job_run(job, ExecutorRef::generic());
+			} else {
+				promise.send(Void());
+			}
+#else
 			promise.send(Void());
+#endif
 			delete this;
 		}
 	};
@@ -334,28 +353,44 @@ static udp::endpoint udpEndpoint(NetworkAddress const& n) {
 
 class BindPromise {
 	Promise<Void> p;
-	const char* errContext;
+	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
+	NetworkAddress peerAddr;
 
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
+	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(BindPromise&& r) noexcept
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
+
+	NetworkAddress getPeerAddr() const { return peerAddr; }
+
+	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
 			if (error) {
 				// Log the error...
 				{
-					TraceEvent evt(SevWarn, errContext, errID);
+					std::optional<TraceEvent> traceEvent;
+					if (std::holds_alternative<AuditedEvent>(errContext))
+						traceEvent.emplace(SevWarn, std::get<AuditedEvent>(errContext), errID);
+					else
+						traceEvent.emplace(SevWarn, std::get<const char*>(errContext), errID);
+					TraceEvent& evt = *traceEvent;
 					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
 					if (error.value() >= (1 << 24L)) {
 						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
+					}
+
+					if (peerAddr.isValid()) {
+						evt.detail("PeerAddr", peerAddr);
 					}
 				}
 
@@ -778,6 +813,14 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		Handshake(ssl_socket& socket, ssl_socket::handshake_type type) : socket(socket), type(type) {}
 		double getTimeEstimate() const override { return 0.001; }
 
+		std::string getPeerAddress() const {
+			std::ostringstream o;
+			boost::system::error_code ec;
+			auto addr = socket.lowest_layer().remote_endpoint(ec);
+			o << (!ec.failed() ? addr.address().to_string() : std::string_view("0.0.0.0"));
+			return std::move(o).str();
+		}
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
@@ -795,8 +838,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			}
 			if (h.err.failed()) {
 				TraceEvent(SevWarn,
-				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"
-				                                                        : "N2_AcceptHandshakeError")
+				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
+				                                                        : "N2_AcceptHandshakeError"_audit)
+				    .detail("PeerAddr", h.getPeerAddress())
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
@@ -806,8 +850,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			}
 		} catch (...) {
 			TraceEvent(SevWarn,
-			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"
-			                                                        : "N2_AcceptHandshakeUnknownError")
+			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"_audit
+			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
+			    .detail("PeerAddr", h.getPeerAddress())
 			    .detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
@@ -898,7 +943,8 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_AcceptHandshakeError", UID());
+				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
+				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -980,7 +1026,8 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_ConnectHandshakeError", self->id);
+				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
+				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1309,7 +1356,8 @@ void Net2::initTLS(ETLSInitState targetState) {
 			    .detail("CertificatePath", tlsConfig.getCertificatePathSync())
 			    .detail("KeyPath", tlsConfig.getKeyPathSync())
 			    .detail("HasPassword", !loaded.getPassword().empty())
-			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
+			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"))
+			    .detail("DisablePlainTextConnection", tlsConfig.getDisablePlainTextConnection());
 			auto loadedTlsConfig = tlsConfig.loadSync();
 			ConfigureSSLContext(loadedTlsConfig, newContext);
 			activeTlsPolicy = makeReference<TLSPolicy>(loadedTlsConfig, onPolicyFailure);
@@ -1406,7 +1454,6 @@ ActorLineageSet& Net2::getActorLineageSet() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
-
 	thread_network = this;
 
 	unsigned int tasksSinceReact = 0;
@@ -1736,6 +1783,7 @@ Future<class Void> Net2::yield(TaskPriority taskID) {
 	return Void();
 }
 
+// TODO: can we wrap our swift task and insert it in here?
 Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
 	                     // as infinite
@@ -1756,6 +1804,15 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 	return delay(seconds, taskId);
 }
 
+void Net2::_swiftEnqueue(void* _job) {
+#ifdef WITH_SWIFT
+	swift::Job* job = (swift::Job*)_job;
+	TaskPriority priority = swift_priority_to_net2(job->getPriority());
+	PromiseTask* t = new PromiseTask(job);
+	taskQueue.addReady(priority, t);
+#endif
+}
+
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
 		return;
@@ -1773,6 +1830,11 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
+	}
+
+	if (tlsConfig.getDisablePlainTextConnection()) {
+		TraceEvent(SevError, "PlainTextConnectionDisabled").detail("toAddr", toAddr);
+		throw connection_failed();
 	}
 
 	return Connection::connect(&this->reactor.ios, toAddr);
@@ -1811,7 +1873,10 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 			    auto endpoint = iter->endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
-				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    // IPV6 loopback might not be supported, only return IPV6 address
+				    if (!addr.is_loopback()) {
+					    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    }
 			    } else {
 				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
 			    }

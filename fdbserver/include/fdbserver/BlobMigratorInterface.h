@@ -38,7 +38,9 @@ struct BlobMigratorInterface {
 	BlobMigratorInterface() {}
 	BlobMigratorInterface(const struct LocalityData& l, UID id) : uniqueID(id), locality(l) {
 		ssi.locality = l;
-		ssi.uniqueID = id;
+		// The second 8 bytes of all blob migration interface id is fixed
+		ASSERT(id.second() == file_identifier);
+		ssi.uniqueID = uniqueID;
 	}
 
 	void initEndpoints() { ssi.initEndpoints(); }
@@ -46,6 +48,9 @@ struct BlobMigratorInterface {
 	NetworkAddress address() const { return haltBlobMigrator.getEndpoint().getPrimaryAddress(); }
 	bool operator==(const BlobMigratorInterface& r) const { return id() == r.id(); }
 	bool operator!=(const BlobMigratorInterface& r) const { return !(*this == r); }
+
+	static UID newId() { return UID(deterministicRandom()->randomUInt64(), file_identifier); }
+	static bool isBlobMigrator(UID id) { return id.second() == file_identifier; };
 
 	template <class Archive>
 	void serialize(Archive& ar) {

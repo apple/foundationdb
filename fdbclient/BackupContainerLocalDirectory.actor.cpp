@@ -21,9 +21,11 @@
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/IAsyncFile.h"
+#include "flow/FaultInjection.h"
 #include "flow/Platform.actor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -66,6 +68,8 @@ public:
 		Future<Void> r = uncancellable(holdWhile(old, m_file->write(old.begin(), size, m_writeOffset)));
 		m_writeOffset += size;
 
+		INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::flush");
+
 		return r;
 	}
 
@@ -76,6 +80,9 @@ public:
 		std::string name = f->m_file->getFilename();
 		f->m_file.clear();
 		wait(IAsyncFileSystem::filesystem()->renameFile(name, f->m_finalFullPath));
+
+		INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::finish");
+
 		return Void();
 	}
 
@@ -115,6 +122,8 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 			results.push_back({ f.substr(m_path.size() + 1), ::fileSize(f) });
 	}
 
+	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::listFiles");
+
 	return results;
 }
 
@@ -149,15 +158,19 @@ BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& 
 	std::string absolutePath = abspath(path);
 
 	if (!g_network->isSimulated() && path != absolutePath) {
-		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
-		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
-		    .detail("URL", url)
-		    .detail("Path", path)
-		    .detail("AbsolutePath", absolutePath);
-		// throw io_error();
-		IBackupContainer::lastOpenError =
-		    format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
-		throw backup_invalid_url();
+		if (CLIENT_KNOBS->BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH) {
+			path = absolutePath;
+		} else {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory")
+			    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
+			    .detail("URL", url)
+			    .detail("Path", path)
+			    .detail("AbsolutePath", absolutePath);
+			// throw io_error();
+			IBackupContainer::lastOpenError =
+			    format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
+			throw backup_invalid_url();
+		}
 	}
 
 	// Finalized path written to will be will be <path>/backup-<uid>
@@ -176,12 +189,19 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
-	if (!g_network->isSimulated() && path != abspath(path)) {
-		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
-		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
-		    .detail("URL", url)
-		    .detail("Path", path);
-		throw io_error();
+	std::string absolutePath = abspath(path);
+
+	if (!g_network->isSimulated() && path != absolutePath) {
+		if (CLIENT_KNOBS->BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH) {
+			path = absolutePath;
+		} else {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory")
+			    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
+			    .detail("URL", url)
+			    .detail("Path", path)
+			    .detail("AbsolutePath", absolutePath);
+			throw io_error();
+		}
 	}
 	std::vector<std::string> dirs = platform::listDirectories(path);
 	std::vector<std::string> results;
@@ -216,6 +236,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	if (usesEncryption()) {
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
+	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::readFile");
 	// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
 	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
 	// but only if the source directory is writeable which shouldn't be required for a restore.
@@ -267,6 +288,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 }
 
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
+	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
 	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 	if (usesEncryption()) {
@@ -285,6 +307,7 @@ Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& p
 
 Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {
 	::deleteFile(joinPath(m_path, path));
+	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::deleteFile");
 	return Void();
 }
 

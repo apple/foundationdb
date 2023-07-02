@@ -49,9 +49,14 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/WatchFile.actor.h"
+#include "flow/IConnection.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+void removeCachedDNS(const std::string& host, const std::string& service) {
+	INetworkConnections::net()->removeCachedDNS(host, service);
+}
 
 namespace {
 
@@ -499,6 +504,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 	state Endpoint remotePingEndpoint({ peer->destination }, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET));
+	// set this to not immediately close the connection as idle if the peer already existed
+	peer->lastDataPacketSentTime = now();
 	loop {
 		if (!FlowTransport::isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
@@ -966,7 +973,7 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 	if (!destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ||
 	    (lastConnectTime > 1.0 && now() - lastConnectTime > FLOW_KNOBS->ALWAYS_ACCEPT_DELAY)) {
 		// Keep the new connection
-		TraceEvent("IncomingConnection", conn->getDebugID())
+		TraceEvent("IncomingConnection"_audit, conn->getDebugID())
 		    .suppressFor(1.0)
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
@@ -1067,9 +1074,10 @@ ACTOR static void deliver(TransportData* self,
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (receiver) {
-			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
+			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented"_audit)
 			    .detail("From", peerAddress)
-			    .detail("Token", destination.token);
+			    .detail("Token", destination.token)
+			    .detail("Receiver", typeid(*receiver).name());
 			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
 			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 			sendPacket(self,
@@ -1568,7 +1576,7 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 			numPrivateKeys++;
 		}
 	}
-	TraceEvent(SevInfo, "AuthzPublicKeySetApply").detail("NumPublicKeys", publicKeys.size());
+	TraceEvent(SevInfo, "AuthzPublicKeySetApply"_audit).detail("NumPublicKeys", publicKeys.size());
 	if (numPrivateKeys > 0) {
 		TraceEvent(SevWarnAlways, "AuthzPublicKeySetContainsPrivateKeys").detail("NumPrivateKeys", numPrivateKeys);
 	}
@@ -2060,7 +2068,7 @@ ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, Transport
 			}
 			// parse/read error
 			errorCount++;
-			TraceEvent(SevWarn, "AuthzPublicKeySetRefreshError").error(e).detail("ErrorCount", errorCount);
+			TraceEvent(SevWarn, "AuthzPublicKeySetRefreshError"_audit).error(e).detail("ErrorCount", errorCount);
 		}
 	}
 }

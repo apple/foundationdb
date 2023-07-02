@@ -24,33 +24,34 @@
 #include "fdbserver/DDShardTracker.h"
 #include "fdbserver/DDRelocationQueue.h"
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/DataDistributorInterface.h"
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same
 // context.
 // NOTE: We should avoid the shared class become an insanely large class, think twice before add member to it.
 class DDSharedContext : public ReferenceCounted<DDSharedContext> {
-	// FIXME(xwang) mark fields privates
 public:
-	std::unique_ptr<DDEnabledState>
-	    ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
-	IDDShardTracker* shardTracker = nullptr;
-	IDDRelocationQueue* relocationQueue = nullptr;
-	std::vector<IDDTeamCollection*> teamCollections;
+	const std::unique_ptr<DDEnabledState>
+	    ddEnabledState; // Note: can't be reset because the underlying object is shared with snapshot server
 
-	// public:
+	DataDistributorInterface interface;
 	UID ddId;
 	MoveKeysLock lock;
 	bool trackerCancelled = false;
 	DatabaseConfiguration configuration;
 
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
+
+	Reference<DataDistributionTracker> tracker;
+	Reference<DDQueue> ddQueue;
+	Reference<DDTeamCollection> primaryTeamCollection, remoteTeamCollection;
 
 	DDSharedContext() = default;
 
-	DDSharedContext(UID id)
-	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure),
-	    processingUnhealthy(new AsyncVar<bool>(false)), processingWiggle(new AsyncVar<bool>(false)) {}
+	explicit DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) { interface = iface; }
+
+	explicit DDSharedContext(UID id)
+	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}
 
 	UID id() const { return ddId; }
 
@@ -60,11 +61,7 @@ public:
 
 	decltype(auto) usableRegions() const { return configuration.usableRegions; }
 
-	bool isDDEnabled() const { return ddEnabledState->isDDEnabled(); };
-
-	void proposeRelocation(const RelocateShard& rs) const { return relocationQueue->relocationProducer.send(rs); }
-
-	void requestRestartShardTracker(KeyRange keys) const { return shardTracker->restartShardTracker.send(keys); }
+	bool isDDEnabled() const { return ddEnabledState->isEnabled(); };
 };
 
 #endif // FOUNDATIONDB_DDSHAREDCONTEXT_H

@@ -25,9 +25,11 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.actor.h"
@@ -63,6 +65,7 @@ struct CommitProxyInterface {
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
+	PublicRequestStream<struct GetBlobGranuleLocationsRequest> getBlobGranuleLocations;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -92,6 +95,8 @@ struct CommitProxyInterface {
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
+			getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
+			    commit.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 
@@ -110,6 +115,7 @@ struct CommitProxyInterface {
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
 		streams.push_back(getTenantId.getReceiver());
+		streams.push_back(getBlobGranuleLocations.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -158,6 +164,7 @@ struct ClientDBInfo {
 
 // Compile ReplyPromise<CachedSerialization<ClientDBInfo>> takes long time, extern template is used to fix this. The
 // corresponding instantiations are done in CommitProxyInterface.cpp
+extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
 struct ExpireIdempotencyIdRequest {
@@ -466,7 +473,59 @@ struct GetKeyServerLocationsRequest {
 	}
 };
 
-struct GetRawCommittedVersionReply {
+struct GetBlobGranuleLocationsReply {
+	constexpr static FileIdentifier file_identifier = 2923309;
+	Arena arena;
+	std::vector<std::pair<KeyRangeRef, UID>> results;
+	std::vector<BlobWorkerInterface> bwInterfs;
+	bool more;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, results, bwInterfs, more, arena);
+	}
+};
+
+struct GetBlobGranuleLocationsRequest {
+	constexpr static FileIdentifier file_identifier = 2508597;
+	Arena arena;
+	SpanContext spanContext;
+	TenantInfo tenant;
+	KeyRef begin;
+	Optional<KeyRef> end;
+	int limit;
+	bool reverse;
+	bool justGranules;
+	ReplyPromise<GetBlobGranuleLocationsReply> reply;
+
+	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
+	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
+	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
+	// updates from other proxies before answering.
+	Version minTenantVersion;
+
+	GetBlobGranuleLocationsRequest() : limit(0), reverse(false), justGranules(false), minTenantVersion(latestVersion) {}
+	GetBlobGranuleLocationsRequest(SpanContext spanContext,
+	                               TenantInfo const& tenant,
+	                               KeyRef const& begin,
+	                               Optional<KeyRef> const& end,
+	                               int limit,
+	                               bool reverse,
+	                               bool justGranules,
+	                               Version minTenantVersion,
+	                               Arena const& arena)
+	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
+	    justGranules(justGranules), minTenantVersion(minTenantVersion) {}
+
+	bool verify() const { return tenant.isAuthorized(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, justGranules, arena);
+	}
+};
+
+struct SWIFT_CXX_IMPORT_OWNED GetRawCommittedVersionReply {
 	constexpr static FileIdentifier file_identifier = 1314732;
 	Optional<UID> debugID;
 	Version version;
@@ -485,7 +544,7 @@ struct GetRawCommittedVersionReply {
 	}
 };
 
-struct GetRawCommittedVersionRequest {
+struct SWIFT_CXX_IMPORT_OWNED GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
 	SpanContext spanContext;
 	Optional<UID> debugID;
@@ -504,17 +563,18 @@ struct GetRawCommittedVersionRequest {
 	}
 };
 
-struct GetStorageServerRejoinInfoReply {
+struct SWIFT_CXX_IMPORT_OWNED GetStorageServerRejoinInfoReply {
 	constexpr static FileIdentifier file_identifier = 9469225;
 	Version version;
 	Tag tag;
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history);
+		serializer(ar, version, tag, newTag, newLocality, history, encryptMode);
 	}
 };
 
@@ -682,10 +742,15 @@ struct GlobalConfigRefreshRequest {
 	GlobalConfigRefreshRequest() {}
 	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
 
+	bool verify() const noexcept { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, lastKnown, reply);
 	}
 };
+
+// Instantiated in CommitProxyInterface.cpp
+extern template class GetEncryptCipherKeys<ClientDBInfo>;
 
 #endif

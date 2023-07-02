@@ -49,7 +49,7 @@ ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersion
                                              std::vector<RestoreFileFR>* pRangeFiles,
                                              Key url,
                                              Optional<std::string> proxy,
-                                             Optional<Database> cx);
+                                             Database cx);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerData> self,
                                                    Database cx,
@@ -775,7 +775,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 
 	state VectorRef<KeyRangeRef> restoreRanges;
 	restoreRanges.add(request.range);
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion, cx, restoreRanges));
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion, restoreRanges));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreControllerPhaseCollectBackupFiles")
@@ -845,7 +845,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions,
                                              RestoreFileFR* file,
                                              Reference<IBackupContainer> bc,
-                                             Optional<Database> cx) {
+                                             Database cx) {
 	TraceEvent("FastRestoreControllerDecodeRangeVersion").detail("File", file->toString());
 	RangeFile rangeFile = { file->version, (uint32_t)file->blockSize, file->fileName, file->fileSize };
 
@@ -886,7 +886,7 @@ ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersion
                                              std::vector<RestoreFileFR>* pRangeFiles,
                                              Key url,
                                              Optional<std::string> proxy,
-                                             Optional<Database> cx) {
+                                             Database cx) {
 	if (!g_network->isSimulated()) {
 		TraceEvent(SevError, "ExpensiveBuildRangeVersions")
 		    .detail("Reason", "Parsing all range files is slow and memory intensive");

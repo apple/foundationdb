@@ -105,7 +105,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 
 		if (self->enableFailures) {
 			// Reboot the proxy and clog the unclogged tlog.
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::Reboot);
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::KillType::Reboot);
 			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		} else {
 			// Alternatively, if we're not injecting machine failures, clog the proxy and the unclogged tlog.

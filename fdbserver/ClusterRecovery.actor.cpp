@@ -19,17 +19,16 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
-
 #include "flow/ProtocolVersion.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -363,6 +362,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
+		isr.encryptMode = self->configuration.encryptionAtRestMode;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -457,6 +457,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
+		self->logSystem->purgeOldRecoveredGenerations();
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 
@@ -478,7 +479,8 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    .detail("NewState.OldTLogs", newState.oldTLogData.size())
 		    .detail("NewState.EncryptionAtRestMode", newState.encryptionAtRestMode.toString())
 		    .detail("Expected.tlogs",
-		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
+		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()))
+		    .detail("RecoveryCount", newState.recoveryCount);
 		wait(self->cstate.write(newState, finalUpdate));
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
@@ -819,6 +821,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
 		    .detail("Logs", describe(logSystemConfig.tLogs))
+		    .detail("OldGenerations", logSystemConfig.oldTLogs.size())
 		    .detail("CStateUpdated", self->cstateUpdated.isSet())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("LastEpochEnd", self->lastEpochEnd);
@@ -920,6 +923,10 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
+		when(GetBlobGranuleLocationsRequest req =
+		         waitNext(parent->provisionalCommitProxies[0].getBlobGranuleLocations.getFuture())) {
+			req.reply.send(Never());
+		}
 		when(wait(waitCommitProxyFailure)) {
 			throw worker_removed();
 		}
@@ -959,6 +966,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	} else {
 		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 		           self->dbgid)
+		    .setMaxFieldLength(-1)
 		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
 		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
 		    .detail("Conf", self->configuration.toString())
@@ -1193,9 +1201,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	}
 
 	Optional<Value> metaclusterRegistrationVal =
-	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
-	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	    wait(self->txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key));
+	Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration =
+	    UnversionedMetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
 	Optional<ClusterName> metaclusterName;
 	Optional<UID> metaclusterId;
 	Optional<ClusterName> clusterName;
@@ -1528,9 +1536,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
 		}
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
-			g_simulator->connectionFailuresDisableDuration = 1e6;
-			g_simulator->speedUpSimulation = true;
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations").log();
+			disableConnectionFailures("TooManyGenerations");
 		}
 	}
 

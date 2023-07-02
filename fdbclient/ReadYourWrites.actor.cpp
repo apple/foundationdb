@@ -77,12 +77,11 @@ public:
 
 	template <bool reverse>
 	struct GetMappedRangeReq {
-		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, int matchIndex, GetRangeLimits limits)
-		  : begin(begin), end(end), mapper(mapper), limits(limits), matchIndex(matchIndex) {}
+		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits) {}
 		KeySelector begin, end;
 		Key mapper;
 		GetRangeLimits limits;
-		int matchIndex;
 		using Result = MappedRangeResult;
 	};
 
@@ -1156,13 +1155,8 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
-		                                                  read.end,
-		                                                  read.mapper,
-		                                                  read.limits,
-		                                                  read.matchIndex,
-		                                                  snapshot,
-		                                                  backwards ? Reverse::True : Reverse::False));
+		MappedRangeResult v = wait(ryw->tr.getMappedRange(
+		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
 		return v;
 	}
 
@@ -1429,7 +1423,85 @@ public:
 		}
 	}
 
+	// This function must not block unless a non-empty commitFuture is passed in
+	// If commitFuture is specified, this will wait for the future and report the result of
+	// the future in the output. If commitFuture isn't specified, then the transaction will
+	// be reported uncommitted. In that case, an optional error can be provided to indicate
+	// why the transaction was uncommitted.
+	ACTOR static Future<Void> printDebugMessages(ReadYourWritesTransaction* self,
+	                                             Optional<Future<Void>> commitFuture,
+	                                             Optional<Error> error = Optional<Error>()) {
+		state std::string prefix;
+		state std::string commitResult;
+		state ErrorOr<Void> result;
+		state std::vector<BaseTraceEvent> debugTraces = std::move(self->debugTraces);
+		state std::vector<std::string> debugMessages = std::move(self->debugMessages);
+
+		self->debugTraces.clear();
+		self->debugMessages.clear();
+
+		if (commitFuture.present()) {
+			try {
+				wait(store(result, errorOr(commitFuture.get())));
+			} catch (Error& e) {
+				result = e;
+			}
+		}
+
+		Version readVersion = self->getReadVersion().canGet() ? self->getReadVersion().get() : -1;
+		Version commitVersion = result.present() ? self->getCommittedVersion() : -1;
+
+		if (result.present()) {
+			commitResult = "Committed";
+		} else if (result.getError().code() == error_code_commit_unknown_result ||
+		           result.getError().code() == error_code_operation_cancelled ||
+		           result.getError().code() == error_code_transaction_timed_out) {
+			commitResult = "Maybe committed";
+		} else if (commitFuture.present()) {
+			commitResult = "Not committed";
+		} else {
+			commitResult = "Uncommitted";
+		}
+
+		for (auto& event : debugTraces) {
+			event.detail("CommitResult", commitResult).detail("ReadVersion", readVersion);
+
+			if (result.present()) {
+				event.detail("CommitVersion", commitVersion);
+			} else if (commitFuture.present()) {
+				event.errorUnsuppressed(result.getError());
+			} else if (error.present()) {
+				event.errorUnsuppressed(error.get());
+			}
+
+			event.log();
+		}
+
+		for (auto message : debugMessages) {
+			std::string cvString = result.present() ? fmt::format(" cv={}", commitVersion) : "";
+			std::string errorString;
+			if (commitFuture.present() && result.isError()) {
+				errorString = fmt::format(" error={}", result.getError().name());
+			} else if (error.present()) {
+				errorString = fmt::format(" error={}", error.get().name());
+			}
+
+			fmt::print("[{} rv={}{}{}] {}\n", commitResult, readVersion, cvString, errorString, message);
+		}
+
+		if (result.isError()) {
+			throw result.getError();
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> onError(ReadYourWritesTransaction* ryw, Error e) {
+		if (ryw->debugTraces.size() > 0 || ryw->debugMessages.size() > 0) {
+			// printDebugMessages returns a future but will not block if called with an empty second argument
+			ASSERT(printDebugMessages(ryw, {}, e).isReady());
+		}
+
 		try {
 			if (ryw->resetPromise.isSet()) {
 				throw ryw->resetPromise.getFuture().getError();
@@ -1708,7 +1780,6 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
                                                                     KeySelector end,
                                                                     Key mapper,
                                                                     GetRangeLimits limits,
-                                                                    int matchIndex,
                                                                     Snapshot snapshot,
                                                                     Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1756,9 +1827,9 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	Future<MappedRangeResult> result =
 	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
+	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, limits), snapshot)
 	            : RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
+	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, limits), snapshot);
 
 	return result;
 }
@@ -2429,14 +2500,16 @@ void ReadYourWritesTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 }
 
 Future<Void> ReadYourWritesTransaction::commit() {
+	Future<Void> result;
 	if (checkUsedDuringCommit()) {
-		return used_during_commit();
+		result = used_during_commit();
+	} else if (resetPromise.isSet()) {
+		result = resetPromise.getFuture().getError();
+	} else {
+		result = RYWImpl::commit(this);
 	}
 
-	if (resetPromise.isSet())
-		return resetPromise.getFuture().getError();
-
-	return RYWImpl::commit(this);
+	return debugMessages.size() > 0 || debugTraces.size() > 0 ? RYWImpl::printDebugMessages(this, result) : result;
 }
 
 Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
@@ -2449,9 +2522,12 @@ Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
 
 void ReadYourWritesTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	setOptionImpl(option, value);
-
-	if (FDBTransactionOptions::optionInfo.getMustExist(option).persistent) {
-		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+	auto const& opt = FDBTransactionOptions::optionInfo.getMustExist(option);
+	if (opt.persistent) {
+		if (opt.sensitive)
+			sensitivePersistentOptions.emplace_back(option, value.castTo<WipedString>());
+		else
+			persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
 }
 
@@ -2564,10 +2640,13 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	cache.arena = &arena;
 	writes.arena = &arena;
 	persistentOptions = std::move(r.persistentOptions);
+	sensitivePersistentOptions = std::move(r.sensitivePersistentOptions);
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
 	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
+	debugTraces = std::move(r.debugTraces);
+	debugMessages = std::move(r.debugMessages);
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
@@ -2583,10 +2662,13 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	watchMap = std::move(r.watchMap);
 	r.resetPromise = Promise<Void>();
 	persistentOptions = std::move(r.persistentOptions);
+	sensitivePersistentOptions = std::move(r.sensitivePersistentOptions);
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
 	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
+	debugTraces = std::move(r.debugTraces);
+	debugMessages = std::move(r.debugMessages);
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
@@ -2595,12 +2677,15 @@ Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
 
 void ReadYourWritesTransaction::applyPersistentOptions() {
 	Optional<StringRef> timeout;
-	for (auto option : persistentOptions) {
+	for (auto const& option : persistentOptions) {
 		if (option.first == FDBTransactionOptions::TIMEOUT) {
 			timeout = option.second.castTo<StringRef>();
 		} else {
 			setOptionImpl(option.first, option.second.castTo<StringRef>());
 		}
+	}
+	for (auto const& option : sensitivePersistentOptions) {
+		setOptionImpl(option.first, option.second.castTo<StringRef>());
 	}
 
 	// Setting a timeout can immediately cause a transaction to fail. The only timeout
@@ -2648,11 +2733,17 @@ void ReadYourWritesTransaction::cancel() {
 }
 
 void ReadYourWritesTransaction::reset() {
+	if (debugTraces.size() > 0 || debugMessages.size() > 0) {
+		// printDebugMessages returns a future but will not block if called with an empty second argument
+		ASSERT(RYWImpl::printDebugMessages(this, {}).isReady());
+	}
+
 	retries = 0;
 	approximateSize = 0;
 	creationTime = now();
 	timeoutActor.cancel();
 	persistentOptions.clear();
+	sensitivePersistentOptions.clear();
 	options.reset(tr);
 	transactionDebugInfo.clear();
 	tr.fullReset();
@@ -2680,6 +2771,11 @@ KeyRef ReadYourWritesTransaction::getMaxWriteKey() {
 ReadYourWritesTransaction::~ReadYourWritesTransaction() {
 	if (!resetPromise.isSet())
 		resetPromise.sendError(transaction_cancelled());
+
+	if (debugTraces.size() || debugMessages.size()) {
+		// printDebugMessages returns a future but will not block if called with an empty second argument
+		[[maybe_unused]] Future<Void> f = RYWImpl::printDebugMessages(this, {});
+	}
 }
 
 bool ReadYourWritesTransaction::checkUsedDuringCommit() {
@@ -2719,4 +2815,14 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 			transactionDebugInfo->lastRetryLogTime = now();
 		}
 	}
+}
+
+void ReadYourWritesTransaction::debugTrace(BaseTraceEvent&& event) {
+	if (event.isEnabled()) {
+		debugTraces.emplace_back(std::move(event));
+	}
+}
+
+void ReadYourWritesTransaction::debugPrint(std::string const& message) {
+	debugMessages.push_back(message);
 }

@@ -112,6 +112,7 @@ namespace actorcompiler
     class IfStatement : Statement
     {
         public string expression;
+        public bool constexpr;
         public Statement ifBody;
         public Statement elseBody;  // might be null
         public override bool containsWait()

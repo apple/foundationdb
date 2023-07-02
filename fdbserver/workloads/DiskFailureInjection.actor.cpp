@@ -65,6 +65,9 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		periodicBroadcastInterval = getOption(options, "periodicBroadcastInterval"_sr, periodicBroadcastInterval);
 	}
 
+	// TODO: Currently this workload doesn't play well with MachineAttrition.
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
+
 	void initFailureInjectionMode(DeterministicRandom& random) override { enabled = clientId == 0; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
