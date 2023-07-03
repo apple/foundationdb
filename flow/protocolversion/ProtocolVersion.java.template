@@ -35,6 +35,14 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 		return protocolVersion;
 	}
 
+	@Override
+	public boolean equals(Object ob) {
+		if (!(ob instanceof ProtocolVersion)) {
+			return false;
+		}
+		return this.protocolVersion == ((ProtocolVersion) ob).protocolVersion;
+	}
+
 	public boolean isSupported() {
 		return supportedVersions.contains(this);
 	}
