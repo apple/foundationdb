@@ -73,12 +73,16 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 
 {% for version, features in all_features.items() %}
 	{% for feature in features %}
-	public boolean has{{feature}}() {
-		return protocolVersion >= {{version | encode_version}};
+
+	{% set feature_name = feature | feature_name_transformer %}
+	{% set encoded_version = version | encode_version %}
+
+	public boolean has{{feature_name}}() {
+		return protocolVersion >= {{encoded_version}};
 	}
 
-	public static ProtocolVersion with{{feature}}() {
-		return new ProtocolVersion({{version | encode_version}});
+	public static ProtocolVersion with{{feature_name}}() {
+		return new ProtocolVersion({{encoded_version}});
 	}
 	{% endfor %}
 {% endfor %}
