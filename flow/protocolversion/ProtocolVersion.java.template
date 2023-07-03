@@ -28,6 +28,10 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 		protocolVersion = version;
 	}
 
+	public ProtocolVersion(Long version) {
+        protocolVersion = version.longValue();
+	}
+
 	public static ProtocolVersion deserialize(ByteBuffer byteBuffer) {
 		assert byteBuffer.order() == ByteOrder.LITTLE_ENDIAN;
 		final long version = byteBuffer.getLong();
