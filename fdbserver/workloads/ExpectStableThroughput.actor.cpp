@@ -125,7 +125,8 @@ public:
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.emplace("Attrition", "RandomClogging");
+		out.insert("Attrition");
+		out.insert("RandomClogging");
 	}
 };
 
