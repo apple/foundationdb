@@ -670,9 +670,15 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("MeanRowReadLatency", cx->readLatencies.mean())
 			    .detail("MedianRowReadLatency", cx->readLatencies.median())
 			    .detail("MaxRowReadLatency", cx->readLatencies.max())
+			    .detail("MeanReadRangeLatency", cx->readRangeLatencies.mean())
+			    .detail("MedianReadRangeLatency", cx->readRangeLatencies.median())
+			    .detail("MaxReadRangeLatency", cx->readRangeLatencies.max())
 			    .detail("MeanGRVLatency", cx->GRVLatencies.mean())
 			    .detail("MedianGRVLatency", cx->GRVLatencies.median())
 			    .detail("MaxGRVLatency", cx->GRVLatencies.max())
+			    .detail("MeanKeyLocationLatency", cx->keyLocationLatencies.mean())
+			    .detail("MedianKeyLocationLatency", cx->keyLocationLatencies.median())
+			    .detail("MaxKeyLocationLatency", cx->keyLocationLatencies.max())
 			    .detail("MeanCommitLatency", cx->commitLatencies.mean())
 			    .detail("MedianCommitLatency", cx->commitLatencies.median())
 			    .detail("MaxCommitLatency", cx->commitLatencies.max())
@@ -722,6 +728,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
+		cx->readRangeLatencies.clear();
 		cx->GRVLatencies.clear();
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
@@ -1559,12 +1566,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     ccFeed("ChangeFeedClientMetrics", dbId.toString()), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
-    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
-    mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0),
-    cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), readRangeLatencies(), commitLatencies(),
+    GRVLatencies(), keyLocationLatencies(), mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0),
+    sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0),
+    lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID),
+    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(_apiVersion),
+    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 
@@ -1870,9 +1878,10 @@ DatabaseContext::DatabaseContext(const Error& err)
     ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
-    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
-    mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr),
-    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), readRangeLatencies(), commitLatencies(),
+    GRVLatencies(), keyLocationLatencies(), mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0),
+    sharedStatePtr(nullptr), transactionTracingSample(false),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	initializeSpecialCounters();
 }
@@ -3002,6 +3011,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Version version) {
 
 	state Span span("NAPI:getKeyLocation"_loc, spanContext);
+	state double startTime = now();
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
 	} else {
@@ -3022,6 +3032,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 			             span.context, tenant, key, Optional<KeyRef>(), 100, isBackward, version, key.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
+				cx->keyLocationLatencies.addSample(now() - startTime);
 				if (debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
 				ASSERT(rep.results.size() == 1);
@@ -4510,13 +4521,15 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Reverse reverse,
                       RangeReadResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
+	double timeNow = now();
 
 	trState->addReadCost(getReadOperationCost(bytes));
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
+	trState->cx->readRangeLatencies.addSample(timeNow - startTime);
 
 	if (trState->trLogInfo) {
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
+		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(timeNow - startTime,
 		                                                             trState->cx->clientLocality.dcId(),
 		                                                             now() - startTime,
 		                                                             bytes,
