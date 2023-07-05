@@ -26,7 +26,6 @@
 #include "flow/FastRef.h"
 #include "flow/Net2Packet.h"
 
-#include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <fmt/format.h>
 #include <unordered_map>

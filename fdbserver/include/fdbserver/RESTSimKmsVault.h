@@ -48,7 +48,7 @@ struct VaultRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<Vault
 	void delref() override { ReferenceCounted<VaultRequestHandler>::delref(); }
 };
 
-void registerHTTPServer();
+Future<Void> registerHTTPServer();
 void initConfig(const std::string& baseFolder);
 Future<Void> initConfigFiles();
 Future<Void> cleanupConfigFiles();

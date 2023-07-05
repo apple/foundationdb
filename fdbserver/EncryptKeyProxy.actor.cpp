@@ -1025,44 +1025,46 @@ ACTOR Future<Void> activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyD
 ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
                                          Reference<AsyncVar<ServerDBInfo>> db,
                                          EncryptionAtRestMode encryptMode) {
+
 	state Reference<EncryptKeyProxyData> self = makeReference<EncryptKeyProxyData>(ekpInterface.id());
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state KmsConnectorInterface kmsConnectorInf;
 
-	kmsConnectorInf.initEndpoints();
-	TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
-	self->addActor.send(waitFailureServer(ekpInterface.waitFailure.getFuture()));
-	self->addActor.send(traceRole(Role::ENCRYPT_KEY_PROXY, ekpInterface.id()));
-
-	wait(activateKmsConnector(self, kmsConnectorInf));
-
-	// Register a recurring task to refresh the cached Encryption keys and blob metadata.
-	// Approach avoids external RPCs due to EncryptionKey refreshes for the inline write encryption codepath such as:
-	// CPs, Redwood Storage Server node flush etc. The process doing the encryption refresh the cached cipher keys based
-	// on FLOW_KNOB->ENCRYPTION_CIPHER_KEY_CACHE_TTL_SEC interval which is intentionally kept longer than
-	// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
-	// mostly not co-inciding with FDB process encryption key refresh attempts.
-
-	self->encryptionKeyRefresher = recurringAsync([&]() { return refreshEncryptionKeys(self, kmsConnectorInf); },
-	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* interval */
-	                                              true, /* absoluteIntervalDelay */
-	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
-	                                              TaskPriority::Worker);
-
-	self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
-	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
-	                                        TaskPriority::Worker);
-
-	self->healthChecker = recurringAsync([&]() { return updateHealthStatus(self, kmsConnectorInf); },
-	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
-	                                     true,
-	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
-	                                     TaskPriority::Worker,
-	                                     true);
-
-	CODE_PROBE(!encryptMode.isEncryptionEnabled() && SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION,
-	           "Encryption disabled and EKP Recruited");
 	try {
+
+		kmsConnectorInf.initEndpoints();
+		TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
+		self->addActor.send(waitFailureServer(ekpInterface.waitFailure.getFuture()));
+		self->addActor.send(traceRole(Role::ENCRYPT_KEY_PROXY, ekpInterface.id()));
+
+		wait(activateKmsConnector(self, kmsConnectorInf));
+
+		// Register a recurring task to refresh the cached Encryption keys and blob metadata.
+		// Approach avoids external RPCs due to EncryptionKey refreshes for the inline write encryption codepath such
+		// as: CPs, Redwood Storage Server node flush etc. The process doing the encryption refresh the cached cipher
+		// keys based on FLOW_KNOB->ENCRYPTION_CIPHER_KEY_CACHE_TTL_SEC interval which is intentionally kept longer than
+		// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key
+		// Manager mostly not co-inciding with FDB process encryption key refresh attempts.
+
+		self->encryptionKeyRefresher = recurringAsync([&]() { return refreshEncryptionKeys(self, kmsConnectorInf); },
+		                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* interval */
+		                                              true, /* absoluteIntervalDelay */
+		                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
+		                                              TaskPriority::Worker);
+
+		self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
+		                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
+		                                        TaskPriority::Worker);
+
+		self->healthChecker = recurringAsync([&]() { return updateHealthStatus(self, kmsConnectorInf); },
+		                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
+		                                     true,
+		                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
+		                                     TaskPriority::Worker,
+		                                     true);
+
+		CODE_PROBE(!encryptMode.isEncryptionEnabled() && SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION,
+		           "Encryption disabled and EKP Recruited");
 		loop choose {
 			when(EKPGetBaseCipherKeysByIdsRequest req = waitNext(ekpInterface.getBaseCipherKeysByIds.getFuture())) {
 				ASSERT(encryptMode.isEncryptionEnabled());

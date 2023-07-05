@@ -2781,7 +2781,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 				startingConfiguration = "usable_regions=1"_sr;
 			}
 			if (testConfig.simHTTPServerEnabled) {
-				RestSimKms::registerHTTPServer();
+				wait(RestSimKms::registerHTTPServer());
 			}
 		} else {
 			g_expect_full_pointermap = 1;
@@ -2796,7 +2796,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 			if (testConfig.simHTTPServerEnabled) {
-				RestSimKms::registerHTTPServer();
+				wait(RestSimKms::registerHTTPServer());
 			}
 		}
 

@@ -559,7 +559,7 @@ void initConfig(const std::string& baseFolder) {
 	g_knobs.setKnob("max_storage_commit_time", KnobValueRef::create(double(1000)));
 }
 
-ACTOR [[flow_allow_discard]] void registerHTTPServerImpl() {
+ACTOR Future<Void> registerHTTPServerImpl() {
 	nServers = deterministicRandom()->randomInt(1, 5);
 	state int i = 0;
 	for (; i < nServers.get(); i++) {
@@ -568,10 +568,11 @@ ACTOR [[flow_allow_discard]] void registerHTTPServerImpl() {
 		wait(g_simulator->registerSimHTTPServer(host, service, makeReference<RestSimKms::VaultRequestHandler>()));
 		TraceEvent("RESTSimKmsVaultRegisterHTTPServer").detail("Host", host).detail("Service", service);
 	}
+	return Void();
 }
 
-void registerHTTPServer() {
-	registerHTTPServerImpl();
+Future<Void> registerHTTPServer() {
+	return registerHTTPServerImpl();
 }
 
 ACTOR Future<Void> cleanupConfigFilesImp() {

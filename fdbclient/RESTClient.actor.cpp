@@ -146,14 +146,12 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			RESTConnectionPool::ReusableConnection _rconn = wait(timeoutError(frconn, client->knobs.connect_timeout));
-			rconn = _rconn;
+			wait(store(rconn, timeoutError(frconn, client->knobs.connect_timeout)));
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
-			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(
-			    HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate), reqTimeout));
-			r = _r;
+			wait(store(r, timeoutError(
+			    HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate), reqTimeout)));
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
