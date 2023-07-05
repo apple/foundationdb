@@ -36,6 +36,18 @@ void nativeToApiBGEncryptionKeyCtx(FDBBGEncryptionCtxV2* dest, const BlobGranule
 	dest->iv.key_length = source.ivRef.size();
 }
 
+void nativeToApiBGEncryptionCipherKey(FDBKey* dest, Reference<BlobCipherKey> source, Arena& ar) {
+	dest->key = new (ar) uint8_t[AES_256_KEY_LENGTH];
+	dest->key_length = AES_256_KEY_LENGTH;
+	memcpy((void*)dest->key, source->rawBaseCipher(), AES_256_KEY_LENGTH);
+}
+
+void nativeToApiBGEncryptionKeys(FDBBGEncryptionKeys* dest, const BlobGranuleCipherKeysCtx& source, Arena& ar) {
+	BlobGranuleFileEncryptionKeys derivedKeys = getEncryptBlobCipherKey(source);
+	nativeToApiBGEncryptionCipherKey(&dest->headerKey, derivedKeys.headerCipherKey, ar);
+	nativeToApiBGEncryptionCipherKey(&dest->textKey, derivedKeys.textCipherKey, ar);
+}
+
 void nativeToApiBGFilePointer(FDBBGFilePointerV2* dest, const BlobFilePointerRef& source, Arena& ar) {
 	dest->filename_ptr = source.filename.begin();
 	dest->filename_length = source.filename.size();
@@ -46,9 +58,12 @@ void nativeToApiBGFilePointer(FDBBGFilePointerV2* dest, const BlobFilePointerRef
 
 	// handle encryption
 	dest->encryption_ctx = nullptr;
+	dest->encryption_keys = nullptr;
 	if (source.cipherKeysCtx.present()) {
 		dest->encryption_ctx = new (ar) FDBBGEncryptionCtxV2();
 		nativeToApiBGEncryptionKeyCtx(dest->encryption_ctx, source.cipherKeysCtx.get(), ar);
+		dest->encryption_keys = new (ar) FDBBGEncryptionKeys();
+		nativeToApiBGEncryptionKeys(dest->encryption_keys, source.cipherKeysCtx.get(), ar);
 	}
 }
 

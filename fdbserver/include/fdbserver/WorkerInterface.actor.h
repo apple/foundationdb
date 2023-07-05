@@ -1231,7 +1231,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 typedef decltype(&tLog) TLogFn;
 
-extern bool isSimulatorProcessReliable();
+extern bool isSimulatorProcessUnreliable();
 
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
@@ -1247,7 +1247,7 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (!isSimulatorProcessReliable()) {
+			if (isSimulatorProcessUnreliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
@@ -1296,7 +1296,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (!isSimulatorProcessReliable()) {
+			if (isSimulatorProcessUnreliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
