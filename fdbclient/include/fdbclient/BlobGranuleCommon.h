@@ -194,6 +194,8 @@ struct BlobGranuleFileEncryptionKeys {
 	Reference<BlobCipherKey> headerCipherKey;
 };
 
+BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKeysCtx& cipherKeysCtx);
+
 struct BlobGranuleCipherKeysMetaRef {
 	EncryptCipherDomainId textDomainId;
 	EncryptCipherBaseKeyId textBaseCipherId;
