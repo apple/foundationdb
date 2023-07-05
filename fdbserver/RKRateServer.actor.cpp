@@ -24,9 +24,10 @@ public:
 			if (p.totalTransactions > 0) {
 				self->smoothReleasedTransactions.addDelta(req.totalReleasedTransactions - p.totalTransactions);
 
-				for (auto const& [tag, count] : req.throttledTagCounts) {
-					quotaThrottler->addRequests(tag, count);
+				for (auto const& [throttlingId, count] : req.throttlingIdToTransactionCount) {
+					quotaThrottler->addRequests(throttlingId, count);
 				}
+				quotaThrottler->updateThroughput(req.throttlingIdToThroughput);
 			}
 			if (p.batchTransactions > 0) {
 				self->smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions - p.batchTransactions);

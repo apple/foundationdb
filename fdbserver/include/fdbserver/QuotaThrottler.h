@@ -44,11 +44,15 @@ public:
 
 	// Based on the busiest readers and writers in the provided storage queue info, update
 	// throttling limits.
-	void updateThrottling(StorageQueueInfo const&);
+	void updateThrottling(Map<UID, StorageQueueInfo> const&);
 
 	// For each throttling ID and priority combination, return the throughput limit for the cluster
-	// (to be shared across all GRV proxies)
+	// (to be shared across all GRV proxies).
 	ThrottlingIdMap<double> getProxyRates(int numProxies);
+
+	// Update per-throttlingId throughput map based on new throughput statistics received
+	// from a GRV proxy.
+	void updateThroughput(ThrottlingIdMap<uint64_t> const& newThroughput);
 
 	// Testing only:
 public:

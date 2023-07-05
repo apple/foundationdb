@@ -477,7 +477,7 @@ public:
 	double POLLING_FREQUENCY;
 	double HEARTBEAT_FREQUENCY;
 
-	// Commit CommitProxy
+	// Commit Proxy and GRV Proxy
 	double START_TRANSACTION_BATCH_INTERVAL_MIN;
 	double START_TRANSACTION_BATCH_INTERVAL_MAX;
 	double START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
@@ -486,7 +486,9 @@ public:
 	double START_TRANSACTION_MAX_TRANSACTIONS_TO_START;
 	int START_TRANSACTION_MAX_REQUESTS_TO_START;
 	double START_TRANSACTION_RATE_WINDOW;
+	double TAG_THROTTLE_RATE_WINDOW;
 	double START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET;
+	double TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
 	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
@@ -639,6 +641,8 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
+	                                             // router is degraded and may use trigger recovery to recover from it.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -748,6 +752,9 @@ public:
 	// compute rates, but these rates won't be sent to GRV proxies for
 	// enforcement.
 	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
+	// Below this throughput threshold (in bytes/second), ratekeeper will forget about the
+	// throughput of a particular throttlingId on a particular storage server
+	int64_t GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD;
 
 	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
 	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;

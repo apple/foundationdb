@@ -283,10 +283,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
-	// Measured by summing the bytes accessed by each read and write operation
-	// after rounding up to the nearest page size and applying a write penalty
-	int64_t totalCost = 0;
-
 	double proxyTagThrottledDuration = 0.0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
@@ -338,9 +334,25 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
 	Future<Version> getReadVersion(uint32_t flags);
 
+	void addReadCost(uint64_t bytes);
+	void addWriteCost(uint64_t bytes);
+	void flushWriteCost();
+	int64_t getTotalCost() const;
+
 private:
 	Optional<Reference<Tenant>> tenant_;
 	bool tenantSet;
+
+	// Measured by summing the bytes accessed by each read operation
+	// after rounding up to the nearest page size
+	int64_t readCost = 0;
+
+	// Measured by summing the bytes accessed by each write operation
+	// after rounding up to the nearest page size and applying a write penalty
+	int64_t writeCost = 0;
+	bool flushedWriteCost = false;
+
+	Optional<ThrottlingId> getThrottlingId();
 };
 
 class Transaction : NonCopyable {
@@ -493,7 +505,7 @@ public:
 	// May be called only after commit() returns success
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
-	int64_t getTotalCost() const { return trState->totalCost; }
+	int64_t getTotalCost() const { return trState->getTotalCost(); }
 
 	double getTagThrottledDuration() const;
 

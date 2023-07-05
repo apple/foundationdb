@@ -1,3 +1,8 @@
+[configuration]
+# Do not generate remote DC because ratekeeper ignores 
+# storage servers in the other datacenters.
+generateFearless = false
+
 [[test]]
 testTitle='ThrottlingTest'
     [[test.workload]]

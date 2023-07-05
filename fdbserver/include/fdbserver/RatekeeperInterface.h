@@ -93,7 +93,8 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 	Version version;
 
-	ThrottlingIdMap<uint64_t> throttledTagCounts;
+	ThrottlingIdMap<uint64_t> throttlingIdToTransactionCount;
+	ThrottlingIdMap<uint64_t> throttlingIdToThroughput;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
@@ -102,11 +103,13 @@ struct GetRateInfoRequest {
 	                   int64_t totalReleasedTransactions,
 	                   int64_t batchReleasedTransactions,
 	                   Version version,
-	                   ThrottlingIdMap<uint64_t> throttledTagCounts,
+	                   ThrottlingIdMap<uint64_t>&& throttlingIdToTransactionCount,
+	                   ThrottlingIdMap<uint64_t>&& throttlingIdToThroughput,
 	                   bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
-	    batchReleasedTransactions(batchReleasedTransactions), version(version), throttledTagCounts(throttledTagCounts),
-	    detailed(detailed) {}
+	    batchReleasedTransactions(batchReleasedTransactions), version(version),
+	    throttlingIdToTransactionCount(std::move(throttlingIdToTransactionCount)),
+	    throttlingIdToThroughput(std::move(throttlingIdToThroughput)), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -115,9 +118,10 @@ struct GetRateInfoRequest {
 		           totalReleasedTransactions,
 		           batchReleasedTransactions,
 		           version,
-		           throttledTagCounts,
+		           throttlingIdToTransactionCount,
 		           detailed,
-		           reply);
+		           reply,
+		           throttlingIdToThroughput);
 	}
 };
 
