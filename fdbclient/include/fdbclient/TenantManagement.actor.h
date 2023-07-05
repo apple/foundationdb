@@ -135,10 +135,10 @@ int64_t getTenantIdPrefix(int64_t tenantId);
 
 ACTOR template <class Transaction>
 Future<TenantMode> getEffectiveTenantMode(Transaction tr) {
-	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 	state ClusterType clusterType;
-	state ValueReadResult tenantModeValue;
+	state Optional<Value> tenantModeValue;
 	wait(store(clusterType, getClusterType(tr)) && store(tenantModeValue, safeThreadFutureToFuture(tenantModeFuture)));
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 	return tenantModeForClusterType(clusterType, tenantMode);

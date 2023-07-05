@@ -31,6 +31,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/BooleanParam.h"
+#include "flow/ThreadHelper.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantData.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -139,19 +140,26 @@ private:
 	}
 
 	ACTOR static Future<Void> validateNoDataInRanges(Reference<DB> db, Standalone<VectorRef<KeyRangeRef>> ranges) {
-		state std::vector<Future<RangeReadResult>> rangeReadFutures;
+		state std::vector<Future<RangeResult>> rangeReadFutures;
+		state std::vector<typename transaction_future_type<typename DB::TransactionT, RangeResult>::type>
+		    rangeReadThreadFutures;
+		std::vector<typename transaction_future_type<typename DB::TransactionT, RangeResult>::type>* ptr =
+		    std::addressof(rangeReadThreadFutures);
 		for (const auto& range : ranges) {
-			Future<RangeReadResult> f = runTransaction(db, [range](Reference<typename DB::TransactionT> tr) {
+			Future<RangeResult> future = runTransaction(db, [range, ptr](Reference<typename DB::TransactionT> tr) {
 				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-				return safeThreadFutureToFuture(tr->getRange(range, 1));
+				typename transaction_future_type<typename DB::TransactionT, RangeResult>::type f =
+				    tr->getRange(range, 1);
+				ptr->emplace_back(f);
+				return safeThreadFutureToFuture(f);
 			});
-			rangeReadFutures.emplace_back(f);
+			rangeReadFutures.emplace_back(future);
 		}
 		wait(waitForAll(rangeReadFutures));
 		for (size_t i = 0; i < ranges.size(); ++i) {
 			auto f = rangeReadFutures[i];
 			ASSERT(f.isReady());
-			RangeReadResult rangeReadResult = f.get();
+			RangeResult rangeReadResult = f.get();
 			if (!rangeReadResult.empty()) {
 				TraceEvent(SevError, "DataOutsideTenants")
 				    .detail("Count", rangeReadFutures.size())
