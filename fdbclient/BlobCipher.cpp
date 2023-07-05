@@ -3010,8 +3010,6 @@ void testKeyCacheCleanup(const int minDomainId, const int maxDomainId) {
 void testEncryptInplaceNoAuthMode(const int minDomainId) {
 	TraceEvent("EncryptInplaceStart");
 
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 
 	// Validate Encryption ops
