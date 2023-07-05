@@ -146,13 +146,18 @@ static DeltaGenerator deltaGen; // Pre-generate deltas
 ACTOR static Future<Void> benchSerializeDeltasActor(benchmark::State* benchState) {
 	state int targetBytes = benchState->range(0);
 	state int chunkSize = benchState->range(1);
+	state bool enableEncryption = benchState->range(2);
 
 	state Standalone<GranuleDeltas> delta = deltaGen.getDelta(targetBytes);
 	state KeyRange range = deltaGen.getRange();
 
 	state Standalone<StringRef> fileName = "testdelta"_sr; // unused
 	state Optional<CompressionFilter> compressFilter; // unused. no compression
+	state Arena arena;
 	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx; // unused. no encryption
+	if (enableEncryption) {
+		cipherKeysCtx = getCipherKeysCtx(arena);
+	}
 
 	state uint32_t serializedBytes = 0;
 	while (benchState->KeepRunning()) {
@@ -190,9 +195,12 @@ static void bench_sort_deltas(benchmark::State& benchState) {
 
 // Benchmark serialization for granule deltas 128KB, 512KB and 1024KB. Chunk size 32KB
 BENCHMARK(bench_serialize_deltas)
-    ->Args({ 128 * 1024, 32 * 1024 })
-    ->Args({ 512 * 1024, 32 * 1024 })
-    ->Args({ 1024 * 1024, 32 * 1024 });
+    ->Args({ 128 * 1024, 32 * 1024, false })
+    ->Args({ 512 * 1024, 32 * 1024, false })
+    ->Args({ 1024 * 1024, 32 * 1024, false })
+    ->Args({ 128 * 1024, 32 * 1024, true })
+    ->Args({ 512 * 1024, 32 * 1024, true })
+    ->Args({ 1024 * 1024, 32 * 1024, true });
 
 // Benchmark sorting for granule deltas 128KB, 512KB and 1024KB. Chunk size 32KB
 BENCHMARK(bench_sort_deltas)->Args({ 128 * 1024 })->Args({ 512 * 1024 })->Args({ 1024 * 1024 });

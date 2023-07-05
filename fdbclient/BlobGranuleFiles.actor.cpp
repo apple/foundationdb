@@ -1755,6 +1755,8 @@ Standalone<StringRef> getBaseCipher() {
 
 const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
 
+} // namespace
+
 BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
 	BlobGranuleCipherKeysCtx cipherKeysCtx;
 	const EncryptCipherKeyCheckValue cipherKCV =
@@ -1777,8 +1779,6 @@ BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
 
 	return cipherKeysCtx;
 }
-
-} // namespace
 
 TEST_CASE("/blobgranule/files/applyDelta") {
 	printf("Testing blob granule delta applying\n");
