@@ -42,6 +42,7 @@
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/PriorityMultiLock.actor.h"
+#include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -1459,6 +1460,7 @@ struct RedwoodMetrics {
 		unsigned int pagerEvictFail;
 		unsigned int btreeLeafPreload;
 		unsigned int btreeLeafPreloadExt;
+		unsigned int readRequestDecryptTimeNS;
 	};
 
 	RedwoodMetrics() {
@@ -2798,7 +2800,8 @@ public:
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
 	                                                           PhysicalPageID pageID,
 	                                                           int priority,
-	                                                           bool header) {
+	                                                           bool header,
+	                                                           PagerEventReasons reason) {
 		ASSERT(!self->memoryOnly);
 
 		state Reference<ArenaPage> page =
@@ -2834,7 +2837,11 @@ public:
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageID);
+			double decryptTime = 0;
+			page->postReadPayload(pageID, &decryptTime);
+			if (isReadRequest(reason)) {
+				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
+			}
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -2867,7 +2874,8 @@ public:
 
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalMultiPage(DWALPager* self,
 	                                                                Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                                                int priority) {
+	                                                                int priority,
+	                                                                Optional<PagerEventReasons> reason) {
 		ASSERT(!self->memoryOnly);
 
 		// if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
@@ -2913,7 +2921,12 @@ public:
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageIDs.front());
+			double decryptTime = 0;
+			page->postReadPayload(pageIDs.front(), &decryptTime);
+			if (reason.present() && isReadRequest(reason.get())) {
+				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
+			}
+
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageIDs).c_str(),
@@ -2940,7 +2953,12 @@ public:
 
 	Future<Reference<ArenaPage>> readHeaderPage(PhysicalPageID pageID) {
 		debug_printf("DWALPager(%s) readHeaderPage %s\n", filename.c_str(), toString(pageID).c_str());
-		return readPhysicalPage(this, pageID, ioMaxPriority, true);
+		return readPhysicalPage(this, pageID, ioMaxPriority, true, PagerEventReasons::MetaData);
+	}
+
+	static bool isReadRequest(PagerEventReasons reason) {
+		return reason == PagerEventReasons::PointRead || reason == PagerEventReasons::FetchRange ||
+		       reason == PagerEventReasons::RangeRead || reason == PagerEventReasons::RangePrefetch;
 	}
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
@@ -2970,7 +2988,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
-			return forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
+			return forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise);
 		}
 		PageCacheEntry& cacheEntry = pageCache.get(pageID, physicalPageSize, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
@@ -2982,7 +3000,7 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise);
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -3019,7 +3037,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
-			return forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
+			return forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise);
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * physicalPageSize, noHit);
@@ -3032,7 +3050,7 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageIDs).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise);
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -8855,6 +8873,8 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 		                                               { "PagerRemapFree", metric.pagerRemapFree },
 		                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 		                                               { "PagerRemapSkip", metric.pagerRemapSkip },
+		                                               { "", 0 },
+		                                               { "ReadRequestDecryptTimeNS", metric.readRequestDecryptTimeNS },
 		                                               { "", 0 } };
 
 	double elapsed = now() - startTime;
