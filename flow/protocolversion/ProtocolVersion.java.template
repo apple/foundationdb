@@ -22,6 +22,8 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 			protocolVersionSevenZero,
 			protocolVersionSevenOne,
 			protocolVersionSevenThree);
+
+	private static final long compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000L;
 	private final long protocolVersion;
 
 	public ProtocolVersion(long version) {
@@ -44,11 +46,19 @@ class ProtocolVersion implements Comparable<ProtocolVersion> {
 		if (!(ob instanceof ProtocolVersion)) {
 			return false;
 		}
-		return this.protocolVersion == ((ProtocolVersion) ob).protocolVersion;
+		return compareTo((ProtocolVersion) ob) == 0;
 	}
 
 	public boolean isSupported() {
 		return supportedVersions.contains(this);
+	}
+
+	public ProtocolVersion normalizedVersion() {
+		return new ProtocolVersion(this.protocolVersion & ProtocolVersion.compatibleProtocolVersionMask);
+	}
+
+	public boolean isCompatible(ProtocolVersion other) {
+		return this.normalizedVersion().equals(other.normalizedVersion());
 	}
 
 	@Override
