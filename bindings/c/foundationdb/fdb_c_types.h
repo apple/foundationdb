@@ -164,7 +164,7 @@ typedef struct FDBBGFileDescriptionV1_ {
  *  (Changed to referecence extensible data structures by pointers)
  */
 
-// contains metadata necessary to derive encryption keys (for passing back to FDB)
+/* contains metadata necessary to derive encryption keys (for passing back to FDB) */
 typedef struct FDBBGEncryptionCtxV2_ {
 	FDBBGEncryptionKey* textKey;
 	uint32_t textKCV;
@@ -173,7 +173,7 @@ typedef struct FDBBGEncryptionCtxV2_ {
 	FDBKey iv;
 } FDBBGEncryptionCtxV2;
 
-// contains actual encryption keys (for external use if necessary)
+/* contains actual encryption keys (for external use if necessary) */
 typedef struct FDBBGEncryptionKeys_ {
 	FDBKey headerKey;
 	FDBKey textKey;
