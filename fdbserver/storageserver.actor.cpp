@@ -298,7 +298,7 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 		while (!updates.empty()) {
 			res.push_back(updates.front());
 			updates.pop_front();
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.5) {
+			if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
 				break;
 			}
 		}
@@ -9460,12 +9460,13 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				return Void();
 			}
 
-			const Version version = data->version.get() + 1;
+			state Version version = data->version.get() + 1;
 			data->mutableData().createNewVersion(version);
 			ASSERT(version == data->data().getLatestVersion());
 
 			validate(data);
 
+			Version highWatermark = moveInShard->getHighWatermark();
 			std::vector<Standalone<VerUpdateRef>> updates =
 			    moveInUpdates->next(SERVER_KNOBS->FETCH_SHARD_BUFFER_BYTE_LIMIT);
 			if (!updates.empty()) {
@@ -9473,10 +9474,14 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				    .detail("MoveInShard", moveInShard->toString())
 				    .detail("MinVerion", updates.front().version)
 				    .detail("MaxVerion", updates.back().version)
+				    .detail("TargetVersion", version)
+				    .detail("HighWatermark", highWatermark)
 				    .detail("Size", updates.size());
 			}
 			for (auto i = updates.begin(); i != updates.end(); ++i) {
 				ASSERT(i->version <= version);
+				ASSERT(i->version > highWatermark);
+				highWatermark = i->version;
 				i->version = version;
 				batch->arena.dependsOn(i->arena());
 			}
@@ -9487,8 +9492,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			// FIXME: pass the deque back rather than copy the data
 			std::copy(updates.begin(), updates.end(), batch->changes.begin() + startSize);
 
-			moveInUpdates->lastAppliedVersion = version;
-			moveInShard->setHighWatermark(version);
+			moveInUpdates->lastAppliedVersion = highWatermark;
+			moveInShard->setHighWatermark(highWatermark);
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 
 			if (!moveInUpdates->hasNext()) {
@@ -9525,6 +9530,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				                                           moveInShardValue(*moveInShard->meta)));
 				TraceEvent(moveInShard->logSev, "MultipleApplyUpdates").detail("MoveInShard", moveInShard->toString());
 			}
+
+			wait(data->version.whenAtLeast(version + 1));
 		}
 
 		moveInShard->setPhase(MoveInPhase::Complete);
@@ -9802,9 +9809,9 @@ void MoveInShard::addMutation(Version version,
 		ASSERT(range.contains(mutation.param1));
 	}
 
-	if (this->getPhase() < MoveInPhase::ReadWritePending) {
+	if (this->getPhase() < MoveInPhase::ReadWritePending && !fromFetch) {
 		updates->addMutation(version, fromFetch, mutation, encryptedMutation);
-	} else if (getPhase() == MoveInPhase::ReadWritePending || getPhase() == MoveInPhase::Complete) {
+	} else if (getPhase() == MoveInPhase::ReadWritePending || getPhase() == MoveInPhase::Complete || fromFetch) {
 		server->addMutation(version, fromFetch, mutation, encryptedMutation, range, server->updateEagerReads);
 	}
 }
