@@ -342,9 +342,10 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		    .detail("StableConnection", stableConnection);
 	}
 
-	~Sim2Conn() { 
+	~Sim2Conn() {
 		// FIXME: HTTPServer implement idle-connection monitoring
-		ASSERT_ABORT(!opened || closedByCaller || g_simulator->httpServerIps.count(peerEndpoint.ip)); }
+		ASSERT_ABORT(!opened || closedByCaller || g_simulator->httpServerIps.count(peerEndpoint.ip));
+	}
 
 	void addref() override { ReferenceCounted<Sim2Conn>::addref(); }
 	void delref() override { ReferenceCounted<Sim2Conn>::delref(); }

@@ -150,8 +150,10 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
-			wait(store(r, timeoutError(
-			    HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate), reqTimeout)));
+			wait(store(
+			    r,
+			    timeoutError(HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate),
+			                 reqTimeout)));
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
