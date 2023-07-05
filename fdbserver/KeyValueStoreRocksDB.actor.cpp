@@ -47,6 +47,7 @@
 #include <liburing.h>
 #endif
 #endif
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBRocksDBVersion.h"
@@ -2782,6 +2783,183 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 
 	// TODO: flush memtable. The process is expected to OOM.
 
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	return Void();
+}
+
+class MiniBackupWorkload {
+public:
+	MiniBackupWorkload() = default;
+	MiniBackupWorkload(IKeyValueStore* kv)
+	  : uid(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())),
+	    backupPrefix(uid.withPrefix(backupLogKeys.begin)), kvStore(kv) {
+		beginVersion = deterministicRandom()->randomInt64(
+		    0, std::numeric_limits<int32_t>::max()); // intentionally not max of int64
+	}
+
+	void run() {
+		inserter = insertData(this);
+		deleter = deleteData(this);
+		checker = checkData(this);
+		deletionChecker = checkDeletion(this);
+	}
+
+	ACTOR static Future<Void> insertData(MiniBackupWorkload* self) {
+		state Version v = self->beginVersion;
+		loop {
+			Key k = getLogKey(v, self->uid);
+			state int parts = deterministicRandom()->randomInt(1, 200);
+			for (int i = 0; i < parts; i++) {
+				Key key = k.withSuffix(StringRef((uint8_t*)&i, sizeof(int)));
+				std::string str =
+				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10000, 100000));
+				self->kvStore->set({ key, str });
+			}
+
+			wait(self->kvStore->commit(false) && delayJittered(0.001));
+			self->keyCount[v] = parts;
+			// fmt::print("inserted {} keys at version {}\n", parts, v);
+			TraceEvent("InsertedData").detail("Version", v).detail("Count", parts);
+
+			// increase version by 100~200k
+			v += deterministicRandom()->randomInt64(100000, 200000);
+		}
+	}
+
+	ACTOR static Future<Void> deleteData(MiniBackupWorkload* self) {
+		state Version beginVersion = self->beginVersion;
+		loop {
+			// 0.1 to 20 million versions
+			state Version endVersion = beginVersion + deterministicRandom()->randomInt64(100000, 20000000);
+			while (self->keyCount.empty() || self->keyCount.rbegin()->first < endVersion) {
+				wait(delayJittered(0.1));
+			}
+			wait(eraseLogData(self, beginVersion, endVersion) && delayJittered(0.01));
+			// fmt::print("deleted data between {} and {}\n", beginVersion, endVersion);
+			TraceEvent("DeletedData").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion);
+			beginVersion = endVersion;
+		}
+	}
+
+	// mimic _eraseLogData() to erase log data between two versions
+	ACTOR static Future<Void> eraseLogData(MiniBackupWorkload* self, Version currBeginVersion, Version endVersion) {
+		if ((endVersion - currBeginVersion) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE >=
+		        std::numeric_limits<uint8_t>::max() ||
+		    deterministicRandom()->random01() < 0.25) {
+			for (int h = 0; h <= std::numeric_limits<uint8_t>::max(); h++) {
+				uint64_t bv = bigEndian64(Version(0));
+				uint64_t ev = bigEndian64(endVersion);
+				uint8_t h1 = h;
+				Key vblockPrefix = StringRef(&h1, sizeof(uint8_t)).withPrefix(self->backupPrefix);
+				self->kvStore->clear(KeyRangeRef(StringRef((uint8_t*)&bv, sizeof(uint64_t)).withPrefix(vblockPrefix),
+				                                 StringRef((uint8_t*)&ev, sizeof(uint64_t)).withPrefix(vblockPrefix)));
+			}
+		} else {
+			Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(currBeginVersion, endVersion, self->uid);
+			for (auto& range : ranges) {
+				self->kvStore->clear(range);
+			}
+		}
+		wait(self->kvStore->commit(false));
+		self->deletedBeginVersion = currBeginVersion;
+		self->deletedEndVersion = endVersion;
+		self->trigger.trigger();
+
+		// clear the version history
+		for (auto it = self->keyCount.lower_bound(currBeginVersion); it != self->keyCount.end(); it++) {
+			if (it->first >= endVersion) {
+				break;
+			}
+			it->second = 0;
+		}
+		while (self->keyCount.size() > 1 && self->keyCount.begin()->second == 0 &&
+		       self->keyCount.begin()->first < currBeginVersion) {
+			self->keyCount.erase(self->keyCount.begin());
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> checkDeletion(MiniBackupWorkload* self) {
+		loop {
+			wait(self->trigger.onTrigger());
+			TraceEvent("CheckingDeletion")
+			    .detail("BeginVersion", self->deletedBeginVersion)
+			    .detail("EndVersion", self->deletedEndVersion);
+			state Standalone<VectorRef<KeyRangeRef>> ranges =
+			    getLogRanges(self->deletedBeginVersion, self->deletedEndVersion, self->uid);
+			state int i = 0;
+			for (i = 0; i < ranges.size(); i++) {
+				state KeyRangeRef range = ranges[ranges.size() - i - 1];
+				RangeResult result = wait(self->kvStore->readRange(range));
+				ASSERT(result.size() == 0);
+			}
+		}
+	}
+
+	ACTOR static Future<Void> checkData(MiniBackupWorkload* self) {
+		loop {
+			try {
+				wait(delayJittered(0.005));
+				while (self->keyCount.empty()) {
+					wait(delayJittered(0.1));
+				}
+				// int offset = deterministicRandom()->randomInt(0, self->keyCount.size() - 1);
+				// auto it = self->keyCount.begin();
+				// std::advance(it, offset);
+				auto it = self->keyCount.rbegin();
+				state Version v = it->first;
+				state int count = it->second;
+				Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, self->uid);
+				ASSERT(ranges.size() == 1);
+				RangeResult result = wait(self->kvStore->readRange(ranges[0]));
+				ASSERT(result.size() == count);
+				// fmt::print("checked {} keys at version {}\n", count, v);
+				TraceEvent("CheckedData").detail("Version", v).detail("Count", count);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				TraceEvent(SevError, "TestFailed").errorUnsuppressed(e);
+				throw;
+			}
+		}
+	}
+
+private:
+	Key uid; // backup UID
+	Key backupPrefix;
+	Future<Void> inserter; // hold the actor for populating data
+	Future<Void> deleter; // hold the actor for deleting data
+	Future<Void> checker; // continuously read data
+	Future<Void> deletionChecker; // continuously check deleted data
+	AsyncTrigger trigger;
+	Version deletedBeginVersion = invalidVersion;
+	Version deletedEndVersion = invalidVersion;
+
+	Version beginVersion;
+
+	// key count in the KV store at each version for reader to check consistency.
+	std::map<Version, int> keyCount;
+
+	IKeyValueStore* kvStore = nullptr;
+};
+
+TEST_CASE("noSim/RocksDB/BackupWorkload") {
+	state const std::string rocksDBTestDir = "rocksdb-perf-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	try {
+		state MiniBackupWorkload workload(kvStore);
+		workload.run();
+		wait(Never());
+	} catch (Error& e) {
+		TraceEvent(SevError, "TestFailed").error(e);
+	}
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
 	wait(closed);
