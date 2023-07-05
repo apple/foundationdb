@@ -27,6 +27,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/TenantName.h"
 #include "fdbrpc/simulator.h"
@@ -93,9 +95,13 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int tenantGroupCapacity;
 	metacluster::metadata::management::MovementRecord moveRecord;
 
+	int64_t reservedQuota;
+	int64_t totalQuota;
+	int64_t storageQuota;
+
 	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
-		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0);
+		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		maxTenants =
 		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
@@ -104,6 +110,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		tenantGroupCapacity =
 		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
+		reservedQuota = getOption(options, "reservedQuota"_sr, 1e6);
+		totalQuota = getOption(options, "totalQuota"_sr, 2e6);
+		storageQuota = getOption(options, "storageQuota"_sr, 1e6);
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
@@ -453,6 +462,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
+				if (e.code() == error_code_tenant_move_failed) {
+					continue;
+				}
 				throw;
 			}
 		}
@@ -533,6 +545,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 
 		TraceEvent(SevDebug, "MetaclusterMoveWorkloadCreateTenantsComplete");
 
+		// bulkSetup usually expects all clients
+		// 	but this is being circumvented by the clientId==0 check
+		self->clientCount = 1;
 		// container of range-based for with continuation must be a state variable
 		state std::map<ClusterName, DataClusterData> dataDbs = self->dataDbs;
 		for (auto const& [clusterName, dataDb] : dataDbs) {
@@ -560,6 +575,26 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				               0,
 				               0,
 				               dataTenants));
+			}
+			std::vector<Future<bool>> blobFutures;
+			for (Reference<Tenant> tenantRef : dataTenants) {
+				blobFutures.push_back(dbObj->blobbifyRangeBlocking(normalKeys, tenantRef));
+			}
+			wait(waitForAll(blobFutures));
+		}
+
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				for (auto const& [tGroupName, tGroupData] : self->tenantGroups) {
+					ThrottleApi::setTagQuota(tr, tGroupName, self->reservedQuota, self->totalQuota);
+					TenantMetadata::storageQuota().set(tr, tGroupName, self->storageQuota);
+				}
+				wait(safeThreadFutureToFuture(tr->commit()));
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
 
