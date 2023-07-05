@@ -536,6 +536,8 @@ if (WITH_SWIFT)
   # Enable Swift <-> C++ interoperability.
   set(SwiftOptions "${SwiftOptions} -cxx-interoperability-mode=swift-5.9")
 
+  set(SwiftOptions "${SwiftOptions} -Xcc -DWITH_SWIFT")
+
   if (FOUNDATIONDB_CROSS_COMPILING)
     # Cross-compilation options.
     # For some reason we need to specify -sdk explictly to pass config-time
