@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <tuple>
-#include <utility>
 #include <variant>
 
 #include "fdbclient/Atomic.h"
