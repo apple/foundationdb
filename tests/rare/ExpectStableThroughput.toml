@@ -1,5 +1,4 @@
 [configuration]
-buggify = false
 tenantModes = ['disabled']
 # TODO: Support multiple GRV proxies
 grvProxyCount = 1
