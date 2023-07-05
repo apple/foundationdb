@@ -177,23 +177,6 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granuleContext) override;
-
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
-	                                                                               Version beginVersion,
-	                                                                               Optional<Version> readVersion,
-	                                                                               Version* readVersionOut) override;
-
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
-
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
 	                                                                                 int rangeLimit) override;
@@ -238,6 +221,10 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
+
+	FDBAllocatorIfc* getAllocatorInterface() override;
+
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;
@@ -261,6 +248,7 @@ public:
 	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
+	FDBAllocatorIfc* getAllocatorInterface() override;
 
 private:
 	friend IClientApi* getLocalClientAPI();
