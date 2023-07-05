@@ -420,7 +420,7 @@ public:
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
-	//	2 = "memory-radixtree-beta"
+	//	2 = "memory-radixtree"
 	//	3 = "ssd-redwood-1"
 	//	4 = "ssd-rocksdb-v1"
 	//	5 = "ssd-sharded-rocksdb"
@@ -1725,7 +1725,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 2: {
 		CODE_PROBE(true, "Simulated cluster using radix-tree storage engine");
-		set_config("memory-radixtree-beta");
+		set_config("memory-radixtree");
 		break;
 	}
 	case 3: {

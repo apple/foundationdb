@@ -445,7 +445,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					storeTypeStr = memoryTypes[deterministicRandom()->randomInt(0, 3)];
 					break;
 				case 2:
-					storeTypeStr = "memory-radixtree-beta";
+					storeTypeStr = "memory-radixtree";
 					break;
 				case 3:
 					// Experimental suffix is still supported so test it
