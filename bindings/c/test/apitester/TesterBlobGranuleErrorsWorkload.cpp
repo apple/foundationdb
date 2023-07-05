@@ -80,9 +80,9 @@ private:
 			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
 			    granuleContext.debugNoMaterialize = !doMaterialize;
 
-			    fdb::Result res =
+			    fdb::ReadRangeResult res =
 			        ctx->tx().readBlobGranules(begin, end, 0 /* beginVersion */, readVersion, granuleContext);
-			    auto out = fdb::Result::KeyValueRefArray{};
+			    auto out = fdb::ReadRangeResult::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 
 			    if (err.code() == error_code_success) {
