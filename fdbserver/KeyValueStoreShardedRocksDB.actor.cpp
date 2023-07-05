@@ -483,6 +483,7 @@ rocksdb::Options getOptions() {
 
 	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
+	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
 	return options;
 }
 
@@ -2303,6 +2304,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		void action(AddShardAction& a) {
 			auto s = a.shard->init();
 			if (!s.ok()) {
+				TraceEvent(SevError, "AddShardError").detail("Status", s.ToString()).detail("ShardId", a.shard->id);
 				a.done.sendError(statusToError(s));
 				return;
 			}
@@ -2428,6 +2430,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			std::vector<std::pair<uint32_t, KeyRange>> deletes;
 			auto s = doCommit(a.writeBatch.get(), a.db, &deletes, a.getHistograms);
 			if (!s.ok()) {
+				TraceEvent(SevError, "CommitError").detail("Status", s.ToString());
 				a.done.sendError(statusToError(s));
 				return;
 			}
