@@ -159,6 +159,14 @@ pipeline {
                         }
                     }
                 }
+
+                stage('Build and Test - Valgrind') {
+                    steps {
+                        script {
+                            trigger_job("precommit_valgrind", "precommit_valgrind.yml")
+                        }
+                    }
+                }
             }
         }
         stage('Update Build Status') {

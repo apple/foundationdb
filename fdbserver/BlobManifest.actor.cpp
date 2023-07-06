@@ -715,8 +715,8 @@ public:
 							TraceEvent("BlobRestoreMissingData").detail("KeyRange", granuleRange.toString());
 						} else {
 							TraceEvent("BlobManifestError").error(e).detail("KeyRange", granuleRange.toString());
+							throw;
 						}
-						throw;
 					}
 				}
 				return results;
