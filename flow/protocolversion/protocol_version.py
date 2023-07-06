@@ -184,6 +184,20 @@ class NameTransformer(abc.ABC):
 
 
 class CamelCaseNameTransformer(NameTransformer):
+
+    def _all_caps_to_camel(self, text: str) -> str:
+        """Translate ABC_DEF to AbcDef"""
+        return "".join(item.capitalize() for item in text.split("_"))
+
+
+class JavaCamelCaseNameTransformer(CamelCaseNameTransformer):
+
+    def transform_feature_text(self, feature: str) -> str:
+        # Java stylechecker expects a tighter form of CamelCase, e.g. IPV6 -> Ipv6
+        return self._all_caps_to_camel(feature)
+
+
+class CxxCamelCaseNameTransformer(CamelCaseNameTransformer):
     XXX_FIELD_MAPPING = {
         "IPV6": "IPv6",
         "INEXPENSIVE_MULTIVERSION_CLIENT": "InexpensiveMultiVersionClient",
@@ -200,13 +214,9 @@ class CamelCaseNameTransformer(NameTransformer):
         "PROCESS_ID_FILE": "ProcessIDFile",
     }
 
-    def _all_caps_to_camel(self, text: str) -> str:
-        """Translate ABC_DEF to AbcDef"""
-        return "".join(item.capitalize() for item in text.split("_"))
-
     def transform_feature_text(self, feature: str) -> str:
-        if feature in CamelCaseNameTransformer.XXX_FIELD_MAPPING:
-            return CamelCaseNameTransformer.XXX_FIELD_MAPPING[feature]
+        if feature in CxxCamelCaseNameTransformer.XXX_FIELD_MAPPING:
+            return CxxCamelCaseNameTransformer.XXX_FIELD_MAPPING[feature]
         return self._all_caps_to_camel(feature)
 
 
@@ -256,7 +266,7 @@ class JavaCodeGen(CodeGenBase):
         return "{}L".format(_version_to_hex_string(version))
 
     def _render(self):
-        env = self._get_environment(self._encode_version, CamelCaseNameTransformer())
+        env = self._get_environment(self._encode_version, JavaCamelCaseNameTransformer())
         with open(JavaCodeGen.JAVA_TEMPLATE_FILE) as template_stream:
             template = env.from_string(template_stream.read())
 
@@ -270,7 +280,7 @@ class CxxHeaderFileCodeGen(CodeGenBase):
         return "{}LL".format(_version_to_hex_string(version))
 
     def _render(self):
-        env = self._get_environment(self._encode_version, CamelCaseNameTransformer())
+        env = self._get_environment(self._encode_version, CxxCamelCaseNameTransformer())
         with open(CxxHeaderFileCodeGen.CXX_TEMPLATE_FILE) as template_stream:
             template = env.from_string(template_stream.read())
 
