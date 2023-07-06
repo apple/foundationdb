@@ -273,6 +273,7 @@ ERROR( invalid_tenant_state, 2143, "Operation cannot be applied to tenant in its
 ERROR( tenant_locked, 2144, "Tenant is locked" )
 ERROR( invalid_tenant_move, 2145, "The tenant movement is invalid" )
 ERROR( tenant_move_failed, 2146, "The tenant movement failed internally but can be retried" )
+ERROR( tenant_move_record_missing, 2147, "There is no tenant movement in progress with the given specifications")
 
 ERROR( invalid_cluster_name, 2160, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2161, "Metacluster operation performed on non-metacluster" )

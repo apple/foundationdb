@@ -110,9 +110,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		tenantGroupCapacity =
 		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
-		reservedQuota = getOption(options, "reservedQuota"_sr, 1e6);
-		totalQuota = getOption(options, "totalQuota"_sr, 2e6);
-		storageQuota = getOption(options, "storageQuota"_sr, 1e6);
+		reservedQuota = getOption(options, "reservedQuota"_sr, 0);
+		totalQuota = getOption(options, "totalQuota"_sr, 1e8);
+		storageQuota = getOption(options, "storageQuota"_sr, 1e8);
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
@@ -513,6 +513,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
+				// If the move record is missing, the operation likely completed
+				// and this is a retry
+				if (e.code() == error_code_tenant_move_record_missing) {
+					return false;
+				}
 				throw;
 			}
 		}

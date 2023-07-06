@@ -83,16 +83,6 @@ static Future<Optional<metadata::management::MovementRecord>> tryGetMovementReco
 	Optional<metadata::management::MovementRecord> moveRecord =
 	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
 
-	if (!validMovementStates.empty()) {
-		Optional<metadata::management::MovementState> movementState =
-		    moveRecord.map(&metadata::management::MovementRecord::mState);
-
-		if (!validMovementStates.count(movementState)) {
-			TraceEvent("TenantMovementInInvalidState").detail("State", movementState);
-			throw invalid_tenant_move();
-		}
-	}
-
 	if (moveRecord.present()) {
 		if (moveRecord->srcCluster != src || moveRecord->dstCluster != dst) {
 			TraceEvent("TenantMoveRecordSrcDstMismatch")
@@ -107,6 +97,19 @@ static Future<Optional<metadata::management::MovementRecord>> tryGetMovementReco
 		if (moveRecord->aborting && !aborting) {
 			TraceEvent("TenantMoveRecordAborting").detail("TenantGroup", tenantGroup);
 			throw invalid_tenant_move();
+		}
+		if (!validMovementStates.empty()) {
+			Optional<metadata::management::MovementState> movementState =
+			    moveRecord.map(&metadata::management::MovementRecord::mState);
+
+			if (!validMovementStates.count(movementState)) {
+				TraceEvent("TenantMovementInInvalidState")
+				    .detail("State", movementState)
+				    .detail("SourceCluster", src)
+				    .detail("DestinationCluster", dst)
+				    .detail("TenantGroup", tenantGroup);
+				throw invalid_tenant_move();
+			}
 		}
 	}
 
@@ -531,7 +534,7 @@ struct SwitchTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SrcName", srcName)
 			    .detail("DstName", dstName);
-			throw invalid_tenant_move();
+			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
 		}
@@ -800,7 +803,7 @@ struct FinishTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SrcName", srcName)
 			    .detail("DstName", dstName);
-			throw invalid_tenant_move();
+			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
 		}
@@ -1032,6 +1035,7 @@ struct FinishTenantMovementImpl {
 
 	ACTOR static Future<Void> run(FinishTenantMovementImpl* self) {
 		wait(self->dstCtx.initializeContext());
+		TraceEvent("Breakpoint0");
 		wait(runMoveManagementTransaction(self->tenantGroup,
 		                                  self->srcCtx,
 		                                  self->dstCtx,
@@ -1050,6 +1054,7 @@ struct FinishTenantMovementImpl {
 			    .detail("MoveState", initialMoveState);
 			throw invalid_tenant_move();
 		}
+		TraceEvent("Breakpoint0.1");
 		if (initialMoveState == metadata::management::MovementState::SWITCH_METADATA) {
 			TraceEvent("Breakpoint1");
 
@@ -1158,7 +1163,7 @@ struct AbortTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SrcName", srcName)
 			    .detail("DstName", dstName);
-			throw invalid_tenant_move();
+			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
 		}
