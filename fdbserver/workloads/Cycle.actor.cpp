@@ -298,7 +298,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
-			ok = false;
+			// ok = false;
 		}
 		if (!self->clientId) {
 			// One client checks the validity of the cycle

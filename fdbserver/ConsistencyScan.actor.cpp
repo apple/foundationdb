@@ -1808,7 +1808,10 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 
 							if (e.code() == error_code_request_maybe_delivered) {
 								// SS in the team may be removed and we get this error.
-								*success = false;
+								testFailure("Storage got maybe delivered during data check",
+								            performQuiescentChecks,
+								            success,
+								            failureIsError);
 								return Void();
 							}
 							// All shards should be available in quiscence
