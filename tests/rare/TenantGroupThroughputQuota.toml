@@ -8,7 +8,7 @@ testTitle='TenantGroupThroughputQuotaTest'
   testName='ThroughputQuota'
   nameRepresentsTenantGroup=true
   name='TestTenantGroup'
-  totalQuota=16384
+  totalQuotaInPages=4
 
   [[test.workload]]
   testName = 'Cycle'

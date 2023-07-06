@@ -198,11 +198,7 @@ Ratekeeper::Ratekeeper(UID id,
     quotaCache(id, db), quotaThrottler(metricsTracker, quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND) {}
 
 void Ratekeeper::updateTagThrottling() {
-	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
-	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
-		auto const& ss = i->value;
-		quotaThrottler.updateThrottling(ss);
-	}
+	quotaThrottler.updateThrottling(metricsTracker.getStorageQueueInfo());
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
