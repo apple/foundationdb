@@ -100,7 +100,8 @@ struct RESTClientKnobs {
 			"connection_pool_size (pz)             Maximum numbers of active connections in the connection-pool",
 			"connect_tries (or ct)                 Number of times to try to connect for each request.",
 			"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
-			"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
+			"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection. Not "
+			"implemented yet.",
 			"request_tries (or rt)                 Number of times to try each request until a parsable HTTP "
 			"response other than 429 is received.",
 			"request_timeout_secs (or rtom)        Number of seconds to wait for a request to succeed after a "
