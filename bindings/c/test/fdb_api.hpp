@@ -66,6 +66,27 @@ struct KeyValueRef : native::FDBKeyValue {
 	ValueRef value() const noexcept { return ValueRef(native::FDBKeyValue::value, value_length); }
 };
 
+struct MappedKeyValueRef : native::FDBMappedKeyValue {
+	KeyRef key() const noexcept {
+		return KeyRef(native::FDBMappedKeyValue::key.key, native::FDBMappedKeyValue::key.key_length);
+	}
+	ValueRef value() const noexcept {
+		return ValueRef(native::FDBMappedKeyValue::value.key, native::FDBMappedKeyValue::value.key_length);
+	}
+	KeyRef rangeBeginKey() const noexcept {
+		return KeyRef(native::FDBMappedKeyValue::getRange.begin.key.key, native::FDBMappedKeyValue::getRange.begin.key.key_length);
+	}
+	KeyRef rangeEndKey() const noexcept {
+		return KeyRef(native::FDBMappedKeyValue::getRange.end.key.key, native::FDBMappedKeyValue::getRange.end.key.key_length);
+	}
+	int rangeSize() const noexcept {
+		return native::FDBMappedKeyValue::getRange.m_size;
+	}
+	KeyValueRef rangeKeyValue(int i) const noexcept {
+		return (KeyValueRef&)native::FDBMappedKeyValue::getRange.data[i];
+	}
+};
+
 struct KeyValue {
 	Key key;
 	Value value;
@@ -241,6 +262,14 @@ public:
 
 	bool retryable() const noexcept { return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err) != 0; }
 
+	bool maybeCommitted() const noexcept {
+		return native::fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, err) != 0;
+	}
+
+	bool retryableNotCommitted() const noexcept {
+		return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err) != 0;
+	}
+
 	static Error success() { return Error(); }
 
 private:
@@ -362,6 +391,18 @@ struct Int64 {
 		return Error(native::fdb_future_get_int64(f, &out));
 	}
 };
+struct Uint64 {
+	using Type = uint64_t;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		return Error(native::fdb_future_get_uint64(f, &out));
+	}
+};
+struct Double {
+	using Type = double;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		return Error(native::fdb_future_get_double(f, &out));
+	}
+};
 struct KeyRef {
 	using Type = fdb::KeyRef;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -409,6 +450,18 @@ struct KeyRangeRefArray {
 		auto& [out_ranges, out_count] = out;
 		auto err = native::fdb_future_get_keyrange_array(
 		    f, reinterpret_cast<const native::FDBKeyRange**>(&out_ranges), &out_count);
+		return Error(err);
+	}
+};
+
+struct MappedKeyValueRefArray {
+	using Type = std::tuple<MappedKeyValueRef const*, int, bool>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto out_more_native = native::fdb_bool_t{};
+		auto& [out_ranges, out_count, out_more] = out;
+		auto err = native::fdb_future_get_mappedkeyvalue_array(
+		    f, reinterpret_cast<const native::FDBMappedKeyValue**>(&out_ranges), &out_count, &out_more_native);
+		out_more = out_more_native != 0;
 		return Error(err);
 	}
 };
@@ -597,6 +650,7 @@ public:
 	}
 
 	void cancel() noexcept { native::fdb_future_cancel(f.get()); }
+	void releaseMemory() noexcept { native::fdb_future_release_memory(f.get()); }
 
 	template <class VarTraits>
 	typename VarTraits::Type get() const {
@@ -612,9 +666,7 @@ public:
 	template <class VarTraits>
 	[[nodiscard]] Error getNothrow(typename VarTraits::Type& var) const noexcept {
 		assert(valid());
-		assert(!error());
-		auto out = typename VarTraits::Type{};
-		return VarTraits::extract(f.get(), out);
+		return VarTraits::extract(f.get(), var);
 	}
 
 	template <class UserFunc>
@@ -747,6 +799,8 @@ public:
 
 	TypedFuture<future_var::Int64> getReadVersion() { return native::fdb_transaction_get_read_version(tr.get()); }
 
+	void setReadVersion(int64_t version) { native::fdb_transaction_set_read_version(tr.get(), version); }
+
 	[[nodiscard]] Error getCommittedVersionNothrow(int64_t& out) {
 		return Error(native::fdb_transaction_get_committed_version(tr.get(), &out));
 	}
@@ -794,6 +848,40 @@ public:
 		                                         iteration,
 		                                         snapshot,
 		                                         reverse);
+	}
+
+	TypedFuture<future_var::MappedKeyValueRefArray> getMappedRange(KeySelector first,
+	                                                               KeySelector last,
+	                                                               KeyRef mapperName,
+	                                                               int limit,
+	                                                               int targetBytes,
+	                                                               FDBStreamingMode mode,
+	                                                               int iteration,
+	                                                               int matchIndex,
+	                                                               bool snapshot,
+	                                                               bool reverse) {
+		return native::fdb_transaction_get_mapped_range(tr.get(),
+		                                                first.key,
+		                                                first.keyLength,
+		                                                first.orEqual,
+		                                                first.offset,
+		                                                last.key,
+		                                                last.keyLength,
+		                                                last.orEqual,
+		                                                last.offset,
+		                                                mapperName.data(),
+		                                                intSize(mapperName),
+		                                                limit,
+		                                                targetBytes,
+		                                                mode,
+		                                                iteration,
+		                                                matchIndex,
+		                                                snapshot,
+		                                                reverse);
+	}
+
+	TypedFuture<future_var::StringArray> getAddressForKey(KeyRef key) {
+		return native::fdb_transaction_get_addresses_for_key(tr.get(), key.data(), key.size());
 	}
 
 	TypedFuture<future_var::KeyRangeRefArray> getBlobGranuleRanges(KeyRef begin, KeyRef end, int rangeLimit) {
@@ -877,6 +965,16 @@ public:
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
 
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
+
+	TypedFuture<future_var::Int64> getApproximateSize() const {
+		return native::fdb_transaction_get_approximate_size(tr.get());
+	}
+
+	TypedFuture<future_var::Int64> getTotalCost() const { return native::fdb_transaction_get_total_cost(tr.get()); }
+
+	TypedFuture<future_var::Double> getTagThrottledDuration() const {
+		return native::fdb_transaction_get_tag_throttled_duration(tr.get());
+	}
 
 	void reset() { return native::fdb_transaction_reset(tr.get()); }
 
@@ -1121,6 +1219,8 @@ public:
 		return Transaction(tx_native);
 	}
 
+	double getMainThreadBusyness() const noexcept { return native::fdb_database_get_main_thread_busyness(db.get()); }
+
 	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) override {
 		if (!db)
 			throw std::runtime_error("listBlobbifiedRanges from null database");
@@ -1176,6 +1276,35 @@ public:
 	}
 
 	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
+
+	TypedFuture<future_var::None> createSnapshot(ValueRef uid, ValueRef snapCommand) {
+		if (!db) {
+			throw std::runtime_error("createSnapshot from null database");
+		}
+		return native::fdb_database_create_snapshot(
+		    db.get(), uid.data(), intSize(uid), snapCommand.data(), intSize(snapCommand));
+	}
+
+	TypedFuture<future_var::None> forceRecoveryWithDataLoss(ValueRef dcid) {
+		if (!db) {
+			throw std::runtime_error("forceRecoveryWithDataLoss from null database");
+		}
+		return native::fdb_database_force_recovery_with_data_loss(db.get(), dcid.data(), intSize(dcid));
+	}
+
+	TypedFuture<future_var::Int64> rebootWorker(ValueRef address, bool check, int duration) {
+		if (!db) {
+			throw std::runtime_error("rebootWorker from null database");
+		}
+		return native::fdb_database_reboot_worker(db.get(), address.data(), intSize(address), check, duration);
+	}
+
+	TypedFuture<future_var::Uint64> getServerProtocol(uint64_t expected_version) const {
+		if (!db) {
+			throw std::runtime_error("getServerProtocol from null database");
+		}
+		return native::fdb_database_get_server_protocol(db.get(), expected_version);
+	}
 };
 
 [[nodiscard]] inline Error selectApiVersionNothrow(int version) {
@@ -1211,5 +1340,10 @@ template <>
 struct std::hash<fdb::Future> {
 	size_t operator()(const fdb::Future& f) const { return std::hash<fdb::native::FDBFuture*>{}(f.nativeHandle()); }
 };
+
+// Trivially construct a BytesRef out of a string literal
+inline fdb::BytesRef operator""_br(const char* str, size_t len) {
+	return fdb::BytesRef(reinterpret_cast<const uint8_t*>(str), len);
+}
 
 #endif /*FDB_API_HPP*/
