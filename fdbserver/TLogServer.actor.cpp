@@ -3616,16 +3616,20 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					logData->logRouterPopToVersion = recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
+					TraceEvent("ZZZStartMonitor1");
 					self->enablePrimaryTxnSystemHealthCheck->set(true);
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, recoverAt, true) ||
 					     logData->removed || logData->stopCommit.onTrigger());
+					TraceEvent("ZZZStopMonitor1");
 					self->enablePrimaryTxnSystemHealthCheck->set(false);
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 					self->enablePrimaryTxnSystemHealthCheck->set(true);
+					TraceEvent("ZZZStartMonitor2");
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, recoverAt, false) ||
 					     logData->removed || logData->stopCommit.onTrigger());
+					TraceEvent("ZZZStopMonitor2");
 					self->enablePrimaryTxnSystemHealthCheck->set(false);
 				}
 				pulledRecoveryVersions = true;

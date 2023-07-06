@@ -49,6 +49,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+
+class ClusterControllerData;
+
 typedef enum {
 	CLUSTER_RECOVERY_STATE_EVENT_NAME,
 	CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,
@@ -172,6 +175,7 @@ private:
 	}
 };
 
+
 struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> {
 	ClusterControllerData* controllerData;
 
@@ -203,6 +207,8 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	int64_t memoryLimit;
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
+
+	RecruitFromConfigurationReply recruitment;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
