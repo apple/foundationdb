@@ -64,13 +64,19 @@ public:
 		}
 		delete this;
 	}
-	void close() override {
+	void closeWithoutDestructing() override {
 		recovering.cancel();
-		log->close();
+		if (log) {
+			log->close();
+			log = nullptr;
+		}
 		if (reserved_buffer != nullptr) {
 			delete[] reserved_buffer;
 			reserved_buffer = nullptr;
 		}
+	}
+	void close() override {
+		closeWithoutDestructing();
 		delete this;
 	}
 
@@ -294,6 +300,10 @@ public:
 	// when being used as TxnStateStore backend.
 	Future<EncryptionAtRestMode> encryptionMode() override {
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
+	~KeyValueStoreMemory() {
+		closeWithoutDestructing();
 	}
 
 private:
@@ -1091,23 +1101,23 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	}
 }
 
-IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
-                                       Reference<AsyncVar<ServerDBInfo> const> db,
-                                       UID logID,
-                                       int64_t memoryLimit,
-                                       bool disableSnapshot,
-                                       bool replaceContent,
-                                       bool exactRecovery,
-                                       bool enableEncryption) {
+Reference<IKeyValueStore> keyValueStoreLogSystem(class IDiskQueue* queue,
+                                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                                 UID logID,
+                                                 int64_t memoryLimit,
+                                                 bool disableSnapshot,
+                                                 bool replaceContent,
+                                                 bool exactRecovery,
+                                                 bool enableEncryption) {
 	// ServerDBInfo is required if encryption is to be enabled, or the KV store instance have been encrypted.
 	ASSERT(!enableEncryption || db.isValid());
-	return new KeyValueStoreMemory<IKeyValueContainer>(queue,
-	                                                   db,
-	                                                   logID,
-	                                                   memoryLimit,
-	                                                   KeyValueStoreType::MEMORY,
-	                                                   disableSnapshot,
-	                                                   replaceContent,
-	                                                   exactRecovery,
-	                                                   enableEncryption);
+	return makeReference<KeyValueStoreMemory<IKeyValueContainer>>(queue,
+	                                                              db,
+	                                                              logID,
+	                                                              memoryLimit,
+	                                                              KeyValueStoreType::MEMORY,
+	                                                              disableSnapshot,
+	                                                              replaceContent,
+	                                                              exactRecovery,
+	                                                              enableEncryption);
 }

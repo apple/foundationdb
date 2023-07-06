@@ -705,8 +705,8 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
 	}
 	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
-	if (self->txnStateStore)
-		self->txnStateStore->close();
+	if (self->txnStateStore.isValid())
+		self->txnStateStore->closeWithoutDestructing();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
 	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
 	                                             self->dbInfo,
@@ -1466,7 +1466,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore.getPtr());
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
@@ -1482,7 +1482,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
-	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
+	wait(discardCommit(self->txnStateStore.getPtr(), self->txnStateLogAdapter));
 
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them

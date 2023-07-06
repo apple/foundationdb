@@ -191,7 +191,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	Reference<ILogSystem> logSystem;
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
-	IKeyValueStore* txnStateStore;
+	Reference<IKeyValueStore> txnStateStore;
 	int64_t memoryLimit;
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
@@ -268,8 +268,8 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	  : controllerData(controllerData), dbgid(masterInterface.id()), lastEpochEnd(invalidVersion),
 	    recoveryTransactionVersion(invalidVersion), lastCommitTime(0), liveCommittedVersion(invalidVersion),
 	    databaseLocked(false), minKnownCommittedVersion(invalidVersion), hasConfiguration(false),
-	    coordinators(coordinators), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
-	    masterInterface(masterInterface), masterLifetime(masterLifetimeToken), clusterController(clusterController),
+	    coordinators(coordinators), lastVersionTime(0), memoryLimit(2e9), dbId(dbId), masterInterface(masterInterface),
+	    masterLifetime(masterLifetimeToken), clusterController(clusterController),
 	    cstate(coordinators, addActor, dbgid), dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
 	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
@@ -299,8 +299,8 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 		}
 	}
 	~ClusterRecoveryData() {
-		if (txnStateStore)
-			txnStateStore->close();
+		if (txnStateStore.isValid())
+			txnStateStore->closeWithoutDestructing();
 	}
 };
 
