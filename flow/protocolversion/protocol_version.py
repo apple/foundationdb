@@ -91,13 +91,13 @@ class ProtocolVersion:
         return self._features
 
 
-def _decapitate(text: str, prefix: str) -> str:
+def _remove_prefix(text: str, prefix: str) -> str:
     if text.startswith(prefix):
         return text[len(prefix) :]
     return text
 
 
-def _tail_chop(text: str, postfix: str) -> str:
+def _remove_postfix(text: str, postfix: str) -> str:
     if text.endswith(postfix):
         return text[: len(text) - len(postfix)]
     return text
@@ -131,7 +131,7 @@ class CMakeProtocolVersionSerializer(ProtocolVersionSerializerBase):
 
     def _decode_version(self, encoded: str) -> int:
         """Decode version like 0x0FDB00B073000000LL into decimal value"""
-        return int(_tail_chop(encoded, "LL"), 16)
+        return int(_remove_postfix(encoded, "LL"), 16)
 
     def _load(self, stream: io.TextIOWrapper) -> ProtocolVersion:
         protocol_version_cmake_regex = re.compile(
@@ -142,7 +142,7 @@ class CMakeProtocolVersionSerializer(ProtocolVersionSerializerBase):
             match = protocol_version_cmake_regex.search(line)
             if not match:
                 continue
-            key_name = _decapitate(match.groupdict()["feature"], "FDB_PV_")
+            key_name = _remove_prefix(match.groupdict()["feature"], "FDB_PV_")
             value = self._decode_version(match.groupdict()["version"])
 
             if key_name in CMakeProtocolVersionSerializer.SPECIAL_FIELDS:
@@ -184,13 +184,13 @@ class NameTransformer(abc.ABC):
 
 
 class CamelCaseNameTransformer(NameTransformer):
-
     def _all_caps_to_camel(self, text: str) -> str:
         """Translate ABC_DEF to AbcDef"""
         return "".join(item.capitalize() for item in text.split("_"))
 
 
 class JavaCamelCaseNameTransformer(CamelCaseNameTransformer):
+    """Transform the name in FDB_PV_UPPER_CASE into FdbPvUpperCase"""
 
     def transform_feature_text(self, feature: str) -> str:
         # Java stylechecker expects a tighter form of CamelCase, e.g. IPV6 -> Ipv6
@@ -198,6 +198,8 @@ class JavaCamelCaseNameTransformer(CamelCaseNameTransformer):
 
 
 class CxxCamelCaseNameTransformer(CamelCaseNameTransformer):
+    """Transform the name in FDB_PV_UPPER_CASE into FdbPvUpperCase, with certain special cases for backward compatibility"""
+
     XXX_FIELD_MAPPING = {
         "IPV6": "IPv6",
         "INEXPENSIVE_MULTIVERSION_CLIENT": "InexpensiveMultiVersionClient",
@@ -266,7 +268,9 @@ class JavaCodeGen(CodeGenBase):
         return "{}L".format(_version_to_hex_string(version))
 
     def _render(self):
-        env = self._get_environment(self._encode_version, JavaCamelCaseNameTransformer())
+        env = self._get_environment(
+            self._encode_version, JavaCamelCaseNameTransformer()
+        )
         with open(JavaCodeGen.JAVA_TEMPLATE_FILE) as template_stream:
             template = env.from_string(template_stream.read())
 
