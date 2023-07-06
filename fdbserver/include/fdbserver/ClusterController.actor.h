@@ -125,6 +125,8 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
+struct ClusterRecoveryData;
+
 class ClusterControllerData {
 public:
 	struct DBInfo {
@@ -151,6 +153,7 @@ public:
 		Optional<ClusterName> metaclusterName;
 		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
 		metacluster::MetaclusterMetrics metaclusterMetrics;
+		Reference<ClusterRecoveryData> recoveryData;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -3105,6 +3108,7 @@ public:
 					// This degraded link is not long enough to be considered as degraded.
 					continue;
 				}
+				disconnectedLinkDst2Src[server].insert(disconnectedPeer);
 				disconnectedLinkDst2Src[disconnectedPeer].insert(server);
 			}
 		}
@@ -3190,70 +3194,72 @@ public:
 	}
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
-	bool transactionSystemContainsDegradedServers() {
-		const ServerDBInfo& dbi = db.serverInfo->get();
-		auto transactionWorkerInList =
-		    [&dbi](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
-			for (const auto& server : serverList) {
-				if (dbi.master.addresses().contains(server)) {
-					return true;
-				}
+	bool transactionSystemContainsDegradedServers();
+	// bool transactionSystemContainsDegradedServers() {
+	// 	const ServerDBInfo& dbi = db.serverInfo->get();
+	// 	auto transactionWorkerInList =
+	// 	    [&dbi](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
+	// 		for (const auto& server : serverList) {
+	// 			if (dbi.master.addresses().contains(server)) {
+	// 				return true;
+	// 			}
 
-				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
-						continue;
-					}
+	// 			for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+	// 				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
+	// 					continue;
+	// 				}
 
-					if (skipRemote && !logSet.isLocal) {
-						continue;
-					}
+	// 				if (skipRemote && !logSet.isLocal) {
+	// 					continue;
+	// 				}
 
-					if (!logSet.isLocal) {
-						// Only check log routers in the remote region.
-						for (const auto& logRouter : logSet.logRouters) {
-							if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
-								return true;
-							}
-						}
-					} else {
-						for (const auto& tlog : logSet.tLogs) {
-							if (tlog.present() && tlog.interf().addresses().contains(server)) {
-								return true;
-							}
-						}
-					}
-				}
+	// 				if (!logSet.isLocal) {
+	// 					// Only check log routers in the remote region.
+	// 					for (const auto& logRouter : logSet.logRouters) {
+	// 						if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
+	// 							return true;
+	// 						}
+	// 					}
+	// 				} else {
+	// 					for (const auto& tlog : logSet.tLogs) {
+	// 						if (tlog.present() && tlog.interf().addresses().contains(server)) {
+	// 							return true;
+	// 						}
+	// 					}
+	// 				}
+	// 			}
 
-				for (const auto& proxy : dbi.client.grvProxies) {
-					if (proxy.addresses().contains(server)) {
-						return true;
-					}
-				}
+	// 			for (const auto& proxy : dbi.client.grvProxies) {
+	// 				if (proxy.addresses().contains(server)) {
+	// 					return true;
+	// 				}
+	// 			}
 
-				for (const auto& proxy : dbi.client.commitProxies) {
-					if (proxy.addresses().contains(server)) {
-						return true;
-					}
-				}
+	// 			for (const auto& proxy : dbi.client.commitProxies) {
+	// 				if (proxy.addresses().contains(server)) {
+	// 					return true;
+	// 				}
+	// 			}
 
-				for (const auto& resolver : dbi.resolvers) {
-					if (resolver.addresses().contains(server)) {
-						return true;
-					}
-				}
-			}
+	// 			for (const auto& resolver : dbi.resolvers) {
+	// 				if (resolver.addresses().contains(server)) {
+	// 					return true;
+	// 				}
+	// 			}
+	// 		}
 
-			return false;
-		};
+	// 		TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "AllHealthy").detail("SkipSatellite", skipSatellite).detail("SkipRemote", skipRemote);
+	// 		return false;
+	// 	};
 
-		// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
-		// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
-		// stable.
-		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
-		       transactionWorkerInList(degradationInfo.disconnectedServers,
-		                               /*skipSatellite=*/false,
-		                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
-	}
+	// 	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
+	// 	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+	// 	// stable.
+	// 	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
+	// 	       transactionWorkerInList(degradationInfo.disconnectedServers,
+	// 	                               /*skipSatellite=*/false,
+	// 	                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
+	// }
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
@@ -3308,16 +3314,20 @@ public:
 	bool shouldTriggerRecoveryDueToDegradedServers() {
 		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
 		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+			TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "MaxExceeded");
 			return false;
 		}
 
+		/*
 		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			TraceEvent("ZZZNoNono").log();
 			return false;
-		}
+		}*/
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
 		// anyways once the cluster controller is moved
 		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "CCExcluded");
 			return false;
 		}
 

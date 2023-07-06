@@ -129,14 +129,14 @@ struct ClogTlogWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> excludeFailedLog(ClogTlogWorkload* self, Database cx) {
-		state Future<Void> timeout = delay(30);
+		state Future<Void> timeout = delay(300);
 
 		loop choose {
 			when(wait(self->dbInfo->onChange())) {
 				if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 					return Void();
 				}
-				timeout = delay(30);
+				timeout = delay(300);
 			}
 			when(wait(timeout)) {
 				// recovery state hasn't changed in 30s, exclude the failed tlog
@@ -157,6 +157,7 @@ struct ClogTlogWorkload : TestWorkload {
 			self->useDisconnection = true;
 		}
 
+		state double workloadEnd = now() + self->testDuration - 10;
 		// Let cycle workload issue some transactions.
 		wait(delay(20.0));
 
@@ -165,7 +166,6 @@ struct ClogTlogWorkload : TestWorkload {
 		}
 
 		double startTime = now();
-		state double workloadEnd = now() + self->testDuration;
 		TraceEvent("ClogTlog").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Clog and wait for recovery to happen
@@ -175,12 +175,12 @@ struct ClogTlogWorkload : TestWorkload {
 		}
 
 		// start exclusion and wait for fully recovery
-		state Future<Void> excludeLog = excludeFailedLog(self, cx);
+		// state Future<Void> excludeLog = excludeFailedLog(self, cx);
 		state Future<Void> onChange = self->dbInfo->onChange();
 		loop choose {
 			when(wait(onChange)) {
 				if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
-					TraceEvent("ClogDoneFullyRecovered");
+					TraceEvent("ClogDoneFullyRecovered").log();
 					self->unclogAll();
 					return Void();
 				}

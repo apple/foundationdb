@@ -1144,6 +1144,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const UpdateWorkerHealthRequest& lastReq,
                                             Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
+	TraceEvent("ZZZZZDoPeerHealthCheck").log();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
 	bool checkRemoteLogRouterConnectivity = dbInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
@@ -1160,13 +1161,14 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		workerLocation = Satellite;
 	}
 
-	if (workerLocation == None) {
+	if (workerLocation == None && !enablePrimaryTxnSystemHealthCheck->get()) {
 		// This worker doesn't need to monitor anything if it is not in transaction system or in remote satellite.
 		return req;
 	}
 
 	for (const auto& [address, peer] : allPeers) {
 		if (!shouldCheckPeer(peer)) {
+			TraceEvent("ZZZZSkipPeerHealthCheck").detail("Address", address).detail("ConnectionFailure", peer->connectFailedCount).detail("Population", peer->pingLatencies.getPopulationSize());
 			continue;
 		}
 
@@ -1175,6 +1177,22 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
+		
+		TraceEvent("ZZZZZLogPeerHealth")
+		    .detail("Peer", address)
+			.detail("Force", enablePrimaryTxnSystemHealthCheck->get())
+		    .detail("Elapsed", now() - lastLoggedTime)
+		    .detail("Disconnected", disconnectedPeer)
+		    .detail("MinLatency", peer->pingLatencies.min())
+		    .detail("MaxLatency", peer->pingLatencies.max())
+		    .detail("MeanLatency", peer->pingLatencies.mean())
+		    .detail("MedianLatency", peer->pingLatencies.median())
+		    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+		    .detail("CheckedPercentileLatency",
+		            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+		    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+		    .detail("PingTimeoutCount", peer->timeoutCount)
+		    .detail("ConnectionFailureCount", peer->connectFailedCount);
 		if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 		    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 			// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
