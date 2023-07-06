@@ -21,10 +21,14 @@
 #include "fdbclient/RESTUtils.h"
 #include "fdbclient/Knobs.h"
 
+#include "flow/Arena.h"
 #include "flow/flat_buffers.h"
-#include "flow/UnitTest.h"
 #include "flow/IConnection.h"
+#include "flow/Knobs.h"
+#include "flow/NetworkAddress.h"
+#include "flow/UnitTest.h"
 
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <queue>
 
@@ -109,13 +113,30 @@ std::unordered_map<std::string, int> RESTClientKnobs::get() const {
 	return details;
 }
 
+RESTConnectionPool::~RESTConnectionPool() {
+	// Close cached connections
+	for (auto& item : connectionPoolMap) {
+		while (!item.second.empty()) {
+			auto rconn = item.second.front();
+			item.second.pop();
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+				TraceEvent("RESTConnClosePoolDtor")
+				    .detail("Host", item.first.first)
+				    .detail("Service", item.first.second)
+				    .detail("SeqNum", rconn.seqNum);
+			}
+			rconn.conn->close();
+			rconn.conn.clear();
+		}
+	}
+}
+
 ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<RESTConnectionPool> connectionPool,
                                                                   RESTConnectionPoolKey connectKey,
                                                                   bool isSecure,
                                                                   int maxConnLife) {
-
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
-		TraceEvent("RESTUtilConnectStart")
+		TraceEvent("RESTConnConnectStart")
 		    .detail("Host", connectKey.first)
 		    .detail("Service", connectKey.second)
 		    .detail("IsSecure", isSecure)
@@ -129,14 +150,24 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 
 		if (rconn.expirationTime > now()) {
 			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
-				TraceEvent("RESTUtilReuseConn")
+				TraceEvent("RESTConnReuse")
 				    .detail("Host", connectKey.first)
 				    .detail("Service", connectKey.second)
 				    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 				    .detail("ExpireIn", rconn.expirationTime - now())
-				    .detail("NumConnsInPool", poolItr->second.size());
+				    .detail("NumConnsInPool", poolItr->second.size())
+				    .detail("SeqNum", rconn.seqNum);
 			}
 			return rconn;
+		} else {
+			// close expired connection
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+				TraceEvent("RESTConnCloseExpired")
+				    .detail("Host", connectKey.first)
+				    .detail("Service", connectKey.second)
+				    .detail("SeqNum", rconn.seqNum);
+			}
+			rconn.conn->close();
 		}
 	}
 
@@ -145,16 +176,20 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 	// No valid connection exists, create a new one
 	state Reference<IConnection> conn =
 	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
+	if (!conn.isValid()) {
+		// invalid connection handle, treat it as `connection_failure`
+		throw connection_failed();
+	}
 	wait(conn->connectHandshake());
 
-	TraceEvent("RESTTUilCreateNewConn")
-	    .suppressFor(60)
+	TraceEvent("RESTConnCreateNew")
 	    .detail("Host", connectKey.first)
 	    .detail("Service", connectKey.second)
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
-	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size());
+	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size())
+	    .detail("SeqNum", connectionPool->seqNum + 1);
 
-	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
+	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife, ++connectionPool->seqNum });
 }
 
 Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTConnectionPoolKey connectKey,
@@ -170,7 +205,8 @@ void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
 		TraceEvent("RESTUtilReturnConnStart")
 		    .detail("Host", connectKey.first)
 		    .detail("Service", connectKey.second)
-		    .detail("ConnectPoolNumKeys", connectionPoolMap.size());
+		    .detail("ConnectPoolNumKeys", connectionPoolMap.size())
+		    .detail("SeqNum", rconn.seqNum);
 	}
 
 	auto poolItr = connectionPoolMap.find(connectKey);
@@ -183,18 +219,36 @@ void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
 			poolItr->second.push(rconn);
 		} else {
 			// Connection pool at its capacity; do nothing
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+				TraceEvent("RESTConnCloseNoCapacity")
+				    .detail("Host", connectKey.first)
+				    .detail("Service", connectKey.second)
+				    .detail("SeqNum", seqNum);
+			}
+			rconn.conn->close();
 			returned = false;
 		}
 
-		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG && returned) {
+		if (returned && FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			poolItr = connectionPoolMap.find(connectKey);
 			TraceEvent("RESTUtilReturnConnToPool")
 			    .detail("Host", connectKey.first)
 			    .detail("Service", connectKey.second)
 			    .detail("ConnPoolSize", connectionPoolMap.size())
 			    .detail("CachedConns", poolItr->second.size())
-			    .detail("TimeToExpire", rconn.expirationTime - now());
+			    .detail("PeerAddr", rconn.conn->getPeerAddress().toString())
+			    .detail("TimeToExpire", rconn.expirationTime - now())
+			    .detail("SeqNum", rconn.seqNum);
 		}
+	} else {
+		// close expired connection
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+			TraceEvent("RESTConnCloseExpired")
+			    .detail("Host", connectKey.first)
+			    .detail("Service", connectKey.second)
+			    .detail("SeqNum", seqNum);
+		}
+		rconn.conn->close();
 	}
 	rconn.conn = Reference<IConnection>();
 }
@@ -238,15 +292,30 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 			this->reqParameters = t.eat().toString();
 		}
 
-		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
-		StringRef hRef(hostPort);
-		StringRef h = hRef.eat(":");
-		if (h.size() == 0) {
+		// hostPort is at least a host or IP (IPv6 or IPv4) address, optionally followed by :portNumber or :serviceName
+		std::string hostPortStr = boost::trim_copy(hostPort.toString());
+		size_t hostPortDelimiter = hostPortStr.rfind(":");
+		if (hostPortDelimiter == std::string::npos) {
+			this->host = hostPortStr;
+		} else {
+			this->host = hostPortStr.substr(0, hostPortDelimiter);
+			if (hostPortDelimiter < hostPortStr.size()) {
+				this->service = hostPortStr.substr(hostPortDelimiter + 1);
+			} else {
+				// service is empty
+			}
+		}
+		// URI is allowed to use canonical IPv6 address format representation
+		if (this->host[0] == '[' || this->host[this->host.size() - 1] == ']') {
+			if (this->host[0] != '[' || this->host[this->host.size() - 1] != ']' || this->host.size() <= 2) {
+				throw std::string("malformed IPv6 address");
+			}
+			this->host = this->host.substr(1, this->host.size() - 2);
+		}
+		if (this->host.empty()) {
 			CODE_PROBE(true, "REST URI empty host");
 			throw std::string("host cannot be empty");
 		}
-		this->host = h.toString();
-		this->service = hRef.eat().toString();
 
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			TraceEvent("RESTUtilParseURI")
@@ -296,12 +365,75 @@ TEST_CASE("/RESTUtils/MissingHost") {
 	return Void();
 }
 
+TEST_CASE("/RESTUtils/InvalidIPv6") {
+	try {
+		std::string uri("https://[]:/bar");
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_rest_invalid_uri) {
+			throw e;
+		}
+	}
+
+	try {
+		std::string uri("https://[abcd::1:2:3:/bar");
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_rest_invalid_uri) {
+			throw e;
+		}
+	}
+
+	try {
+		std::string uri("https://abcd::1:2:3]:/bar");
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_rest_invalid_uri) {
+			throw e;
+		}
+	}
+	return Void();
+}
+
 TEST_CASE("/RESTUtils/ValidURIWithService") {
 	std::string uri("https://host:80/foo/bar");
 	RESTUrl r(uri);
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithCanonicalIPv6AndService") {
+	std::string uri("https://[abcd::1:2:3:4]:80/foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("abcd::1:2:3:4"), 0);
+	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithIPv6AndService") {
+	std::string uri("https://abcd::1:2:3:4:80/foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("abcd::1:2:3:4"), 0);
+	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithEmptyService") {
+	std::string uri("https://host:/foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
 	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	return Void();
 }

@@ -28,6 +28,7 @@
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/Optional.h"
 #include "flow/network.h"
 
 // The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
@@ -88,7 +89,14 @@ public:
 		return itr->second;
 	}
 
-	EncryptCipherBaseKeyId getBaseCipherIdFromDomainId(const EncryptCipherDomainId domainId) const {
+	Optional<EncryptCipherBaseKeyId> getBaseCipherIdFromDomainId(const EncryptCipherDomainId domainId) const {
+		if (domainId < 0) {
+			// ensure input domainId is acceptable
+			if (domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && domainId != ENCRYPT_HEADER_DOMAIN_ID &&
+			    domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+				return Optional<EncryptCipherBaseKeyId>();
+			}
+		}
 		return 1 + abs(domainId) % maxEncryptionKeys;
 	}
 
@@ -144,8 +152,11 @@ Reference<SimKmsVaultKeyCtx> getByBaseCipherId(const EncryptCipherBaseKeyId base
 
 Reference<SimKmsVaultKeyCtx> getByDomainId(const EncryptCipherDomainId domainId) {
 	Reference<SimKmsVaultCtx> ctx = SimKmsVaultCtx::getInstance();
-	const EncryptCipherBaseKeyId baseCipherId = ctx->getBaseCipherIdFromDomainId(domainId);
-	return ctx->getByBaseCipherId(baseCipherId);
+	Optional<EncryptCipherBaseKeyId> baseCipherId = ctx->getBaseCipherIdFromDomainId(domainId);
+	if (baseCipherId.present()) {
+		return ctx->getByBaseCipherId(baseCipherId.get());
+	}
+	return Reference<SimKmsVaultKeyCtx>();
 }
 
 uint32_t maxSimKeys() {

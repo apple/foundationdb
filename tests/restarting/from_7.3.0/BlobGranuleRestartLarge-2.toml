@@ -8,6 +8,7 @@ injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4, 5]
+simHTTPServerEnabled=false
 
 [[test]]
 testTitle = 'BlobGranuleRestartLarge'
