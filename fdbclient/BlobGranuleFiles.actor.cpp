@@ -313,7 +313,7 @@ struct IndexBlockRef {
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeaderRef headerRef;
-		buffer = StringRef(serializedBuff.contents().begin(), serializedBuff.contents().size());
+		buffer = serializedBuff;
 		arena.dependsOn(serializedBuff.arena());
 		encryptor.encryptInplace(mutateString(buffer), buffer.size(), &headerRef);
 		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
