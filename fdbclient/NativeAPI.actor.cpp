@@ -7216,12 +7216,74 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
-                                         Location location,
-                                         SpanContext spanContext,
-                                         Future<GetReadVersionReply> f,
-                                         Promise<Optional<Value>> metadataVersion) {
-	state Span span(spanContext, location, trState->spanContext);
+bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority priority) {
+	if (priority == TransactionPriority::IMMEDIATE) {
+		return true;
+	} else if (priority == TransactionPriority::BATCH) {
+		if (cx->lastRkBatchThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	} else if (priority == TransactionPriority::DEFAULT) {
+		if (cx->lastRkDefaultThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	}
+	return false;
+}
+
+ACTOR Future<Version> getReadVersion_internal(Reference<TransactionState> trState, uint32_t flags) {
+	if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
+	    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
+	     trState->options.useGrvCache) &&
+	    rkThrottlingCooledDown(trState->cx.getPtr(), trState->options.priority)) {
+		// Upon our first request to use cached RVs, start the background updater
+		if (!trState->cx->grvUpdateHandler.isValid()) {
+			trState->cx->grvUpdateHandler = backgroundGrvUpdater(trState->cx.getPtr());
+		}
+		Version rv = trState->cx->getCachedReadVersion();
+		double lastTime = trState->cx->getLastGrvTime();
+		double requestTime = now();
+		if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
+			ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
+			return rv;
+		} // else go through regular GRV path
+	}
+	++trState->cx->transactionReadVersions;
+	flags |= trState->options.getReadVersionFlags;
+	switch (trState->options.priority) {
+	case TransactionPriority::IMMEDIATE:
+		flags |= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
+		++trState->cx->transactionImmediateReadVersions;
+		break;
+	case TransactionPriority::DEFAULT:
+		flags |= GetReadVersionRequest::PRIORITY_DEFAULT;
+		++trState->cx->transactionDefaultReadVersions;
+		break;
+	case TransactionPriority::BATCH:
+		flags |= GetReadVersionRequest::PRIORITY_BATCH;
+		++trState->cx->transactionBatchReadVersions;
+		break;
+	default:
+		ASSERT(false);
+	}
+
+	Optional<TenantGroupName> tenantGroup;
+	if (trState->tenant().present()) {
+		tenantGroup = trState->tenant().get()->tenantGroup();
+	}
+	state Span span("NAPI:getReadVersion"_loc, trState->spanContext);
+	Optional<UID> versionDebugID =
+	    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>();
+	auto const f = trState->cx->readVersionBatchers.getReadVersion(trState->cx,
+	                                                               trState->options.priority,
+	                                                               flags,
+	                                                               tenantGroup,
+	                                                               span.context,
+	                                                               trState->options.throttlingTag,
+	                                                               versionDebugID);
+	trState->startTime = now();
 	GetReadVersionReply rep = wait(f);
 	double replyTime = now();
 	double latency = replyTime - trState->startTime;
@@ -7267,7 +7329,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 		    std::make_pair(rep.version, rep.metadataVersion);
 	}
 
-	metadataVersion.send(rep.metadataVersion);
+	trState->metadataVersion.send(rep.metadataVersion);
 	if (trState->cx->versionVectorCacheActive(rep.ssVersionVectorDelta)) {
 		if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
 			trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
@@ -7278,71 +7340,10 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority priority) {
-	if (priority == TransactionPriority::IMMEDIATE) {
-		return true;
-	} else if (priority == TransactionPriority::BATCH) {
-		if (cx->lastRkBatchThrottleTime == 0.0) {
-			return true;
-		}
-		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
-	} else if (priority == TransactionPriority::DEFAULT) {
-		if (cx->lastRkDefaultThrottleTime == 0.0) {
-			return true;
-		}
-		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
-	}
-	return false;
-}
-
 Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	ASSERT(!readVersionFuture.isValid());
 
-	if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !options.skipGrvCache &&
-	    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache) &&
-	    rkThrottlingCooledDown(cx.getPtr(), options.priority)) {
-		// Upon our first request to use cached RVs, start the background updater
-		if (!cx->grvUpdateHandler.isValid()) {
-			cx->grvUpdateHandler = backgroundGrvUpdater(cx.getPtr());
-		}
-		Version rv = cx->getCachedReadVersion();
-		double lastTime = cx->getLastGrvTime();
-		double requestTime = now();
-		if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
-			ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
-			return rv;
-		} // else go through regular GRV path
-	}
-	++cx->transactionReadVersions;
-	flags |= options.getReadVersionFlags;
-	switch (options.priority) {
-	case TransactionPriority::IMMEDIATE:
-		flags |= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
-		++cx->transactionImmediateReadVersions;
-		break;
-	case TransactionPriority::DEFAULT:
-		flags |= GetReadVersionRequest::PRIORITY_DEFAULT;
-		++cx->transactionDefaultReadVersions;
-		break;
-	case TransactionPriority::BATCH:
-		flags |= GetReadVersionRequest::PRIORITY_BATCH;
-		++cx->transactionBatchReadVersions;
-		break;
-	default:
-		ASSERT(false);
-	}
-
-	Optional<TenantGroupName> tenantGroup;
-	if (tenant().present()) {
-		tenantGroup = tenant().get()->tenantGroup();
-	}
-	Location location = "NAPI:getReadVersion"_loc;
-	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
-	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
-	auto const reply = cx->readVersionBatchers.getReadVersion(
-	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.throttlingTag, versionDebugID);
-	startTime = now();
-	return extractReadVersion(Reference<TransactionState>::addRef(this), location, spanContext, reply, metadataVersion);
+	return getReadVersion_internal(Reference<TransactionState>::addRef(this), flags);
 }
 
 Optional<ThrottlingId> TransactionState::getThrottlingId() {
