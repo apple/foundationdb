@@ -639,11 +639,7 @@ public:
 						self->pollingMoveKeyLockForSecurityMode = false;
 						return Void();
 					}
-					if (!self->context->ddEnabledState->isEnabled()) {
-						ASSERT_WE_THINK(!self->context->ddEnabledState->isBlobRestorePreparing());
-						break; // we do not want to check lock when snapshot
-					}
-					wait(checkMoveKeysLockReadOnly(&tr, self->context->lock));
+					wait(checkMoveKeysLockReadOnly(&tr, self->context->lock, self->context->ddEnabledState.get()));
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));

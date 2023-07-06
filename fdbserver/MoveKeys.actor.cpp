@@ -379,10 +379,6 @@ Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const
 	return checkMoveKeysLock(tr, lock, ddEnabledState, false);
 }
 
-Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock) {
-	return checkPersistentMoveKeysLock(tr, lock, false);
-}
-
 namespace {
 ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
 	ErrorOr<GetShardStateReply> reply = wait(fReply);
