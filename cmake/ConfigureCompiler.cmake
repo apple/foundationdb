@@ -538,6 +538,11 @@ if (WITH_SWIFT)
 
   set(SwiftOptions "${SwiftOptions} -Xcc -DWITH_SWIFT")
 
+  # Supress noisy C++ warnings from Swift.
+  set(SwiftOptions "${SwiftOptions} -Xcc -Wno-deprecated -Xcc -Wno-undefined-var-template")
+  # Supress rapidjson noisy GCC pragma diagnostics.
+  set(SwiftOptions "${SwiftOptions} -Xcc -Wno-unknown-warning-option")
+
   if (FOUNDATIONDB_CROSS_COMPILING)
     # Cross-compilation options.
     # For some reason we need to specify -sdk explictly to pass config-time

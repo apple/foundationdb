@@ -60,6 +60,8 @@
 #include "SwiftModules/Flow_CheckedContinuation.h"
 #endif  /* SWIFT_HIDE_CHECKED_CONTINUATION */
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
 #endif /* WITH_SWIFT */
 
 #include "pthread.h"
@@ -97,7 +99,7 @@ bool validationIsEnabled(BuggifyType type);
 
 namespace SwiftBridging {
 
-inline bool buggify(const char *filename, int line) {
+inline bool buggify(const char * _Nonnull filename, int line) {
     // SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
     return getSBVar(filename, line, BuggifyType::General) && deterministicRandom()->random01() < (P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)]);
 }
@@ -1608,6 +1610,10 @@ inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 }
 
 void bindDeterministicRandomToOpenssl();
+
+#ifdef WITH_SWIFT
+#pragma clang diagnostic pop
+#endif
 
 #include "flow/genericactors.actor.h"
 #endif
