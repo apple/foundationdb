@@ -340,7 +340,7 @@ struct MoveInShard {
 	void addRange(const KeyRangeRef range);
 	void removeRange(const KeyRangeRef range);
 	void cancel(const MoveInFailed failed = MoveInFailed::False);
-	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ReadWritePending; }
+	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ApplyingUpdates; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
 	bool failed() const { return this->getPhase() == MoveInPhase::Cancel || this->getPhase() == MoveInPhase::Error; }
 	void setHighWatermark(const Version version) { this->meta->highWatermark = version; }
@@ -9484,6 +9484,11 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				highWatermark = i->version;
 				i->version = version;
 				batch->arena.dependsOn(i->arena());
+				if (MUTATION_TRACKING_ENABLED) {
+					for (auto& m : i->mutations) {
+						DEBUG_MUTATION("fetchShardMutationInject", i->version, m, data->thisServerID);
+					}
+				}
 			}
 
 			const int startSize = batch->changes.size();
