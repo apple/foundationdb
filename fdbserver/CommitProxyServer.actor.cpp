@@ -609,6 +609,10 @@ struct CommitBatchContext {
 
 	double startTime;
 
+	// If encryption is enabled this value represents the total time (in nanoseconds) that was spent on encryption in
+	// the commit proxy for a given Commit Batch
+	Optional<double> encryptionTime;
+
 	Optional<UID> debugID;
 
 	bool forceRecovery = false;
@@ -1721,7 +1725,8 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
                                           int64_t domainId,
                                           const MutationRef* mutation,
                                           Optional<MutationRef>* encryptedMutationOpt,
-                                          Arena* arena) {
+                                          Arena* arena,
+                                          double* encryptTime = nullptr) {
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 
 	// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
@@ -1760,7 +1765,8 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			}
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 			ASSERT(self->cipherKeys.count(domainId) > 0);
-			encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
+			encryptedMutation =
+			    mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG, encryptTime);
 		}
 		ASSERT(encryptedMutation.isEncrypted());
 		CODE_PROBE(true, "encrypting non-metadata mutations");
@@ -1789,13 +1795,14 @@ inline bool shouldBackup(MutationRef const& m) {
 	return false;
 }
 
-void pushToBackupMutations(CommitBatchContext* self,
-                           ProxyCommitData* const pProxyCommitData,
-                           Arena& arena,
-                           MutationRef const& m,
-                           MutationRef const& writtenMutation,
-                           Optional<MutationRef> const& encryptedMutation) {
+double pushToBackupMutations(CommitBatchContext* self,
+                             ProxyCommitData* const pProxyCommitData,
+                             Arena& arena,
+                             MutationRef const& m,
+                             MutationRef const& writtenMutation,
+                             Optional<MutationRef> const& encryptedMutation) {
 	// In required tenant mode, the clear ranges are already split by tenant
+	double encryptionTime = 0;
 	if (m.type != MutationRef::Type::ClearRange ||
 	    (pProxyCommitData->getTenantMode() == TenantMode::REQUIRED && !systemKeys.contains(m.param1))) {
 		if (EXPENSIVE_VALIDATION && m.type == MutationRef::ClearRange) {
@@ -1829,8 +1836,6 @@ void pushToBackupMutations(CommitBatchContext* self,
 			// Create the custom mutation for the specific backup tag
 			MutationRef backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
 
-			// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must
-			// be changed to account for clear ranges which span tenant boundaries
 			if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 				CODE_PROBE(true, "encrypting clear range backup mutation");
 				if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
@@ -1838,8 +1843,10 @@ void pushToBackupMutations(CommitBatchContext* self,
 					backupMutation = encryptedMutation.get();
 				} else {
 					EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, backupMutation);
-					backupMutation =
-					    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
+					double encryptionTimeV = 0;
+					backupMutation = backupMutation.encrypt(
+					    self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP, &encryptionTimeV);
+					encryptionTime += encryptionTimeV;
 				}
 			}
 			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || backupMutation.isEncrypted());
@@ -1850,6 +1857,7 @@ void pushToBackupMutations(CommitBatchContext* self,
 			}
 		}
 	}
+	return encryptionTime;
 }
 
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
@@ -1857,6 +1865,8 @@ void pushToBackupMutations(CommitBatchContext* self,
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
+	state double curEncryptionTime = 0;
+	state double totalEncryptionTime = 0;
 
 	for (; self->transactionNum < trs.size(); self->transactionNum++) {
 		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted &&
@@ -1946,7 +1956,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (encryptedMutation.present()) {
 					ASSERT(encryptedMutation.get().isEncrypted());
 				}
-				WriteMutationRefVar var = wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
+
+				WriteMutationRefVar var =
+				    wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena, &curEncryptionTime));
+				totalEncryptionTime += curEncryptionTime;
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -2002,7 +2015,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				WriteMutationRefVar var = wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
+				WriteMutationRefVar var =
+				    wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena, &curEncryptionTime));
+				totalEncryptionTime += curEncryptionTime;
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -2026,13 +2041,19 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				continue;
 			}
 
-			pushToBackupMutations(self, pProxyCommitData, arena, m, writtenMutation, encryptedMutation);
+			totalEncryptionTime +=
+			    pushToBackupMutations(self, pProxyCommitData, arena, m, writtenMutation, encryptedMutation);
 		}
 
 		if (checkSample) {
 			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
 			    trs[self->transactionNum].commitCostEstimation.get().expensiveCostEstCount;
 		}
+	}
+
+	ASSERT(CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING || self->encryptionTime == 0);
+	if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+		self->encryptionTime = totalEncryptionTime;
 	}
 
 	return Void();
@@ -2454,6 +2475,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		    ExpectedIdempotencyIdCountForKey{ self->commitVersion, count, highOrderBatchIndex });
 	}
 
+	if (self->pProxyCommitData->encryptMode.isEncryptionEnabled() && self->encryptionTime.present()) {
+		pProxyCommitData->stats.encryptionLatencySample.addMeasurement(self->encryptionTime.get());
+	}
 	++pProxyCommitData->stats.commitBatchOut;
 	pProxyCommitData->stats.txnCommitOut += self->trs.size();
 	pProxyCommitData->stats.txnConflicts += self->trs.size() - self->commitCount;
