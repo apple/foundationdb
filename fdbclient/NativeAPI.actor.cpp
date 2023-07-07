@@ -1512,7 +1512,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  int _apiVersion,
                                  IsSwitchable switchable,
                                  Optional<TenantName> defaultTenant)
-  : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
+  : lockAware(lockAware), switchable(switchable), dbId(deterministicRandom()->randomUniqueID()),
     connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
     enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
     readVersionBatchers(CLIENT_KNOBS->MAX_GRV_BATCHERS,
@@ -1590,6 +1590,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+		throughputTrackerFuture = throughputTracker.run(*this);
+	}
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -1868,9 +1871,9 @@ DatabaseContext::DatabaseContext(const Error& err)
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
     feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
-    mutationsPerCommit(), bytesPerCommit(), sharedStatePtr(nullptr), transactionTracingSample(false),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())), outstandingWatches(0) {
+    mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr),
+    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	initializeSpecialCounters();
 }
 
@@ -2875,10 +2878,10 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 	}
 }
 
-Tenant::Tenant(Database cx, TenantName name) : lookupFuture(cx->lookupTenant(name)), name(name) {}
+Tenant::Tenant(Database cx, TenantName name) : name(name), lookupFuture(cx->lookupTenant(name)) {}
 Tenant::Tenant(int64_t id) : lookupFuture(id) {}
 Tenant::Tenant(Future<TenantLookupInfo> tenantLookupInfo, Optional<TenantName> name)
-  : lookupFuture(tenantLookupInfo), name(name) {}
+  : name(name), lookupFuture(tenantLookupInfo) {}
 
 int64_t Tenant::id() const {
 	ASSERT(lookupFuture.isReady());
@@ -3636,8 +3639,8 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
-			trState->totalCost +=
-			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0));
+			trState->addReadCost(
+			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0)));
 
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
@@ -4508,7 +4511,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       RangeReadResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
-	trState->totalCost += getReadOperationCost(bytes);
+	trState->addReadCost(getReadOperationCost(bytes));
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
 
@@ -5960,7 +5963,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
-	trState->totalCost += getWriteOperationCost(key.expectedSize() + value.expectedSize());
+	trState->addWriteCost(getWriteOperationCost(key.expectedSize() + value.expectedSize()));
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5990,7 +5993,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	auto v = ValueRef(req.arena, operand);
 
 	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
-	trState->totalCost += getWriteOperationCost(key.expectedSize());
+	trState->addWriteCost(getWriteOperationCost(key.expectedSize()));
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -6025,7 +6028,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	trState->addWriteCost(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6786,6 +6789,8 @@ Future<Void> Transaction::commitMutations() {
 			return Void();
 		}
 
+		trState->flushWriteCost();
+
 		++trState->cx->transactionsCommitStarted;
 
 		if (trState->options.readOnly)
@@ -7211,12 +7216,74 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
-                                         Location location,
-                                         SpanContext spanContext,
-                                         Future<GetReadVersionReply> f,
-                                         Promise<Optional<Value>> metadataVersion) {
-	state Span span(spanContext, location, trState->spanContext);
+bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority priority) {
+	if (priority == TransactionPriority::IMMEDIATE) {
+		return true;
+	} else if (priority == TransactionPriority::BATCH) {
+		if (cx->lastRkBatchThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	} else if (priority == TransactionPriority::DEFAULT) {
+		if (cx->lastRkDefaultThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	}
+	return false;
+}
+
+ACTOR Future<Version> getReadVersion_internal(Reference<TransactionState> trState, uint32_t flags) {
+	if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
+	    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
+	     trState->options.useGrvCache) &&
+	    rkThrottlingCooledDown(trState->cx.getPtr(), trState->options.priority)) {
+		// Upon our first request to use cached RVs, start the background updater
+		if (!trState->cx->grvUpdateHandler.isValid()) {
+			trState->cx->grvUpdateHandler = backgroundGrvUpdater(trState->cx.getPtr());
+		}
+		Version rv = trState->cx->getCachedReadVersion();
+		double lastTime = trState->cx->getLastGrvTime();
+		double requestTime = now();
+		if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
+			ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
+			return rv;
+		} // else go through regular GRV path
+	}
+	++trState->cx->transactionReadVersions;
+	flags |= trState->options.getReadVersionFlags;
+	switch (trState->options.priority) {
+	case TransactionPriority::IMMEDIATE:
+		flags |= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
+		++trState->cx->transactionImmediateReadVersions;
+		break;
+	case TransactionPriority::DEFAULT:
+		flags |= GetReadVersionRequest::PRIORITY_DEFAULT;
+		++trState->cx->transactionDefaultReadVersions;
+		break;
+	case TransactionPriority::BATCH:
+		flags |= GetReadVersionRequest::PRIORITY_BATCH;
+		++trState->cx->transactionBatchReadVersions;
+		break;
+	default:
+		ASSERT(false);
+	}
+
+	Optional<TenantGroupName> tenantGroup;
+	if (trState->tenant().present()) {
+		tenantGroup = trState->tenant().get()->tenantGroup();
+	}
+	state Span span("NAPI:getReadVersion"_loc, trState->spanContext);
+	Optional<UID> versionDebugID =
+	    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>();
+	auto const f = trState->cx->readVersionBatchers.getReadVersion(trState->cx,
+	                                                               trState->options.priority,
+	                                                               flags,
+	                                                               tenantGroup,
+	                                                               span.context,
+	                                                               trState->options.throttlingTag,
+	                                                               versionDebugID);
+	trState->startTime = now();
 	GetReadVersionReply rep = wait(f);
 	double replyTime = now();
 	double latency = replyTime - trState->startTime;
@@ -7262,7 +7329,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 		    std::make_pair(rep.version, rep.metadataVersion);
 	}
 
-	metadataVersion.send(rep.metadataVersion);
+	trState->metadataVersion.send(rep.metadataVersion);
 	if (trState->cx->versionVectorCacheActive(rep.ssVersionVectorDelta)) {
 		if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
 			trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
@@ -7273,71 +7340,48 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority priority) {
-	if (priority == TransactionPriority::IMMEDIATE) {
-		return true;
-	} else if (priority == TransactionPriority::BATCH) {
-		if (cx->lastRkBatchThrottleTime == 0.0) {
-			return true;
-		}
-		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
-	} else if (priority == TransactionPriority::DEFAULT) {
-		if (cx->lastRkDefaultThrottleTime == 0.0) {
-			return true;
-		}
-		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
-	}
-	return false;
-}
-
 Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	ASSERT(!readVersionFuture.isValid());
 
-	if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !options.skipGrvCache &&
-	    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache) &&
-	    rkThrottlingCooledDown(cx.getPtr(), options.priority)) {
-		// Upon our first request to use cached RVs, start the background updater
-		if (!cx->grvUpdateHandler.isValid()) {
-			cx->grvUpdateHandler = backgroundGrvUpdater(cx.getPtr());
-		}
-		Version rv = cx->getCachedReadVersion();
-		double lastTime = cx->getLastGrvTime();
-		double requestTime = now();
-		if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
-			ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
-			return rv;
-		} // else go through regular GRV path
-	}
-	++cx->transactionReadVersions;
-	flags |= options.getReadVersionFlags;
-	switch (options.priority) {
-	case TransactionPriority::IMMEDIATE:
-		flags |= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
-		++cx->transactionImmediateReadVersions;
-		break;
-	case TransactionPriority::DEFAULT:
-		flags |= GetReadVersionRequest::PRIORITY_DEFAULT;
-		++cx->transactionDefaultReadVersions;
-		break;
-	case TransactionPriority::BATCH:
-		flags |= GetReadVersionRequest::PRIORITY_BATCH;
-		++cx->transactionBatchReadVersions;
-		break;
-	default:
-		ASSERT(false);
-	}
+	return getReadVersion_internal(Reference<TransactionState>::addRef(this), flags);
+}
 
-	Optional<TenantGroupName> tenantGroup;
-	if (tenant().present()) {
-		tenantGroup = tenant().get()->tenantGroup();
+Optional<ThrottlingId> TransactionState::getThrottlingId() {
+	if (tenant().present() && tenant().get()->tenantGroup().present()) {
+		return ThrottlingIdRef::fromTenantGroup(tenant().get()->tenantGroup().get());
+	} else if (options.throttlingTag.present()) {
+		return ThrottlingIdRef::fromTag(options.throttlingTag.get());
+	} else {
+		return {};
 	}
-	Location location = "NAPI:getReadVersion"_loc;
-	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
-	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
-	auto const reply = cx->readVersionBatchers.getReadVersion(
-	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.throttlingTag, versionDebugID);
-	startTime = now();
-	return extractReadVersion(Reference<TransactionState>::addRef(this), location, spanContext, reply, metadataVersion);
+}
+
+void TransactionState::addReadCost(uint64_t bytes) {
+	readCost += bytes;
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+		auto const throttlingId = getThrottlingId();
+		if (throttlingId.present()) {
+			cx->addCost(throttlingId.get(), bytes);
+		}
+	}
+}
+
+void TransactionState::addWriteCost(uint64_t bytes) {
+	writeCost += bytes;
+}
+
+void TransactionState::flushWriteCost() {
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS && !flushedWriteCost) {
+		auto const throttlingId = getThrottlingId();
+		if (throttlingId.present()) {
+			cx->addCost(throttlingId.get(), writeCost);
+		}
+		flushedWriteCost = true;
+	}
+}
+
+int64_t TransactionState::getTotalCost() const {
+	return readCost + writeCost;
 }
 
 Optional<Version> Transaction::getCachedReadVersion() const {
@@ -11170,6 +11214,10 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version version) {
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
+}
+
+void DatabaseContext::addCost(ThrottlingId const& throttlingId, uint64_t bytes) {
+	throughputTracker.addCost(throttlingId, bytes);
 }
 
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {

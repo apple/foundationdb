@@ -38,6 +38,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/ThroughputTracker.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
@@ -722,6 +723,8 @@ public:
 		return clientInfo->get().tenantMode;
 	}
 
+	void addCost(ThrottlingId const&, uint64_t bytes);
+
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
@@ -784,6 +787,9 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+
+	ThroughputTracker throughputTracker;
+	Future<Void> throughputTrackerFuture;
 
 	void initializeSpecialCounters();
 };

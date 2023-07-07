@@ -86,6 +86,8 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 		state FlowMutex responseMutex;
 		state Future<Void> readPrevRequest = Future<Void>(Void());
 		wait(conn->acceptHandshake());
+
+		// FIXME: Implement idle-connection monitoring to proactively close idle-connection.
 		loop {
 			wait(readPrevRequest);
 			wait(delay(0));
@@ -203,7 +205,7 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	return Void();
 }
 
-struct HelloWorldRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloWorldRequestHandler> {
+struct HelloWorldRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<HelloWorldRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloWorldServerCallback(req, response);
@@ -224,7 +226,7 @@ ACTOR Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req
 	}
 }
 
-struct HelloErrorRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloErrorRequestHandler> {
+struct HelloErrorRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<HelloErrorRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloErrorServerCallback(req, response);
@@ -262,7 +264,7 @@ ACTOR Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> re
 	return Void();
 }
 
-struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
+struct HelloBadMD5RequestHandler final : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloBadMD5ServerCallback(req, response);

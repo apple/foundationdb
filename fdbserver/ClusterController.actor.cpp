@@ -2161,7 +2161,14 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 			// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
 			// on the same process as the CluserController.
 			state std::map<Optional<Standalone<StringRef>>, int> id_used;
-			Recruiter::updateKnownIds(self, &id_used);
+			if (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				Recruiter::updateKnownIds(self, &id_used);
+			} else {
+				// Approach solves following scenario: a) EKP crash/restart recruits the process accounting for CC and
+				// Sequencer only b) BetterSingleton process placement checks 'halts' EKP c) Repeat step #a
+				id_used = self->getUsedIds();
+			}
+
 			state WorkerFitnessInfo ekpWorker =
 			    self->recruiter.getWorkerForRoleInDatacenter(self,
 			                                                 self->clusterControllerDcId,
@@ -2221,21 +2228,18 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 		TraceEvent("EKPNotConfigured");
 		return Void();
 	}
-	state SingletonRecruitThrottler recruitThrottler;
+
 	loop {
 		if (self->db.serverInfo->get().client.encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			loop choose {
+			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().client.encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
 					const auto& encryptKeyProxy = self->db.serverInfo->get().client.encryptKeyProxy;
 					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
 					TraceEvent("CCEKP_Died", self->id);
-					break;
 				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {
-					break;
-				}
+				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
 			}
 		} else {
 			wait(startEncryptKeyProxy(self, encryptMode));
@@ -3117,6 +3121,18 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		ASSERT_EQ(health.disconnectedPeers[badPeer3].lastRefreshTime, previousRefreshTime);
 	}
 
+	// Make badPeer1 a recovered peer, and CC should remove it from `workerAddress` bad peers.
+	{
+		wait(delay(0.001));
+		UpdateWorkerHealthRequest req;
+		req.address = workerAddress;
+		req.recoveredPeers.push_back(badPeer1);
+		data.updateWorkerHealth(req);
+		auto& health = data.workerHealth[workerAddress];
+		ASSERT(health.degradedPeers.find(badPeer1) == health.degradedPeers.end());
+		ASSERT(health.disconnectedPeers.find(badPeer1) == health.disconnectedPeers.end());
+	}
+
 	return Void();
 }
 
@@ -3376,14 +3392,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 
 	TLogInterface localTLogInterf;
 	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, testUID));
-	TLogInterface localLogRouterInterf;
-	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, testUID));
 	BackupInterface backupInterf;
 	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, testUID));
 	TLogSet localTLogSet;
 	localTLogSet.isLocal = true;
 	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
-	localTLogSet.logRouters.push_back(OptionalInterface(localLogRouterInterf));
 	localTLogSet.backupWorkers.push_back(OptionalInterface(backupInterf));
 	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
 
@@ -3397,9 +3410,12 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 
 	TLogInterface remoteTLogInterf;
 	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, testUID));
+	TLogInterface remoteLogRouterInterf;
+	remoteLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, testUID));
 	TLogSet remoteTLogSet;
 	remoteTLogSet.isLocal = false;
 	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
+	remoteTLogSet.logRouters.push_back(OptionalInterface(remoteLogRouterInterf));
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface proxyInterf;
@@ -3451,12 +3467,14 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
 
-	// No recovery when log router is degraded.
+	// No recovery when remote log router is degraded.
 	data.degradationInfo.degradedServers.insert(logRouter);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.degradedServers.clear();
+
+	// Trigger recovery when remote log router is disconnected.
 	data.degradationInfo.disconnectedServers.insert(logRouter);
-	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
 
 	// No recovery when backup worker is degraded.

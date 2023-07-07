@@ -71,10 +71,10 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 
 ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
-    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false),
-    blobGranulesEnabled(false) {}
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED),
+    blobGranulesEnabled(false), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0),
+    speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
+    allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -342,7 +342,10 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		    .detail("StableConnection", stableConnection);
 	}
 
-	~Sim2Conn() { ASSERT_ABORT(!opened || closedByCaller); }
+	~Sim2Conn() {
+		// FIXME: HTTPServer implement idle-connection monitoring
+		ASSERT_ABORT(!opened || closedByCaller || g_simulator->httpServerIps.count(peerEndpoint.ip));
+	}
 
 	void addref() override { ReferenceCounted<Sim2Conn>::addref(); }
 	void delref() override { ReferenceCounted<Sim2Conn>::delref(); }
@@ -560,8 +563,10 @@ private:
 	}
 
 	ACTOR static Future<Void> trackLeakedConnection(Sim2Conn* self) {
-		// FIXME: we could also just implement connection idle closing for sim http server instead
-		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
+		// FIXME: we could also just implement connection idle closing for sim http server instead && tracking client
+		// connection (pooled) if any
+		if (g_simulator->httpServerIps.count(self->process->address.ip) ||
+		    g_simulator->httpServerIps.count(self->peerEndpoint.ip)) {
 			return Void();
 		}
 		wait(g_simulator->onProcess(self->process));
@@ -2535,7 +2540,7 @@ public:
 		Promise<Void> promise;
 		ProcessInfo* machine;
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : promise(std::move(promise)), machine(machine) {}
 	};
 
 	void execTask(struct PromiseTask& t) {

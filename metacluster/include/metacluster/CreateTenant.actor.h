@@ -45,11 +45,11 @@ namespace internal {
 template <class DB>
 struct CreateTenantImpl {
 	MetaclusterOperationContext<DB> ctx;
-	AssignClusterAutomatically assignClusterAutomatically;
-	IgnoreCapacityLimit ignoreCapacityLimit;
 
 	// Initialization parameters
 	MetaclusterTenantMapEntry tenantEntry;
+	AssignClusterAutomatically assignClusterAutomatically;
+	IgnoreCapacityLimit ignoreCapacityLimit;
 
 	// Parameter set if tenant creation permanently fails on the data cluster
 	Optional<int64_t> replaceExistingTenantId;

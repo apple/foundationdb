@@ -51,7 +51,8 @@ static void bench_encrypt(benchmark::State& state) {
 	auto data = getKey(bytes);
 	for (auto _ : state) {
 		for (int chunk = 0; chunk < chunks; ++chunk) {
-			benchmark::DoNotOptimize(encrypt(key, iv, data.begin() + chunk * chunkSize, chunkSize));
+			auto result = encrypt(key, iv, data.begin() + chunk * chunkSize, chunkSize);
+			benchmark::DoNotOptimize(result);
 		}
 	}
 	state.SetBytesProcessed(bytes * static_cast<long>(state.iterations()));
@@ -70,8 +71,8 @@ static void bench_decrypt(benchmark::State& state) {
 		Arena arena;
 		DecryptionStreamCipher decryptor(key, iv);
 		for (int chunk = 0; chunk < chunks; ++chunk) {
-			benchmark::DoNotOptimize(
-			    Standalone<StringRef>(decryptor.decrypt(encrypted.begin() + chunk * chunkSize, chunkSize, arena)));
+			Standalone<StringRef> result(decryptor.decrypt(encrypted.begin() + chunk * chunkSize, chunkSize, arena));
+			benchmark::DoNotOptimize(result);
 		}
 	}
 	state.SetBytesProcessed(bytes * static_cast<long>(state.iterations()));
