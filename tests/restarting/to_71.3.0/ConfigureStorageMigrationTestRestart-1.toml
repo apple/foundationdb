@@ -4,6 +4,7 @@ maxTLogVersion=6
 disableHostname=true
 storageEngineExcludeTypes=[4]
 tenantModes=['disabled']
+simHTTPServerEnabled=false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'

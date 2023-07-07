@@ -86,6 +86,8 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 		state FlowMutex responseMutex;
 		state Future<Void> readPrevRequest = Future<Void>(Void());
 		wait(conn->acceptHandshake());
+
+		// FIXME: Implement idle-connection monitoring to proactively close idle-connection.
 		loop {
 			wait(readPrevRequest);
 			wait(delay(0));
