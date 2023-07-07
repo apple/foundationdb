@@ -23,6 +23,8 @@
 #include "flow/EncryptUtils.h"
 
 namespace RESTKmsConnectorUtils {
+const char* HTTP_CONTENT_TYPE = "application/json";
+const char* HTTP_ACCEPT = "application/json";
 
 const char* BASE_CIPHER_ID_TAG = "base_cipher_id";
 const char* BASE_CIPHER_TAG = "base_cipher";
@@ -52,14 +54,6 @@ const char* BLOB_METADATA_LOCATION_ID_TAG = "id";
 const char* BLOB_METADATA_LOCATION_PATH_TAG = "path";
 
 const int INVALID_REQUEST_VERSION = 0;
-
-HTTP::Headers getHTTPHeaders() {
-	HTTP::Headers headers;
-	headers["Content-type"] = "application/json";
-	headers["Accept"] = "application/json";
-
-	return headers;
-}
 
 void addVersionToDoc(rapidjson::Document& doc, const int requestVersion) {
 	rapidjson::Value version;
