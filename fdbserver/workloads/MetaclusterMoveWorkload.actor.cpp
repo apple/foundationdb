@@ -489,6 +489,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
 				if (e.code() == error_code_tenant_move_failed) {
+					// Retryable error
 					continue;
 				}
 				if (e.code() == error_code_invalid_tenant_move) {
@@ -550,12 +551,12 @@ struct MetaclusterMoveWorkload : TestWorkload {
 						return false;
 					}
 					if (aborted) {
-						// This scenario can be reached when a finishMove retries, completes, times out,
-						// and then abort is attempted. Return false in this case to verify the correct data
-						if (moveRecord.get().mState ==
-						    metacluster::metadata::management::MovementState::FINISH_UNLOCK) {
-							return false;
-						}
+						// // This scenario can be reached when a finishMove retries, completes, times out,
+						// // and then abort is attempted. Return false in this case to verify the correct data
+						// if (moveRecord.get().mState ==
+						//     metacluster::metadata::management::MovementState::FINISH_UNLOCK) {
+						// 	return false;
+						// }
 						return aborted;
 					}
 				}
@@ -567,6 +568,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("DestinationCluster", dstCluster);
 				// If the move record is missing, the operation likely completed
 				// and this is a retry
+				// TODO: possible for this to have been a successful abort + retry?
 				if (e.code() == error_code_tenant_move_record_missing) {
 					return false;
 				}
@@ -577,7 +579,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterMoveWorkload* self) {
-		// TODO: blobbify and set quotas
 		metacluster::DataClusterEntry clusterEntry;
 		clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
@@ -603,7 +604,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		TraceEvent(SevDebug, "MetaclusterMoveWorkloadCreateTenantsComplete");
 
 		// bulkSetup usually expects all clients
-		// 	but this is being circumvented by the clientId==0 check
+		// but this is being circumvented by the clientId==0 check
 		self->clientCount = 1;
 		// container of range-based for with continuation must be a state variable
 		state std::map<ClusterName, DataClusterData> dataDbs = self->dataDbs;
@@ -633,6 +634,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				               0,
 				               dataTenants));
 			}
+			// Blobbify all tenants
 			std::vector<Future<bool>> blobFutures;
 			for (Reference<Tenant> tenantRef : dataTenants) {
 				blobFutures.push_back(dbObj->blobbifyRangeBlocking(normalKeys, tenantRef));
@@ -640,6 +642,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			wait(waitForAll(blobFutures));
 		}
 
+		// Set storage and tag quotas
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
 		loop {
 			try {

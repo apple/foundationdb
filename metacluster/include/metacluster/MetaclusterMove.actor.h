@@ -159,7 +159,7 @@ static Future<metadata::management::MovementRecord> getMovementRecord(
 
 	if (!moveRecord.present()) {
 		TraceEvent("TenantMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
-		throw invalid_tenant_move();
+		throw tenant_move_record_missing();
 	}
 
 	return moveRecord.get();
@@ -226,11 +226,9 @@ static Future<Void> purgeAndVerifyTenant(Reference<DB> db, TenantName tenant) {
 	TraceEvent("BreakpointPurge4");
 	state Key purgeKey = wait(safeThreadFutureToFuture(resultFuture));
 	TraceEvent("BreakpointPurge5");
-	// TODO:
-	// state ThreadFuture<Void> resultFuture2 = tenantObj->waitPurgeGranulesComplete(purgeKey);
-	// // wait(safeThreadFutureToFuture(tenantObj->waitPurgeGranulesComplete(purgeKey)));
-	// wait(safeThreadFutureToFuture(resultFuture2));
-	// TraceEvent("BreakpointPurge6");
+	state ThreadFuture<Void> resultFuture2 = tenantObj->waitPurgeGranulesComplete(purgeKey);
+	wait(safeThreadFutureToFuture(resultFuture2));
+	TraceEvent("BreakpointPurge6");
 	return Void();
 }
 
@@ -333,7 +331,8 @@ struct StartTenantMovementImpl {
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tenantName);
 		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
 		// chunkSize = 100MB, use smaller size for simulation to avoid making every range '' - \xff
-		state int64_t chunkSize = (!g_network->isSimulated()) ? 1e8 : 1e3;
+		// state int64_t chunkSize = (!g_network->isSimulated()) ? 1e8 : 1e3;
+		state int64_t chunkSize = (!g_network->isSimulated()) ? 1e8 : 1e2;
 		loop {
 			try {
 				state ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture =
@@ -676,8 +675,13 @@ struct SwitchTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> switchMetadataToDestination(SwitchTenantMovementImpl* self,
-	                                                      Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<Void> switchMetadataToDestination(
+	    SwitchTenantMovementImpl* self,
+	    Reference<typename DB::TransactionT> tr,
+	    Optional<metadata::management::MovementRecord> movementRecord) {
+		if (!movementRecord.present()) {
+			throw tenant_move_record_missing();
+		}
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		TraceEvent("TenantMoveSwitchBegin");
@@ -797,7 +801,7 @@ struct SwitchTenantMovementImpl {
 		                                  { metadata::management::MovementState::SWITCH_METADATA },
 		                                  [self = self](Reference<typename DB::TransactionT> tr,
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return switchMetadataToDestination(self, tr);
+			                                  return switchMetadataToDestination(self, tr, movementRecord);
 		                                  }));
 
 		TraceEvent("BreakpointSwitch5");
@@ -863,7 +867,11 @@ struct FinishTenantMovementImpl {
 	ACTOR static Future<Void> checkValidUnlock(FinishTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr,
 	                                           std::vector<TenantMapEntry> srcEntries,
-	                                           std::vector<TenantMapEntry> dstEntries) {
+	                                           std::vector<TenantMapEntry> dstEntries,
+	                                           Optional<metadata::management::MovementRecord> movementRecord) {
+		if (!movementRecord.present()) {
+			throw tenant_move_record_missing();
+		}
 		state size_t iterLen = self->tenantsInGroup.size();
 		ASSERT_EQ(iterLen, srcEntries.size());
 		ASSERT_EQ(iterLen, dstEntries.size());
@@ -942,7 +950,11 @@ struct FinishTenantMovementImpl {
 	ACTOR static Future<Void> checkValidDelete(FinishTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr,
 	                                           std::vector<TenantMapEntry> srcEntries,
-	                                           std::vector<TenantMapEntry> dstEntries) {
+	                                           std::vector<TenantMapEntry> dstEntries,
+	                                           Optional<metadata::management::MovementRecord> movementRecord) {
+		if (!movementRecord.present()) {
+			throw tenant_move_record_missing();
+		}
 		state size_t iterLen = self->tenantsInGroup.size();
 		ASSERT_EQ(iterLen, srcEntries.size());
 		ASSERT_EQ(iterLen, dstEntries.size());
@@ -1067,11 +1079,9 @@ struct FinishTenantMovementImpl {
 		metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple, endTuple);
 	}
 
-	ACTOR static Future<Void> finalizeMovement(FinishTenantMovementImpl* self,
-	                                           Reference<typename DB::TransactionT> tr) {
-		Optional<metadata::management::MovementRecord> movementRecord = wait(tryGetMovementRecord(
-		    tr, self->tenantGroup, self->srcCtx.clusterName.get(), self->dstCtx.clusterName.get(), Aborting::False));
-
+	static Future<Void> finalizeMovement(FinishTenantMovementImpl* self,
+	                                     Reference<typename DB::TransactionT> tr,
+	                                     Optional<metadata::management::MovementRecord> movementRecord) {
 		if (movementRecord.present()) {
 			self->updateCapacityMetadata(tr);
 			self->clearMovementMetadataFinish(tr);
@@ -1093,56 +1103,70 @@ struct FinishTenantMovementImpl {
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
 			                                  return initFinish(self, tr, movementRecord);
 		                                  }));
-		state metadata::management::MovementState initialMoveState = self->moveRecord.mState;
-		if (initialMoveState != metadata::management::MovementState::SWITCH_METADATA &&
-		    initialMoveState != metadata::management::MovementState::FINISH_UNLOCK) {
-			TraceEvent("TenantMoveFinishWrongInitialMoveState")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("MoveState", initialMoveState);
-			throw invalid_tenant_move();
-		}
-		TraceEvent("Breakpoint0.1").detail("InitialMoveState", initialMoveState);
-		if (initialMoveState == metadata::management::MovementState::SWITCH_METADATA) {
-			TraceEvent("Breakpoint1");
+		try {
+			if (self->moveRecord.mState == metadata::management::MovementState::SWITCH_METADATA) {
+				TraceEvent("Breakpoint1");
 
-			state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
-			TraceEvent("Breakpoint2");
-			state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
-			TraceEvent("Breakpoint3");
-			loop {
-				bool versionReady = wait(self->dstCtx.runDataClusterTransaction(
-				    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
-				if (versionReady) {
-					break;
+				state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
+				    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+				TraceEvent("Breakpoint2");
+				state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
+				    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+				TraceEvent("Breakpoint3");
+				loop {
+					bool versionReady = wait(self->dstCtx.runDataClusterTransaction(
+					    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
+					if (versionReady) {
+						break;
+					}
 				}
+				TraceEvent("Breakpoint4");
+
+				wait(runMoveManagementTransaction(self->tenantGroup,
+				                                  self->srcCtx,
+				                                  self->dstCtx,
+				                                  Aborting::False,
+				                                  { metadata::management::MovementState::SWITCH_METADATA },
+				                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+				                                      Reference<typename DB::TransactionT> tr,
+				                                      Optional<metadata::management::MovementRecord> movementRecord) {
+					                                  return checkValidUnlock(
+					                                      self, tr, srcEntries, dstEntries, movementRecord);
+				                                  }));
+				TraceEvent("Breakpoint5");
+				wait(runMoveManagementTransaction(self->tenantGroup,
+				                                  self->srcCtx,
+				                                  self->dstCtx,
+				                                  Aborting::False,
+				                                  { metadata::management::MovementState::SWITCH_METADATA },
+				                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+				                                      Reference<typename DB::TransactionT> tr,
+				                                      Optional<metadata::management::MovementRecord> movementRecord) {
+					                                  return checkValidDelete(
+					                                      self, tr, srcEntries, dstEntries, movementRecord);
+				                                  }));
 			}
-			TraceEvent("Breakpoint4");
-
-			wait(runMoveManagementTransaction(self->tenantGroup,
-			                                  self->srcCtx,
-			                                  self->dstCtx,
-			                                  Aborting::False,
-			                                  { metadata::management::MovementState::SWITCH_METADATA },
-			                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
-			                                      Reference<typename DB::TransactionT> tr,
-			                                      Optional<metadata::management::MovementRecord> movementRecord) {
-				                                  return checkValidUnlock(self, tr, srcEntries, dstEntries);
-			                                  }));
-			TraceEvent("Breakpoint5");
-			wait(runMoveManagementTransaction(self->tenantGroup,
-			                                  self->srcCtx,
-			                                  self->dstCtx,
-			                                  Aborting::False,
-			                                  { metadata::management::MovementState::SWITCH_METADATA },
-			                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
-			                                      Reference<typename DB::TransactionT> tr,
-			                                      Optional<metadata::management::MovementRecord> movementRecord) {
-				                                  return checkValidDelete(self, tr, srcEntries, dstEntries);
-			                                  }));
+		} catch (Error& e) {
+			state Error err(e);
+			if (err.code() == error_code_invalid_tenant_move) {
+				// Possible for delayed moveRecord update on retry
+				metadata::management::MovementRecord moveRecord =
+				    wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+					    return getMovementRecord(tr,
+					                             self->tenantGroup,
+					                             self->srcCtx.clusterName.get(),
+					                             self->dstCtx.clusterName.get(),
+					                             Aborting::False,
+					                             { metadata::management::MovementState::SWITCH_METADATA,
+					                               metadata::management::MovementState::FINISH_UNLOCK });
+				    }));
+				if (moveRecord.mState != metadata::management::MovementState::FINISH_UNLOCK) {
+					throw err;
+				}
+			} else {
+				throw err;
+			}
 		}
-
 		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return updateMoveRecordState(tr, metadata::management::MovementState::FINISH_UNLOCK, self->tenantGroup);
 		}));
@@ -1176,7 +1200,7 @@ struct FinishTenantMovementImpl {
 		                                  { metadata::management::MovementState::FINISH_UNLOCK },
 		                                  [self = self](Reference<typename DB::TransactionT> tr,
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return finalizeMovement(self, tr);
+			                                  return finalizeMovement(self, tr, movementRecord);
 		                                  }));
 
 		TraceEvent("Breakpoint11");
@@ -1228,8 +1252,12 @@ struct AbortTenantMovementImpl {
 	}
 
 	static Future<Void> clearMovementMetadataAbort(AbortTenantMovementImpl* self,
-	                                               Reference<typename DB::TransactionT> tr) {
-		UID runId = self->moveRecord.runId;
+	                                               Reference<typename DB::TransactionT> tr,
+	                                               Optional<metadata::management::MovementRecord> movementRecord) {
+		if (!movementRecord.present()) {
+			throw tenant_move_record_missing();
+		}
+		UID runId = movementRecord.get().runId;
 		metadata::management::emergency_movement::emergencyMovements().erase(tr, self->tenantGroup);
 		TraceEvent("BreakpointMoveErased2").detail("TenantGroup", self->tenantGroup);
 		metadata::management::emergency_movement::movementQueue().erase(
@@ -1256,7 +1284,11 @@ struct AbortTenantMovementImpl {
 	// Don't check for matching destination entries because they will have been deleted or not yet created
 	ACTOR static Future<Void> checkValidUnlock(AbortTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr,
-	                                           std::vector<TenantMapEntry> srcEntries) {
+	                                           std::vector<TenantMapEntry> srcEntries,
+	                                           Optional<metadata::management::MovementRecord> movementRecord) {
+		if (!movementRecord.present()) {
+			throw tenant_move_record_missing();
+		}
 		state size_t iterLen = self->tenantsInGroup.size();
 		ASSERT_EQ(iterLen, srcEntries.size());
 		state int index = 0;
@@ -1294,7 +1326,11 @@ struct AbortTenantMovementImpl {
 	ACTOR static Future<Void> checkValidDelete(AbortTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr,
 	                                           std::vector<TenantMapEntry> srcEntries,
-	                                           std::vector<TenantMapEntry> dstEntries) {
+	                                           std::vector<TenantMapEntry> dstEntries,
+	                                           Optional<metadata::management::MovementRecord> movementRecord) {
+		if (!movementRecord.present()) {
+			throw tenant_move_record_missing();
+		}
 		state size_t iterLen = self->tenantsInGroup.size();
 		ASSERT_EQ(iterLen, srcEntries.size());
 		ASSERT_EQ(iterLen, dstEntries.size());
@@ -1456,7 +1492,7 @@ struct AbortTenantMovementImpl {
 		    { metadata::management::MovementState::START_LOCK },
 		    [self = self, srcEntries = srcEntries](Reference<typename DB::TransactionT> tr,
 		                                           Optional<metadata::management::MovementRecord> movementRecord) {
-			    return checkValidUnlock(self, tr, srcEntries);
+			    return checkValidUnlock(self, tr, srcEntries, movementRecord);
 		    }));
 
 		wait(unlockSourceTenants(self));
@@ -1468,7 +1504,7 @@ struct AbortTenantMovementImpl {
 		                                  { metadata::management::MovementState::START_LOCK },
 		                                  [self = self](Reference<typename DB::TransactionT> tr,
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return clearMovementMetadataAbort(self, tr);
+			                                  return clearMovementMetadataAbort(self, tr, movementRecord);
 		                                  }));
 
 		return Void();
@@ -1481,18 +1517,33 @@ struct AbortTenantMovementImpl {
 		// If no tenant entries exist on dst, they are already deleted or were never created
 		state std::vector<TenantMapEntry> dstEntries;
 		state bool runDelete = true;
-		try {
-			wait(store(dstEntries, self->dstCtx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-				return getTenantEntries(self->tenantsInGroup, tr);
-			})));
-		} catch (Error& e) {
-			if (e.code() != error_code_tenant_not_found) {
-				throw;
+		state int tries = 0;
+		loop {
+			TraceEvent("BreakpointLoop1");
+			try {
+				wait(
+				    store(dstEntries, self->dstCtx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+					    return getTenantEntries(self->tenantsInGroup, tr);
+				    })));
+				break;
+			} catch (Error& e) {
+				state Error err(e);
+				TraceEvent("TenantMoveAbortStartCreateError").error(err);
+				// TODO: Timing issues can make it so that abort doesn't see the created tenants on dst(?)
+				// Will a retry loop solve this or can the delay extend past it
+				if (err.code() == error_code_tenant_not_found) {
+					TraceEvent("TenantMoveDestinationEntriesNotFound")
+					    .detail("TenantGroup", self->tenantGroup)
+					    .detail("NumTenants", self->tenantsInGroup.size());
+					if (++tries >= 10) {
+						runDelete = false;
+						break;
+					}
+					wait(delay(1.0));
+				} else {
+					throw err;
+				}
 			}
-			TraceEvent("TenantMoveDestinationEntriesNotFound")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("NumTenants", self->tenantsInGroup.size());
-			runDelete = false;
 		}
 		TraceEvent("BreakpointAbort3.1").detail("RunDelete", runDelete);
 		if (runDelete) {
@@ -1508,7 +1559,8 @@ struct AbortTenantMovementImpl {
 			                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
 			                                      Reference<typename DB::TransactionT> tr,
 			                                      Optional<metadata::management::MovementRecord> movementRecord) {
-				                                  return checkValidDelete(self, tr, srcEntries, dstEntries);
+				                                  return checkValidDelete(
+				                                      self, tr, srcEntries, dstEntries, movementRecord);
 			                                  }));
 			TraceEvent("BreakpointAbort3.3");
 			wait(deleteAllDestinationData(self));
