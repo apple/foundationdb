@@ -42,6 +42,16 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 }
 } // namespace
 
+const KeyRangeRef partialKeys1 = KeyRangeRef(KeyRef(), "\x01"_sr);
+const KeyRangeRef partialKeys2 = KeyRangeRef("\x01"_sr, "\x02"_sr);
+const KeyRangeRef partialKeys3 = KeyRangeRef("\x02"_sr, "\x03"_sr);
+const KeyRangeRef partialKeys4 = KeyRangeRef("\x03"_sr, "\xfe"_sr);
+const KeyRangeRef partialKeys5 = KeyRangeRef("\xfe"_sr, "\xff"_sr);
+const KeyRangeRef partialKeys6 = KeyRangeRef("\x05"_sr, "\xaa"_sr);
+const KeyRangeRef partialKeys7 = KeyRangeRef("\xaa"_sr, "\xaa"_sr);
+const KeyRangeRef partialKeys8 = KeyRangeRef(KeyRef(), KeyRef());
+const KeyRangeRef partialKeys9 = KeyRangeRef("\xff"_sr, "\xff"_sr);
+
 struct ValidateStorage : TestWorkload {
 	static constexpr auto NAME = "ValidateStorageWorkload";
 
@@ -77,15 +87,20 @@ struct ValidateStorage : TestWorkload {
 	ACTOR Future<UID> triggerAuditStorageForType(Database cx, AuditType type, std::string context) {
 		// Send audit request until the cluster accepts the request
 		state UID auditId;
+		std::vector<KeyRangeRef> auditKeysCollection = { partialKeys1, partialKeys2, partialKeys3, partialKeys4,
+			                                             partialKeys5, partialKeys6, partialKeys7, partialKeys8,
+			                                             partialKeys9, allKeys };
+		state KeyRangeRef auditRange = deterministicRandom()->randomChoice(auditKeysCollection);
 		loop {
 			try {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
-				                                 allKeys,
+				                                 auditRange,
 				                                 type,
 				                                 /*timeoutSecond=*/300));
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
+				    .detail("AuditRange", auditRange)
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", type);
 				break;

@@ -465,19 +465,17 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
                                                  std::string context,
                                                  UID dataMoveId) {
 	if (range.empty()) {
-		TraceEvent(SevWarn, "AuditLocationMetadataEmptyInputRange")
-		    .detail("By", "PreCheck")
-		    .detail("AuditRange", range);
+		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PreCheck").detail("Range", range);
 		return Void();
 	}
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<UID, Optional<bool>> results;
-	TraceEvent(SevDebug, "AuditLocationMetadataStart")
+	TraceEvent(SevDebug, "CheckLocationMetadataStart")
 	    .detail("By", "PreCheck")
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Servers", describe(servers))
 	    .detail("Context", context)
-	    .detail("AuditRange", range);
+	    .detail("Range", range);
 	try {
 		actors.clear();
 		results.clear();
@@ -488,40 +486,40 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 		for (const auto& [ssid, res] : results) {
 			ASSERT(res.present());
 			if (!res.get()) { // Stop check if corruption detected
-				TraceEvent(SevError, "AuditLocationMetadataCorruptionDetected")
+				TraceEvent(SevError, "CheckLocationMetadataCorruptionDetected")
 				    .detail("By", "PreCheck")
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Servers", describe(servers))
 				    .detail("Context", context)
-				    .detail("AuditRange", range);
+				    .detail("Range", range);
 				throw location_metadata_corruption();
 			}
 		}
-		TraceEvent(SevDebug, "AuditLocationMetadataComplete")
+		TraceEvent(SevDebug, "CheckLocationMetadataComplete")
 		    .detail("By", "PreCheck")
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Servers", describe(servers))
 		    .detail("Context", context)
-		    .detail("AuditRange", range);
+		    .detail("Range", range);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
 			throw e;
 		} else {
-			TraceEvent(SevInfo, "AuditLocationMetadataFailed")
+			TraceEvent(SevInfo, "CheckLocationMetadataFailed")
 			    .errorUnsuppressed(e)
 			    .detail("By", "PreCheck")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Context", context)
-			    .detail("AuditRange", range);
+			    .detail("Range", range);
 			// Check any existing result when failure presents
 			for (const auto& [ssid, res] : results) {
 				if (res.present() && !res.get()) {
-					TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
+					TraceEvent(SevError, "CheckLocationMetadataCorruptionDetectedWhenFailed")
 					    .detail("By", "PreCheck")
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("Servers", describe(servers))
 					    .detail("Context", context)
-					    .detail("AuditRange", range);
+					    .detail("Range", range);
 					throw location_metadata_corruption();
 				}
 			}
@@ -533,9 +531,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 
 ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
 	if (range.empty()) {
-		TraceEvent(SevWarn, "AuditLocationMetadataEmptyInputRange")
-		    .detail("By", "PostCheck")
-		    .detail("AuditRange", range);
+		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PostCheck").detail("Range", range);
 		return Void();
 	}
 	state std::vector<Future<Void>> actors;
@@ -545,10 +541,10 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 	state RangeResult UIDtoTagMap;
 	state Transaction tr(occ);
 	state int retryCount = 0;
-	TraceEvent(SevDebug, "AuditLocationMetadataStart")
+	TraceEvent(SevDebug, "CheckLocationMetadataStart")
 	    .detail("By", "PostCheck")
 	    .detail("Context", context)
-	    .detail("AuditRange", range);
+	    .detail("Range", range);
 	loop {
 		try {
 			loop {
@@ -569,7 +565,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 					actors.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
 					wait(waitForAll(actors));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					TraceEvent(SevVerbose, "AuditLocationMetadataReadDone")
+					TraceEvent(SevVerbose, "CheckLocationMetadataReadDone")
 					    .detail("By", "PostCheck")
 					    .detail("ResultSize", readResultKS.size());
 					// Read serverKeys
@@ -606,11 +602,11 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 						rangeToReadBegin = readResultKS.back().key;
 						continue;
 					} else {
-						TraceEvent(SevDebug, "AuditLocationMetadataComplete")
+						TraceEvent(SevDebug, "CheckLocationMetadataComplete")
 						    .detail("By", "PostCheck")
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Context", context)
-						    .detail("AuditRange", range);
+						    .detail("Range", range);
 						break;
 					}
 				} catch (Error& e) {
@@ -626,21 +622,21 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 				// Check corruptions for the current (failed) round
 				for (const auto& [idx, res] : results) {
 					if (res.present() && !res.get()) {
-						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
+						TraceEvent(SevError, "CheckLocationMetadataCorruptionDetectedWhenFailed")
 						    .detail("By", "PostCheck")
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Context", context)
-						    .detail("AuditRange", range);
+						    .detail("Range", range);
 						throw location_metadata_corruption();
 					}
 				}
 				if (retryCount > SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX) {
-					TraceEvent(SevInfo, "AuditLocationMetadataFailed")
+					TraceEvent(SevInfo, "CheckLocationMetadataFailed")
 					    .errorUnsuppressed(e)
 					    .detail("By", "PostCheck")
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("Context", context)
-					    .detail("AuditRange", range);
+					    .detail("CheckRange", range);
 					// If no corruption detected, exit silently
 				} else {
 					wait(delay(0.5));
