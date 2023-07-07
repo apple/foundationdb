@@ -166,10 +166,11 @@ void HTTP::SimRegisteredHandlerContext::removeIp(IPAddress ip) {
 	updateDNS();
 }
 
-struct AlwaysFailRequestHandler : HTTP::IRequestHandler, ReferenceCounted<AlwaysFailRequestHandler> {
+struct AlwaysFailRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<AlwaysFailRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		ASSERT(false);
+		return Void();
 	}
 	Reference<HTTP::IRequestHandler> clone() override { return makeReference<AlwaysFailRequestHandler>(); }
 
