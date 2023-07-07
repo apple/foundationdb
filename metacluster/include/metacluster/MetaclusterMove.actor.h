@@ -1528,7 +1528,7 @@ struct AbortTenantMovementImpl {
 				break;
 			} catch (Error& e) {
 				state Error err(e);
-				TraceEvent("TenantMoveAbortStartCreateError").error(err);
+				TraceEvent("TenantMoveAbortStartCreateGetTenantEntriesError").error(err);
 				// TODO: Timing issues can make it so that abort doesn't see the created tenants on dst(?)
 				// Will a retry loop solve this or can the delay extend past it
 				if (err.code() == error_code_tenant_not_found) {
@@ -1547,27 +1547,34 @@ struct AbortTenantMovementImpl {
 		}
 		TraceEvent("BreakpointAbort3.1").detail("RunDelete", runDelete);
 		if (runDelete) {
-			state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+			try {
+				state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
+				    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
 
-			TraceEvent("BreakpointAbort3.2");
-			wait(runMoveManagementTransaction(self->tenantGroup,
-			                                  self->srcCtx,
-			                                  self->dstCtx,
-			                                  Aborting::True,
-			                                  { metadata::management::MovementState::START_CREATE },
-			                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
-			                                      Reference<typename DB::TransactionT> tr,
-			                                      Optional<metadata::management::MovementRecord> movementRecord) {
-				                                  return checkValidDelete(
-				                                      self, tr, srcEntries, dstEntries, movementRecord);
-			                                  }));
-			TraceEvent("BreakpointAbort3.3");
-			wait(deleteAllDestinationData(self));
-			TraceEvent("BreakpointAbort3.4");
-			wait(self->dstCtx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return deleteDestinationTenants(self, tr); }));
-			TraceEvent("BreakpointAbort3.5");
+				TraceEvent("BreakpointAbort3.2");
+				wait(runMoveManagementTransaction(self->tenantGroup,
+				                                  self->srcCtx,
+				                                  self->dstCtx,
+				                                  Aborting::True,
+				                                  { metadata::management::MovementState::START_CREATE },
+				                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+				                                      Reference<typename DB::TransactionT> tr,
+				                                      Optional<metadata::management::MovementRecord> movementRecord) {
+					                                  return checkValidDelete(
+					                                      self, tr, srcEntries, dstEntries, movementRecord);
+				                                  }));
+				TraceEvent("BreakpointAbort3.3");
+				wait(deleteAllDestinationData(self));
+				TraceEvent("BreakpointAbort3.4");
+				wait(self->dstCtx.runDataClusterTransaction(
+				    [self = self](Reference<ITransaction> tr) { return deleteDestinationTenants(self, tr); }));
+				TraceEvent("BreakpointAbort3.5");
+			} catch (Error& e) {
+				TraceEvent("TenantMoveAbortStartCreateDeleteError").error(e);
+				if (e.code() != error_code_tenant_not_found) {
+					throw e;
+				}
+			}
 		}
 		TraceEvent("BreakpointAbort3.6");
 
@@ -1596,7 +1603,7 @@ struct AbortTenantMovementImpl {
 		TraceEvent("BreakpointAbort1");
 		// Check for full completion and only reverse if fully completed
 		Optional<MetaclusterTenantGroupEntry> optionalGroupEntry =
-		    wait(tryGetTenantGroup(self->dstCtx.managementDb, self->tenantGroup));
+		    wait(tryGetTenantGroup(self->srcCtx.managementDb, self->tenantGroup));
 		ASSERT(optionalGroupEntry.present());
 		if (optionalGroupEntry.get().assignedCluster == self->dstCtx.clusterName.get()) {
 			wait(runMoveManagementTransaction(

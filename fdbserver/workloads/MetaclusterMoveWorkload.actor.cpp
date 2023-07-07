@@ -371,6 +371,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 					break;
 				}
+				TraceEvent("MetaclusterMoveAbortTimedOut")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				CODE_PROBE(true, "Metacluster move start timed out");
 			} catch (Error& e) {
 				TraceEvent("MetaclusterMoveAbortFailed")
 				    .error(e)
