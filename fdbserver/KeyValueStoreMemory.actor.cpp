@@ -57,7 +57,10 @@ public:
 	Future<Void> onClosed() const override { return log->onClosed(); }
 	void dispose() override {
 		recovering.cancel();
-		log->dispose();
+		if (log) {
+			log->dispose();
+			log = nullptr;
+		}
 		if (reserved_buffer != nullptr) {
 			delete[] reserved_buffer;
 			reserved_buffer = nullptr;
