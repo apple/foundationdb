@@ -1305,6 +1305,7 @@ public:
 		LatencySample readQueueWaitSample;
 		LatencySample kvReadRangeLatencySample;
 		LatencySample updateLatencySample;
+		LatencySample updateEncryptionLatencySample;
 
 		LatencyBands readLatencyBands;
 		LatencySample mappedRangeSample; // Samples getMappedRange latency
@@ -1373,6 +1374,10 @@ public:
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    updateEncryptionLatencySample("UpdateEncryptionLatencyMetrics",
+		                                  self->thisServerID,
+		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample("GetMappedRangeMetrics",
 		                      self->thisServerID,
@@ -9367,6 +9372,7 @@ inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double updateStart = g_network->timer();
+	state double decryptionTime = 0;
 	state double start;
 	state bool enableClearRangeEagerReads =
 	    (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
@@ -9528,7 +9534,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							msg.updateEncryptCipherDetails(cipherDetails);
 							collectingCipherKeys = true;
 						} else {
-							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
+							double decryptionTimeV = 0;
+							msg = msg.decrypt(
+							    cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
+							decryptionTime += decryptionTimeV;
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -9684,7 +9693,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
 					encryptedMutation.cipherKeys = msg.getCipherKeys(cipherKeys.get());
-					msg = msg.decrypt(encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG);
+					double decryptionTimeV = 0;
+					msg = msg.decrypt(
+					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
+					decryptionTime += decryptionTimeV;
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -9865,6 +9877,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			data->behind = false;
 		}
 		const double duration = g_network->timer() - updateStart;
+		data->counters.updateEncryptionLatencySample.addMeasurement(decryptionTime);
 		data->counters.updateLatencySample.addMeasurement(duration);
 
 		return Void(); // update will get called again ASAP
