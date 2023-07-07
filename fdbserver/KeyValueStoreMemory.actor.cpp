@@ -305,9 +305,7 @@ public:
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
-	~KeyValueStoreMemory() {
-		closeWithoutDestructing();
-	}
+	~KeyValueStoreMemory() { closeWithoutDestructing(); }
 
 private:
 	enum OpType {

@@ -154,9 +154,7 @@ public:
 	// Similar to close, but without destructing self.
 	// Should be idempotent. Only implemented for some
 	// key value stores, so use with caution.
-	virtual void closeWithoutDestructing() {
-		throw not_implemented();
-	}
+	virtual void closeWithoutDestructing() { throw not_implemented(); }
 
 	virtual ~IKeyValueStore() {}
 };
