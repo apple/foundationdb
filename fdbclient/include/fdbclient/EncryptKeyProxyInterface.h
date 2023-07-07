@@ -51,12 +51,6 @@ struct KMSHealthStatus {
 		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
 	}
 
-	void setKMSHealthness(bool isKMSHealthy, bool isEKPHealthy) {
-		canConnectToKms = isKMSHealthy;
-		canConnectToEKP = isEKPHealthy;
-		lastUpdatedTS = now();
-	}
-
 	bool healthnessChanged(const KMSHealthStatus& other) {
 		return canConnectToKms != other.canConnectToKms || canConnectToEKP != other.canConnectToEKP;
 	}

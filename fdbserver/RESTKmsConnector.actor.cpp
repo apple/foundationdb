@@ -1128,6 +1128,8 @@ ACTOR Future<Void> procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 	return Void();
 }
 
+// Check if KMS is table by checking request failure count from RESTClient metrics.
+// Will clear RESTClient metrics afterward, assuming it is the only user of the metrics.
 void updateKMSStability(Reference<RESTKmsConnectorCtx> self) {
 	bool stable = true;
 	for (auto& s : self->restClient.statsMap) {
@@ -1140,7 +1142,6 @@ void updateKMSStability(Reference<RESTKmsConnectorCtx> self) {
 }
 
 Future<Void> getKMSState(Reference<RESTKmsConnectorCtx> self, KmsConnGetKMSStateReq req) {
-	TraceEvent("RestKMSGetKMSState", self->uid);
 	KmsConnGetKMSStateRep reply;
 	reply.kmsStable = self->kmsStable;
 
@@ -1151,7 +1152,7 @@ Future<Void> getKMSState(Reference<RESTKmsConnectorCtx> self, KmsConnGetKMSState
 		}
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent("RestKMSGetKMSStateFailed", self->uid).error(e);
+		TraceEvent(SevWarn, "RestKMSGetKMSStateFailed", self->uid).error(e);
 		throw e;
 	}
 
