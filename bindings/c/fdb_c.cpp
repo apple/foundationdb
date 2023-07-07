@@ -1277,17 +1277,20 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description_v
                                                                                   int end_key_name_length,
                                                                                   int64_t begin_version,
                                                                                   int64_t read_version) {
-	FDBReadBGDescriptionRequest* request =
-	    createApiRequest<FDBReadBGDescriptionRequest>(tr, FDBApiRequest_ReadBGDescription);
-	request->read_version = read_version;
-	request->begin_version = begin_version;
-	request->key_range.begin_key = (uint8_t*)copyBytesIntoApiRequest(request, begin_key_name, begin_key_name_length);
-	request->key_range.begin_key_length = begin_key_name_length;
-	request->key_range.end_key = (uint8_t*)copyBytesIntoApiRequest(request, end_key_name, end_key_name_length);
-	request->key_range.end_key_length = end_key_name_length;
-	FDBFuture* future = executeApiRequest<FDBReadBGDescriptionRequest>(tr, request);
-	releaseApiRequest(request);
-	return future;
+	RETURN_FUTURE_ON_ERROR(ApiResult,
+	                       FDBReadBGDescriptionRequest* request =
+	                           createApiRequest<FDBReadBGDescriptionRequest>(tr, FDBApiRequest_ReadBGDescription);
+	                       request->read_version = read_version;
+	                       request->begin_version = begin_version;
+	                       request->key_range.begin_key =
+	                           (uint8_t*)copyBytesIntoApiRequest(request, begin_key_name, begin_key_name_length);
+	                       request->key_range.begin_key_length = begin_key_name_length;
+	                       request->key_range.end_key =
+	                           (uint8_t*)copyBytesIntoApiRequest(request, end_key_name, end_key_name_length);
+	                       request->key_range.end_key_length = end_key_name_length;
+	                       FDBFuture* future = executeApiRequest<FDBReadBGDescriptionRequest>(tr, request);
+	                       releaseApiRequest(request);
+	                       return future;);
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description_v1(FDBTransaction* tr,
