@@ -47,6 +47,7 @@ struct ClogTlogWorkload : TestWorkload {
 	bool enabled;
 	double testDuration;
 	bool clogged = false;
+	bool useDisconnection = false;
 	Optional<NetworkAddress> tlog; // the tlog to be clogged with all other processes except the CC
 	std::vector<std::pair<IPAddress, IPAddress>> cloggedPairs;
 
@@ -101,8 +102,13 @@ struct ClogTlogWorkload : TestWorkload {
 		// clog pairs
 		for (const auto& ip : ips) {
 			if (ip != tlog.get().ip && ip != cc) {
-				g_simulator->clogPair(ip, tlog.get().ip, seconds);
-				g_simulator->clogPair(tlog.get().ip, ip, seconds);
+				if (useDisconnection) {
+					g_simulator->disconnectPair(ip, tlog.get().ip, seconds);
+					g_simulator->disconnectPair(tlog.get().ip, ip, seconds);
+				} else {
+					g_simulator->clogPair(ip, tlog.get().ip, seconds);
+					g_simulator->clogPair(tlog.get().ip, ip, seconds);
+				}
 				cloggedPairs.emplace_back(ip, tlog.get().ip);
 				cloggedPairs.emplace_back(tlog.get().ip, ip);
 			}
@@ -113,7 +119,11 @@ struct ClogTlogWorkload : TestWorkload {
 	void unclogAll() {
 		// unclog previously clogged connections
 		for (const auto& pair : cloggedPairs) {
-			g_simulator->unclogPair(pair.first, pair.second);
+			if (useDisconnection) {
+				g_simulator->reconnectPair(pair.first, pair.second);
+			} else {
+				g_simulator->unclogPair(pair.first, pair.second);
+			}
 		}
 		cloggedPairs.clear();
 	}
@@ -143,6 +153,10 @@ struct ClogTlogWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> clogClient(ClogTlogWorkload* self, Database cx) {
+		if (deterministicRandom()->coinflip()) {
+			self->useDisconnection = true;
+		}
+
 		// Let cycle workload issue some transactions.
 		wait(delay(20.0));
 
