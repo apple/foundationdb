@@ -159,8 +159,8 @@ struct SimRegisteredHandlerContext : ReferenceCounted<SimRegisteredHandlerContex
 public:
 	std::string hostname;
 	std::string service;
-	Reference<IRequestHandler> requestHandler;
 	int port;
+	Reference<IRequestHandler> requestHandler;
 
 	SimRegisteredHandlerContext(std::string hostname,
 	                            std::string service,
