@@ -58,19 +58,6 @@ namespace internal {
 
 FDB_BOOLEAN_PARAM(Aborting);
 
-ACTOR static Future<Void> updateMoveRecordState(Reference<ITransaction> tr,
-                                                metadata::management::MovementState mState,
-                                                TenantGroupName tenantGroup) {
-	Optional<metadata::management::MovementRecord> existingMoveRec =
-	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
-
-	auto updatedMoveRec = existingMoveRec.get();
-	updatedMoveRec.mState = mState;
-
-	metadata::management::emergency_movement::emergencyMovements().set(tr, tenantGroup, updatedMoveRec);
-	return Void();
-}
-
 ACTOR template <class Transaction>
 static Future<Optional<metadata::management::MovementRecord>> tryGetMovementRecord(
     Reference<Transaction> tr,
@@ -188,12 +175,12 @@ static Future<Void> findTenantsInGroup(Reference<Transaction> tr,
 	return Void();
 }
 
-ACTOR static Future<std::vector<TenantMapEntry>> getTenantEntries(
-    std::vector<std::pair<TenantName, int64_t>> tenantsInGroup,
-    Reference<ITransaction> tr) {
+ACTOR template <class Transaction>
+static Future<std::vector<TenantMapEntry>> getTenantEntries(std::vector<std::pair<TenantName, int64_t>> tenantsInGroup,
+                                                            Reference<Transaction> tr) {
 	state std::vector<Future<TenantMapEntry>> entryFutures;
 	for (const auto& tenantPair : tenantsInGroup) {
-		entryFutures.push_back(TenantAPI::getTenantTransaction(tr, tenantPair.first));
+		entryFutures.push_back(TenantAPI::getTenantTransaction(tr, tenantPair.second));
 	}
 
 	wait(waitForAll(entryFutures));
@@ -206,12 +193,40 @@ ACTOR static Future<std::vector<TenantMapEntry>> getTenantEntries(
 	return results;
 }
 
-ACTOR static Future<Void> purgeAndVerifyTenant(Reference<IDatabase> db, TenantName tenant) {
+ACTOR template <class Transaction>
+static Future<Void> updateMoveRecordState(Reference<Transaction> tr,
+                                          metadata::management::MovementState mState,
+                                          TenantGroupName tenantGroup) {
+	state Optional<metadata::management::MovementRecord> existingMoveRec =
+	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
+	if (!existingMoveRec.present()) {
+		throw tenant_move_record_missing();
+	}
+
+	auto updatedMoveRec = existingMoveRec.get();
+	TraceEvent("BreakpointExistingMoveRec")
+	    .detail("TenantGroup", tenantGroup)
+	    .detail("RunID", updatedMoveRec.runId)
+	    .detail("Src", updatedMoveRec.srcCluster)
+	    .detail("Dst", updatedMoveRec.dstCluster)
+	    .detail("State", updatedMoveRec.mState)
+	    .detail("NewState", mState)
+	    .detail("Version", updatedMoveRec.version)
+	    .detail("Aborting", updatedMoveRec.aborting);
+	updatedMoveRec.mState = mState;
+
+	metadata::management::emergency_movement::emergencyMovements().set(tr, tenantGroup, updatedMoveRec);
+	return Void();
+}
+
+ACTOR template <class DB>
+static Future<Void> purgeAndVerifyTenant(Reference<DB> db, TenantName tenant) {
 	state Reference<ITenant> tenantObj = db->openTenant(tenant);
 	state ThreadFuture<Key> resultFuture = tenantObj->purgeBlobGranules(normalKeys, latestVersion, false);
 	TraceEvent("BreakpointPurge4");
 	state Key purgeKey = wait(safeThreadFutureToFuture(resultFuture));
 	TraceEvent("BreakpointPurge5");
+	// TODO:
 	// state ThreadFuture<Void> resultFuture2 = tenantObj->waitPurgeGranulesComplete(purgeKey);
 	// // wait(safeThreadFutureToFuture(tenantObj->waitPurgeGranulesComplete(purgeKey)));
 	// wait(safeThreadFutureToFuture(resultFuture2));
@@ -449,7 +464,7 @@ struct StartTenantMovementImpl {
 
 	ACTOR static Future<Void> run(StartTenantMovementImpl* self) {
 		wait(self->dstCtx.initializeContext());
-
+		TraceEvent("BreakpointStart1");
 		wait(runMoveManagementTransaction(self->tenantGroup,
 		                                  self->srcCtx,
 		                                  self->dstCtx,
@@ -462,14 +477,19 @@ struct StartTenantMovementImpl {
 			                                  return initializeMove(self, tr, movementRecord);
 		                                  }));
 
+		TraceEvent("BreakpointStart2");
 		if (self->moveRecord.mState < metadata::management::MovementState::START_CREATE) {
+			TraceEvent("BreakpointStart2.1");
 			wait(lockSourceTenants(self));
 		}
+		TraceEvent("BreakpointStart3");
 
 		wait(self->srcCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return getSourceClusterMetadata(self, tr); }));
+		TraceEvent("BreakpointStart4");
 
 		if (self->moveRecord.mState < metadata::management::MovementState::START_CREATE) {
+			TraceEvent("BreakpointStart4.1");
 			wait(runMoveManagementTransaction(
 			    self->tenantGroup,
 			    self->srcCtx,
@@ -481,9 +501,11 @@ struct StartTenantMovementImpl {
 				    return writeMovementMetadata(self, tr, movementRecord);
 			    }));
 		}
+		TraceEvent("BreakpointStart5");
 
 		wait(self->dstCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return createLockedDestinationTenants(self, tr); }));
+		TraceEvent("BreakpointStart6");
 
 		return Void();
 	}
@@ -511,20 +533,34 @@ struct SwitchTenantMovementImpl {
 	                         std::vector<std::string>& messages)
 	  : srcCtx(managementDb, src), dstCtx(managementDb, dst), tenantGroup(tenantGroup), messages(messages) {}
 
-	ACTOR static Future<Void> initSwitch(SwitchTenantMovementImpl* self,
+	// returns true if this has already completed and this is a retry
+	ACTOR static Future<bool> initSwitch(SwitchTenantMovementImpl* self,
 	                                     Reference<typename DB::TransactionT> tr,
 	                                     Optional<metadata::management::MovementRecord> movementRecord) {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		// Check that tenantGroup exists on src
 		// If it doesn't the switch may have already completed
-		state bool exists = wait(
+		state bool srcExists = wait(
 		    metadata::management::clusterTenantGroupIndex().exists(tr, Tuple::makeTuple(srcName, self->tenantGroup)));
-		if (!exists) {
-			TraceEvent("TenantMoveSwitchGroupNotOnSource")
+		if (!srcExists) {
+			TraceEvent("BreakpointExists1")
 			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("ClusterName", srcName);
-
+			    .detail("SourceName", srcName)
+			    .detail("DestName", dstName);
+			state bool dstExists = wait(metadata::management::clusterTenantGroupIndex().exists(
+			    tr, Tuple::makeTuple(dstName, self->tenantGroup)));
+			if (dstExists) {
+				TraceEvent("BreakpointExists2")
+				    .detail("TenantGroup", self->tenantGroup)
+				    .detail("SourceName", srcName)
+				    .detail("DestName", dstName);
+				return true;
+			}
+			TraceEvent("TenantMoveSwitchGroupNotOnSourceOrDest")
+			    .detail("TenantGroup", self->tenantGroup)
+			    .detail("SourceName", srcName)
+			    .detail("DestName", dstName);
 			throw invalid_tenant_move();
 		}
 
@@ -538,7 +574,7 @@ struct SwitchTenantMovementImpl {
 		} else {
 			self->moveRecord = movementRecord.get();
 		}
-		return Void();
+		return false;
 	}
 
 	ACTOR static Future<RangeReadResult> readTenantData(Reference<ITenant> tenant,
@@ -646,22 +682,15 @@ struct SwitchTenantMovementImpl {
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		TraceEvent("TenantMoveSwitchBegin");
 
-		metadata::management::MovementRecord moveRecord =
-		    wait(getMovementRecord(tr, self->tenantGroup, srcName, dstName, Aborting::False));
-
 		// Possible Retry
-		if (moveRecord.mState >= metadata::management::MovementState::SWITCH_METADATA) {
-			TraceEvent("TenantMoveSwitchBegin2");
-			Tuple indexEntry = Tuple::makeTuple(dstName, self->tenantGroup);
-			bool exists = wait(metadata::management::clusterTenantGroupIndex().exists(tr, indexEntry));
-			if (exists) {
-				TraceEvent("TenantMoveSwitchBegin3");
-				return Void();
-			}
-		} else {
-			TraceEvent("TenantMoveSwitchBegin4");
-			wait(updateMoveRecordState(tr, metadata::management::MovementState::SWITCH_METADATA, self->tenantGroup));
+		TraceEvent("TenantMoveSwitchBegin2");
+		Tuple dstEntry = Tuple::makeTuple(dstName, self->tenantGroup);
+		bool exists = wait(metadata::management::clusterTenantGroupIndex().exists(tr, dstEntry));
+		if (exists) {
+			TraceEvent("TenantMoveSwitchBegin2.1");
+			return Void();
 		}
+		TraceEvent("TenantMoveSwitchBegin3");
 
 		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
 		wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, self->tenantsInGroup)));
@@ -673,6 +702,10 @@ struct SwitchTenantMovementImpl {
 
 			// tenantMetadata().tenantMap update assigned cluster
 			if (tenantEntry.assignedCluster != srcName) {
+				if (tenantEntry.assignedCluster == dstName) {
+					// possible that this is a retry
+					return Void();
+				}
 				TraceEvent(SevError, "TenantMoveSwitchTenantEntryWrongCluster")
 				    .detail("TenantName", tName)
 				    .detail("TenantId", tId)
@@ -717,6 +750,7 @@ struct SwitchTenantMovementImpl {
 		groupEntry.get().assignedCluster = dstName;
 		metadata::management::tenantMetadata().tenantGroupMap.set(tr, self->tenantGroup, groupEntry.get());
 
+		TraceEvent("TenantMoveSwitchEnd");
 		return Void();
 	}
 
@@ -724,17 +758,22 @@ struct SwitchTenantMovementImpl {
 		wait(self->dstCtx.initializeContext());
 
 		TraceEvent("BreakpointSwitch1");
-		wait(runMoveManagementTransaction(self->tenantGroup,
-		                                  self->srcCtx,
-		                                  self->dstCtx,
-		                                  Aborting::False,
-		                                  { metadata::management::MovementState::START_CREATE,
-		                                    metadata::management::MovementState::SWITCH_HYBRID,
-		                                    metadata::management::MovementState::SWITCH_METADATA },
-		                                  [self = self](Reference<typename DB::TransactionT> tr,
-		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return initSwitch(self, tr, movementRecord);
-		                                  }));
+		bool alreadySwitched = wait(
+		    runMoveManagementTransaction(self->tenantGroup,
+		                                 self->srcCtx,
+		                                 self->dstCtx,
+		                                 Aborting::False,
+		                                 { metadata::management::MovementState::START_CREATE,
+		                                   metadata::management::MovementState::SWITCH_HYBRID,
+		                                   metadata::management::MovementState::SWITCH_METADATA },
+		                                 [self = self](Reference<typename DB::TransactionT> tr,
+		                                               Optional<metadata::management::MovementRecord> movementRecord) {
+			                                 return initSwitch(self, tr, movementRecord);
+		                                 }));
+		if (alreadySwitched) {
+			TraceEvent("BreakpointSwitch1.1");
+			return Void();
+		}
 
 		TraceEvent("BreakpointSwitch2");
 		if (self->moveRecord.mState < metadata::management::MovementState::SWITCH_HYBRID) {
@@ -746,13 +785,16 @@ struct SwitchTenantMovementImpl {
 			wait(applyHybridRanges(self));
 		}
 
+		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			return updateMoveRecordState(tr, metadata::management::MovementState::SWITCH_METADATA, self->tenantGroup);
+		}));
+
 		TraceEvent("BreakpointSwitch4");
 		wait(runMoveManagementTransaction(self->tenantGroup,
 		                                  self->srcCtx,
 		                                  self->dstCtx,
 		                                  Aborting::False,
-		                                  { metadata::management::MovementState::SWITCH_HYBRID,
-		                                    metadata::management::MovementState::SWITCH_METADATA },
+		                                  { metadata::management::MovementState::SWITCH_METADATA },
 		                                  [self = self](Reference<typename DB::TransactionT> tr,
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
 			                                  return switchMetadataToDestination(self, tr);
@@ -806,6 +848,13 @@ struct FinishTenantMovementImpl {
 			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
+			TraceEvent("BreakpointInitFinishMoveRecord")
+			    .detail("RunID", self->moveRecord.runId)
+			    .detail("Src", self->moveRecord.srcCluster)
+			    .detail("Dst", self->moveRecord.dstCluster)
+			    .detail("State", self->moveRecord.mState)
+			    .detail("Version", self->moveRecord.version)
+			    .detail("Aborting", self->moveRecord.aborting);
 		}
 
 		return Void();
@@ -864,9 +913,6 @@ struct FinishTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> unlockDestinationTenants(FinishTenantMovementImpl* self) {
-		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			return updateMoveRecordState(tr, metadata::management::MovementState::FINISH_UNLOCK, self->tenantGroup);
-		}));
 		std::vector<Future<Void>> unlockFutures;
 		for (auto& tenantPair : self->tenantsInGroup) {
 			unlockFutures.push_back(changeTenantLockState(self->srcCtx.managementDb,
@@ -1010,9 +1056,10 @@ struct FinishTenantMovementImpl {
 		metadata::management::clusterTenantCount().atomicOp(tr, srcName, -numTenants, MutationRef::AddValue);
 	}
 
-	void clearMovementMetadata(Reference<typename DB::TransactionT> tr) {
+	void clearMovementMetadataFinish(Reference<typename DB::TransactionT> tr) {
 		UID runId = moveRecord.runId;
 		metadata::management::emergency_movement::emergencyMovements().erase(tr, tenantGroup);
+		TraceEvent("BreakpointMoveErased1").detail("TenantGroup", tenantGroup);
 		metadata::management::emergency_movement::movementQueue().erase(tr,
 		                                                                std::make_pair(tenantGroup, runId.toString()));
 		Tuple beginTuple = Tuple::makeTuple(tenantGroup, runId.toString(), TenantName(""_sr), KeyRef(""_sr));
@@ -1027,7 +1074,7 @@ struct FinishTenantMovementImpl {
 
 		if (movementRecord.present()) {
 			self->updateCapacityMetadata(tr);
-			self->clearMovementMetadata(tr);
+			self->clearMovementMetadataFinish(tr);
 		}
 
 		return Void();
@@ -1054,7 +1101,7 @@ struct FinishTenantMovementImpl {
 			    .detail("MoveState", initialMoveState);
 			throw invalid_tenant_move();
 		}
-		TraceEvent("Breakpoint0.1");
+		TraceEvent("Breakpoint0.1").detail("InitialMoveState", initialMoveState);
 		if (initialMoveState == metadata::management::MovementState::SWITCH_METADATA) {
 			TraceEvent("Breakpoint1");
 
@@ -1096,6 +1143,9 @@ struct FinishTenantMovementImpl {
 			                                  }));
 		}
 
+		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			return updateMoveRecordState(tr, metadata::management::MovementState::FINISH_UNLOCK, self->tenantGroup);
+		}));
 		TraceEvent("Breakpoint6");
 		wait(unlockDestinationTenants(self));
 
@@ -1159,7 +1209,7 @@ struct AbortTenantMovementImpl {
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		wait(findTenantsInGroup(tr, self->tenantGroup, &self->tenantsInGroup));
 		if (!movementRecord.present()) {
-			TraceEvent("TenantMoveSwitchNoMoveRecord")
+			TraceEvent("TenantMoveAbortNoMoveRecord")
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SrcName", srcName)
 			    .detail("DstName", dstName);
@@ -1177,9 +1227,11 @@ struct AbortTenantMovementImpl {
 		return Void();
 	}
 
-	static Future<Void> clearMovementMetadata(AbortTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
+	static Future<Void> clearMovementMetadataAbort(AbortTenantMovementImpl* self,
+	                                               Reference<typename DB::TransactionT> tr) {
 		UID runId = self->moveRecord.runId;
 		metadata::management::emergency_movement::emergencyMovements().erase(tr, self->tenantGroup);
+		TraceEvent("BreakpointMoveErased2").detail("TenantGroup", self->tenantGroup);
 		metadata::management::emergency_movement::movementQueue().erase(
 		    tr, std::make_pair(self->tenantGroup, runId.toString()));
 		Tuple beginTuple = Tuple::makeTuple(self->tenantGroup, runId.toString(), TenantName(""_sr), KeyRef(""_sr));
@@ -1263,10 +1315,10 @@ struct AbortTenantMovementImpl {
 
 			// Assert src tenant exists in metacluster metadata
 			// Abort will have switched metadata to source by this point
-			Tuple indexTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
-			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
-			if (!result) {
-				TraceEvent(SevError, "TenantMoveFinishDeleteNoMatchingTenant")
+			Tuple srcTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
+			bool srcExists = wait(metadata::management::clusterTenantIndex().exists(tr, srcTuple));
+			if (!srcExists) {
+				TraceEvent("TenantMoveFinishDeleteNoMatchingTenant")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId)
 				    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
@@ -1347,6 +1399,10 @@ struct AbortTenantMovementImpl {
 
 			// tenantMetadata().tenantMap update assigned cluster
 			if (tenantEntry.assignedCluster != dstName) {
+				if (tenantEntry.assignedCluster == srcName) {
+					// possible that this is a retry
+					return Void();
+				}
 				TraceEvent(SevError, "TenantMoveAbortSwitchTenantEntryWrongCluster")
 				    .detail("TenantName", tName)
 				    .detail("TenantId", tId)
@@ -1388,6 +1444,7 @@ struct AbortTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> abortStartLock(AbortTenantMovementImpl* self) {
+		TraceEvent("BreakpointAbort4");
 		state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
 
@@ -1411,13 +1468,16 @@ struct AbortTenantMovementImpl {
 		                                  { metadata::management::MovementState::START_LOCK },
 		                                  [self = self](Reference<typename DB::TransactionT> tr,
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return clearMovementMetadata(self, tr);
+			                                  return clearMovementMetadataAbort(self, tr);
 		                                  }));
 
 		return Void();
 	}
 
 	ACTOR static Future<Void> abortStartCreate(AbortTenantMovementImpl* self) {
+		TraceEvent("BreakpointAbort3")
+		    .detail("TenantGroup", self->tenantGroup)
+		    .detail("DstName", self->dstCtx.clusterName);
 		// If no tenant entries exist on dst, they are already deleted or were never created
 		state std::vector<TenantMapEntry> dstEntries;
 		state bool runDelete = true;
@@ -1429,12 +1489,17 @@ struct AbortTenantMovementImpl {
 			if (e.code() != error_code_tenant_not_found) {
 				throw;
 			}
+			TraceEvent("TenantMoveDestinationEntriesNotFound")
+			    .detail("TenantGroup", self->tenantGroup)
+			    .detail("NumTenants", self->tenantsInGroup.size());
 			runDelete = false;
 		}
+		TraceEvent("BreakpointAbort3.1").detail("RunDelete", runDelete);
 		if (runDelete) {
 			state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
 
+			TraceEvent("BreakpointAbort3.2");
 			wait(runMoveManagementTransaction(self->tenantGroup,
 			                                  self->srcCtx,
 			                                  self->dstCtx,
@@ -1445,10 +1510,14 @@ struct AbortTenantMovementImpl {
 			                                      Optional<metadata::management::MovementRecord> movementRecord) {
 				                                  return checkValidDelete(self, tr, srcEntries, dstEntries);
 			                                  }));
+			TraceEvent("BreakpointAbort3.3");
 			wait(deleteAllDestinationData(self));
+			TraceEvent("BreakpointAbort3.4");
 			wait(self->dstCtx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return deleteDestinationTenants(self, tr); }));
+			TraceEvent("BreakpointAbort3.5");
 		}
+		TraceEvent("BreakpointAbort3.6");
 
 		// Update state and unwind with other steps
 		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
@@ -1459,6 +1528,7 @@ struct AbortTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> abortSwitchHybrid(AbortTenantMovementImpl* self) {
+		TraceEvent("BreakpointAbort2");
 		// Okay to run even if step is uncompleted or partially completed
 		wait(purgeDestinationBlobRanges(self));
 
@@ -1471,6 +1541,7 @@ struct AbortTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> abortSwitchMetadata(AbortTenantMovementImpl* self) {
+		TraceEvent("BreakpointAbort1");
 		// Check for full completion and only reverse if fully completed
 		Optional<MetaclusterTenantGroupEntry> optionalGroupEntry =
 		    wait(tryGetTenantGroup(self->dstCtx.managementDb, self->tenantGroup));

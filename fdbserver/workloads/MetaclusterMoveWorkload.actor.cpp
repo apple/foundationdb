@@ -354,6 +354,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                    ClusterName dstCluster) {
 		loop {
 			try {
+				TraceEvent("MetaclusterMoveAbortBegin")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
 				Future<Void> abortFuture =
 				    metacluster::abortTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
 				Optional<Void> result = wait(timeout(abortFuture, deterministicRandom()->randomInt(1, 30)));
@@ -373,8 +377,14 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
+				// Abort failed
 				if (e.code() == error_code_invalid_tenant_move) {
 					return false;
+				}
+				// If the move record is missing, the operation likely completed
+				// and this is a retry OR this is aborting after a finish completed
+				if (e.code() == error_code_tenant_move_record_missing) {
+					return true;
 				}
 				throw e;
 			}
@@ -389,6 +399,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                    ClusterName dstCluster) {
 		loop {
 			try {
+				TraceEvent("MetaclusterMoveStartBegin")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
 				Future<Void> startFuture =
 				    metacluster::startTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
 				Optional<Void> result = wait(timeout(startFuture, deterministicRandom()->randomInt(1, 30)));
@@ -399,6 +413,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("DestinationCluster", dstCluster);
 					break;
 				}
+				TraceEvent("MetaclusterMoveStartTimedOut")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				CODE_PROBE(true, "Metacluster move start timed out");
 				if (deterministicRandom()->random01() < 0.2) {
 					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
 					TraceEvent("MetaclusterMoveStartAttemptedAbort")
@@ -410,7 +429,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 						return aborted;
 					}
 				}
-				CODE_PROBE(true, "Metacluster move start timed out");
 			} catch (Error& e) {
 				TraceEvent("MetaclusterMoveWorkloadStartFailed")
 				    .error(e)
@@ -431,6 +449,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		state std::vector<std::string> messages;
 		loop {
 			try {
+				TraceEvent("MetaclusterMoveSwitchBegin")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
 				Future<Void> switchFuture = metacluster::switchTenantMovement(
 				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
 				Optional<Void> result = wait(timeout(switchFuture, deterministicRandom()->randomInt(1, 30)));
@@ -444,6 +466,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 					break;
 				}
+				TraceEvent("MetaclusterMoveSwitchTimedOut")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				CODE_PROBE(true, "Metacluster move switch timed out");
 				if (deterministicRandom()->random01() < 0.2) {
 					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
 					TraceEvent("MetaclusterMoveSwitchAttemptedAbort")
@@ -455,7 +482,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 						return aborted;
 					}
 				}
-				CODE_PROBE(true, "Metacluster move switch timed out");
 			} catch (Error& e) {
 				TraceEvent("MetaclusterMoveWorkloadSwitchFailed")
 				    .error(e)
@@ -464,6 +490,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("DestinationCluster", dstCluster);
 				if (e.code() == error_code_tenant_move_failed) {
 					continue;
+				}
+				if (e.code() == error_code_invalid_tenant_move) {
+					// Completed and retry threw error
+					return false;
 				}
 				throw;
 			}
@@ -480,6 +510,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		// expect this case and keep trying to finish
 		loop {
 			try {
+				TraceEvent("MetaclusterMoveFinishBegin")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
 				Future<Void> finishFuture =
 				    metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
 				Optional<Void> result = wait(timeout(finishFuture, deterministicRandom()->randomInt(1, 30)));
@@ -490,23 +524,41 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("DestinationCluster", dstCluster);
 					break;
 				}
+				TraceEvent("MetaclusterMoveFinishTimedOut")
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				CODE_PROBE(true, "Metacluster move finish timed out");
 				if (deterministicRandom()->random01() < 0.2) {
 					// Keep track of move record before calling abort
-					state metacluster::metadata::management::MovementRecord moveRecord =
-					    wait(self->getMoveRecord(tenantGroup));
-					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
+					state Optional<metacluster::metadata::management::MovementRecord> moveRecord =
+					    wait(self->tryGetMoveRecord(tenantGroup));
+					// Move completed and metadata was erased
+					if (!moveRecord.present()) {
+						return false;
+					}
+					state bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
 					TraceEvent("MetaclusterMoveFinishAttemptedAbort")
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster)
 					    .detail("AbortedSuccessfully", aborted);
+
+					wait(store(moveRecord, self->tryGetMoveRecord(tenantGroup)));
+					// Move completed and metadata was erased
+					if (!moveRecord.present()) {
+						return false;
+					}
 					if (aborted) {
-						// The abort call should throw an error if this is the inital state
-						ASSERT_NE(moveRecord.mState, metacluster::metadata::management::MovementState::FINISH_UNLOCK);
+						// This scenario can be reached when a finishMove retries, completes, times out,
+						// and then abort is attempted. Return false in this case to verify the correct data
+						if (moveRecord.get().mState ==
+						    metacluster::metadata::management::MovementState::FINISH_UNLOCK) {
+							return false;
+						}
 						return aborted;
 					}
 				}
-				CODE_PROBE(true, "Metacluster move finish timed out");
 			} catch (Error& e) {
 				TraceEvent("MetaclusterMoveWorkloadFinishFailed")
 				    .error(e)
@@ -762,6 +814,14 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    return Future<Void>(Void());
 			    }));
 		}
+	}
+
+	Future<Optional<metacluster::metadata::management::MovementRecord>> tryGetMoveRecord(TenantGroupName tenantGroup) {
+		return runTransaction(managementDb, [tenantGroup](Reference<ITransaction> tr) {
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+			return map(metacluster::metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup),
+			           [](Optional<metacluster::metadata::management::MovementRecord> record) { return record; });
+		});
 	}
 
 	Future<metacluster::metadata::management::MovementRecord> getMoveRecord(TenantGroupName tenantGroup) {

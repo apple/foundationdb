@@ -172,6 +172,7 @@ struct MetaclusterOperationContext {
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointManagementError").error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
@@ -251,6 +252,7 @@ struct MetaclusterOperationContext {
 				wait(safeThreadFutureToFuture(tr->commit()));
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointDataClusterError").error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
