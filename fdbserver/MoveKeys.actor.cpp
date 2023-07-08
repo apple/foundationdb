@@ -470,7 +470,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 	}
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<UID, Optional<bool>> results;
-	TraceEvent(SevDebug, "CheckLocationMetadataStart")
+	TraceEvent(SevVerbose, "CheckLocationMetadataStart")
 	    .detail("By", "PreCheck")
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Servers", describe(servers))
@@ -495,7 +495,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 				throw location_metadata_corruption();
 			}
 		}
-		TraceEvent(SevDebug, "CheckLocationMetadataComplete")
+		TraceEvent(SevVerbose, "CheckLocationMetadataComplete")
 		    .detail("By", "PreCheck")
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Servers", describe(servers))
@@ -541,7 +541,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 	state RangeResult UIDtoTagMap;
 	state Transaction tr(occ);
 	state int retryCount = 0;
-	TraceEvent(SevDebug, "CheckLocationMetadataStart")
+	TraceEvent(SevVerbose, "CheckLocationMetadataStart")
 	    .detail("By", "PostCheck")
 	    .detail("Context", context)
 	    .detail("Range", range);
@@ -602,7 +602,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 						rangeToReadBegin = readResultKS.back().key;
 						continue;
 					} else {
-						TraceEvent(SevDebug, "CheckLocationMetadataComplete")
+						TraceEvent(SevVerbose, "CheckLocationMetadataComplete")
 						    .detail("By", "PostCheck")
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Context", context)

@@ -449,7 +449,7 @@ public:
 				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < ads.size(); ++i) {
 					auto auditState = decodeAuditStorageState(ads[i].value);
-					TraceEvent(SevDebug, "AuditStorageResumeLoad", self->ddId)
+					TraceEvent(SevVerbose, "AuditStorageResumeLoad", self->ddId)
 					    .detail("AuditDDID", auditState.ddId)
 					    .detail("AuditType", auditState.getType())
 					    .detail("AuditID", auditState.id)
@@ -2112,7 +2112,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	    auditState.getType() != AuditType::ValidateStorageServerShard) {
 		throw not_implemented();
 	}
-	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
+	TraceEvent(SevVerbose, "DDRunAuditStorage", self->ddId)
 	    .detail("AuditState", auditState.toString())
 	    .detail("Context", context);
 	ASSERT(auditState.id.isValid());
@@ -2160,7 +2160,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			std::shared_ptr<DDAudit> audit;
 			// find existing audit with requested type and range
 			for (auto& [id, currentAudit] : getAuditsForType(self, auditType)) {
-				TraceEvent(SevInfo, "DDAuditStorageLaunchCheckExisting", self->ddId)
+				TraceEvent(SevVerbose, "DDAuditStorageLaunchCheckExisting", self->ddId)
 				    .detail("AuditID", currentAudit->coreState.id)
 				    .detail("AuditType", currentAudit->coreState.getType())
 				    .detail("AuditPhase", currentAudit->coreState.getPhase())
