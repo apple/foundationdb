@@ -151,11 +151,6 @@ public:
 	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
 	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
 
-	// Similar to close, but without destructing self.
-	// Should be idempotent. Only implemented for some
-	// key value stores, so use with caution.
-	virtual void closeWithoutDestructing() { throw not_implemented(); }
-
 	virtual ~IKeyValueStore() {}
 };
 

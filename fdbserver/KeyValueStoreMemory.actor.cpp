@@ -57,31 +57,11 @@ public:
 	Future<Void> onClosed() const override { return log->onClosed(); }
 	void dispose() override {
 		recovering.cancel();
-		if (log) {
-			log->dispose();
-			log = nullptr;
-		}
-		if (reserved_buffer != nullptr) {
-			delete[] reserved_buffer;
-			reserved_buffer = nullptr;
-		}
+		log->dispose();
+		log = nullptr;
 		delete this;
 	}
-	void closeWithoutDestructing() override {
-		recovering.cancel();
-		if (log) {
-			log->close();
-			log = nullptr;
-		}
-		if (reserved_buffer != nullptr) {
-			delete[] reserved_buffer;
-			reserved_buffer = nullptr;
-		}
-	}
-	void close() override {
-		closeWithoutDestructing();
-		delete this;
-	}
+	void close() override { delete this; }
 
 	// IKeyValueStore
 	KeyValueStoreType getType() const override { return type; }
@@ -305,7 +285,17 @@ public:
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
-	~KeyValueStoreMemory() { closeWithoutDestructing(); }
+	~KeyValueStoreMemory() {
+		recovering.cancel();
+		if (log) {
+			log->close();
+			log = nullptr;
+		}
+		if (reserved_buffer != nullptr) {
+			delete[] reserved_buffer;
+			reserved_buffer = nullptr;
+		}
+	}
 
 private:
 	enum OpType {

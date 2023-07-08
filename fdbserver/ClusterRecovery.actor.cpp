@@ -705,8 +705,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
 	}
 	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
-	if (self->txnStateStore.isValid())
-		self->txnStateStore->closeWithoutDestructing();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
 	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
 	                                             self->dbInfo,

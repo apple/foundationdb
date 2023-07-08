@@ -298,10 +298,6 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 			forceRecovery = false;
 		}
 	}
-	~ClusterRecoveryData() {
-		if (txnStateStore.isValid())
-			txnStateStore->closeWithoutDestructing();
-	}
 };
 
 ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
