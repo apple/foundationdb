@@ -352,14 +352,15 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                    TenantGroupName tenantGroup,
 	                                    ClusterName srcCluster,
 	                                    ClusterName dstCluster) {
+		state std::vector<std::string> messages;
 		loop {
 			try {
 				TraceEvent("MetaclusterMoveAbortBegin")
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
-				Future<Void> abortFuture =
-				    metacluster::abortTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
+				Future<Void> abortFuture = metacluster::abortTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
 				Optional<Void> result = wait(timeout(abortFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					TraceEvent(SevDebug, "MetaclusterMoveAbortComplete")
@@ -402,14 +403,15 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                    TenantGroupName tenantGroup,
 	                                    ClusterName srcCluster,
 	                                    ClusterName dstCluster) {
+		state std::vector<std::string> messages;
 		loop {
 			try {
 				TraceEvent("MetaclusterMoveStartBegin")
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
-				Future<Void> startFuture =
-				    metacluster::startTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
+				Future<Void> startFuture = metacluster::startTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
 				Optional<Void> result = wait(timeout(startFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					TraceEvent(SevDebug, "MetaclusterMoveStartComplete")
@@ -516,6 +518,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                     TenantGroupName tenantGroup,
 	                                     ClusterName srcCluster,
 	                                     ClusterName dstCluster) {
+		state std::vector<std::string> messages;
 		// finish tenant move will fail to abort if movement record has been updated
 		// expect this case and keep trying to finish
 		loop {
@@ -524,8 +527,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
-				Future<Void> finishFuture =
-				    metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
+				Future<Void> finishFuture = metacluster::finishTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
 				Optional<Void> result = wait(timeout(finishFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					TraceEvent(SevDebug, "MetaclusterMoveFinishComplete")
@@ -844,15 +847,64 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		});
 	}
 
-	// TODO: update the test to run arbitrary stages despite the current state to verify that it doesn’t break anything
-	// (i.e. run switch on a move that has already switched or aborted, etc.)
+	enum class MoveCommand { START, SWITCH, FINISH };
+	// Function that is expected to fail with an error. Run it inbetween steps with invalid states
+	ACTOR static Future<Void> runCommandFail(MetaclusterMoveWorkload* self,
+	                                         TenantGroupName tenantGroup,
+	                                         ClusterName srcCluster,
+	                                         ClusterName dstCluster,
+	                                         MoveCommand moveCommand) {
+		state std::vector<std::string> messages;
+		Future<Void> commandFuture;
+		switch (moveCommand) {
+		case MoveCommand::START:
+			commandFuture =
+			    metacluster::startTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
+			break;
+		case MoveCommand::SWITCH:
+			commandFuture =
+			    metacluster::switchTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
+			break;
+		case MoveCommand::FINISH:
+			commandFuture =
+			    metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
+			break;
+		}
+
+		try {
+			wait(commandFuture);
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() != error_code_invalid_tenant_move) {
+				throw e;
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) {
 		// Expect an error if the same cluster is picked
 		state ClusterName srcCluster = self->chooseClusterName();
 		state ClusterName dstCluster = self->chooseClusterName();
+		auto& existingGroups = self->dataDbs[srcCluster].tenantGroups;
+
+		state int tries = 0;
+		state int tryLimit = 10;
+		// Pick a cluster that has tenant groups
+		while (existingGroups.empty()) {
+			if (++tries >= tryLimit) {
+				return Void();
+			}
+			srcCluster = self->chooseClusterName();
+			existingGroups = self->dataDbs[srcCluster].tenantGroups;
+		}
 
 		Optional<TenantGroupName> optionalTenantGroup;
+		tries = 0;
 		while (!optionalTenantGroup.present()) {
+			if (++tries >= tryLimit) {
+				return Void();
+			}
 			optionalTenantGroup = self->chooseTenantGroup(srcCluster);
 		}
 		state TenantGroupName tenantGroup = optionalTenantGroup.get();
@@ -863,12 +915,26 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		    .detail("TenantGroup", tenantGroup)
 		    .detail("GroupsOnSrc", self->dataDbs[srcCluster].tenantGroups.size())
 		    .detail("GroupsOnDst", self->dataDbs[dstCluster].tenantGroups.size());
+
+		// List of commands expected to fail after successful completion of specified step
+		state std::vector<MoveCommand> initFailCmds = { MoveCommand::SWITCH, MoveCommand::FINISH };
+		state std::vector<MoveCommand> startFailCmds = { MoveCommand::FINISH };
+		state std::vector<MoveCommand> switchFailCmds = { MoveCommand::START };
+		state std::vector<MoveCommand> finishFailCmds = { MoveCommand::SWITCH, MoveCommand::FINISH };
+		state MoveCommand cmdChoice;
 		loop {
 			try {
+				cmdChoice = deterministicRandom()->randomChoice(initFailCmds);
+				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
+
 				wait(store(aborted, startMove(self, tenantGroup, srcCluster, dstCluster)));
 				if (aborted) {
 					break;
 				}
+
+				cmdChoice = deterministicRandom()->randomChoice(startFailCmds);
+				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
+
 				// If start completes successfully, the move identifier should be written
 				wait(store(self->moveRecord, self->getMoveRecord(tenantGroup)));
 				wait(processQueue(self, tenantGroup, srcCluster, dstCluster));
@@ -876,9 +942,16 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				if (aborted) {
 					break;
 				}
+
+				cmdChoice = deterministicRandom()->randomChoice(switchFailCmds);
+				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
+
 				wait(store(self->moveRecord, self->getMoveRecord(tenantGroup)));
 
 				wait(store(aborted, finishMove(self, tenantGroup, srcCluster, dstCluster)));
+
+				cmdChoice = deterministicRandom()->randomChoice(finishFailCmds);
+				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
 				break;
 			} catch (Error& e) {
 				state Error err(e);

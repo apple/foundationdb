@@ -174,6 +174,7 @@ private:
 			ASSERT_EQ(t.size(), 2);
 			int64_t capacity = t.getInt(0);
 			ClusterName clusterName = t.getString(1);
+			TraceEvent("BreakpointEmplace").detail("Capacity", capacity).detail("ClusterName", clusterName);
 			ASSERT(self->managementMetadata.clusterAllocatedMap.try_emplace(clusterName, capacity).second);
 		}
 
