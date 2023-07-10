@@ -944,7 +944,9 @@ using flow_swift::FlowCheckedContinuation;
 
 template<class T>
 class
+#ifdef WITH_SWIFT
 SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
+#endif
 FlowCallbackForSwiftContinuation : Callback<T> {
 public:
 	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
@@ -997,7 +999,9 @@ template <class T>
 class
 SWIFT_SENDABLE
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifdef WITH_SWIFT
 SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowFutureOps)
+#endif
 #endif
 Future {
 public:
