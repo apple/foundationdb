@@ -875,7 +875,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			wait(commandFuture);
 			ASSERT(false);
 		} catch (Error& e) {
-			if (e.code() != error_code_invalid_tenant_move) {
+			if (e.code() != error_code_invalid_tenant_move && e.code() != error_code_tenant_move_record_missing) {
 				throw e;
 			}
 		}
