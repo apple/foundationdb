@@ -25,35 +25,17 @@
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
 
-namespace RestSimKms {
+const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "/get-encryption-keys-by-key-ids";
+const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "/get-encryption-keys-by-domain-ids";
+const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "/get-blob-metadata";
 
-const std::string REST_SIM_KMS_BASE_HOSTNAME = "restsimkms";
-const int REST_SIM_KMS_BASE_SERVICE_PORT = 7860;
-
-const std::string REST_SIM_KMS_VAULT_DIR = "simkmsvault";
-const std::string REST_SIM_KMS_VAULT_DISCOVERY_FILE = "restSimKmsDiscovery_urls";
-const std::string REST_SIM_KMS_VAULT_TOKEN_NAME = "simKmsValidationToken";
-const std::string REST_SIM_KMS_VAULT_TOKEN_FILE = "restSimKmsValidation_tokens";
-
-const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "get-encryption-keys-by-key-ids";
-const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "get-encryption-keys-by-domain-ids";
-const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "get-blob-metadata";
-
-struct VaultRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<VaultRequestHandler> {
+struct RESTSimKmsVaultRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<RESTSimKmsVaultRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override;
-	Reference<HTTP::IRequestHandler> clone() override { return makeReference<VaultRequestHandler>(); }
+	Reference<HTTP::IRequestHandler> clone() override { return makeReference<RESTSimKmsVaultRequestHandler>(); }
 
-	void addref() override { ReferenceCounted<VaultRequestHandler>::addref(); }
-	void delref() override { ReferenceCounted<VaultRequestHandler>::delref(); }
+	void addref() override { ReferenceCounted<RESTSimKmsVaultRequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<RESTSimKmsVaultRequestHandler>::delref(); }
 };
-
-Future<Void> registerHTTPServer();
-void initConfig(const std::string& baseFolder);
-Future<Void> initConfigFiles();
-Future<Void> cleanupConfigFiles();
-bool isVaultConfigFile(const std::string&);
-
-} // namespace RestSimKms
 
 #endif
