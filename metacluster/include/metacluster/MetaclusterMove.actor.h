@@ -560,23 +560,19 @@ struct SwitchTenantMovementImpl {
 		state bool srcExists = wait(
 		    metadata::management::clusterTenantGroupIndex().exists(tr, Tuple::makeTuple(srcName, self->tenantGroup)));
 		if (!srcExists) {
-			TraceEvent("BreakpointExists1")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("SourceName", srcName)
-			    .detail("DestName", dstName);
 			state bool dstExists = wait(metadata::management::clusterTenantGroupIndex().exists(
 			    tr, Tuple::makeTuple(dstName, self->tenantGroup)));
 			if (dstExists) {
-				TraceEvent("BreakpointExists2")
-				    .detail("TenantGroup", self->tenantGroup)
-				    .detail("SourceName", srcName)
-				    .detail("DestName", dstName);
 				return true;
 			}
 			TraceEvent("TenantMoveSwitchGroupNotOnSourceOrDest")
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SourceName", srcName)
 			    .detail("DestName", dstName);
+
+			self->messages.push_back(fmt::format("Tenant move switch tenantGroup not found on source or destination\n"
+			                                     "		group name:	{}\n",
+			                                     self->tenantGroup));
 			throw invalid_tenant_move();
 		}
 
@@ -586,6 +582,8 @@ struct SwitchTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SrcName", srcName)
 			    .detail("DstName", dstName);
+			self->messages.push_back(fmt::format(
+			    "Tenant move switch no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
@@ -633,6 +631,8 @@ struct SwitchTenantMovementImpl {
 				    .detail("End", end)
 				    .detail("SrcSize", srcRange.size())
 				    .detail("DstSize", dstRange.size());
+				self->messages.push_back(fmt::format(
+				    "Tenant move switch data mismatch in range {} - {} for tenant {}\n", begin, end, tName));
 				throw invalid_tenant_move();
 			}
 
@@ -684,6 +684,7 @@ struct SwitchTenantMovementImpl {
 			for (const auto& blobResult : blobFutures) {
 				if (!blobResult.get()) {
 					TraceEvent("TenantMoveSwitchBlobbifyFailed").detail("TenantName", tName);
+					self->messages.push_back(fmt::format("Tenant move switch blobbify failed for tenant {}\n", tName));
 					throw tenant_move_failed();
 				}
 			}
@@ -697,6 +698,8 @@ struct SwitchTenantMovementImpl {
 	    Reference<typename DB::TransactionT> tr,
 	    Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			self->messages.push_back(fmt::format(
+			    "Tenant move switch no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state ClusterName srcName = self->srcCtx.clusterName.get();
@@ -734,9 +737,9 @@ struct SwitchTenantMovementImpl {
 				    .detail("Src", srcName)
 				    .detail("Dst", dstName)
 				    .detail("EntryCluster", tenantEntry.assignedCluster);
-				self->messages.push_back(fmt::format("Tenant move switch wrong assigned cluster\n"
-				                                     "		expected:	{}\n"
-				                                     "		actual:		{}",
+				self->messages.push_back(fmt::format("Tenant move switch tenantEntry with incorrect cluster\n"
+				                                     "		expected cluster:	{}\n"
+				                                     "		actual cluster:		{}\n",
 				                                     srcName,
 				                                     tenantEntry.assignedCluster));
 				throw invalid_tenant_move();
@@ -759,6 +762,9 @@ struct SwitchTenantMovementImpl {
 
 		if (!groupEntry.present()) {
 			TraceEvent(SevError, "TenantMoveSwitchGroupEntryMissing").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format("Tenant move switch tenantGroupEntry missing\n"
+			                                     "		group name:	{}\n",
+			                                     self->tenantGroup));
 			throw invalid_tenant_move();
 		}
 		if (groupEntry.get().assignedCluster != srcName) {
@@ -766,6 +772,13 @@ struct SwitchTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("ExpectedCluster", srcName)
 			    .detail("GroupEntryAssignedCluster", groupEntry.get().assignedCluster);
+			self->messages.push_back(fmt::format("Tenant move switch tenantGroupEntry with incorrect cluster\n"
+			                                     "		group name:			{}\n"
+			                                     "		expected cluster:	{}\n"
+			                                     "		actual cluster:	{}\n",
+			                                     self->tenantGroup,
+			                                     srcName,
+			                                     groupEntry.get().assignedCluster));
 			throw invalid_tenant_move();
 		}
 		groupEntry.get().assignedCluster = dstName;
