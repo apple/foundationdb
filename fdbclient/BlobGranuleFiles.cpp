@@ -1837,9 +1837,6 @@ std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, s
 }
 
 namespace {
-const EncryptCipherDomainId encryptDomainId = deterministicRandom()->randomInt64(786, 7860);
-const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->randomUInt64();
-const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
 
 Standalone<StringRef> getBaseCipher() {
 	Standalone<StringRef> baseCipher = makeString(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1));
@@ -1847,9 +1844,12 @@ Standalone<StringRef> getBaseCipher() {
 	return baseCipher;
 }
 
-const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
-
 BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
+	static const EncryptCipherDomainId encryptDomainId = deterministicRandom()->randomInt64(786, 7860);
+	static const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->randomUInt64();
+	static const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
+	static const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
+
 	BlobGranuleCipherKeysCtx cipherKeysCtx;
 	const EncryptCipherKeyCheckValue cipherKCV =
 	    Sha256KCV().computeKCV(encryptBaseCipher.begin(), encryptBaseCipher.size());
