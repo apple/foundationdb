@@ -294,13 +294,15 @@ bool MoveInUpdates::hasNext() const {
 
 std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 	std::vector<Standalone<VerUpdateRef>> res;
+	int size = 0;
 	if (!this->fail) {
 		while (!updates.empty()) {
 			if (updates.front().version > this->lastAppliedVersion) {
 				res.push_back(updates.front());
+				size += res.back().mutations.expectedSize();
 			}
 			updates.pop_front();
-			if (g_network->isSimulated() && deterministicRandom()->coinflip() && !res.empty()) {
+			if (size > byteLimit) {
 				break;
 			}
 		}
