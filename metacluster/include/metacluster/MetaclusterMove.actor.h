@@ -555,6 +555,17 @@ struct SwitchTenantMovementImpl {
 	                                     Optional<metadata::management::MovementRecord> movementRecord) {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
+		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveSwitchNoMoveRecord")
+			    .detail("TenantGroup", self->tenantGroup)
+			    .detail("SrcName", srcName)
+			    .detail("DstName", dstName);
+			self->messages.push_back(fmt::format(
+			    "Tenant move switch no movement in progress for the tenant group: {}\n", self->tenantGroup));
+			throw tenant_move_record_missing();
+		} else {
+			self->moveRecord = movementRecord.get();
+		}
 		// Check that tenantGroup exists on src
 		// If it doesn't the switch may have already completed
 		state bool srcExists = wait(
@@ -577,17 +588,6 @@ struct SwitchTenantMovementImpl {
 		}
 
 		wait(findTenantsInGroup(tr, self->tenantGroup, &self->tenantsInGroup));
-		if (!movementRecord.present()) {
-			TraceEvent("TenantMoveSwitchNoMoveRecord")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("SrcName", srcName)
-			    .detail("DstName", dstName);
-			self->messages.push_back(fmt::format(
-			    "Tenant move switch no movement in progress for the tenant group: {}\n", self->tenantGroup));
-			throw tenant_move_record_missing();
-		} else {
-			self->moveRecord = movementRecord.get();
-		}
 		return false;
 	}
 
