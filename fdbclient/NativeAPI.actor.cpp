@@ -730,6 +730,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->readLatencies.clear();
 		cx->readRangeLatencies.clear();
 		cx->GRVLatencies.clear();
+		cx->keyLocationLatencies.clear();
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
@@ -4529,9 +4530,9 @@ void getRangeFinished(Reference<TransactionState> trState,
 	trState->cx->readRangeLatencies.addSample(timeNow - startTime);
 
 	if (trState->trLogInfo) {
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(timeNow - startTime,
+		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
 		                                                             trState->cx->clientLocality.dcId(),
-		                                                             now() - startTime,
+		                                                             timeNow - startTime,
 		                                                             bytes,
 		                                                             begin.getKey(),
 		                                                             end.getKey(),
