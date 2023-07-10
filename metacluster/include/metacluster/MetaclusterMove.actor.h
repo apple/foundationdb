@@ -36,7 +36,7 @@
 #include "flow/genericactors.actor.h"
 
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "flow/ThreadHelper.actor.h"
 
 #include "fdbclient/DatabaseContext.h"
