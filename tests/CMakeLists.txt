@@ -390,8 +390,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml)
+    TEST_FILES restarting/from_71.3.1/BlobGranuleRestartCorrectness-1.toml
+    restarting/from_71.3.1/BlobGranuleRestartCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
