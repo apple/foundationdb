@@ -1328,6 +1328,7 @@ public:
 	}
 
 	static void runLoop(Sim2* self) {
+		self->printSimTime = true;
 		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		int lastPrintTime = 0;
 		while (!self->isStopped) {

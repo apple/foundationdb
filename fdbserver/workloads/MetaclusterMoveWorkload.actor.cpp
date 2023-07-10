@@ -435,12 +435,17 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 				}
 			} catch (Error& e) {
+				state Error err(e);
 				TraceEvent("MetaclusterMoveWorkloadStartFailed")
-				    .error(e)
+				    .error(err)
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
-				throw e;
+				if (err.code() == error_code_metacluster_no_capacity) {
+					wait(increaseMetaclusterCapacity(self));
+					continue;
+				}
+				throw err;
 			}
 		}
 		return false;
@@ -496,8 +501,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				if (e.code() == error_code_tenant_move_failed) {
 					// Retryable error
 					continue;
-				}
-				if (e.code() == error_code_invalid_tenant_move) {
+				} else if (e.code() == error_code_invalid_tenant_move) {
 					// Completed and retry threw error
 					return false;
 				}
@@ -549,19 +553,13 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster)
 					    .detail("AbortedSuccessfully", aborted);
-
-					wait(store(moveRecord, self->tryGetMoveRecord(tenantGroup)));
-					// Move completed and metadata was erased
-					if (!moveRecord.present()) {
-						return false;
-					}
 					if (aborted) {
-						// // This scenario can be reached when a finishMove retries, completes, times out,
-						// // and then abort is attempted. Return false in this case to verify the correct data
-						// if (moveRecord.get().mState ==
-						//     metacluster::metadata::management::MovementState::FINISH_UNLOCK) {
-						// 	return false;
-						// }
+						// This scenario can be reached when a finishMove retries, completes, times out,
+						// and then abort is attempted. Return false in this case to verify the correct data
+						if (moveRecord.get().mState ==
+						    metacluster::metadata::management::MovementState::FINISH_UNLOCK) {
+							return false;
+						}
 						return aborted;
 					}
 				}
@@ -573,7 +571,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("DestinationCluster", dstCluster);
 				// If the move record is missing, the operation likely completed
 				// and this is a retry
-				// TODO: possible for this to have been a successful abort + retry?
 				if (e.code() == error_code_tenant_move_record_missing) {
 					return false;
 				}
@@ -611,6 +608,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		// bulkSetup usually expects all clients
 		// but this is being circumvented by the clientId==0 check
 		self->clientCount = 1;
+		TraceEvent("BreakpointStuck1");
 		// container of range-based for with continuation must be a state variable
 		state std::map<ClusterName, DataClusterData> dataDbs = self->dataDbs;
 		for (auto const& [clusterName, dataDb] : dataDbs) {
@@ -639,12 +637,15 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				               0,
 				               dataTenants));
 			}
+			TraceEvent("BreakpointStuck2");
 			// Blobbify all tenants
 			std::vector<Future<bool>> blobFutures;
 			for (Reference<Tenant> tenantRef : dataTenants) {
 				blobFutures.push_back(dbObj->blobbifyRangeBlocking(normalKeys, tenantRef));
 			}
+			TraceEvent("BreakpointStuck3");
 			wait(waitForAll(blobFutures));
+			TraceEvent("BreakpointStuck4");
 		}
 
 		// Set storage and tag quotas
@@ -856,6 +857,12 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 		state TenantGroupName tenantGroup = optionalTenantGroup.get();
 		state bool aborted;
+		TraceEvent("BreakpointTestStart")
+		    .detail("Src", srcCluster)
+		    .detail("Dst", dstCluster)
+		    .detail("TenantGroup", tenantGroup)
+		    .detail("GroupsOnSrc", self->dataDbs[srcCluster].tenantGroups.size())
+		    .detail("GroupsOnDst", self->dataDbs[dstCluster].tenantGroups.size());
 		loop {
 			try {
 				wait(store(aborted, startMove(self, tenantGroup, srcCluster, dstCluster)));
