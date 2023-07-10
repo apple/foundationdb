@@ -65,9 +65,8 @@ private:
 				RangeReadResult systemTenantSubspaceKeys =
 				    wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
 
-				// TODO: account for storageQuota \xff keys
 				// The only key in the `\xff` tenant subspace should be the tenant id prefix
-				// ASSERT(systemTenantSubspaceKeys.size() == 1);
+				ASSERT(systemTenantSubspaceKeys.size() == 1);
 				return Void();
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
