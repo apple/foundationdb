@@ -613,14 +613,9 @@ struct RolesInfo {
 				}
 			}
 
-		} catch (Error& e) {
-			if (e.code() != error_code_attribute_not_found)
-				throw e;
-			else {
-				TraceEvent(SevWarnAlways, "StorageServerStatusJson").error(e);
-			}
+		} catch (AttributeNotFoundError& e) {
+			TraceEvent(SevWarnAlways, "StorageServerStatusJson").detail("MissingAttribute", e.getMissingAttribute());
 		}
-
 		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;
 		}
@@ -2469,10 +2464,12 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 			Optional<TraceEventFields> fields = wait(timeoutError(
 			    latestEventOnWorker(addressWorkersMap[managerIntf.get().address()], "BlobManagerMetrics"), 2.0));
 			if (fields.present()) {
+				statusObj["last_flush_version"] = fields.get().getUint64("LastFlushVersion");
 				statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
 				statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
 				statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
 				statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+				statusObj["last_truncation_version"] = fields.get().getUint64("LastMLogTruncationVersion");
 			}
 		}
 

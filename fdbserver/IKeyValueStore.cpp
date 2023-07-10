@@ -1,5 +1,5 @@
 /*
- * IKeyValueStore.actor.cpp
+ * IKeyValueStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/ServerDBInfo.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -67,29 +67,4 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 		UNREACHABLE();
 	}
 	UNREACHABLE(); // FIXME: is this right?
-}
-
-ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
-                                            KeyRange range,
-                                            Standalone<VectorRef<KeyValueRef>> data) {
-	state int sinceYield = 0;
-	state const KeyValueRef* kvItr = data.begin();
-	state KeyRangeRef rangeRef = range;
-	if (rangeRef.empty()) {
-		return Void();
-	}
-	self->clear(rangeRef);
-	for (; kvItr != data.end(); kvItr++) {
-		self->set(*kvItr);
-		if (++sinceYield > 1000) {
-			wait(yield());
-			sinceYield = 0;
-		}
-	}
-	return Void();
-}
-
-// Default implementation for replaceRange(), which writes the key one by one.
-Future<Void> IKeyValueStore::replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
-	return replaceRange_impl(this, range, data);
 }

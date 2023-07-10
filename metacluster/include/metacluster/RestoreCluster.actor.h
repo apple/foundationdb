@@ -69,9 +69,10 @@ struct RestoreClusterImpl {
 	std::vector<std::string>& messages;
 
 	// Unique ID generated for this restore. Used to avoid concurrent restores
-	UID restoreId = deterministicRandom()->randomUniqueID();
+	metadata::RestoreId restoreId;
 
 	// Loaded from the management cluster
+	int64_t tenantIdPrefix;
 	Optional<int64_t> lastManagementClusterTenantId;
 
 	// Loaded from the data cluster
@@ -101,7 +102,8 @@ struct RestoreClusterImpl {
 	ACTOR template <class Transaction>
 	static Future<Void> checkRestoreId(RestoreClusterImpl* self, Transaction tr) {
 		if (!self->restoreDryRun) {
-			Optional<UID> activeRestoreId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
+			Optional<metadata::RestoreId> activeRestoreId =
+			    wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 			if (!activeRestoreId.present() || activeRestoreId.get() != self->restoreId) {
 				CODE_PROBE(true, "Conflicting restore detected");
 				throw conflicting_restore();
@@ -114,7 +116,7 @@ struct RestoreClusterImpl {
 	// Returns true if the restore ID was erased
 	ACTOR template <class Transaction>
 	static Future<bool> eraseRestoreId(RestoreClusterImpl* self, Transaction tr) {
-		Optional<UID> transactionId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
+		Optional<metadata::RestoreId> transactionId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 		if (!transactionId.present()) {
 			CODE_PROBE(true, "Erasing non-existent restore ID");
 			return false;
@@ -202,9 +204,24 @@ struct RestoreClusterImpl {
 		}
 	}
 
+	ACTOR static Future<Void> loadTenantIdData(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+		wait(store(self->lastManagementClusterTenantId, metadata::management::tenantMetadata().lastTenantId.get(tr)));
+
+		if (!self->lastManagementClusterTenantId.present()) {
+			Optional<int64_t> prefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
+			ASSERT(prefix.present());
+			self->tenantIdPrefix = prefix.get();
+		} else {
+			self->tenantIdPrefix = TenantAPI::getTenantIdPrefix(self->lastManagementClusterTenantId.get());
+		}
+
+		return Void();
+	}
+
 	// Store the cluster entry for the restored cluster
-	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
-	                                                                      Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<metadata::RestoreId> registerRestoringClusterInManagementCluster(
+	    RestoreClusterImpl* self,
+	    Reference<typename DB::TransactionT> tr) {
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
@@ -214,7 +231,8 @@ struct RestoreClusterImpl {
 			throw cluster_already_exists();
 		} else if (!self->restoreDryRun) {
 			metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
-			metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+			metadata::RestoreId restoreId =
+			    metadata::RestoreId::createRestoreId(tr, metadata::activeRestoreIds(), self->clusterName);
 
 			if (!dataClusterMetadata.present()) {
 				self->dataClusterId = deterministicRandom()->randomUniqueID();
@@ -233,9 +251,11 @@ struct RestoreClusterImpl {
 			    .detail("Capacity", clusterEntry.capacity)
 			    .detail("Version", tr->getCommittedVersion())
 			    .detail("ConnectionString", self->connectionString.toString());
+
+			return restoreId;
 		}
 
-		return Void();
+		return metadata::RestoreId();
 	}
 
 	// If adding a data cluster to a restored management cluster, write a metacluster registration entry
@@ -264,7 +284,7 @@ struct RestoreClusterImpl {
 
 				wait(lastTenantIdFuture);
 
-				MetaclusterRegistrationEntry dataClusterEntry =
+				state MetaclusterRegistrationEntry dataClusterEntry =
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->dataClusterId);
 
@@ -281,9 +301,16 @@ struct RestoreClusterImpl {
 				}
 
 				if (!self->restoreDryRun) {
+					Versionstamp maxRestoreId =
+					    wait(metadata::maxRestoreId().getD(tr, Snapshot::False, Versionstamp()));
+					if (!self->restoreId.replaces(maxRestoreId)) {
+						throw conflicting_restore();
+					}
+
 					metadata::metaclusterRegistration().set(tr, dataClusterEntry);
 					metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 					metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+					metadata::maxRestoreId().set(tr, self->restoreId.versionstamp);
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 				}
 
@@ -296,9 +323,11 @@ struct RestoreClusterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> markClusterRestoring(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<metadata::RestoreId> markClusterRestoring(RestoreClusterImpl* self,
+	                                                              Reference<typename DB::TransactionT> tr) {
 		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
-		metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+		state metadata::RestoreId restoreId =
+		    metadata::RestoreId::createRestoreId(tr, metadata::activeRestoreIds(), self->clusterName);
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 			updatedEntry.clusterState = DataClusterState::RESTORING;
@@ -315,10 +344,10 @@ struct RestoreClusterImpl {
 			CODE_PROBE(true, "Mark cluster restoring already complete");
 		}
 
-		wait(store(self->lastManagementClusterTenantId, metadata::management::tenantMetadata().lastTenantId.get(tr)));
+		wait(loadTenantIdData(self, tr));
 
 		TraceEvent("MarkedDataClusterRestoring").detail("Name", self->clusterName);
-		return Void();
+		return restoreId;
 	}
 
 	Future<Void> markClusterAsReady(Reference<typename DB::TransactionT> tr) {
@@ -386,7 +415,6 @@ struct RestoreClusterImpl {
 		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenants =
 		    wait(metadata::management::tenantMetadata().tenantMap.getRange(
 		        tr, initialTenantId, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
-
 		for (auto const& t : tenants.results) {
 			self->mgmtClusterTenantMap.emplace(t.first, t.second);
 			if (self->clusterName == t.second.assignedCluster) {
@@ -801,12 +829,11 @@ struct RestoreClusterImpl {
 
 	ACTOR static Future<Void> addTenantBatchToManagementCluster(RestoreClusterImpl* self,
 	                                                            Reference<typename DB::TransactionT> tr,
-	                                                            std::vector<TenantMapEntry> tenants,
-	                                                            int64_t tenantIdPrefix) {
+	                                                            std::vector<TenantMapEntry> tenants) {
 		state std::vector<Future<bool>> futures;
 		state int64_t maxId = -1;
 		for (auto const& t : tenants) {
-			if (TenantAPI::getTenantIdPrefix(t.id) == tenantIdPrefix) {
+			if (TenantAPI::getTenantIdPrefix(t.id) == self->tenantIdPrefix) {
 				maxId = std::max(maxId, t.id);
 				self->newLastDataClusterTenantId = std::max(t.id, self->newLastDataClusterTenantId.orDefault(0));
 			}
@@ -858,26 +885,19 @@ struct RestoreClusterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> updateLastTenantId(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
-		state Optional<int64_t> lastTenantId = wait(metadata::management::tenantMetadata().lastTenantId.get(tr));
-		state int64_t tenantIdPrefix;
-		if (!lastTenantId.present()) {
-			Optional<int64_t> prefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
-			ASSERT(prefix.present());
-			tenantIdPrefix = prefix.get();
-		} else {
-			tenantIdPrefix = TenantAPI::getTenantIdPrefix(lastTenantId.get());
-		}
+	ACTOR static Future<Void> updateLastTenantId(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+		wait(loadTenantIdData(self, tr));
 
 		if (self->lastDataClusterTenantId.present() &&
-		    tenantIdPrefix == TenantAPI::getTenantIdPrefix(self->lastDataClusterTenantId.get())) {
+		    self->tenantIdPrefix == TenantAPI::getTenantIdPrefix(self->lastDataClusterTenantId.get())) {
 			if (!self->forceReuseTenantIdPrefix) {
 				self->messages.push_back(fmt::format(
 				    "The data cluster being added is using the same tenant ID prefix {} as the management cluster.",
-				    tenantIdPrefix));
+				    self->tenantIdPrefix));
 				CODE_PROBE(true, "Reusing tenant ID without force reuse option");
 				throw invalid_metacluster_configuration();
-			} else if (!self->restoreDryRun && self->lastDataClusterTenantId.get() > lastTenantId.orDefault(-1)) {
+			} else if (!self->restoreDryRun &&
+			           self->lastDataClusterTenantId.get() > self->lastManagementClusterTenantId.orDefault(-1)) {
 				CODE_PROBE(true, "Reusing tenant ID prefix and increase existing ID");
 				metadata::management::tenantMetadata().lastTenantId.set(tr, self->lastDataClusterTenantId.get());
 			}
@@ -886,7 +906,7 @@ struct RestoreClusterImpl {
 			self->newLastDataClusterTenantId = self->lastDataClusterTenantId;
 		}
 
-		return tenantIdPrefix;
+		return Void();
 	}
 
 	ACTOR static Future<Void> addTenantsToManagementCluster(RestoreClusterImpl* self) {
@@ -894,7 +914,7 @@ struct RestoreClusterImpl {
 		state std::vector<TenantMapEntry> tenantBatch;
 		state int64_t tenantsToAdd = 0;
 
-		state int64_t tenantIdPrefix = wait(self->runRestoreManagementTransaction(
+		wait(self->runRestoreManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return updateLastTenantId(self, tr); }));
 
 		for (itr = self->dataClusterTenantMap.begin(); itr != self->dataClusterTenantMap.end(); ++itr) {
@@ -918,10 +938,9 @@ struct RestoreClusterImpl {
 
 			if (tenantBatch.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
 				wait(self->runRestoreManagementTransaction(
-				    [self = self, tenantBatch = tenantBatch, tenantIdPrefix = tenantIdPrefix](
-				        Reference<typename DB::TransactionT> tr) {
+				    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
 					    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					    return addTenantBatchToManagementCluster(self, tr, tenantBatch, tenantIdPrefix);
+					    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
 				    }));
 				tenantBatch.clear();
 			}
@@ -929,10 +948,9 @@ struct RestoreClusterImpl {
 
 		if (!tenantBatch.empty()) {
 			wait(self->runRestoreManagementTransaction(
-			    [self = self, tenantBatch = tenantBatch, tenantIdPrefix = tenantIdPrefix](
-			        Reference<typename DB::TransactionT> tr) {
+			    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
 				    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				    return addTenantBatchToManagementCluster(self, tr, tenantBatch, tenantIdPrefix);
+				    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
 			    }));
 		}
 
@@ -949,11 +967,53 @@ struct RestoreClusterImpl {
 	ACTOR static Future<Void> finalizeDataClusterAfterRepopulate(RestoreClusterImpl* self, Reference<ITransaction> tr) {
 		bool erased = wait(eraseRestoreId(self, tr));
 		if (erased) {
+			TenantMetadata::tenantIdPrefix().set(tr, self->tenantIdPrefix);
 			if (self->newLastDataClusterTenantId.present()) {
 				TenantMetadata::lastTenantId().set(tr, self->newLastDataClusterTenantId.get());
 			} else {
 				TenantMetadata::lastTenantId().clear(tr);
 			}
+
+			Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
+			    wait(TenantMetadata::tombstoneCleanupData().get(tr));
+
+			// If our tombstones are for a different tenant prefix, we need to erase them
+			if (!tombstoneCleanupData.present() ||
+			    TenantAPI::getTenantIdPrefix(tombstoneCleanupData.get().nextTombstoneEraseId) != self->tenantIdPrefix) {
+				CODE_PROBE(true, "Remove tombstone cleanup data during management cluster repopulate");
+				TenantMetadata::tenantTombstones().clear(tr);
+				TenantMetadata::tombstoneCleanupData().clear(tr);
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> updateDataClusterMetadata(RestoreClusterImpl* self, Reference<ITransaction> tr) {
+		Versionstamp maxRestoreId = wait(metadata::maxRestoreId().getD(tr, Snapshot::False, Versionstamp()));
+		if (!self->restoreId.replaces(maxRestoreId)) {
+			throw conflicting_restore();
+		}
+
+		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
+		metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+		metadata::maxRestoreId().set(tr, self->restoreId.versionstamp);
+		TenantMetadata::tenantIdPrefix().set(tr, self->tenantIdPrefix);
+		if (self->lastManagementClusterTenantId.present()) {
+			TenantMetadata::lastTenantId().set(tr, self->lastManagementClusterTenantId.get());
+		} else {
+			TenantMetadata::lastTenantId().clear(tr);
+		}
+
+		Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
+		    wait(TenantMetadata::tombstoneCleanupData().get(tr));
+
+		// If our tombstones are for a different tenant prefix, we need to erase them
+		if (!tombstoneCleanupData.present() ||
+		    TenantAPI::getTenantIdPrefix(tombstoneCleanupData.get().nextTombstoneEraseId) != self->tenantIdPrefix) {
+			CODE_PROBE(true, "Remove tombstone cleanup data during data cluster restore");
+			TenantMetadata::tenantTombstones().clear(tr);
+			TenantMetadata::tombstoneCleanupData().clear(tr);
 		}
 
 		return Void();
@@ -974,30 +1034,18 @@ struct RestoreClusterImpl {
 
 		// set state to restoring
 		if (!self->restoreDryRun) {
-			try {
-				wait(self->ctx.runManagementTransaction(
-				    [self = self](Reference<typename DB::TransactionT> tr) { return markClusterRestoring(self, tr); }));
-			} catch (Error& e) {
-				// If the transaction retries after success or if we are trying a second time to restore the cluster, it
-				// will throw an error indicating that the restore has already started
-				if (e.code() != error_code_cluster_restoring) {
-					throw;
-				}
-			}
+			wait(store(self->restoreId,
+			           self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+				           return markClusterRestoring(self, tr);
+			           })));
+
+			wait(self->restoreId.onSet());
 		}
 
 		// Set the restore ID in the data cluster and update the last tenant ID to match the management cluster
 		if (!self->restoreDryRun) {
-			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-				metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
-				metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-				if (self->lastManagementClusterTenantId.present()) {
-					TenantMetadata::lastTenantId().set(tr, self->lastManagementClusterTenantId.get());
-				} else {
-					TenantMetadata::lastTenantId().clear(tr);
-				}
-				return Future<Void>(Void());
-			}));
+			wait(self->ctx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return updateDataClusterMetadata(self, tr); }));
 		}
 
 		// get all the tenants in the metacluster
@@ -1023,7 +1071,9 @@ struct RestoreClusterImpl {
 			// set restored cluster to ready state
 			wait(self->ctx.runManagementTransaction(
 			    [self = self](Reference<typename DB::TransactionT> tr) { return self->markClusterAsReady(tr); }));
-			TraceEvent("MetaclusterRepopulatedFromDataCluster").detail("Name", self->clusterName);
+			TraceEvent("MetaclusterRepopulatedFromDataCluster")
+			    .detail("Name", self->clusterName)
+			    .detail("RestoreId", self->restoreId);
 		}
 
 		return Void();
@@ -1034,9 +1084,15 @@ struct RestoreClusterImpl {
 		CODE_PROBE(self->forceReuseTenantIdPrefix, "Management cluster restore force reuse tenant ID prefix");
 
 		// Record the data cluster in the management cluster
-		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			return registerRestoringClusterInManagementCluster(self, tr);
-		}));
+		state metadata::RestoreId restoreId =
+		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			    return registerRestoringClusterInManagementCluster(self, tr);
+		    }));
+
+		if (!self->restoreDryRun) {
+			wait(restoreId.onSet());
+			self->restoreId = restoreId;
+		}
 
 		// Write a metacluster registration entry in the data cluster
 		wait(writeDataClusterRegistration(self));

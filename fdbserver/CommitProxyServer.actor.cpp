@@ -45,7 +45,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -1720,17 +1720,10 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 
 	ASSERT(encryptedMutation.isEncrypted());
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo = self->pProxyCommitData->db;
-	if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-		headerRef = encryptedMutation.configurableEncryptionHeader();
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::TLOG));
-		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
-	} else {
-		header = encryptedMutation.encryptionHeader();
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
-		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
-	}
+	headerRef = encryptedMutation.configurableEncryptionHeader();
+	TextAndHeaderCipherKeys cipherKeys =
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::TLOG));
+	decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
 
 	ASSERT(decryptedMutation.type == mutation->type);
 	ASSERT(decryptedMutation.param1 == mutation->param1);

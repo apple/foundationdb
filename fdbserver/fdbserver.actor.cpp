@@ -59,7 +59,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
@@ -2331,10 +2331,6 @@ int main(int argc, char* argv[]) {
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
 				                KnobValue::create((int)ini.GetLongValue(
 				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
-				g_knobs.setKnob("enable_configurable_encryption",
-				                KnobValue::create(ini.GetBoolValue("META",
-				                                                   "enableConfigurableEncryption",
-				                                                   CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION)));
 
 				g_knobs.setKnob(
 				    "shard_encode_location_metadata",

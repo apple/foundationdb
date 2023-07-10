@@ -37,7 +37,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -412,6 +412,13 @@ public:
 			TraceEvent("DDInitGotConfiguration", self->ddId)
 			    .setMaxFieldLength(-1)
 			    .detail("Conf", self->configuration.toString());
+
+			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->ddId)
+				    .detail("EnableServerKnob", "SHARD_ENCODE_LOCATION_METADATA");
+				throw internal_error();
+			}
 
 			wait(self->updateReplicaKeys());
 			TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();

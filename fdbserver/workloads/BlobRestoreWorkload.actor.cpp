@@ -200,13 +200,19 @@ struct BlobRestoreWorkload : TestWorkload {
 				wait(verify(cx, self));
 
 				// Check if we can flush ranges after restore
-				wait(killBlobWorkers(self->extraDb_));
+				state ISimulator::KillType kt = ISimulator::KillType::RebootProcessAndSwitch;
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
+				wait(delay(2));
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
+
 				wait(flushBlobRanges(self->extraDb_, self, {}));
 				return Void();
 			}
 			// TODO need to define more specific error handling
 			if (phase == BlobRestorePhase::ERROR) {
-				auto db = SystemDBWriteLockedNow(cx.getReference());
+				auto db = SystemDBWriteLockedNow(self->extraDb_.getReference());
 				std::string error = wait(BlobGranuleRestoreConfig().error().getD(db));
 				fmt::print("Unexpected restore error code = {}\n", error);
 				return Void();

@@ -1066,7 +1066,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						rrs.dataMoveId = UID();
 					} else {
 						const bool enabled =
-						    deterministicRandom()->random01() <= SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+						    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                               AssignEmptyRange::False,
 						                               EnablePhysicalShardMove(enabled));
@@ -1444,6 +1444,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          PreferLowerReadUtil::True,
+						                          PreferWithinShardLimit::True,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty,
 						                          rd.keys);
@@ -1654,7 +1655,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						self->moveCreateNewPhysicalShard++;
 					}
 					const bool enabled =
-					    deterministicRandom()->random01() <= SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+					    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 					rd.dataMoveId = newDataMoveId(
 					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
@@ -2287,11 +2288,13 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                                       PreferLowerDiskUtil::False,
 				                                       TeamMustHaveShards::True,
 				                                       PreferLowerReadUtil::False,
+				                                       PreferWithinShardLimit::False,
 				                                       ForReadBalance(readRebalance));
 				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                        PreferLowerDiskUtil::True,
 				                                        TeamMustHaveShards::False,
 				                                        PreferLowerReadUtil::True,
+				                                        PreferWithinShardLimit::False,
 				                                        ForReadBalance(readRebalance));
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);

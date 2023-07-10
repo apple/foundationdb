@@ -51,7 +51,7 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/TesterInterface.actor.h" // for poisson()
 #include "fdbserver/IDiskQueue.h"
@@ -239,8 +239,10 @@ ACTOR Future<Void> forwardError(PromiseStream<ErrorInfo> errors, Role role, UID 
 	}
 }
 
-ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
-	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+ACTOR Future<Void> handleIOErrors(Future<Void> actor,
+                                  Future<ErrorOr<Void>> storeError,
+                                  UID id,
+                                  Future<Void> onClosed = Void()) {
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
@@ -275,6 +277,11 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			throw e.getError();
 		}
 	}
+}
+
+Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
+	Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
 ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
@@ -1097,12 +1104,44 @@ TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
 
 } // namespace
 
-// Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers. If so,
-// report degraded and disconnected peers to the cluster controller.
-void doPeerHealthCheck(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                       const WorkerInterface& interf,
-                       const LocalityData& locality,
-                       Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+// Returns true if the `peer` has enough measurement samples that should be checked by the health monitor.
+bool shouldCheckPeer(Reference<Peer> peer) {
+	if (peer->connectFailedCount != 0) {
+		return true;
+	}
+
+	if (peer->pingLatencies.getPopulationSize() >= SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+		// Ignore peers that don't have enough samples.
+		// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
+		// regular basis, which may affect the measurement count. Currently,
+		// WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so it may be
+		// ok. If this ends to be a problem, we need to consider keep track of last ping latencies
+		// logged.
+		return true;
+	}
+
+	return false;
+}
+
+// Returns true if `address` is a degraded/disconnected peer in `lastReq` sent to CC.
+bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddress& address) {
+	if (std::find(lastReq.degradedPeers.begin(), lastReq.degradedPeers.end(), address) != lastReq.degradedPeers.end()) {
+		return true;
+	}
+
+	if (std::find(lastReq.disconnectedPeers.begin(), lastReq.disconnectedPeers.end(), address) !=
+	    lastReq.disconnectedPeers.end()) {
+		return true;
+	}
+
+	return false;
+}
+
+// Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
+UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
+                                            const LocalityData& locality,
+                                            Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                            const UpdateWorkerHealthRequest& lastReq) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
@@ -1122,18 +1161,11 @@ void doPeerHealthCheck(Reference<AsyncVar<Optional<ClusterControllerFullInterfac
 
 	if (workerLocation == None) {
 		// This worker doesn't need to monitor anything if it is in remote satellite.
-		return;
+		return req;
 	}
 
 	for (const auto& [address, peer] : allPeers) {
-		if (peer->connectFailedCount == 0 &&
-		    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
-			// Ignore peers that don't have enough samples.
-			// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
-			// regular basis, which may affect the measurement count. Currently,
-			// WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so it may be
-			// ok. If this ends to be a problem, we need to consider keep track of last ping latencies
-			// logged.
+		if (!shouldCheckPeer(peer)) {
 			continue;
 		}
 
@@ -1228,6 +1260,9 @@ void doPeerHealthCheck(Reference<AsyncVar<Optional<ClusterControllerFullInterfac
 			req.disconnectedPeers.push_back(address);
 		} else if (degradedPeer) {
 			req.degradedPeers.push_back(address);
+		} else if (isDegradedPeer(lastReq, address)) {
+			TraceEvent("HealthMonitorDetectRecoveredPeer").detail("Peer", address);
+			req.recoveredPeers.push_back(address);
 		}
 	}
 
@@ -1237,6 +1272,8 @@ void doPeerHealthCheck(Reference<AsyncVar<Optional<ClusterControllerFullInterfac
 		// transport's health monitor. Note that all the closed peers stored here are caused by connection
 		// failure, but not normal connection close. Therefore, we report all such peers if they are also
 		// part of the transaction sub system.
+		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
+		// considered permanently closed peers.
 		for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
 			if (allPeers.find(address) != allPeers.end()) {
 				// We have checked this peer in the above for loop.
@@ -1254,11 +1291,25 @@ void doPeerHealthCheck(Reference<AsyncVar<Optional<ClusterControllerFullInterfac
 		}
 	}
 
-	if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty()) {
-		// Disconnected or degraded peers are reported to the cluster controller.
-		req.address = FlowTransport::transport().getLocalAddress();
-		ccInterface->get().get().updateWorkerHealth.send(req);
+	if (g_network->isSimulated()) {
+		// Invariant check in simulation: for any peers that shouldn't be checked, we won't include it in the
+		// UpdateWorkerHealthRequest sent to CC.
+		for (const auto& [address, peer] : allPeers) {
+			if (!shouldCheckPeer(peer)) {
+				for (const auto& disconnectedPeer : req.disconnectedPeers) {
+					ASSERT(address != disconnectedPeer);
+				}
+				for (const auto& degradedPeer : req.degradedPeers) {
+					ASSERT(address != degradedPeer);
+				}
+				for (const auto& recoveredPeer : req.recoveredPeers) {
+					ASSERT(address != recoveredPeer);
+				}
+			}
+		}
 	}
+
+	return req;
 }
 
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
@@ -1266,11 +1317,31 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
                                  WorkerInterface interf,
                                  LocalityData locality,
                                  Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state UpdateWorkerHealthRequest req;
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			doPeerHealthCheck(ccInterface, interf, locality, dbInfo);
+			req = doPeerHealthCheck(interf, locality, dbInfo, req);
+
+			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty() || !req.recoveredPeers.empty()) {
+				if (g_network->isSimulated()) {
+					// Do an invariant check only in simulation.
+					// Any recovered peer shouldn't appear as disconnected or degraded peer.
+					for (const auto& recoveredPeer : req.recoveredPeers) {
+						for (const auto& disconnectedPeer : req.disconnectedPeers) {
+							ASSERT(recoveredPeer != disconnectedPeer);
+						}
+						for (const auto& degradedPeer : req.degradedPeers) {
+							ASSERT(recoveredPeer != degradedPeer);
+						}
+					}
+				}
+
+				// Disconnected or degraded peers are reported to the cluster controller.
+				req.address = FlowTransport::transport().getLocalAddress();
+				ccInterface->get().get().updateWorkerHealth.send(req);
+			}
 		}
 		choose {
 			when(wait(nextHealthCheckDelay)) {}
@@ -1560,9 +1631,10 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
+		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
-		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
+		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
 	}
 }
 
@@ -2166,10 +2238,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
+				Future<ErrorOr<Void>> storeError = errorOr(kv->getError());
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
-				f = handleIOErrors(f, kv, s.storeID, kvClosed);
+
+				f = handleIOErrors(f, storeError, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
 				                                  &storageCleaners,
 				                                  f,
@@ -2885,6 +2959,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
+					Future<ErrorOr<Void>> storeError = errorOr(data->getError());
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -2893,7 +2968,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               storageReady,
 					                               dbInfo,
 					                               folder);
-					s = handleIOErrors(s, data, recruited.id(), kvClosed);
+					s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
 					                                  &storageCleaners,

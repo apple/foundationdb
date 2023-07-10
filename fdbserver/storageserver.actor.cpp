@@ -72,7 +72,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -1655,7 +1655,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && storage->shardAware()) {
+		if (storage->shardAware()) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -5560,7 +5560,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 			totalShardsCount++;
 			std::vector<UID> servers(src.size() + dest.size());
 			std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-			for (auto& ssid : servers) { // how to decide servers
+			for (auto& ssid : servers) {
 				serverOwnRanges[ssid].push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
 			}
 		}
@@ -5953,7 +5953,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
 					KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
 					std::string error =
-					    format("Storage server shard info mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+					    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
 					           ssid.toString().c_str(),
 					           mismatchedRangeByKeyServer.toString().c_str(),
 					           mismatchedRangeByServerKey.toString().c_str());
@@ -7786,6 +7786,16 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		state int i;
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
+			// Chunk is empty if no snapshot file. Skip it
+			if (!chunks[i].snapshotFile.present()) {
+				TraceEvent("SkipBlobChunk")
+				    .detail("Chunk", chunks[i].keyRange)
+				    .detail("Version", chunks[i].includedVersion);
+				RangeResult rows;
+				results.send(rows);
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+				continue;
+			}
 			state Reference<BlobConnectionProvider> blobConn = wait(loadBStoreForTenant(tenantData, chunkRange));
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
 
@@ -9605,10 +9615,10 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
-				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
+				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
-				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
+				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
 		} catch (Error& e) {
@@ -12837,9 +12847,6 @@ ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	    (double)info.size / (key.size() + SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD) / SERVER_KNOBS->BYTE_SAMPLING_FACTOR;
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0.99 only for testing
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0 for other cases
-	if (SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY != 0) {
-		ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	}
 	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
 	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
 	info.sampledSize = info.size / info.probability;
@@ -13971,7 +13978,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
+	self.shardAware = persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {

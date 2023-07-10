@@ -42,7 +42,7 @@
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbserver/Knobs.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -111,6 +111,14 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 	}
 }
 
+ACTOR Future<Void> forwardError(Future<int> input) {
+	int errorCode = wait(input);
+	if (errorCode == error_code_success) {
+		return Never();
+	}
+	throw Error::fromCode(errorCode);
+}
+
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
 // inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
@@ -135,14 +143,14 @@ public:
 		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
 		// All background errors will be treated as storage engine failure. Send the error to storage server.
 		if (bg_error->IsIOError()) {
-			errorPromise.sendError(io_error());
+			errorPromise.send(error_code_io_error);
 		} else if (bg_error->IsCorruption()) {
-			errorPromise.sendError(file_corrupt());
+			errorPromise.send(error_code_file_corrupt);
 		} else {
-			errorPromise.sendError(unknown_error());
+			errorPromise.send(error_code_unknown_error);
 		}
 	}
-	Future<Void> getFuture() {
+	Future<int> getFuture() {
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
@@ -150,11 +158,11 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		errorPromise.send(Never());
+		errorPromise.send(error_code_success);
 	}
 
 private:
-	ThreadReturnPromise<Void> errorPromise;
+	ThreadReturnPromise<int> errorPromise;
 	std::mutex mutex;
 };
 
@@ -484,6 +492,7 @@ rocksdb::Options getOptions() {
 
 	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
+	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
 	return options;
 }
 
@@ -2304,6 +2313,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		void action(AddShardAction& a) {
 			auto s = a.shard->init();
 			if (!s.ok()) {
+				TraceEvent(SevError, "AddShardError").detail("Status", s.ToString()).detail("ShardId", a.shard->id);
 				a.done.sendError(statusToError(s));
 				return;
 			}
@@ -2429,6 +2439,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			std::vector<std::pair<uint32_t, KeyRange>> deletes;
 			auto s = doCommit(a.writeBatch.get(), a.db, &deletes, a.getHistograms);
 			if (!s.ok()) {
+				TraceEvent(SevError, "CommitError").detail("Status", s.ToString());
 				a.done.sendError(statusToError(s));
 				return;
 			}
@@ -3206,7 +3217,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
+	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(forwardError(errorListener->getFuture())),
 	    dbOptions(getOptions()), shardManager(path, id, dbOptions, errorListener, &counters),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage

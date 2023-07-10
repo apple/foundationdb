@@ -233,6 +233,11 @@ struct ConfigureTenantImpl {
 			return Void();
 		}
 
+		if (self->updatedEntry.toTenantMapEntry() == tenantEntry) {
+			// No update to write to data cluster, just return.
+			return Void();
+		}
+
 		wait(TenantAPI::configureTenantTransaction(tr, tenantEntry.get(), self->updatedEntry.toTenantMapEntry()));
 		return Void();
 	}
@@ -243,7 +248,7 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry =
 		    wait(tryGetTenantTransaction(tr, self->updatedEntry.id));
 
-		if (!tenantEntry.present() || tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
+		if (!tenantEntry.present() || (tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
 			CODE_PROBE(!tenantEntry.present(), "Tenant removed while configuring on management cluster");
 			CODE_PROBE(tenantEntry.present(), "Tenant configuration already applied on management cluster");
@@ -256,7 +261,52 @@ struct ConfigureTenantImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> forceMarkManagementTenantAsReady(ConfigureTenantImpl* self,
+	                                                           Reference<typename DB::TransactionT> tr) {
+		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
+
+		if (!tenantEntry.present()) {
+			CODE_PROBE(true, "Configure tenant state for non-existent tenant", probe::decoration::rare);
+			throw tenant_not_found();
+		}
+
+		if (tenantEntry.get().tenantState == metacluster::TenantState::READY) {
+			// We may reach here due to retry after getting `commit_unknown_result`.
+			// No work to do, just return
+			return Void();
+		} else if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
+			TraceEvent(SevError, "TenantStateNotError")
+			    .detail("Tenant", self->tenantName)
+			    .detail("State", tenantEntry.get().tenantState);
+			throw invalid_tenant_state();
+		}
+		self->updatedEntry = tenantEntry.get();
+		self->updatedEntry.tenantState = metacluster::TenantState::READY;
+		metadata::management::tenantMetadata().tenantMap.set(tr, self->updatedEntry.id, self->updatedEntry);
+		metadata::management::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> run(ConfigureTenantImpl* self) {
+		// Check whether we are setting tenant state and other properties together.
+		// If so, throw
+		state std::map<Standalone<StringRef>, Optional<Value>> parameters = self->configurationParameters;
+		for (const auto& [configKey, configValue] : parameters) {
+			if (configKey == "tenant_state"_sr) {
+				if (self->configurationParameters.size() > 1) {
+					CODE_PROBE(true, "SettingTenantStateWithOtherConfigs", probe::decoration::rare);
+					TraceEvent(SevError, "ConfigureTenantStateWithOtherProperties").detail("Tenant", self->tenantName);
+					throw invalid_tenant_configuration();
+				} else {
+					wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+						return forceMarkManagementTenantAsReady(self, tr);
+					}));
+					return Void();
+				}
+			}
+		}
+
 		bool configUpdated = wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return updateManagementCluster(self, tr); }));
 
@@ -290,6 +340,18 @@ Future<Void> changeTenantLockState(Reference<DB> db,
                                    TenantAPI::TenantLockState lockState,
                                    UID lockId) {
 	state internal::ConfigureTenantImpl<DB> impl(db, name, lockState, lockId);
+	wait(impl.run());
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> resetTenantStateToReady(Reference<DB> db, TenantName name) {
+	state internal::ConfigureTenantImpl<DB> impl(
+	    db,
+	    name,
+	    std::map<Standalone<StringRef>, Optional<Value>>{
+	        { "tenant_state"_sr, metacluster::tenantStateToString(metacluster::TenantState::READY) } },
+	    IgnoreCapacityLimit::False);
 	wait(impl.run());
 	return Void();
 }

@@ -324,6 +324,11 @@ public:
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
 	int DD_SHARD_TRACKING_LOG_SEVERITY;
+	bool ENFORCE_SHARD_COUNT_PER_TEAM; // Whether data movement selects dst team not exceeding
+	                                   // DESIRED_MAX_SHARDS_PER_TEAM.
+	int DESIRED_MAX_SHARDS_PER_TEAM; // When ENFORCE_SHARD_COUNT_PER_TEAM is true, this is the desired, but not strictly
+	                                 // enforced, max shard count per team.
+
 	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
 	                                   // without yielding
@@ -479,6 +484,7 @@ public:
 	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
+	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -490,7 +496,7 @@ public:
 	double POLLING_FREQUENCY;
 	double HEARTBEAT_FREQUENCY;
 
-	// Commit CommitProxy
+	// Commit Proxy and GRV Proxy
 	double START_TRANSACTION_BATCH_INTERVAL_MIN;
 	double START_TRANSACTION_BATCH_INTERVAL_MAX;
 	double START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
@@ -499,7 +505,9 @@ public:
 	double START_TRANSACTION_MAX_TRANSACTIONS_TO_START;
 	int START_TRANSACTION_MAX_REQUESTS_TO_START;
 	double START_TRANSACTION_RATE_WINDOW;
+	double TAG_THROTTLE_RATE_WINDOW;
 	double START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET;
+	double TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
 	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
@@ -872,6 +880,9 @@ public:
 	int PERSIST_FINISH_AUDIT_COUNT; // Num of persist complete/failed audits for each type
 	int AUDIT_RETRY_COUNT_MAX;
 	int CONCURRENT_AUDIT_TASK_COUNT_MAX;
+	bool AUDIT_DATAMOVE_PRE_CHECK;
+	bool AUDIT_DATAMOVE_POST_CHECK;
+	int AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -1180,6 +1191,7 @@ public:
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	int BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
 
 	// Blob metadata
