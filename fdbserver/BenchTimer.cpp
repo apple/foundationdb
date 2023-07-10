@@ -24,14 +24,16 @@
 
 static void bench_timer(benchmark::State& state) {
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(timer());
+		double result = timer();
+		benchmark::DoNotOptimize(result);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
 static void bench_timer_monotonic(benchmark::State& state) {
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(timer_monotonic());
+		double result = timer_monotonic();
+		benchmark::DoNotOptimize(result);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }

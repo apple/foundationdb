@@ -67,7 +67,7 @@ public:
 	explicit TooManyGrvBatchersWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 	Future<Void> setup(Database const& cx) override {
 		this->cx = cx->clone();
-		this->cx->debugUseTags = false;
+		this->cx->debugUseTag = false;
 		return Void();
 	}
 	Future<Void> start(Database const&) override { return clientId ? Void() : _start(this->cx); }

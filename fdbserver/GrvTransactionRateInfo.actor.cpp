@@ -24,9 +24,9 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
-GrvTransactionRateInfo::GrvTransactionRateInfo(double rate)
-  : rate(rate), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW),
-    smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {
+GrvTransactionRateInfo::GrvTransactionRateInfo(double rateWindow, double maxEmptyQueueBudget, double rate)
+  : rateWindow(rateWindow), maxEmptyQueueBudget(maxEmptyQueueBudget), rate(rate), smoothRate(rateWindow),
+    smoothReleased(rateWindow) {
 	smoothRate.setTotal(rate);
 }
 
@@ -50,14 +50,14 @@ void GrvTransactionRateInfo::endReleaseWindow(int64_t numStarted, bool queueEmpt
 	// accumulate budget over time in the case that our batches are too big to take advantage of the rate window based
 	// limits.
 	//
-	// Note that "rate window" here indicates a period of SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW seconds,
+	// Note that "rate window" here indicates a period of rateWindow seconds,
 	// whereas "release window" is the period between wait statements, with duration indicated by "elapsed."
-	budget = std::max(0.0, budget + elapsed * (limit - numStarted) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
+	budget = std::max(0.0, budget + elapsed * (limit - numStarted) / rateWindow);
 
 	// If we are emptying out the queue of requests, then we don't need to carry much budget forward
 	// If we did keep accumulating budget, then our responsiveness to changes in workflow could be compromised
 	if (queueEmpty) {
-		budget = std::min(budget, SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET);
+		budget = std::min(budget, maxEmptyQueueBudget);
 	}
 
 	smoothReleased.addDelta(numStarted);
@@ -91,7 +91,7 @@ void GrvTransactionRateInfo::startReleaseWindow() {
 	// Limit can be negative in the event that we are releasing more transactions than we are allowed (due to the
 	// use of our budget or because of higher priority transactions).
 	double releaseRate = smoothRate.smoothTotal() - smoothReleased.smoothRate();
-	limit = SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW * releaseRate;
+	limit = rateWindow * releaseRate;
 }
 
 static bool isNear(double desired, int64_t actual) {
@@ -112,7 +112,7 @@ ACTOR static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double de
 // Rate limit set at 10, but client attempts 20 transactions per second.
 // Client should be throttled to only 10 transactions per second.
 TEST_CASE("/GrvTransactionRateInfo/Simple") {
-	state GrvTransactionRateInfo rateInfo;
+	state GrvTransactionRateInfo rateInfo(/*rateWindow=*/2.0, /*maxEmptyQueueBudget=*/100, /*rate=*/10);
 	state int64_t counter;
 	rateInfo.setRate(10.0);
 	wait(timeout(mockClient(&rateInfo, 20.0, &counter), 60.0, Void()));

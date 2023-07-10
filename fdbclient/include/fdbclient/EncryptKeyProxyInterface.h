@@ -42,11 +42,11 @@ struct KMSHealthStatus {
 	bool canConnectToEKP;
 	double lastUpdatedTS;
 
-	KMSHealthStatus() : canConnectToEKP(false), canConnectToKms(false), lastUpdatedTS(-1) {}
+	KMSHealthStatus() : canConnectToKms(false), canConnectToEKP(false), lastUpdatedTS(-1) {}
 	KMSHealthStatus(bool canConnectToKms, bool canConnectToEKP, double lastUpdatedTS)
 	  : canConnectToKms(canConnectToKms), canConnectToEKP(canConnectToEKP), lastUpdatedTS(lastUpdatedTS) {}
 
-	bool operator==(const KMSHealthStatus& other) {
+	bool operator==(const KMSHealthStatus& other) const {
 		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
 	}
 

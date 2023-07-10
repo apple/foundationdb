@@ -48,8 +48,8 @@ template <class DB>
 class MetaclusterConsistencyCheck {
 private:
 	Reference<DB> managementDb;
-	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 	MetaclusterData<DB> metaclusterData;
+	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
 	// the case with the current metacluster simulation workloads

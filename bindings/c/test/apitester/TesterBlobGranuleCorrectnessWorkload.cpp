@@ -65,6 +65,7 @@ private:
 	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
 
 	std::set<fdb::ByteString> validatedFiles;
+	std::map<fdb::ByteString, std::pair<fdb::ByteString, fdb::ByteString>> previousFileKeys;
 
 	void debugOp(std::string opName, fdb::KeyRange keyRange, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
@@ -320,6 +321,9 @@ private:
 	}
 
 	template <class GranuleFilePointerRefT>
+	void checkEncryptionKeys(const GranuleFilePointerRefT* file);
+
+	template <class GranuleFilePointerRefT>
 	fdb::ReadRangeResult parseSnapshotFile(fdb::Transaction tx,
 	                                       fdb::BytesRef snapshotData,
 	                                       const fdb::native::FDBBGTenantPrefix* tenantPrefix,
@@ -334,6 +338,8 @@ private:
 	                          int64_t& prevFileVersion) {
 		ASSERT(snapshotFile->file_version > prevFileVersion);
 		prevFileVersion = snapshotFile->file_version;
+
+		checkEncryptionKeys(snapshotFile);
 		if (validatedFiles.contains(fdb::ByteString(snapshotFile->filename()))) {
 			return;
 		}
@@ -380,11 +386,14 @@ private:
 	                       int64_t& prevFileVersion) {
 		ASSERT(deltaFile->file_version > prevFileVersion);
 		prevFileVersion = deltaFile->file_version;
+
+		checkEncryptionKeys(deltaFile);
 		if (validatedFiles.contains(fdb::ByteString(deltaFile->filename()))) {
 			return;
 		}
 
 		validatedFiles.insert(fdb::ByteString(deltaFile->filename()));
+
 		int64_t deltaLoadId = bgCtx.start_load_f((const char*)(deltaFile->filename().data()),
 		                                         deltaFile->filename().size(),
 		                                         deltaFile->file_offset,
@@ -693,6 +702,36 @@ fdb::ReadBGMutationsResult ApiBlobGranuleCorrectnessWorkload::parseDeltaFile<fdb
     const fdb::native::FDBBGTenantPrefix* tenantPrefix,
     const fdb::GranuleFilePointerRefV1* deltaFile) {
 	return tx.parseDeltaFileV1(deltaData, tenantPrefix, &deltaFile->encryption_ctx);
+}
+
+template <>
+void ApiBlobGranuleCorrectnessWorkload::checkEncryptionKeys<fdb::GranuleFilePointerRef>(
+    const fdb::GranuleFilePointerRef* file) {
+	fdb::ByteString fname(file->filename());
+	auto it = previousFileKeys.find(fname);
+
+	if (file->encryption_keys) {
+		fdb::ByteString headerKey(file->encryption_keys->headerKey.key, file->encryption_keys->headerKey.key_length);
+		fdb::ByteString textKey(file->encryption_keys->textKey.key, file->encryption_keys->textKey.key_length);
+		if (it == previousFileKeys.end()) {
+			ASSERT(headerKey != textKey);
+			ASSERT(32 == headerKey.size());
+			ASSERT(32 == textKey.size());
+			std::pair<fdb::ByteString, fdb::ByteString> keyPair = { headerKey, textKey };
+			previousFileKeys.insert({ fname, keyPair });
+		} else {
+			ASSERT(headerKey == it->second.first);
+			ASSERT(textKey == it->second.second);
+		}
+	} else {
+		ASSERT(it == previousFileKeys.end());
+	}
+}
+
+template <>
+void ApiBlobGranuleCorrectnessWorkload::checkEncryptionKeys<fdb::GranuleFilePointerRefV1>(
+    const fdb::GranuleFilePointerRefV1* file) {
+	return;
 }
 
 WorkloadFactory<ApiBlobGranuleCorrectnessWorkload> ApiBlobGranuleCorrectnessWorkloadFactory(

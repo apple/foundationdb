@@ -977,7 +977,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	loop {
 		try {
-			if (initialSnapshot && snapshot.size() > 1 && canStopEarly &&
+			if (initialSnapshot && snapshot.size() > 3 && canStopEarly &&
 			    (injectTooBig || bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();
@@ -992,7 +992,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				break;
 			}
 			// if we got transaction_too_old naturally, have lower threshold for re-evaluating (2xlimit)
-			if (initialSnapshot && snapshot.size() > 1 && e.code() == error_code_transaction_too_old &&
+			if (initialSnapshot && snapshot.size() > 3 && e.code() == error_code_transaction_too_old &&
 			    (injectTooBig || bytesRead >= 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// idle this actor, while we tell the manager this is too big and to re-evaluate granules and revoke us
 				if (BW_DEBUG) {
@@ -2209,7 +2209,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			fmt::print("  blobFilesToSnapshot={}\n", startState.blobFilesToSnapshot.size());
 		}
 
-		state Version startVersion;
+		state Version startVersion = invalidVersion;
 		state BlobFileIndex newSnapshotFile;
 
 		// if this is a reassign, calculate how close to a snapshot the previous owner was
@@ -2255,16 +2255,20 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				metadata->durableSnapshotVersion.set(minDurableSnapshotV);
 			} else {
-				ASSERT(startState.previousDurableVersion == invalidVersion);
-				BlobFileIndex fromFDB = wait(
-				    dumpInitialSnapshotFromFDB(bwData, bstore, metadata, startState.granuleID, cfKey, &inFlightPops));
-				newSnapshotFile = fromFDB;
-				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
-				startVersion = newSnapshotFile.version;
-				metadata->files.snapshotFiles.push_back(newSnapshotFile);
-				metadata->durableSnapshotVersion.set(startVersion);
+				// In restore mode, we couldn't dump snapshot because storage server doesn't have
+				// data yet
+				if (!bwData->isFullRestoreMode) {
+					ASSERT(startState.previousDurableVersion == invalidVersion);
+					BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(
+					    bwData, bstore, metadata, startState.granuleID, cfKey, &inFlightPops));
+					newSnapshotFile = fromFDB;
+					ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
+					startVersion = newSnapshotFile.version;
+					metadata->files.snapshotFiles.push_back(newSnapshotFile);
+					metadata->durableSnapshotVersion.set(startVersion);
 
-				wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+				}
 			}
 			metadata->initialSnapshotVersion = startVersion;
 			metadata->pendingSnapshotVersion = startVersion;
@@ -3971,6 +3975,17 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				    KeyRangeRef(StringRef(rep.arena, item.first.begin), StringRef(rep.arena, item.first.end));
 				if (tenantPrefix.present()) {
 					chunk.tenantPrefix = Optional<StringRef>(tenantPrefix.get());
+				}
+
+				if (bwData->isFullRestoreMode && item.second.snapshotFiles.empty()) {
+					CODE_PROBE(true, "empty snapshot file during restore");
+					chunk.includedVersion = req.readVersion;
+					rep.chunks.push_back(rep.arena, chunk);
+					readThrough = chunk.keyRange.end;
+					TraceEvent(SevDebug, "EmptyGranuleSnapshotFile", bwData->id)
+					    .detail("Chunk", chunk.keyRange)
+					    .detail("Version", req.readVersion);
+					continue;
 				}
 
 				int64_t deltaBytes = 0;

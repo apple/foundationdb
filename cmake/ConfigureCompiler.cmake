@@ -14,7 +14,7 @@ env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidat
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
-env_set(USE_WERROR OFF BOOL "Compile with -Werror. Recommended for local development and CI.")
+env_set(USE_WERROR ON BOOL "Compile with -Werror. Recommended for local development and CI.")
 default_linker(_use_ld)
 env_set(USE_LD "${_use_ld}" STRING
   "The linker to use for building: can be LD (system default and same as DEFAULT), BFD, GOLD, or LLD - will be LLD for Clang if available, DEFAULT otherwise")
@@ -325,22 +325,8 @@ if (CLANG OR ICX)
     -Wshift-sign-overflow
     # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
     -Wno-sign-compare
-    -Wno-undefined-var-template
     -Wno-unknown-warning-option
     -Wno-unused-parameter
-    -Wno-constant-logical-operand
-    # These need to be disabled for FDB's RocksDB storage server implementation
-    -Wno-deprecated-copy
-    -Wno-delete-non-abstract-non-virtual-dtor
-    -Wno-range-loop-construct
-    -Wno-reorder-ctor
-    # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
-    # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-    -Wno-unused-command-line-argument
-    # Disable C++ 20 warning for ambiguous operator.
-    -Wno-ambiguous-reversed-operator
-    # Required to compile googlebenchmark:
-    -Wno-error=shift-sign-overflow
     )
   if (USE_CCACHE)
     add_compile_options(

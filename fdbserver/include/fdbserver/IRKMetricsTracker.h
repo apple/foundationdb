@@ -6,7 +6,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/RatekeeperInterface.h"

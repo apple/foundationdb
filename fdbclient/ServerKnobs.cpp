@@ -519,7 +519,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( POLLING_FREQUENCY,                                     2.0 ); if( longLeaderElection ) POLLING_FREQUENCY = 8.0;
 	init( HEARTBEAT_FREQUENCY,                                   0.5 ); if( longLeaderElection ) HEARTBEAT_FREQUENCY = 1.0;
 
-	// Commit CommitProxy and GRV CommitProxy
+	// Commit Proxy and GRV Proxy
 	init( START_TRANSACTION_BATCH_INTERVAL_MIN,                 1e-6 );
 	init( START_TRANSACTION_BATCH_INTERVAL_MAX,                0.010 );
 	init( START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.5 );
@@ -528,7 +528,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
 	init( START_TRANSACTION_RATE_WINDOW,                         2.0 );
+	init( TAG_THROTTLE_RATE_WINDOW,                              2.0 );
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
+	init( TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET,                1000.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 	init( TENANT_ID_REQUEST_MAX_QUEUE_SIZE,                      1e6 );
@@ -671,6 +673,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
 	init( CC_SATELLITE_DEGRADATION_MIN_COMPLAINER,                 3 );
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
+	init( CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING,               true );
 	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
@@ -790,26 +793,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BW_MAX_BLOCKED_INTERVAL,                              10.0 ); if(buggifySmallBWLag) BW_MAX_BLOCKED_INTERVAL = 2.0;
 	init( BW_RK_SIM_QUIESCE_DELAY,                             300.0 );
 
-	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
-	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;
-	init( MIN_TAG_COST,                                          200 ); if(randomize && BUGGIFY) MIN_TAG_COST = 0.0;
-	init( AUTO_THROTTLE_TARGET_TAG_BUSYNESS,                     0.1 ); if(randomize && BUGGIFY) AUTO_THROTTLE_TARGET_TAG_BUSYNESS = 0.0;
-	init( AUTO_TAG_THROTTLE_RAMP_UP_TIME,                      120.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_RAMP_UP_TIME = 5.0;
-	init( AUTO_TAG_THROTTLE_DURATION,                          240.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_DURATION = 20.0;
 	init( TAG_THROTTLE_PUSH_INTERVAL,                            1.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_PUSH_INTERVAL = 0.0;
-	init( AUTO_TAG_THROTTLE_START_AGGREGATION_TIME,              5.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_START_AGGREGATION_TIME = 0.5;
-	init( AUTO_TAG_THROTTLE_UPDATE_FREQUENCY,                   10.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_UPDATE_FREQUENCY = 0.5;
-	init( TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL,                30.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL = 1.0;
-	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;
 	init( SS_THROTTLE_TAGS_TRACKED,                                1 ); if(randomize && BUGGIFY) SS_THROTTLE_TAGS_TRACKED = deterministicRandom()->randomInt(1, 10);
-	init( GLOBAL_TAG_THROTTLING,                                true ); if(isSimulated) GLOBAL_TAG_THROTTLING = deterministicRandom()->coinflip();
-	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,   GLOBAL_TAG_THROTTLING );
+	init( GLOBAL_TAG_THROTTLING,                                true );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
-	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                 10 );
+	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                100 );
 	init( GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER,              240.0 );
 	init( GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,         60.0 );
 	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
 	init( GLOBAL_TAG_THROTTLING_REPORT_ONLY,                   false );
+	init( GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD,          4096.0 );
 
 	init( GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME,        10.0 );
 	init( GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,   2.0 );
@@ -929,7 +922,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             10.0 );
 	init( MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             30.0 );
 	init( DBINFO_FAILED_DELAY,                                   1.0 );
-	init( ENABLE_WORKER_HEALTH_MONITOR,                        false );
+	init( ENABLE_WORKER_HEALTH_MONITOR,                        false ); if ( randomize && BUGGIFY ) ENABLE_WORKER_HEALTH_MONITOR = true;
 	init( WORKER_HEALTH_MONITOR_INTERVAL,                       60.0 );
 	init( PEER_LATENCY_CHECK_MIN_POPULATION,                      30 );
 	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.50 );

@@ -287,6 +287,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_GRV_BATCHERS,                        1000 );
 	init( GRV_BATCHER_EXPIRATION_TIMEOUT,          60.0 );
 	init( GRV_BATCHER_CLEANING_INTERVAL,            5.0 );
+	init( TRACK_THROUGHPUT_ON_CLIENTS,            false ); if( randomize && BUGGIFY ) TRACK_THROUGHPUT_ON_CLIENTS = true;
+	init( CLIENT_THROUGHPUT_REPORT_INTERVAL,        1.0 );
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
@@ -314,7 +316,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,   2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
-	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,        true );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );

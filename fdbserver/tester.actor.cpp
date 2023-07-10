@@ -380,7 +380,8 @@ Future<bool> CompoundWorkload::check(Database const& cx) {
 			    TraceEvent("WorkloadCheckStatus")
 			        .detail("Name", workloadName)
 			        .detail("Remaining", *wCount)
-			        .detail("Phase", "End");
+			        .detail("Phase", "End")
+			        .detail("Success", ret);
 			    return ret;
 		    },
 		    workload.check(cx));
@@ -1103,12 +1104,14 @@ ACTOR Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyS
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
                                                  std::vector<TesterInterface> testers,
                                                  TestSpec spec,
-                                                 Optional<TenantName> defaultTenant) {
+                                                 Optional<TenantName> defaultTenant,
+                                                 bool requireCheckSuccess) {
 	TraceEvent("TestRunning")
 	    .detail("WorkloadTitle", spec.title)
 	    .detail("TesterCount", testers.size())
 	    .detail("Phases", spec.phases)
-	    .detail("TestTimeout", spec.timeout);
+	    .detail("TestTimeout", spec.timeout)
+	    .detail("RequireCheckSuccess", requireCheckSuccess);
 
 	state std::vector<Future<WorkloadInterface>> workRequests;
 	state std::vector<std::vector<PerfMetric>> metricsResults;
@@ -1183,10 +1186,16 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		for (int i = 0; i < checks.size(); i++) {
 			if (checks[i].get().get().value)
 				success++;
-			else
+			else {
+				TraceEvent("TestCheckFailed")
+				    .detail("Idx", i)
+				    .detail("Workload", workloads[i].id())
+				    .detail("Spec", spec.title);
 				failure++;
+			}
 		}
 		TraceEvent("TestCheckComplete").detail("WorkloadTitle", spec.title);
+		ASSERT(!requireCheckSuccess || failure == 0);
 	}
 
 	if (spec.phases & TestWorkload::METRICS) {
@@ -1315,7 +1324,8 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	state double start = now();
 	state bool lastRun = false;
 	loop {
-		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+		// do not require check success except on last run because we explicitly expect it to fail or be flaky and retry
+		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>(), lastRun));
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator->connectionFailuresDisableDuration = connectionFailures;

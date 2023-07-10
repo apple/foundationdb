@@ -262,6 +262,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CycleWithDeadHall.toml)
   add_fdb_test(TEST_FILES rare/DataDistributionMetrics.toml)
   add_fdb_test(TEST_FILES rare/DcLag.toml)
+  add_fdb_test(TEST_FILES rare/ExpectStableThroughput.toml)
   add_fdb_test(TEST_FILES rare/HighContentionPrefixAllocator.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.toml)
@@ -280,9 +281,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/ThroughputQuotaCache.toml)
   add_fdb_test(TEST_FILES rare/TooManyGrvBatchers.toml)
   add_fdb_test(TEST_FILES rare/TransactionCost.toml)
-  add_fdb_test(TEST_FILES rare/TransactionTagApiCorrectness.toml)
-  add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
-  add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
   add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
@@ -370,9 +368,10 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
     restarting/from_71.3.0/CycleTestRestart-2.txt)
+  #TODO: Reenable this test once knob issue is fixed (FDBCORE-5417):
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml)
+    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.toml
     restarting/from_71.3.0/SnapCycleRestart-2.toml)

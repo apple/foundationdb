@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import glob
+import json
 import logging
 import os
 from pathlib import Path
@@ -22,7 +23,9 @@ logger = get_logger()
 TENANT_API_VERSION = 720
 
 CLUSTER_ACTIONS = ["wiggle"]
-HEALTH_CHECK_TIMEOUT_SEC = 5
+HEALTH_CHECK_MAX_RETRIES = 20
+HEALTH_CHECK_RETRY_DELAY_SEC = 5
+HEALTH_CHECK_WAIT_FOR_RECOVERY = False
 PROGRESS_CHECK_TIMEOUT_SEC = 30
 TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
@@ -101,7 +104,9 @@ class UpgradeTest:
         self.tester_proc = None
         self.output_pipe = None
         self.ctrl_pipe = None
+        self.workload_thread = None
         self.determine_api_version()
+        self.disable_log_dump = args.disable_log_dump
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
@@ -123,25 +128,36 @@ class UpgradeTest:
             )
             shutil.copyfile(src_file_path, target_file_path)
 
+    def exit_with_error(self, msg):
+        logger.error(msg)
+        self.kill_tester_if_alive(False)
+        self.dump_warnings_in_logs()
+        if errcode != 0 and not self.disable_log_dump:
+            test.dump_cluster_logs()
+        self.cluster.stop_cluster()
+        self.cluster.release_ports()
+        os._exit(1)
+
     # Perform a health check of the cluster: Use fdbcli status command to check if the number of
     # server processes and their versions are as expected
-    def health_check(self, timeout_sec=HEALTH_CHECK_TIMEOUT_SEC):
+    def health_check(self, max_retries=HEALTH_CHECK_MAX_RETRIES):
         retries = 0
-        while retries < timeout_sec:
+        status = ""
+        while retries < max_retries:
+            if retries > 0:
+                time.sleep(HEALTH_CHECK_RETRY_DELAY_SEC)
             retries += 1
             status = self.cluster.get_status()
             if "processes" not in status["cluster"]:
-                logger.info("Health check: no processes found. Retrying")
-                time.sleep(1)
+                logger.info("Health check: no processes found")
                 continue
             num_proc = len(status["cluster"]["processes"])
             if num_proc != self.cluster.process_number:
                 logger.info(
-                    "Health check: {} of {} processes found. Retrying".format(
+                    "Health check: {} of {} processes found".format(
                         num_proc, self.cluster.process_number
                     )
                 )
-                time.sleep(1)
                 continue
             expected_version = self.cluster_version
             if expected_version == FUTURE_VERSION:
@@ -153,9 +169,33 @@ class UpgradeTest:
                 ), "Process version: expected: {}, actual: {}".format(
                     expected_version, proc_ver
                 )
+            if not status["client"]["database_status"]["healthy"]:
+                logger.info("Health check: Database not healthy yet")
+                continue
+            dd_state = status["cluster"]["data"]["state"]["name"]
+            if dd_state != "healthy":
+                if HEALTH_CHECK_WAIT_FOR_RECOVERY:
+                    logger.info(
+                        "Health check: Proceeding while data distribution in state {}".format(
+                            dd_state
+                        )
+                    )
+                    continue
+                logger.info(
+                    "Health check: Data distribution in state {}".format(dd_state)
+                )
+            if not status["cluster"]["bounce_impact"]["can_clean_bounce"]:
+                if HEALTH_CHECK_WAIT_FOR_RECOVERY:
+                    logger.info("Health check: Cluster is still in the recovery state.")
+                    continue
+                logger.info(
+                    "Health check: Proceeding while the cluster is still in the recovery state."
+                )
             logger.info("Health check: OK")
             return
-        assert False, "Health check: Failed"
+        logger.error(">>>>>>>>>>>>>>>>>>>> Cluster status:")
+        logger.error(json.dumps(status))
+        self.exit_with_error("Health check: Failed")
 
     # Create and save a cluster configuration for the given version
     def configure_version(self, version):
@@ -269,10 +309,9 @@ class UpgradeTest:
             # If the tester failed to initialize, other threads of the test may stay
             # blocked on trying to open the named pipes
             if self.ctrl_pipe is None or self.output_pipe is None:
-                logger.error(
+                self.exit_with_error(
                     "Tester failed before initializing named pipes. Aborting the test"
                 )
-                os._exit(1)
 
     # Perform a progress check: Trigger it and wait until it is completed
     def progress_check(self):
@@ -282,12 +321,14 @@ class UpgradeTest:
         if self.progress_event.is_set():
             logger.info("Progress check: OK")
         else:
-            logger.error(
+            status = self.cluster.get_status()
+            logger.error(">>>>>>>>>>>>>>>>>>>> Cluster status:")
+            logger.error(json.dumps(status))
+            self.exit_with_error(
                 "Progress check failed after upgrade to version {}".format(
                     self.cluster_version
                 )
             )
-            os._exit(1)
 
     # The main function of a thread for reading and processing
     # the notifications received from the tester
@@ -329,8 +370,8 @@ class UpgradeTest:
             os.close(self.ctrl_pipe)
 
     # Kill the tester process if it is still alive
-    def kill_tester_if_alive(self, workload_thread, dump_stacks):
-        if not workload_thread.is_alive():
+    def kill_tester_if_alive(self, dump_stacks):
+        if self.workload_thread is None or not self.workload_thread.is_alive():
             return
         if self.tester_proc is not None:
             try:
@@ -338,7 +379,7 @@ class UpgradeTest:
                     os.system("pstack {}".format(self.tester_proc.pid))
                 logger.info("Killing the tester process")
                 self.tester_proc.kill()
-                workload_thread.join(5)
+                self.workload_thread.join(5)
             except Exception:
                 logger.error("Failed to kill the tester process")
 
@@ -350,8 +391,10 @@ class UpgradeTest:
         self.tester_proc = None
         test_retcode = 1
         try:
-            workload_thread = Thread(target=self.exec_workload, args=(args.test_file,))
-            workload_thread.start()
+            self.workload_thread = Thread(
+                target=self.exec_workload, args=(args.test_file,)
+            )
+            self.workload_thread.start()
 
             reader_thread = Thread(target=self.output_pipe_reader)
             reader_thread.start()
@@ -361,11 +404,11 @@ class UpgradeTest:
         except Exception:
             logger.error("Upgrade test failed")
             logger.error(traceback.format_exc())
-            self.kill_tester_if_alive(workload_thread, False)
+            self.kill_tester_if_alive(False)
         finally:
-            workload_thread.join(5)
+            self.workload_thread.join(5)
             reader_thread.join(5)
-            self.kill_tester_if_alive(workload_thread, True)
+            self.kill_tester_if_alive(True)
             if test_retcode == 0:
                 test_retcode = self.tester_retcode
         return test_retcode

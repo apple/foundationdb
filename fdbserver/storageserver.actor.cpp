@@ -653,17 +653,17 @@ public:
 	Version version;
 	Future<Version> watch_impl;
 	Promise<Version> versionPromise;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	Optional<UID> debugID;
 	int64_t tenantId;
 
 	ServerWatchMetadata(Key key,
 	                    Optional<Value> value,
 	                    Version version,
-	                    Optional<TagSet> tags,
+	                    Optional<TransactionTag> throttlingTag,
 	                    Optional<UID> debugID,
 	                    int64_t tenantId)
-	  : key(key), value(value), version(version), tags(tags), debugID(debugID), tenantId(tenantId) {}
+	  : key(key), value(value), version(version), throttlingTag(throttlingTag), debugID(debugID), tenantId(tenantId) {}
 };
 
 struct BusiestWriteTagContext {
@@ -1305,6 +1305,7 @@ public:
 		LatencySample readQueueWaitSample;
 		LatencySample kvReadRangeLatencySample;
 		LatencySample updateLatencySample;
+		LatencySample updateEncryptionLatencySample;
 
 		LatencyBands readLatencyBands;
 		LatencySample mappedRangeSample; // Samples getMappedRange latency
@@ -1316,11 +1317,14 @@ public:
 		    allQueries("QueryQueue", cc), systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
 		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
-		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
-		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
-		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
-		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
+		    getRangeStreamQueries("GetRangeStreamQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
+		    rowsQueried("RowsQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
+		    feedRowsQueried("FeedRowsQueried", cc), feedBytesQueried("FeedBytesQueried", cc),
+		    feedStreamQueries("FeedStreamQueries", cc), rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc),
+		    feedVersionQueries("FeedVersionQueries", cc), getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
+		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
+		    getMappedRangeQueries("GetMappedRangeQueries", cc),
+		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
 		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
@@ -1337,9 +1341,6 @@ public:
 		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
 		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
 		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
-		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
-		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
-		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
 		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
@@ -1365,6 +1366,18 @@ public:
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    kvReadRangeLatencySample("KVGetRangeMetrics",
+		                             self->thisServerID,
+		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    updateLatencySample("UpdateLatencyMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    updateEncryptionLatencySample("UpdateEncryptionLatencyMetrics",
+		                                  self->thisServerID,
+		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample("GetMappedRangeMetrics",
 		                      self->thisServerID,
@@ -1377,15 +1390,7 @@ public:
 		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    kvReadRangeLatencySample("KVGetRangeMetrics",
-		                             self->thisServerID,
-		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    updateLatencySample("UpdateLatencyMetrics",
-		                        self->thisServerID,
-		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -2319,7 +2324,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
-	data->throttlingCounter.addRequest(req.tags, tenantGroup, req.key.size() + resultSize);
+	data->throttlingCounter.addRequest(req.throttlingTag, tenantGroup, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -2378,7 +2383,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			           "Starting watch loop with latestVersion > data->version",
 			           probe::decoration::rare);
 			GetValueRequest getReq(
-			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
+			    span.context, TenantInfo(), metadata->key, latest, metadata->throttlingTag, options, VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -3855,7 +3860,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    pOriginalReq->tenantInfo,
 			                    key,
 			                    version,
-			                    pOriginalReq->tags,
+			                    pOriginalReq->throttlingTag,
 			                    pOriginalReq->options,
 			                    VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
@@ -4551,7 +4556,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->throttlingCounter.addRequest(req.tags, tenantGroup, resultSize);
+	data->throttlingCounter.addRequest(req.throttlingTag, tenantGroup, resultSize);
 	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -4603,7 +4608,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 		req.options = pOriginalReq->options;
 		// TODO: tweak priorities in req.options.get().type?
-		req.tags = pOriginalReq->tags;
+		req.throttlingTag = pOriginalReq->throttlingTag;
 		req.ssLatestCommitVersions = VersionVector();
 
 		// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
@@ -4819,7 +4824,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			req.limit = limit;
 			req.limitBytes = limitBytes;
 			req.version = version;
-			req.tags = TagSet();
+			req.throttlingTag = {};
 			fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 
 			GetKeyValuesRequest localReq;
@@ -4829,7 +4834,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			localReq.limit = limit;
 			localReq.limitBytes = limitBytes;
 			localReq.version = version;
-			localReq.tags = TagSet();
+			localReq.throttlingTag = {};
 			data->actors.add(getKeyValuesQ(data, localReq));
 			fs.push_back(errorOr(localReq.reply.getFuture()));
 			std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
@@ -6051,9 +6056,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	}
 
 	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the
-	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
+	// key. It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
-	data->throttlingCounter.addRequest(req.tags, tenantGroup, resultSize);
+	data->throttlingCounter.addRequest(req.throttlingTag, tenantGroup, resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -6804,6 +6809,16 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeReadResult> results,
 		state int i;
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
+			// Chunk is empty if no snapshot file. Skip it
+			if (!chunks[i].snapshotFile.present()) {
+				TraceEvent("SkipBlobChunk")
+				    .detail("Chunk", chunks[i].keyRange)
+				    .detail("Version", chunks[i].includedVersion);
+				RangeResult rows;
+				results.send(rows);
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+				continue;
+			}
 			state Reference<BlobConnectionProvider> blobConn = wait(loadBStoreForTenant(tenantData, chunkRange));
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
 
@@ -9357,6 +9372,7 @@ inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double updateStart = g_network->timer();
+	state double decryptionTime = 0;
 	state double start;
 	state bool enableClearRangeEagerReads =
 	    (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
@@ -9518,7 +9534,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							msg.updateEncryptCipherDetails(cipherDetails);
 							collectingCipherKeys = true;
 						} else {
-							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
+							double decryptionTimeV = 0;
+							msg = msg.decrypt(
+							    cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
+							decryptionTime += decryptionTimeV;
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -9674,7 +9693,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
 					encryptedMutation.cipherKeys = msg.getCipherKeys(cipherKeys.get());
-					msg = msg.decrypt(encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG);
+					double decryptionTimeV = 0;
+					msg = msg.decrypt(
+					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
+					decryptionTime += decryptionTimeV;
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -9855,6 +9877,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			data->behind = false;
 		}
 		const double duration = g_network->timer() - updateStart;
+		data->counters.updateEncryptionLatencySample.addMeasurement(decryptionTime);
 		data->counters.updateLatencySample.addMeasurement(duration);
 
 		return Void(); // update will get called again ASAP
@@ -11515,7 +11538,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
 			metadata = makeReference<ServerWatchMetadata>(
-			    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
+			    req.key, req.value, req.version, req.throttlingTag, req.debugID, req.tenantInfo.tenantId);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
 			                               metadata->versionPromise);
@@ -11525,7 +11548,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		else if (metadata->value == req.value) {
 			if (req.version > metadata->version) {
 				metadata->version = req.version;
-				metadata->tags = req.tags;
+				metadata->throttlingTag = req.throttlingTag;
 				metadata->debugID = req.debugID;
 			}
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
@@ -11537,7 +11560,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			metadata->watch_impl.cancel();
 
 			metadata = makeReference<ServerWatchMetadata>(
-			    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
+			    req.key, req.value, req.version, req.throttlingTag, req.debugID, req.tenantInfo.tenantId);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
 			                               metadata->versionPromise);
@@ -11557,8 +11580,13 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					state Version latest = self->version.get();
 					options.debugID = metadata->debugID;
 
-					GetValueRequest getReq(
-					    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
+					GetValueRequest getReq(span.context,
+					                       TenantInfo(),
+					                       metadata->key,
+					                       latest,
+					                       metadata->throttlingTag,
+					                       options,
+					                       VersionVector());
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
@@ -11571,7 +11599,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 
 					if (reply.value == req.value) { // valSS == valreq
 						metadata = makeReference<ServerWatchMetadata>(
-						    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
+						    req.key, req.value, req.version, req.throttlingTag, req.debugID, req.tenantInfo.tenantId);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
 						    forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
