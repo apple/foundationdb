@@ -350,9 +350,6 @@ public:
 	bool willRestart = false;
 	bool restarted = false;
 	ValidationData validationData;
-	bool initRESTSimKmsVaultConfigFilesDone = false;
-
-	ProcessInfo* testSystem = nullptr;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started

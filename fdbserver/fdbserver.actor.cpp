@@ -62,7 +62,6 @@
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-#include "fdbserver/RESTSimKmsVault.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/Status.actor.h"
@@ -1824,9 +1823,8 @@ bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestartin
 			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
 				fprintf(stderr,
-				        "ERROR: Data folder `%s' is non-empty, file `%s`; please use clean, fdb-only folder\n",
-				        dataFolder.c_str(),
-				        file.c_str());
+				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
+				        dataFolder.c_str());
 				return false;
 			}
 		}
@@ -2080,8 +2078,7 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".",         "..",      "backups",
-				                                               "unittests", "fdbblob", "simkmsvault" };
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests", "fdbblob" };
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {

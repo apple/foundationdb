@@ -1,7 +1,6 @@
 [configuration]
 extraMachineCountDC = 2
 allowDefaultTenant = false
-simHTTPServerEnabled=false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
