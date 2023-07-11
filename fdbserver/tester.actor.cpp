@@ -908,6 +908,7 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	loop {
 		try {
 			tr.debugTransaction(debugRandom()->randomUniqueID());
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterClearingTenantsStart", tr.trState->readOptions.get().debugID.get());
 			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
