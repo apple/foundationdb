@@ -439,17 +439,24 @@ elseif(NOT WIN32 AND NOT APPLE) # Linux Only
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
 
   set(IMPLIBSO_SRC_DIR ${CMAKE_SOURCE_DIR}/contrib/Implib.so)
+
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "amd64")
+    set(IMPLIBSO_ARCH "x86_64")
+  else()
+    set(IMPLIBSO_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+  endif()
+
   set(IMPLIBSO_SRC
     ${IMPLIBSO_SRC_DIR}/implib-gen.py
     ${IMPLIBSO_SRC_DIR}/arch/common/init.cpp.tpl
-    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/config.ini
-    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/table.S.tpl
-    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/trampoline.S.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/${IMPLIBSO_ARCH}/config.ini
+    ${IMPLIBSO_SRC_DIR}/arch/${IMPLIBSO_ARCH}/table.S.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/${IMPLIBSO_ARCH}/trampoline.S.tpl
     )
 
   add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
     COMMAND $<TARGET_FILE:Python3::Interpreter> ${IMPLIBSO_SRC_DIR}/implib-gen.py
-    --target ${CMAKE_SYSTEM_PROCESSOR}
+    --target ${IMPLIBSO_ARCH}
     --outdir ${SHIM_LIB_OUTPUT_DIR}
     --dlopen-callback=fdb_shim_dlopen_callback
     --symbol-filter='^fdb_.*$$'
