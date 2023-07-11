@@ -2797,24 +2797,55 @@ public:
 	    backupPrefix(uid.withPrefix(backupLogKeys.begin)), kvStore(kv) {
 		beginVersion = deterministicRandom()->randomInt64(
 		    0, std::numeric_limits<int32_t>::max()); // intentionally not max of int64
+		error = actorCollection(addActor.getFuture());
+	}
+
+	~MiniBackupWorkload() { stop(); }
+
+	void stop() {
+		inserter = Void();
+		deleter = Void();
+		checker = Void();
+		error = Void();
 	}
 
 	void run() {
-		inserter = insertData(this);
+		inserter = insertData(this) && insertNormalData(this) && insertNormalData(this) && insertNormalData(this);
 		deleter = deleteData(this);
 		checker = checkData(this);
-		deletionChecker = checkDeletion(this);
+	}
+
+	// insert normal key space data
+	ACTOR static Future<Void> insertNormalData(MiniBackupWorkload* self) {
+		loop {
+			int n = deterministicRandom()->randomInt(1, 50);
+			for (int i = 0; i < n; i++) {
+				std::string key = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
+				std::string val =
+				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(100, 1000));
+				self->kvStore->set({ key, val });
+			}
+			n = deterministicRandom()->randomInt(0, 3);
+			for (int i = 0; i < n; i++) {
+				std::string key1 = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
+				std::string key2 = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
+				KeyRangeRef range = key1 > key2 ? KeyRangeRef(key2, key1) : KeyRangeRef(key1, key2);
+				self->kvStore->clear(range);
+			}
+
+			wait(self->kvStore->commit(false) && delayJittered(0.001));
+		}
 	}
 
 	ACTOR static Future<Void> insertData(MiniBackupWorkload* self) {
 		state Version v = self->beginVersion;
 		loop {
 			Key k = getLogKey(v, self->uid);
-			state int parts = deterministicRandom()->randomInt(1, 200);
+			state int parts = deterministicRandom()->randomInt(1, 20);
 			for (int i = 0; i < parts; i++) {
 				Key key = k.withSuffix(StringRef((uint8_t*)&i, sizeof(int)));
 				std::string str =
-				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10000, 100000));
+				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(10000, 50000));
 				self->kvStore->set({ key, str });
 			}
 
@@ -2836,6 +2867,10 @@ public:
 			while (self->keyCount.empty() || self->keyCount.rbegin()->first < endVersion) {
 				wait(delayJittered(0.1));
 			}
+			// read log data between beginVersion and endVersion
+			wait(readLogData(self, beginVersion, endVersion));
+
+			// delete log data between beginVersion and endVersion
 			wait(eraseLogData(self, beginVersion, endVersion) && delayJittered(0.01));
 			// fmt::print("deleted data between {} and {}\n", beginVersion, endVersion);
 			TraceEvent("DeletedData").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion);
@@ -2843,11 +2878,34 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> readLogData(MiniBackupWorkload* self, Version beginVersion, Version endVersion) {
+		state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, self->uid);
+		state int i = 0;
+		state std::map<Version, int> partCount;
+		for (i = 0; i < ranges.size(); i++) {
+			state KeyRangeRef range = ranges[ranges.size() - i - 1];
+			state RangeResult result = wait(self->kvStore->readRange(range));
+			for (auto& kv : result) {
+				int part = *(int*)(kv.key.end() - sizeof(int));
+				Version v = getLogKeyVersion(kv.key);
+				int count = self->keyCount[v];
+				ASSERT(part < count);
+				partCount[v]++;
+			}
+		}
+		for (const auto [version, count] : partCount) {
+			ASSERT_EQ(count, self->keyCount[version]);
+		}
+		return Void();
+	}
+
 	// mimic _eraseLogData() to erase log data between two versions
 	ACTOR static Future<Void> eraseLogData(MiniBackupWorkload* self, Version currBeginVersion, Version endVersion) {
+		state bool overlap = false;
 		if ((endVersion - currBeginVersion) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE >=
 		        std::numeric_limits<uint8_t>::max() ||
 		    deterministicRandom()->random01() < 0.25) {
+			overlap = true;
 			for (int h = 0; h <= std::numeric_limits<uint8_t>::max(); h++) {
 				uint64_t bv = bigEndian64(Version(0));
 				uint64_t ev = bigEndian64(endVersion);
@@ -2863,9 +2921,8 @@ public:
 			}
 		}
 		wait(self->kvStore->commit(false));
-		self->deletedBeginVersion = currBeginVersion;
-		self->deletedEndVersion = endVersion;
-		self->trigger.trigger();
+
+		self->addActor.send(checkDeletionInternal(self, currBeginVersion, endVersion, overlap));
 
 		// clear the version history
 		for (auto it = self->keyCount.lower_bound(currBeginVersion); it != self->keyCount.end(); it++) {
@@ -2881,21 +2938,25 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkDeletion(MiniBackupWorkload* self) {
-		loop {
-			wait(self->trigger.onTrigger());
-			TraceEvent("CheckingDeletion")
-			    .detail("BeginVersion", self->deletedBeginVersion)
-			    .detail("EndVersion", self->deletedEndVersion);
-			state Standalone<VectorRef<KeyRangeRef>> ranges =
-			    getLogRanges(self->deletedBeginVersion, self->deletedEndVersion, self->uid);
-			state int i = 0;
-			for (i = 0; i < ranges.size(); i++) {
-				state KeyRangeRef range = ranges[ranges.size() - i - 1];
-				RangeResult result = wait(self->kvStore->readRange(range));
-				ASSERT(result.size() == 0);
-			}
+	ACTOR static Future<Void> checkDeletionInternal(MiniBackupWorkload* self,
+	                                                Version beginVersion,
+	                                                Version endVersion,
+	                                                bool overlap) {
+		if (deterministicRandom()->random01() < 0.2) {
+			wait(delayJittered(0.1));
 		}
+		TraceEvent("CheckingDeletion")
+		    .detail("BeginVersion", beginVersion)
+		    .detail("EndVersion", endVersion)
+		    .detail("OverlapDelete", overlap);
+		state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, self->uid);
+		state int i = 0;
+		for (i = 0; i < ranges.size(); i++) {
+			state KeyRangeRef range = ranges[ranges.size() - i - 1];
+			state RangeResult result = wait(self->kvStore->readRange(range));
+			ASSERT(result.size() == 0);
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> checkData(MiniBackupWorkload* self) {
@@ -2933,10 +2994,9 @@ private:
 	Future<Void> inserter; // hold the actor for populating data
 	Future<Void> deleter; // hold the actor for deleting data
 	Future<Void> checker; // continuously read data
-	Future<Void> deletionChecker; // continuously check deleted data
-	AsyncTrigger trigger;
-	Version deletedBeginVersion = invalidVersion;
-	Version deletedEndVersion = invalidVersion;
+
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error;
 
 	Version beginVersion;
 
@@ -2956,7 +3016,7 @@ TEST_CASE("noSim/RocksDB/BackupWorkload") {
 	try {
 		state MiniBackupWorkload workload(kvStore);
 		workload.run();
-		wait(Never());
+		wait(delay(10.0 * deterministicRandom()->random01()));
 	} catch (Error& e) {
 		TraceEvent(SevError, "TestFailed").error(e);
 	}
