@@ -318,6 +318,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
+	~TransactionState();
+
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 
 	Version readVersion() {
@@ -361,12 +363,7 @@ public:
 	~Transaction();
 
 	void setVersion(Version v);
-	Future<Version> getReadVersion() {
-		if (!trState->readVersionFuture.isValid()) {
-			trState->readVersionFuture = trState->getReadVersion(0);
-		}
-		return trState->readVersionFuture;
-	}
+	Future<Version> getReadVersion();
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
