@@ -13,6 +13,14 @@ pipeline {
                     scmInfo = checkout scm
                     println("${scmInfo}")
                     precommit_job_status = "SUCCESS"
+                    buildcop_members = ['tclinkenbeard',
+                                         'akejriwal',
+                                         'mdvorsky',
+                                         'jshim',
+                                         'jslocum',
+                                         'ajbeamon',
+                                         'dadkins',
+                                         'yajin']
                     user_id = ""
                     labels = []
                     if (env.BRANCH_NAME.startsWith("PR-")) {
@@ -63,6 +71,20 @@ pipeline {
                             //extracting the LDAP portion from commentAuthor sfc-gh-xxx
                             user_id = "${currentBuild.getBuildCauses()[0].commentAuthor}".split("-")[2]
                             createCheck("github_comment", "Criteria Satisfied", "", "completed", "success");
+
+                            //Check CI is initiated by @fdb-build-cop member when labels are used
+                            println("labels " + labels.size())
+                            if (labels.size() > 0 && labels[0] != "")  {
+                                if (buildcop_members.contains(user_id)) {
+                                    msg = user_id + " approved labels " + labels.join(", ") + " and started CI"
+                                    createCheck("labels_check", msg, msg, "completed", "success");
+                                } else {
+                                    msg = "CI can only be triggered by one of the members of @fdb-build-cop if labels used"
+                                    shortDescription = "Please check with one of the @fdb-build-cop members: " + buildcop_members.join(", ")
+                                    createCheck("labels_check", msg, shortDescription, "completed", "failure");
+                                    error("Aborting the build.")
+                                }
+                            }
                         } else {
                             def triggerMessage = "To start Full CI, Please comment: @fdb-ci precommit start"
                             createCheck("github_comment", triggerMessage, triggerMessage, "completed", "failure");
@@ -303,7 +325,7 @@ def getLabels() {
             curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" "https://api.github.com/repos/snowflakedb/frostdb/pulls/${pr_id}" -o pr.json
         """
     }
-    def labels = sh(script:"jq -r '.labels[].name' pr.json; rm pr.json", returnStdout: true)
+    labels = sh(script:"jq -r '.labels[].name' pr.json; rm pr.json", returnStdout: true)
     labels = labels.split("\n")
     return labels
 }
