@@ -65,6 +65,10 @@ private:
 				RangeReadResult systemTenantSubspaceKeys =
 				    wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
 
+				for (const auto& [k, v] : systemTenantSubspaceKeys.contents()) {
+					TraceEvent("BreakpointEndCheck").detail("Key", k).detail("Value", v);
+				}
+
 				// The only key in the `\xff` tenant subspace should be the tenant id prefix
 				ASSERT(systemTenantSubspaceKeys.size() == 1);
 				return Void();

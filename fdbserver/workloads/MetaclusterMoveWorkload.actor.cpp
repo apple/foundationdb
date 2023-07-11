@@ -977,26 +977,23 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			throw operation_failed();
 		}
 
+		return Void();
+	}
+
+	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
 		// Remove storage quotas to satisfy metacluster consistency check
 		// since storage quotas write to the \xff tenant subspace
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				for (auto const& [tGroupName, tGroupData] : self->tenantGroups) {
-					TenantMetadata::storageQuota().erase(tr, tGroupName);
-				}
+				TenantMetadata::storageQuota().clear(tr);
 				wait(safeThreadFutureToFuture(tr->commit()));
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
-
-		return Void();
-	}
-
-	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
 		state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
 		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::False);
