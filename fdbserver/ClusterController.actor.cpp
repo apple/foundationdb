@@ -2161,14 +2161,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 			// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
 			// on the same process as the CluserController.
 			state std::map<Optional<Standalone<StringRef>>, int> id_used;
-			if (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				Recruiter::updateKnownIds(self, &id_used);
-			} else {
-				// Approach solves following scenario: a) EKP crash/restart recruits the process accounting for CC and
-				// Sequencer only b) BetterSingleton process placement checks 'halts' EKP c) Repeat step #a
-				id_used = self->getUsedIds();
-			}
-
+			Recruiter::updateKnownIds(self, &id_used);
 			state WorkerFitnessInfo ekpWorker =
 			    self->recruiter.getWorkerForRoleInDatacenter(self,
 			                                                 self->clusterControllerDcId,
@@ -2228,18 +2221,21 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 		TraceEvent("EKPNotConfigured");
 		return Void();
 	}
-
+	state SingletonRecruitThrottler recruitThrottler;
 	loop {
 		if (self->db.serverInfo->get().client.encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			choose {
+			loop choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().client.encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
 					const auto& encryptKeyProxy = self->db.serverInfo->get().client.encryptKeyProxy;
 					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
 					TraceEvent("CCEKP_Died", self->id);
+					break;
 				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
+				when(wait(self->recruitEncryptKeyProxy.onChange())) {
+					break;
+				}
 			}
 		} else {
 			wait(startEncryptKeyProxy(self, encryptMode));

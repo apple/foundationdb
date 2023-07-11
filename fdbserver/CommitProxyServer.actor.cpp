@@ -3416,7 +3416,7 @@ struct TransactionStateResolveContext {
 	ProxyCommitData* pCommitData = nullptr;
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
-	IKeyValueStore* pTxnStateStore = nullptr;
+	Reference<IKeyValueStore> pTxnStateStore;
 
 	Future<Void> txnRecovery;
 
@@ -3431,7 +3431,7 @@ struct TransactionStateResolveContext {
 
 	TransactionStateResolveContext(ProxyCommitData* pCommitData_, PromiseStream<Future<Void>>* pActors_)
 	  : pCommitData(pCommitData_), pTxnStateStore(pCommitData_->txnStateStore), pActors(pActors_) {
-		ASSERT(pTxnStateStore != nullptr);
+		ASSERT(pTxnStateStore.isValid());
 	}
 };
 
@@ -3473,7 +3473,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
-				auto storageInfo = getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore);
+				auto storageInfo =
+				    getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore.getPtr());
 				ASSERT(storageInfo->tag != invalidTag);
 				tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);

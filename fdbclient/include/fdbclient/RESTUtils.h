@@ -20,6 +20,7 @@
 
 #ifndef FDRPC_REST_UTILS_H
 #define FDRPC_REST_UTILS_H
+
 #pragma once
 
 #include "flow/flow.h"
@@ -48,17 +49,14 @@ public:
 	struct ReusableConnection {
 		Reference<IConnection> conn;
 		double expirationTime;
-		uint64_t seqNum;
 	};
 
 	// Maximum number of connections cached in the connection-pool.
 	int maxConnPerConnectKey;
-	uint64_t seqNum;
 	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
 	    connectionPoolMap;
 
-	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey), seqNum(0) {}
-	~RESTConnectionPool();
+	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 
 	// Routine is responsible to provide an usable TCP connection object; it reuses an active connection from
 	// connection-pool if availalbe, otherwise, establish a new TCP connection

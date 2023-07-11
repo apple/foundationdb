@@ -342,10 +342,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		    .detail("StableConnection", stableConnection);
 	}
 
-	~Sim2Conn() {
-		// FIXME: HTTPServer implement idle-connection monitoring
-		ASSERT_ABORT(!opened || closedByCaller || g_simulator->httpServerIps.count(peerEndpoint.ip));
-	}
+	~Sim2Conn() { ASSERT_ABORT(!opened || closedByCaller); }
 
 	void addref() override { ReferenceCounted<Sim2Conn>::addref(); }
 	void delref() override { ReferenceCounted<Sim2Conn>::delref(); }
@@ -563,10 +560,8 @@ private:
 	}
 
 	ACTOR static Future<Void> trackLeakedConnection(Sim2Conn* self) {
-		// FIXME: we could also just implement connection idle closing for sim http server instead && tracking client
-		// connection (pooled) if any
-		if (g_simulator->httpServerIps.count(self->process->address.ip) ||
-		    g_simulator->httpServerIps.count(self->peerEndpoint.ip)) {
+		// FIXME: we could also just implement connection idle closing for sim http server instead
+		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
 			return Void();
 		}
 		wait(g_simulator->onProcess(self->process));

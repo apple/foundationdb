@@ -1,7 +1,6 @@
 [configuration]
 maxTLogVersion = 6
 disableTss = true
-simHTTPServerEnabled=false
 
 [[test]]
 testTitle = 'Clogged'
