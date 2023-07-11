@@ -48,14 +48,15 @@ extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            int64_t memoryLimit,
                                            std::string ext = "fdq",
                                            KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
-extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
-                                              Reference<AsyncVar<struct ServerDBInfo> const> db,
-                                              UID logID,
-                                              int64_t memoryLimit,
-                                              bool disableSnapshot,
-                                              bool replaceContent,
-                                              bool exactRecovery,
-                                              bool enableEncryption);
+
+extern Reference<IKeyValueStore> keyValueStoreLogSystem(class IDiskQueue* queue,
+                                                        Reference<AsyncVar<struct ServerDBInfo> const> db,
+                                                        UID logID,
+                                                        int64_t memoryLimit,
+                                                        bool disableSnapshot,
+                                                        bool replaceContent,
+                                                        bool exactRecovery,
+                                                        bool enableEncryption);
 
 extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          std::string const& filename,

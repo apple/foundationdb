@@ -1999,8 +1999,10 @@ void MultiVersionTenant::TenantState::updateTenant() {
 	}
 
 	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [self](ErrorOr<Void> result) {
-		self->updateTenant();
-		return Void();
+		if (!result.isError()) {
+			self->updateTenant();
+		}
+		return result;
 	});
 }
 

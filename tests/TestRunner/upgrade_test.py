@@ -175,15 +175,21 @@ class UpgradeTest:
                 continue
             dd_state = status["cluster"]["data"]["state"]["name"]
             if dd_state != "healthy":
+                if HEALTH_CHECK_WAIT_FOR_RECOVERY:
+                    logger.info(
+                        "Health check: Proceeding while data distribution in state {}".format(
+                            dd_state
+                        )
+                    )
+                    continue
                 logger.info(
                     "Health check: Data distribution in state {}".format(dd_state)
                 )
-                continue
             if not status["cluster"]["bounce_impact"]["can_clean_bounce"]:
                 if HEALTH_CHECK_WAIT_FOR_RECOVERY:
                     logger.info("Health check: Cluster is still in the recovery state.")
                     continue
-                logger.warn(
+                logger.info(
                     "Health check: Proceeding while the cluster is still in the recovery state."
                 )
             logger.info("Health check: OK")
