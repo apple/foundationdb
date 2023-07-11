@@ -776,10 +776,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			Key nextKey = nextTuple.getString(3);
 			// The tuple ending with "\xff" will not exist as a key in splitPointsMap
 			// The next Tuple key should have the next tenant with the empty key ""
+			// OR this is revisiting a failed copy range, which should also have a different tenant
 			if (headEnd != nextKey) {
 				ASSERT_NE(nextTenantName, queueHead.first);
-				ASSERT_EQ(headEnd, "\xff"_sr);
-				ASSERT_EQ(nextKey, ""_sr);
 			}
 			metacluster::metadata::management::emergency_movement::movementQueue().set(
 			    tr, std::make_pair(tenantGroup, runId.toString()), std::make_pair(nextTenantName, nextKey));
@@ -909,12 +908,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 		state TenantGroupName tenantGroup = optionalTenantGroup.get();
 		state bool aborted;
-		TraceEvent("BreakpointTestStart")
-		    .detail("Src", srcCluster)
-		    .detail("Dst", dstCluster)
-		    .detail("TenantGroup", tenantGroup)
-		    .detail("GroupsOnSrc", self->dataDbs[srcCluster].tenantGroups.size())
-		    .detail("GroupsOnDst", self->dataDbs[dstCluster].tenantGroups.size());
 
 		// List of commands expected to fail after successful completion of specified step
 		state std::vector<MoveCommand> initFailCmds = { MoveCommand::SWITCH, MoveCommand::FINISH };
@@ -924,6 +917,13 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		state MoveCommand cmdChoice;
 		loop {
 			try {
+				TraceEvent("BreakpointTestStart")
+				    .detail("Src", srcCluster)
+				    .detail("Dst", dstCluster)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("TenantsInGroup", self->tenantGroups[srcCluster].tenants.size())
+				    .detail("GroupsOnSrc", self->dataDbs[srcCluster].tenantGroups.size())
+				    .detail("GroupsOnDst", self->dataDbs[dstCluster].tenantGroups.size());
 				cmdChoice = deterministicRandom()->randomChoice(initFailCmds);
 				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
 

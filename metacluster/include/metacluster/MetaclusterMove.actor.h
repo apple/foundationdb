@@ -1577,20 +1577,25 @@ struct AbortTenantMovementImpl {
 			} catch (Error& e) {
 				state Error err(e);
 				TraceEvent("TenantMoveAbortStartCreateGetTenantEntriesError").error(err);
-				// TODO: Timing issues can make it so that abort doesn't see the created tenants on dst(?)
-				// Will a retry loop solve this or can the delay extend past it
+				// Timing issues can make it so that abort doesn't see the created tenants on dst
+				// Delete every tenant regardless if our initial "get" doesn't see any
+				// This will succeed (no-op) or result in a conflict
 				if (err.code() == error_code_tenant_not_found) {
-					TraceEvent("TenantMoveDestinationEntriesNotFound")
+					TraceEvent("TenantMoveAbortStartCreateDestinationEntriesNotFound")
 					    .detail("TenantGroup", self->tenantGroup)
 					    .detail("NumTenants", self->tenantsInGroup.size());
-					if (++tries >= 10) {
+					try {
+						wait(self->dstCtx.runDataClusterTransaction(
+						    [self = self](Reference<ITransaction> tr) { return deleteDestinationTenants(self, tr); }));
 						runDelete = false;
 						break;
+					} catch (Error& e2) {
+						if (e2.code() == error_code_not_committed || e2.code() == error_code_tenant_not_empty) {
+							continue;
+						}
 					}
-					wait(delay(1.0));
-				} else {
-					throw err;
 				}
+				throw err;
 			}
 		}
 		TraceEvent("BreakpointAbort3.1").detail("RunDelete", runDelete);
