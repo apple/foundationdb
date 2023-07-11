@@ -3144,6 +3144,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     UseProvisionalProxies useProvisionalProxies,
     Version version) {
 	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
+	state double startTime = now();
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
@@ -3158,6 +3159,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 			             span.context, tenant, keys.begin, keys.end, limit, reverse, version, keys.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
+				cx->keyLocationLatencies.addSample(now() - startTime);
 				state GetKeyServerLocationsReply rep = _rep;
 				if (debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
