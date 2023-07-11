@@ -226,17 +226,8 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	Future<Void> kmsStabilityChecker;
 
 	RESTKmsConnectorCtx()
-	  : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {
-		setRESTClientKnobs();
-	}
-	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {
-		setRESTClientKnobs();
-	}
-
-	void setRESTClientKnobs() {
-		restClient.setKnobs({ { "connect_timeout", SERVER_KNOBS->REST_KMS_RESTCLIENT_CONNECT_TIMEOUT },
-		                      { "request_timeout_secs", SERVER_KNOBS->REST_KMS_RESTCLIENT_REQUEST_TIMEOUT_SEC } });
-	}
+	  : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
+	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
 };
 
 std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::string& url, const std::string& suffix) {
