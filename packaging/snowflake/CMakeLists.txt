@@ -1,6 +1,6 @@
 set(xp_tarball_name ${CMAKE_BINARY_DIR}/packages/frostdb-${CMAKE_SYSTEM_PROCESSOR}-${FDB_VERSION}-snapshot.tar.gz)
 
-if (NOT FDB_RELEASE)
+if (NOT FDB_RELEASE AND NOT OPEN_FOR_IDE)
 
 # Creates a XP tarball for prerelease testing
 # It cannot be used for release process in its current form, because we cannot create prerelease binaries
