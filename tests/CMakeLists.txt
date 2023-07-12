@@ -370,8 +370,8 @@ if(WITH_PYTHON)
     restarting/from_71.3.0/CycleTestRestart-2.txt)
   #TODO: Reenable this test once knob issue is fixed (FDBCORE-5417):
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
+    TEST_FILES restarting/from_71.3.1/BlobGranuleRestartCorrectness-1.toml
+    restarting/from_71.3.1/BlobGranuleRestartCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.toml
     restarting/from_71.3.0/SnapCycleRestart-2.toml)
