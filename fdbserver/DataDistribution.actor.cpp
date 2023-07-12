@@ -2641,7 +2641,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-			.detail("Loc", "doAuditOnStorageServerError")
+		    .detail("Loc", "doAuditOnStorageServerError")
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 		    .detail("AuditType", auditType);
