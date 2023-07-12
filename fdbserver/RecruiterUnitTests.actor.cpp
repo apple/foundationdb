@@ -25,7 +25,7 @@ void addWorker(ClusterControllerData& data, ProcessClass::ClassType classType) {
 	data.id_worker[id].details.interf.locality.set(LocalityData::keyDcId, "1"_sr);
 	// data.id_worker[id].details.interf.locality.set("data_hall"_sr, "1"_sr);
 	// data.id_worker[id].details.interf.locality.set("rack"_sr, "1"_sr);
-	// data.id_worker[id].details.interf.locality.set("zoneid"_sr, "1"_sr);
+	data.id_worker[id].details.interf.locality.set("zoneid"_sr, "1"_sr);
 	// data.id_worker[id].details.interf.locality.set(LocalityData::keyMachineId, "1"_sr);
 	data.id_worker[id].details.interf.locality.set(LocalityData::keyProcessId, id);
 
@@ -245,6 +245,97 @@ TEST_CASE("/fdbserver/Recruiter/Stateless/Zero") {
 	ASSERT_EQ(workers.grvProxies.size(), 1);
 	ASSERT_EQ(workers.commitProxies.size(), 1);
 	ASSERT_EQ(workers.resolvers.size(), 1);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/Recruiter/TLogs") {
+	DatabaseConfiguration conf;
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/logs"_sr, "5"_sr));
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/log_replicas"_sr, "1"_sr));
+	// The default tlog replication policy replicates across the "zoneid"
+	// attribute. So make sure zoneid is set on the locality data for each
+	// worker.
+	conf.test_setDefaultReplicationPolicy();
+
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData({}, {}, {}, "1"_sr),
+	                           ServerCoordinators(),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	addWorkers(data, ProcessClass::ClassType::TransactionClass, 5);
+
+	auto recruiter = Recruiter(UID());
+	RecruitmentInfo info(conf, false, 0);
+	ASSERT_EQ(recruiter.findWorkers(&data, info, false).tLogs.size(), 5);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/Recruiter/TLogs/NotEnoughDesired") {
+	DatabaseConfiguration conf;
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/logs"_sr, "5"_sr));
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/log_replicas"_sr, "1"_sr));
+	conf.test_setDefaultReplicationPolicy();
+
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData({}, {}, {}, "1"_sr),
+	                           ServerCoordinators(),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	addWorkers(data, ProcessClass::ClassType::TransactionClass, 4);
+
+	auto recruiter = Recruiter(UID());
+	RecruitmentInfo info(conf, false, 0);
+	ASSERT_EQ(recruiter.findWorkers(&data, info, false).tLogs.size(), 4);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/Recruiter/TLogs/NotEnoughRequired") {
+	DatabaseConfiguration conf;
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/logs"_sr, "5"_sr));
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/log_replicas"_sr, "3"_sr));
+	conf.test_setDefaultReplicationPolicy();
+
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData({}, {}, {}, "1"_sr),
+	                           ServerCoordinators(),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	addWorkers(data, ProcessClass::ClassType::TransactionClass, 2);
+
+	auto recruiter = Recruiter(UID());
+	RecruitmentInfo info(conf, false, 0);
+	try {
+		auto workers = recruiter.findWorkers(&data, info, false);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_no_more_servers);
+	}
+
+	return Void();
+}
+
+// When the desired number of log replicas is not explicitly set, only one tlog
+// gets recruited per zone (zones are used to define data replication
+// boundaries). This occurs because the tlog recruitment algorithm attempts to
+// make assignments based first on zones, and then only allows multiple
+// processes in the same zone to be recruited at worse fitness levels if enough
+// tlogs in different zones were recruited. The result is somewhat funny
+// behavior where not being able to satisy the replication policy means the
+// desired number of tlogs will not be recruited.
+TEST_CASE("/fdbserver/Recruiter/TLogs/NoReplicationPolicy") {
+	DatabaseConfiguration conf;
+	conf.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/logs"_sr, "5"_sr));
+	conf.test_setDefaultReplicationPolicy();
+
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData({}, {}, {}, "1"_sr),
+	                           ServerCoordinators(),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	addWorkers(data, ProcessClass::ClassType::TransactionClass, 5);
+
+	auto recruiter = Recruiter(UID());
+	RecruitmentInfo info(conf, false, 0);
+	ASSERT_EQ(recruiter.findWorkers(&data, info, false).tLogs.size(), 1);
 
 	return Void();
 }
