@@ -169,7 +169,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
@@ -367,7 +367,7 @@ if(WITH_PYTHON)
     restarting/from_71.3.0/ClientTransactionProfilingCorrectness-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
-    restarting/from_71.3.0/CycleTestRestart-2.txt IGNORE)
+    restarting/from_71.3.0/CycleTestRestart-2.txt)
   #TODO: Reenable this test once knob issue is fixed (FDBCORE-5417):
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
@@ -395,16 +395,16 @@ if(WITH_PYTHON)
     restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
-    restarting/to_71.3.0/CycleTestRestart-2.toml IGNORE)
+    restarting/to_71.3.0/CycleTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
-    restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml IGNORE)
+    restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.1/BlobGranuleRestartCorrectness-1.toml
     restarting/to_71.3.1/BlobGranuleRestartCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/BlobGranuleRestartLarge-1.toml
-    restarting/to_71.3.0/BlobGranuleRestartLarge-2.toml IGNORE)
+    restarting/to_71.3.0/BlobGranuleRestartLarge-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
