@@ -2900,6 +2900,7 @@ public:
 
 	// mimic _eraseLogData() to erase log data between two versions
 	ACTOR static Future<Void> eraseLogData(MiniBackupWorkload* self, Version currBeginVersion, Version endVersion) {
+		TraceEvent("DeletingData").detail("BeginVersion", currBeginVersion).detail("EndVersion", endVersion);
 		state bool overlap = false;
 		if ((endVersion - currBeginVersion) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE >=
 		        std::numeric_limits<uint8_t>::max() ||
@@ -2973,6 +2974,7 @@ public:
 				state int count = it->second;
 				Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, self->uid);
 				ASSERT(ranges.size() == 1);
+				TraceEvent("CheckingData").detail("Version", v).detail("Count", count).detail("Range", ranges[0]);
 				RangeResult result = wait(self->kvStore->readRange(ranges[0]));
 				if (result.size() != count) {
 					TraceEvent(SevError, "TestFailedMismatch")
