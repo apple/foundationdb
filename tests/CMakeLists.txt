@@ -394,8 +394,14 @@ if(WITH_PYTHON)
     TEST_FILES restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
+    TEST_FILES restarting/to_71.3.1/ConfigureStorageMigrationTestRestart-1.toml
+	restarting/to_71.3.1/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.3.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.1/CycleTestRestart-1.toml
+	restarting/to_71.3.1/CycleTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
     restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
