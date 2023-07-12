@@ -133,6 +133,17 @@ int64_t computeNextTenantId(int64_t tenantId, int64_t delta);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
 int64_t getTenantIdPrefix(int64_t tenantId);
 
+ACTOR template <class Transaction>
+Future<TenantMode> getEffectiveTenantMode(Transaction tr) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state ClusterType clusterType;
+	state Optional<Value> tenantModeValue;
+	wait(store(clusterType, getClusterType(tr)) && store(tenantModeValue, safeThreadFutureToFuture(tenantModeFuture)));
+	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
+	return tenantModeForClusterType(clusterType, tenantMode);
+}
+
 // Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
 // that we no longer keep tombstones for it, an error is thrown.
 ACTOR template <class Transaction>
