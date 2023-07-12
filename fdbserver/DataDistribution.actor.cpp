@@ -1055,7 +1055,7 @@ inline std::unordered_map<UID, std::shared_ptr<DDAudit>> getAuditsForType(Refere
 	return self->audits[auditType];
 }
 
-// Periodically check and log the physicalShard status; clean up empty physicalShard;
+// Periodically check movend log the physicalShard status; clean up empty physicalShard;
 ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);

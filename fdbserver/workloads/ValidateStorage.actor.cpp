@@ -23,6 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -64,7 +65,17 @@ struct ValidateStorage : TestWorkload {
 	// We disable failure injection because there is an irrelevant issue:
 	// Remote tLog is failed to rejoin to CC
 	// Once this issue is fixed, we should be able to enable the failure injection
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
+	// This workload is not compatible with following workload because they will race in changing the DD mode
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys",
+		             "DataLossRecovery",
+		             "IDDTxnProcessorApiCorrectness",
+		             "PerpetualWiggleStatsWorkload",
+		             "PhysicalShardMove",
+		             "StorageCorruption",
+		             "StorageServerCheckpointRestoreTest",
+		             "Attrition" });
+	}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
@@ -182,7 +193,12 @@ struct ValidateStorage : TestWorkload {
 					    .detail("AuditType", type);
 					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
 					       existingAuditState.getPhase() == AuditPhase::Failed ||
-					       existingAuditState.getPhase() == AuditPhase::Running);
+					       existingAuditState.getPhase() == AuditPhase::Running ||
+					       existingAuditState.getPhase() == AuditPhase::Error);
+					if (existingAuditState.getPhase() == AuditPhase::Error) {
+						TraceEvent(SevError, "CheckAuditStorageInternalStateInconsistencyDetected");
+						throw audit_storage_error();
+					}
 				}
 				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
 					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
@@ -297,6 +313,12 @@ struct ValidateStorage : TestWorkload {
 
 		wait(self->testAuditStorageWhenDDBackToNormalMode(self, cx));
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");
+
+		// wait(self->testInjectInconsistency(self, cx));
+		//TraceEvent("TestInjectInconsistencyDone");
+
+		// wait(self->testDDSecurityModePath(self, cx));
+		//TraceEvent("TestDDSecurityModePathDone");
 
 		return Void();
 	}
@@ -661,6 +683,89 @@ struct ValidateStorage : TestWorkload {
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDBackToNormalMode"));
 		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDBackToNormalMode", auditIdD);
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testInjectInconsistency(ValidateStorage* self, Database cx) {
+		TraceEvent("TestInjectInconsistencyBegin");
+
+		state Transaction tr(cx);
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+				UID modifiedSrc = interfs[deterministicRandom()->randomInt(0, interfs.size())].uniqueID;
+				const UID& srcId = deterministicRandom()->randomUniqueID();
+				tr.set(keyServersKey("TestKeyF"_sr), keyServersValue({ modifiedSrc }, {}, srcId, UID()));
+				tr.set(keyServersKey("TestKeyFF"_sr), keyServersValue({ modifiedSrc }, {}, srcId, UID()));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		TraceEvent("TestInjectInconsistencyDone");
+
+		try {
+			UID ignored = wait(
+			    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestInjectedCorruption"));
+		} catch (Error& e) {
+			TraceEvent("AuditFailed").error(e);
+			ASSERT(e.code() == error_code_audit_storage_error);
+		}
+
+		TraceEvent("TestInjectInconsistencyValidationDone");
+		return Void();
+	}
+
+	ACTOR Future<Void> testDDSecurityModePath(ValidateStorage* self, Database cx) {
+		TraceEvent("TestDDSecurityModePathBegin");
+
+		state Transaction tr(cx);
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+				UID modifiedSrc = interfs[deterministicRandom()->randomInt(0, interfs.size())].uniqueID;
+				const UID& srcId = deterministicRandom()->randomUniqueID();
+				tr.set(keyServersKey("TestKeyF"_sr), keyServersValue({ modifiedSrc }, {}, srcId, UID()));
+				tr.set(keyServersKey("TestKeyFF"_sr), keyServersValue({ modifiedSrc }, {}, srcId, UID()));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		TraceEvent("TestDDSecurityModePathDone");
+
+		tr.reset();
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> old = wait(tr.get(dataDistributionModeKey));
+				int oldMode = 1;
+				if (old.present()) {
+					BinaryReader rd(old.get(), Unversioned());
+					rd >> oldMode;
+				}
+				if (oldMode == 1) {
+					TraceEvent("TestDDSecurityModePathCheckSecurityModeWait");
+					wait(delay(1));
+					continue;
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent("SetDDModeRetrying").error(e);
+				wait(tr.onError(e));
+			}
+		}
+		TraceEvent("TestDDSecurityModePathDone");
 		return Void();
 	}
 
