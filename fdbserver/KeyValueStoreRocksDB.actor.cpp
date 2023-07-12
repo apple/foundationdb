@@ -2820,15 +2820,14 @@ public:
 		loop {
 			int n = deterministicRandom()->randomInt(1, 50);
 			for (int i = 0; i < n; i++) {
-				std::string key = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
-				std::string val =
-				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(100, 1000));
+				state Key key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+				state Value val(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(100, 1000)));
 				self->kvStore->set({ key, val });
 			}
 			n = deterministicRandom()->randomInt(0, 3);
 			for (int i = 0; i < n; i++) {
-				std::string key1 = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
-				std::string key2 = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
+				state Key key1(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+				state Key key2(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
 				KeyRangeRef range = key1 > key2 ? KeyRangeRef(key2, key1) : KeyRangeRef(key1, key2);
 				self->kvStore->clear(range);
 			}
@@ -2975,7 +2974,13 @@ public:
 				Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, self->uid);
 				ASSERT(ranges.size() == 1);
 				RangeResult result = wait(self->kvStore->readRange(ranges[0]));
-				ASSERT(result.size() == count);
+				if (result.size() != count) {
+					TraceEvent(SevError, "TestFailedMismatch")
+					    .detail("Version", v)
+					    .detail("Count", count)
+					    .detail("ResultSize", result.size());
+					ASSERT(false);
+				}
 				// fmt::print("checked {} keys at version {}\n", count, v);
 				TraceEvent("CheckedData").detail("Version", v).detail("Count", count);
 			} catch (Error& e) {
@@ -3017,9 +3022,11 @@ TEST_CASE("noSim/RocksDB/BackupWorkload") {
 		state MiniBackupWorkload workload(kvStore);
 		workload.run();
 		wait(delay(10.0 * deterministicRandom()->random01()));
+		workload.stop();
 	} catch (Error& e) {
 		TraceEvent(SevError, "TestFailed").error(e);
 	}
+	TraceEvent("TestFinished");
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
 	wait(closed);
