@@ -916,6 +916,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 			TraceEvent(SevDebug, "AuditStorageResume", self->ddId)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
+			    .detail("AuditState", auditState.toString())
 			    .detail("NumFinishAuditsCleared", numFinishAuditsCleared)
 			    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 			runAuditStorage(self, auditState, 0, "ResumeAudit");
