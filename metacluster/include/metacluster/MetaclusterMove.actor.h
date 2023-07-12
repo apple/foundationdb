@@ -158,7 +158,7 @@ static Future<metadata::management::MovementRecord> getMovementRecord(
 	    wait(tryGetMovementRecord(tr, tenantGroup, src, dst, aborting, validMovementStates));
 
 	if (!moveRecord.present()) {
-		TraceEvent("TenantMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
+		TraceEvent("TenantMoveRecordGetNotPresent").detail("TenantGroup", tenantGroup);
 		throw tenant_move_record_missing();
 	}
 
@@ -200,6 +200,7 @@ static Future<Void> updateMoveRecordState(Reference<Transaction> tr,
 	state Optional<metadata::management::MovementRecord> existingMoveRec =
 	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
 	if (!existingMoveRec.present()) {
+		TraceEvent("TenantMoveRecordUpdateNotPresent").detail("TenantGroup", tenantGroup);
 		throw tenant_move_record_missing();
 	}
 
@@ -269,6 +270,10 @@ struct StartTenantMovementImpl {
 			TraceEvent("TenantMoveStartGroupNotOnSource")
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("ClusterName", srcName);
+			self->messages.push_back(
+			    fmt::format("Tenant move start: no tenant group named {} found on source cluster {}\n",
+			                self->tenantGroup,
+			                srcName));
 			throw invalid_tenant_move();
 		}
 
@@ -285,6 +290,9 @@ struct StartTenantMovementImpl {
 			state DataClusterMetadata clusterMetadata = self->dstCtx.dataClusterMetadata.get();
 			state DataClusterEntry updatedEntry = clusterMetadata.entry;
 			if (!updatedEntry.hasCapacity()) {
+				TraceEvent("TenantMoveStartClusterNoCapacity").detail("DstCluster", dstName);
+				self->messages.push_back(
+				    fmt::format("Tenant move start: destination cluster {} has no more capacity.\n", dstName));
 				throw metacluster_no_capacity();
 			}
 			updatedEntry.allocated.numTenantGroups++;
@@ -556,12 +564,9 @@ struct SwitchTenantMovementImpl {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		if (!movementRecord.present()) {
-			TraceEvent("TenantMoveSwitchNoMoveRecord")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("SrcName", srcName)
-			    .detail("DstName", dstName);
+			TraceEvent("TenantMoveSwitchNoMoveRecord").detail("TenantGroup", self->tenantGroup);
 			self->messages.push_back(fmt::format(
-			    "Tenant move switch no movement in progress for the tenant group: {}\n", self->tenantGroup));
+			    "Tenant move switch: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
@@ -580,8 +585,7 @@ struct SwitchTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("SourceName", srcName)
 			    .detail("DestName", dstName);
-
-			self->messages.push_back(fmt::format("Tenant move switch tenantGroup not found on source or destination\n"
+			self->messages.push_back(fmt::format("Tenant move switch: tenantGroup not found on source or destination\n"
 			                                     "		group name:	{}\n",
 			                                     self->tenantGroup));
 			throw invalid_tenant_move();
@@ -632,7 +636,7 @@ struct SwitchTenantMovementImpl {
 				    .detail("SrcSize", srcRange.size())
 				    .detail("DstSize", dstRange.size());
 				self->messages.push_back(fmt::format(
-				    "Tenant move switch data mismatch in range {} - {} for tenant {}\n", begin, end, tName));
+				    "Tenant move switch: data mismatch in range {} - {} for tenant {}\n", begin, end, tName));
 				throw invalid_tenant_move();
 			}
 
@@ -684,7 +688,7 @@ struct SwitchTenantMovementImpl {
 			for (const auto& blobResult : blobFutures) {
 				if (!blobResult.get()) {
 					TraceEvent("TenantMoveSwitchBlobbifyFailed").detail("TenantName", tName);
-					self->messages.push_back(fmt::format("Tenant move switch blobbify failed for tenant {}\n", tName));
+					self->messages.push_back(fmt::format("Tenant move switch: blobbify failed for tenant {}\n", tName));
 					throw tenant_move_failed();
 				}
 			}
@@ -698,8 +702,9 @@ struct SwitchTenantMovementImpl {
 	    Reference<typename DB::TransactionT> tr,
 	    Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveSwitchNoMoveRecord").detail("TenantGroup", self->tenantGroup);
 			self->messages.push_back(fmt::format(
-			    "Tenant move switch no movement in progress for the tenant group: {}\n", self->tenantGroup));
+			    "Tenant move switch: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state ClusterName srcName = self->srcCtx.clusterName.get();
@@ -737,7 +742,7 @@ struct SwitchTenantMovementImpl {
 				    .detail("Src", srcName)
 				    .detail("Dst", dstName)
 				    .detail("EntryCluster", tenantEntry.assignedCluster);
-				self->messages.push_back(fmt::format("Tenant move switch tenantEntry with incorrect cluster\n"
+				self->messages.push_back(fmt::format("Tenant move switch: tenantEntry with incorrect cluster\n"
 				                                     "		expected cluster:	{}\n"
 				                                     "		actual cluster:		{}\n",
 				                                     srcName,
@@ -762,7 +767,7 @@ struct SwitchTenantMovementImpl {
 
 		if (!groupEntry.present()) {
 			TraceEvent(SevError, "TenantMoveSwitchGroupEntryMissing").detail("TenantGroup", self->tenantGroup);
-			self->messages.push_back(fmt::format("Tenant move switch tenantGroupEntry missing\n"
+			self->messages.push_back(fmt::format("Tenant move switch: tenantGroupEntry missing\n"
 			                                     "		group name:	{}\n",
 			                                     self->tenantGroup));
 			throw invalid_tenant_move();
@@ -772,7 +777,7 @@ struct SwitchTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("ExpectedCluster", srcName)
 			    .detail("GroupEntryAssignedCluster", groupEntry.get().assignedCluster);
-			self->messages.push_back(fmt::format("Tenant move switch tenantGroupEntry with incorrect cluster\n"
+			self->messages.push_back(fmt::format("Tenant move switch: tenantGroupEntry with incorrect cluster\n"
 			                                     "		group name:			{}\n"
 			                                     "		expected cluster:	{}\n"
 			                                     "		actual cluster:	{}\n",
@@ -874,16 +879,19 @@ struct FinishTenantMovementImpl {
 		if (!exists) {
 			TraceEvent("TenantMoveFinishGroupNotOnDestination")
 			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("ClusterName", dstName);
+			    .detail("DstClusterName", dstName);
+			self->messages.push_back(
+			    fmt::format("Tenant move finish: tenant group {} not found on destination cluster {}\n",
+			                self->tenantGroup,
+			                dstName));
 			throw invalid_tenant_move();
 		}
 
 		wait(findTenantsInGroup(tr, self->tenantGroup, &self->tenantsInGroup));
 		if (!movementRecord.present()) {
-			TraceEvent("TenantMoveFinishNoMoveRecord")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("SrcName", srcName)
-			    .detail("DstName", dstName);
+			TraceEvent("TenantMoveFinishNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move finish: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
@@ -905,6 +913,9 @@ struct FinishTenantMovementImpl {
 	                                           std::vector<TenantMapEntry> dstEntries,
 	                                           Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveFinishNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move finish: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state size_t iterLen = self->tenantsInGroup.size();
@@ -925,6 +936,10 @@ struct FinishTenantMovementImpl {
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId)
 				    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
+				self->messages.push_back(
+				    fmt::format("Tenant move finish: tenant {} does not exist on destination cluster {}\n",
+				                tName,
+				                self->dstCtx.clusterName.get()));
 				throw invalid_tenant_move();
 			}
 			// Assert src tenant has the correct tenant group
@@ -932,6 +947,8 @@ struct FinishTenantMovementImpl {
 				TraceEvent(SevError, "TenantMoveFinishUnlockTenantGroupMissing")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId);
+				self->messages.push_back(
+				    fmt::format("Tenant move finish: tenant group missing for tenant {}\n", tName));
 				throw invalid_tenant_move();
 			}
 			if (srcEntry.tenantGroup.get() != self->tenantGroup ||
@@ -942,6 +959,14 @@ struct FinishTenantMovementImpl {
 				    .detail("ExpectedGroup", self->tenantGroup)
 				    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
 				    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
+				self->messages.push_back(fmt::format(
+				    "Tenant move finish: tenant group does not match between corresponding tenant entries:\n"
+				    "	tenant name:						{}"
+				    "	source entry tenant group:			{}"
+				    "	destination entry tenant group:		{}",
+				    tName,
+				    srcEntry.tenantGroup.get(),
+				    dstEntry.tenantGroup.get()));
 				throw invalid_tenant_move();
 			}
 			// Assert src tenant is locked
@@ -949,6 +974,8 @@ struct FinishTenantMovementImpl {
 				TraceEvent(SevError, "TenantMoveFinishUnlockMatchingTenantNotLocked")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId);
+				self->messages.push_back(
+				    fmt::format("Tenant move finish: tenant {} on source cluster is not locked\n", tName));
 				throw invalid_tenant_move();
 			}
 		}
@@ -988,6 +1015,9 @@ struct FinishTenantMovementImpl {
 	                                           std::vector<TenantMapEntry> dstEntries,
 	                                           Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveFinishNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move finish: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state size_t iterLen = self->tenantsInGroup.size();
@@ -1005,6 +1035,8 @@ struct FinishTenantMovementImpl {
 				TraceEvent(SevError, "TenantMoveFinishTenantNotLocked")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId);
+				self->messages.push_back(
+				    fmt::format("Tenant move finish: tenant {} on source cluster is not locked\n", tName));
 				throw invalid_tenant_move();
 			}
 
@@ -1012,18 +1044,33 @@ struct FinishTenantMovementImpl {
 			Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
 			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
 			if (!result) {
-				TraceEvent(SevError, "TenantMoveFinishDeleteDataMismatch")
+				TraceEvent(SevError, "TenantMoveFinishDeleteDataClusterMismatch")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId)
 				    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
+				self->messages.push_back(
+				    fmt::format("Tenant move finish: tenant {} does not exist on destination cluster {}\n",
+				                tName,
+				                self->dstCtx.clusterName.get()));
 				throw invalid_tenant_move();
 			}
 
 			// Assert matching tenant groups
 			if (dstEntry.tenantGroup != srcEntry.tenantGroup) {
-				TraceEvent(SevError, "TenantMoveFinishTenantGroupMismatch")
-				    .detail("DestinationTenantGroup", dstEntry.tenantGroup)
-				    .detail("SourceTenantGroup", srcEntry.tenantGroup);
+				TraceEvent(SevError, "TenantMoveFinishDeleteTenantGroupMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId)
+				    .detail("ExpectedGroup", self->tenantGroup)
+				    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
+				    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
+				self->messages.push_back(fmt::format(
+				    "Tenant move finish: tenant group does not match between corresponding tenant entries:\n"
+				    "	tenant name:						{}"
+				    "	source entry tenant group:			{}"
+				    "	destination entry tenant group:		{}",
+				    tName,
+				    srcEntry.tenantGroup.get(),
+				    dstEntry.tenantGroup.get()));
 				throw invalid_tenant_move();
 			}
 		}
@@ -1272,16 +1319,16 @@ struct AbortTenantMovementImpl {
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		wait(findTenantsInGroup(tr, self->tenantGroup, &self->tenantsInGroup));
 		if (!movementRecord.present()) {
-			TraceEvent("TenantMoveAbortNoMoveRecord")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("SrcName", srcName)
-			    .detail("DstName", dstName);
+			TraceEvent("TenantMoveAbortNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move abort: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
 		}
 		if (self->moveRecord.mState == metadata::management::MovementState::FINISH_UNLOCK) {
 			TraceEvent("TenantMoveAbortNotAllowedAfterDestUnlocked");
+			self->messages.push_back(fmt::format("Tenant move abort: disallowed after tenants have been unlocked"));
 			throw invalid_tenant_move();
 		}
 		// Mark movement as aborting and write it into metadata immediately
@@ -1295,6 +1342,9 @@ struct AbortTenantMovementImpl {
 	    Reference<typename DB::TransactionT> tr,
 	    Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveAbortNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move abort: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state UID runId = movementRecord.get().runId;
@@ -1335,6 +1385,9 @@ struct AbortTenantMovementImpl {
 	                                           std::vector<TenantMapEntry> srcEntries,
 	                                           Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveAbortNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move abort: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state size_t iterLen = self->tenantsInGroup.size();
@@ -1353,6 +1406,10 @@ struct AbortTenantMovementImpl {
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId)
 				    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
+				self->messages.push_back(
+				    fmt::format("Tenant move abort: tenant {} does not exist on source cluster {}\n",
+				                tName,
+				                self->srcCtx.clusterName.get()));
 				throw invalid_tenant_move();
 			}
 		}
@@ -1377,6 +1434,9 @@ struct AbortTenantMovementImpl {
 	                                           std::vector<TenantMapEntry> dstEntries,
 	                                           Optional<metadata::management::MovementRecord> movementRecord) {
 		if (!movementRecord.present()) {
+			TraceEvent("TenantMoveAbortNoMoveRecord").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format(
+			    "Tenant move abort: no movement in progress for the tenant group: {}\n", self->tenantGroup));
 			throw tenant_move_record_missing();
 		}
 		state size_t iterLen = self->tenantsInGroup.size();
@@ -1394,6 +1454,8 @@ struct AbortTenantMovementImpl {
 				TraceEvent(SevError, "TenantMoveAbortTenantNotLocked")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId);
+				self->messages.push_back(
+				    fmt::format("Tenant move abort: tenant {} on source cluster is not locked\n", tName));
 				throw invalid_tenant_move();
 			}
 
@@ -1402,18 +1464,33 @@ struct AbortTenantMovementImpl {
 			Tuple srcTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
 			bool srcExists = wait(metadata::management::clusterTenantIndex().exists(tr, srcTuple));
 			if (!srcExists) {
-				TraceEvent("TenantMoveFinishDeleteNoMatchingTenant")
+				TraceEvent("TenantMoveAbortDeleteTenantClusterMismatch")
 				    .detail("TenantName", tName)
 				    .detail("TenantID", tId)
 				    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
+				self->messages.push_back(
+				    fmt::format("Tenant move abort: tenant {} does not exist on source cluster {}\n",
+				                tName,
+				                self->srcCtx.clusterName.get()));
 				throw invalid_tenant_move();
 			}
 
 			// Assert matching tenant groups
 			if (dstEntry.tenantGroup != srcEntry.tenantGroup) {
-				TraceEvent(SevError, "TenantMoveFinishTenantGroupMismatch")
-				    .detail("DestinationTenantGroup", dstEntry.tenantGroup)
-				    .detail("SourceTenantGroup", srcEntry.tenantGroup);
+				TraceEvent(SevError, "TenantMoveAbortDeleteTenantGroupMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId)
+				    .detail("ExpectedGroup", self->tenantGroup)
+				    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
+				    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
+				self->messages.push_back(
+				    fmt::format("Tenant move abort: tenant group does not match between corresponding tenant entries:\n"
+				                "	tenant name:						{}"
+				                "	source entry tenant group:			{}"
+				                "	destination entry tenant group:		{}",
+				                tName,
+				                srcEntry.tenantGroup.get(),
+				                dstEntry.tenantGroup.get()));
 				throw invalid_tenant_move();
 			}
 		}
@@ -1491,7 +1568,14 @@ struct AbortTenantMovementImpl {
 				    .detail("TenantName", tName)
 				    .detail("TenantId", tId)
 				    .detail("ExpectedCluster", dstName)
+				    .detail("Src", srcName)
+				    .detail("Dst", dstName)
 				    .detail("EntryCluster", tenantEntry.assignedCluster);
+				self->messages.push_back(fmt::format("Tenant move switch: tenantEntry with incorrect cluster\n"
+				                                     "		expected cluster:	{}\n"
+				                                     "		actual cluster:		{}\n",
+				                                     dstName,
+				                                     tenantEntry.assignedCluster));
 				throw invalid_tenant_move();
 			}
 			tenantEntry.assignedCluster = srcName;
@@ -1512,6 +1596,9 @@ struct AbortTenantMovementImpl {
 
 		if (!groupEntry.present()) {
 			TraceEvent(SevError, "TenantMoveAbortSwitchGroupEntryMissing").detail("TenantGroup", self->tenantGroup);
+			self->messages.push_back(fmt::format("Tenant move abort: tenantGroupEntry missing\n"
+			                                     "		group name:	{}\n",
+			                                     self->tenantGroup));
 			throw invalid_tenant_move();
 		}
 		if (groupEntry.get().assignedCluster != dstName) {
@@ -1519,6 +1606,13 @@ struct AbortTenantMovementImpl {
 			    .detail("TenantGroup", self->tenantGroup)
 			    .detail("ExpectedCluster", dstName)
 			    .detail("GroupEntryAssignedCluster", groupEntry.get().assignedCluster);
+			self->messages.push_back(fmt::format("Tenant move abort: tenantGroupEntry with incorrect cluster\n"
+			                                     "		group name:			{}\n"
+			                                     "		expected cluster:	{}\n"
+			                                     "		actual cluster:	{}\n",
+			                                     self->tenantGroup,
+			                                     dstName,
+			                                     groupEntry.get().assignedCluster));
 			throw invalid_tenant_move();
 		}
 		groupEntry.get().assignedCluster = srcName;
@@ -1764,6 +1858,7 @@ Future<Void> startTenantMovement(Reference<DB> db,
 	state internal::StartTenantMovementImpl<DB> impl(db, tenantGroup, src, dst, *messages);
 	if (src == dst) {
 		TraceEvent("TenantMoveStartSameSrcDst").detail("TenantGroup", tenantGroup).detail("ClusterName", src);
+		messages->push_back(fmt::format("Tenant move start: source and destination cluster must be distinct\n"));
 		throw invalid_tenant_move();
 	}
 	wait(impl.run());
@@ -1779,6 +1874,7 @@ Future<Void> switchTenantMovement(Reference<DB> db,
 	state internal::SwitchTenantMovementImpl<DB> impl(db, tenantGroup, src, dst, *messages);
 	if (src == dst) {
 		TraceEvent("TenantMoveSwitchSameSrcDst").detail("TenantGroup", tenantGroup).detail("ClusterName", src);
+		messages->push_back(fmt::format("Tenant move switch: source and destination cluster must be distinct\n"));
 		throw invalid_tenant_move();
 	}
 	wait(impl.run());
@@ -1794,6 +1890,7 @@ Future<Void> finishTenantMovement(Reference<DB> db,
 	state internal::FinishTenantMovementImpl<DB> impl(db, tenantGroup, src, dst, *messages);
 	if (src == dst) {
 		TraceEvent("TenantMoveFinishSameSrcDst").detail("TenantGroup", tenantGroup).detail("ClusterName", src);
+		messages->push_back(fmt::format("Tenant move finish: source and destination cluster must be distinct\n"));
 		throw invalid_tenant_move();
 	}
 	wait(impl.run());
@@ -1809,6 +1906,7 @@ Future<Void> abortTenantMovement(Reference<DB> db,
 	state internal::AbortTenantMovementImpl<DB> impl(db, tenantGroup, src, dst, *messages);
 	if (src == dst) {
 		TraceEvent("TenantMoveAbortSameSrcDst").detail("TenantGroup", tenantGroup).detail("ClusterName", src);
+		messages->push_back(fmt::format("Tenant move abort: source and destination cluster must be distinct\n"));
 		throw invalid_tenant_move();
 	}
 	wait(impl.run());

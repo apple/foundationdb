@@ -365,10 +365,17 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
+	state std::vector<std::string> messages;
 	try {
-		wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+		wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
 	} catch (Error& e) {
 		fmt::print(stderr, "ERROR: {}\n", e.what());
+		if (!messages.empty()) {
+			fmt::print(stderr, "\nThe move reported the following messages:\n\n");
+			for (int i = 0; i < messages.size(); ++i) {
+				fmt::print(stderr, "  {}. {}\n", i + 1, messages[i]);
+			}
+		}
 		return false;
 	}
 
@@ -388,6 +395,12 @@ ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<
 		wait(metacluster::switchTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
 	} catch (Error& e) {
 		fmt::print(stderr, "ERROR: {}\n", e.what());
+		if (!messages.empty()) {
+			fmt::print(stderr, "\nThe move reported the following messages:\n\n");
+			for (int i = 0; i < messages.size(); ++i) {
+				fmt::print(stderr, "  {}. {}\n", i + 1, messages[i]);
+			}
+		}
 		return false;
 	}
 
@@ -402,10 +415,17 @@ ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
+	state std::vector<std::string> messages;
 	try {
-		wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+		wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
 	} catch (Error& e) {
 		fmt::print(stderr, "ERROR: {}\n", e.what());
+		if (!messages.empty()) {
+			fmt::print(stderr, "\nThe move reported the following messages:\n\n");
+			for (int i = 0; i < messages.size(); ++i) {
+				fmt::print(stderr, "  {}. {}\n", i + 1, messages[i]);
+			}
+		}
 		return false;
 	}
 
@@ -420,10 +440,17 @@ ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<S
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
+	state std::vector<std::string> messages;
 	try {
-		wait(metacluster::abortTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+		wait(metacluster::abortTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
 	} catch (Error& e) {
 		fmt::print(stderr, "ERROR: {}\n", e.what());
+		if (!messages.empty()) {
+			fmt::print(stderr, "\nThe move reported the following messages:\n\n");
+			for (int i = 0; i < messages.size(); ++i) {
+				fmt::print(stderr, "  {}. {}\n", i + 1, messages[i]);
+			}
+		}
 		return false;
 	}
 
