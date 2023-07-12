@@ -88,6 +88,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	Future<Void> summaryClient;
 	Future<Void> forceFlushingClient;
+	Future<Void> reqWayInFuture;
 	Promise<Void> triggerSummaryComplete;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -510,6 +511,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			forceFlushingClient = validateForceFlushing(cx, normalKeys, testDuration, triggerSummaryComplete);
 		} else {
 			forceFlushingClient = Future<Void>(Void());
+		}
+		if (clientId == 0 && deterministicRandom()->random01() < 0.1) {
+			reqWayInFuture = requestWayInTheFuture(cx, normalKeys, {});
 		}
 		return delay(testDuration);
 	}
