@@ -26,8 +26,12 @@
 // This workload sets the throughput quota of a tag during the setup phase
 class ThroughputQuotaWorkload : public TestWorkload {
 	TransactionTag transactionTag;
-	int64_t reservedQuota{ 0 };
-	int64_t totalQuota{ 0 };
+	int64_t reservedQuotaInPages{ 0 };
+	int64_t totalQuotaInPages{ 0 };
+
+	int64_t getReservedQuota() const { return reservedQuotaInPages * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
+
+	int64_t getTotalQuota() const { return totalQuotaInPages * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 
 	ACTOR static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -36,9 +40,9 @@ class ThroughputQuotaWorkload : public TestWorkload {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
 				    .detail("Tag", printable(self->transactionTag))
-				    .detail("ReservedQuota", self->reservedQuota)
-				    .detail("TotalQuota", self->totalQuota);
-				ThrottleApi::setTagQuota(tr, self->transactionTag, self->reservedQuota, self->totalQuota);
+				    .detail("ReservedQuota", self->getReservedQuota())
+				    .detail("TotalQuota", self->getTotalQuota());
+				ThrottleApi::setTagQuota(tr, self->transactionTag, self->getReservedQuota(), self->getTotalQuota());
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -52,14 +56,11 @@ public:
 	static constexpr auto NAME = "ThroughputQuota";
 	explicit ThroughputQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
-		reservedQuota = getOption(options, "reservedQuota"_sr, 0.0);
-		totalQuota = getOption(options, "totalQuota"_sr, 0.0);
+		reservedQuotaInPages = getOption(options, "reservedQuotaInPages"_sr, 0);
+		totalQuotaInPages = getOption(options, "totalQuotaInPages"_sr, 0);
 	}
 
-	Future<Void> setup(Database const& cx) override {
-		DatabaseContext::debugUseTags = true;
-		return clientId ? Void() : setup(this, cx);
-	}
+	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
