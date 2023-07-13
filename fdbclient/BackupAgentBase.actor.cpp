@@ -224,7 +224,7 @@ Key getApplyKey(Version version, Key backupUid) {
 }
 
 Key getLogKey(Version version, Key backupUid) {
-	int64_t vblock = (version - 1) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	int64_t vblock = version / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	uint64_t v = bigEndian64(version);
 	uint32_t data = vblock & 0xffffffff;
 	uint8_t hash = (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
