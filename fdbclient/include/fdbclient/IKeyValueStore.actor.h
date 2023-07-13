@@ -55,7 +55,7 @@ ACTOR static Future<Void> replaceRange_impl(class IKeyValueStore* self,
                                             KeyRange range,
                                             Standalone<VectorRef<KeyValueRef>> data);
 
-class IKeyValueStore : public IClosable {
+class IKeyValueStore : public IClosable, public ReferenceCounted<IKeyValueStore> {
 public:
 	virtual KeyValueStoreType getType() const = 0;
 	// Returns true if the KV store supports shards, i.e., implements addRange(), removeRange(), and
@@ -151,7 +151,6 @@ public:
 	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
 	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
 
-protected:
 	virtual ~IKeyValueStore() {}
 };
 

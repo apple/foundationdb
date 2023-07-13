@@ -142,7 +142,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<ILogSystem> logSystem;
-	IKeyValueStore* txnStateStore = nullptr;
+	Reference<IKeyValueStore> txnStateStore;
 	int localTLogCount = -1;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
@@ -558,7 +558,7 @@ struct TransactionStateResolveContext {
 	Reference<Resolver> pResolverData;
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
-	IKeyValueStore* pTxnStateStore = nullptr;
+	Reference<IKeyValueStore> pTxnStateStore;
 
 	// Actor streams
 	PromiseStream<Future<Void>>* pActors = nullptr;
@@ -571,7 +571,7 @@ struct TransactionStateResolveContext {
 
 	TransactionStateResolveContext(Reference<Resolver> pResolverData_, PromiseStream<Future<Void>>* pActors_)
 	  : pResolverData(pResolverData_), pTxnStateStore(pResolverData_->txnStateStore), pActors(pActors_) {
-		ASSERT(pTxnStateStore != nullptr || !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+		ASSERT(pTxnStateStore.isValid() || !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 	}
 };
 
@@ -609,7 +609,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
-				auto storageInfo = getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore);
+				auto storageInfo =
+				    getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore.getPtr());
 				ASSERT(storageInfo->tag != invalidTag);
 				tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);

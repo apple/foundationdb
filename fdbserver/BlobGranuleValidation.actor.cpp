@@ -616,6 +616,34 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 	}
 }
 
+// This ideally should have no effect on anything else, but before these fixes caused head-of-line blocking in change
+// feeds that could freeze the whole system
+ACTOR Future<Void> requestWayInTheFuture(Database cx, KeyRange range, Optional<Reference<Tenant>> tenant) {
+	state Transaction tr(cx, tenant);
+	state Version version = 0;
+	loop {
+		try {
+			wait(store(version, tr.getReadVersion()));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	version += 100000000 * SERVER_KNOBS->VERSIONS_PER_SECOND;
+
+	loop {
+		try {
+			wait(success(tr.readBlobGranules(range, 0, version)));
+			// this intentionally should never succeed
+			ASSERT(false);
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> killBlobWorkers(Database cx) {
 	state Transaction tr(cx);
 	state std::set<UID> knownWorkers;

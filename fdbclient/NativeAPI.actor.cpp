@@ -670,9 +670,15 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("MeanRowReadLatency", cx->readLatencies.mean())
 			    .detail("MedianRowReadLatency", cx->readLatencies.median())
 			    .detail("MaxRowReadLatency", cx->readLatencies.max())
+			    .detail("MeanReadRangeLatency", cx->readRangeLatencies.mean())
+			    .detail("MedianReadRangeLatency", cx->readRangeLatencies.median())
+			    .detail("MaxReadRangeLatency", cx->readRangeLatencies.max())
 			    .detail("MeanGRVLatency", cx->GRVLatencies.mean())
 			    .detail("MedianGRVLatency", cx->GRVLatencies.median())
 			    .detail("MaxGRVLatency", cx->GRVLatencies.max())
+			    .detail("MeanKeyLocationLatency", cx->keyLocationLatencies.mean())
+			    .detail("MedianKeyLocationLatency", cx->keyLocationLatencies.median())
+			    .detail("MaxKeyLocationLatency", cx->keyLocationLatencies.max())
 			    .detail("MeanCommitLatency", cx->commitLatencies.mean())
 			    .detail("MedianCommitLatency", cx->commitLatencies.median())
 			    .detail("MaxCommitLatency", cx->commitLatencies.max())
@@ -722,7 +728,9 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
+		cx->readRangeLatencies.clear();
 		cx->GRVLatencies.clear();
+		cx->keyLocationLatencies.clear();
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
@@ -1559,12 +1567,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     ccFeed("ChangeFeedClientMetrics", dbId.toString()), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
-    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
-    mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0),
-    cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), readRangeLatencies(), commitLatencies(),
+    GRVLatencies(), keyLocationLatencies(), mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0),
+    sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0),
+    lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID),
+    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(_apiVersion),
+    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 
@@ -1870,9 +1879,10 @@ DatabaseContext::DatabaseContext(const Error& err)
     ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
-    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
-    mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr),
-    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), readRangeLatencies(), commitLatencies(),
+    GRVLatencies(), keyLocationLatencies(), mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0),
+    sharedStatePtr(nullptr), transactionTracingSample(false),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	initializeSpecialCounters();
 }
@@ -3002,6 +3012,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Version version) {
 
 	state Span span("NAPI:getKeyLocation"_loc, spanContext);
+	state double startTime = now();
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
 	} else {
@@ -3022,6 +3033,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 			             span.context, tenant, key, Optional<KeyRef>(), 100, isBackward, version, key.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
+				cx->keyLocationLatencies.addSample(now() - startTime);
 				if (debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
 				ASSERT(rep.results.size() == 1);
@@ -3132,6 +3144,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     UseProvisionalProxies useProvisionalProxies,
     Version version) {
 	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
+	state double startTime = now();
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
@@ -3146,6 +3159,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 			             span.context, tenant, keys.begin, keys.end, limit, reverse, version, keys.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
+				cx->keyLocationLatencies.addSample(now() - startTime);
 				state GetKeyServerLocationsReply rep = _rep;
 				if (debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
@@ -3436,6 +3450,13 @@ TransactionState::TransactionState(Database cx,
   : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext),
     readVersionObtainedFromGrvProxy(true), tenant_(tenant), tenantSet(tenant.present()) {}
 
+TransactionState::~TransactionState() {
+	// Need to cancel the actors, because otherwise they may access already destroyed
+	// transaction state members
+	readVersionFuture.cancel();
+	startFuture.cancel();
+}
+
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
 
@@ -3516,7 +3537,7 @@ bool TransactionState::hasTenant(ResolveDefaultTenant resolveDefaultTenant) {
 	return tenant_.present();
 }
 
-ACTOR Future<Void> startTransaction(Reference<TransactionState> trState) {
+ACTOR Future<Void> startTransaction(TransactionState* trState) {
 	wait(success(trState->readVersionFuture));
 	if (trState->hasTenant()) {
 		wait(trState->tenant().get()->ready());
@@ -3533,7 +3554,7 @@ Future<Void> TransactionState::startTransaction(uint32_t readVersionFlags) {
 		if (readVersionFuture.isReady() && (!hasTenant() || tenant().get()->ready().isReady())) {
 			startFuture = Void();
 		} else {
-			startFuture = ::startTransaction(Reference<TransactionState>::addRef(this));
+			startFuture = ::startTransaction(this);
 		}
 	}
 
@@ -4510,15 +4531,17 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Reverse reverse,
                       RangeReadResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
+	double timeNow = now();
 
 	trState->addReadCost(getReadOperationCost(bytes));
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
+	trState->cx->readRangeLatencies.addSample(timeNow - startTime);
 
 	if (trState->trLogInfo) {
 		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
 		                                                             trState->cx->clientLocality.dcId(),
-		                                                             now() - startTime,
+		                                                             timeNow - startTime,
 		                                                             bytes,
 		                                                             begin.getKey(),
 		                                                             end.getKey(),
@@ -7233,7 +7256,7 @@ bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority prior
 	return false;
 }
 
-ACTOR Future<Version> getReadVersion_internal(Reference<TransactionState> trState, uint32_t flags) {
+ACTOR Future<Version> getReadVersion_internal(TransactionState* trState, uint32_t flags) {
 	if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
 	    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
 	     trState->options.useGrvCache) &&
@@ -7343,7 +7366,7 @@ ACTOR Future<Version> getReadVersion_internal(Reference<TransactionState> trStat
 Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	ASSERT(!readVersionFuture.isValid());
 
-	return getReadVersion_internal(Reference<TransactionState>::addRef(this), flags);
+	return getReadVersion_internal(this, flags);
 }
 
 Optional<ThrottlingId> TransactionState::getThrottlingId() {
@@ -7382,6 +7405,20 @@ void TransactionState::flushWriteCost() {
 
 int64_t TransactionState::getTotalCost() const {
 	return readCost + writeCost;
+}
+
+ACTOR Future<Version> Transaction_getReadVersion(Reference<TransactionState> trState) {
+	if (!trState->readVersionFuture.isValid()) {
+		trState->readVersionFuture = trState->getReadVersion(0);
+	}
+	// Here are we waiting on readVersionFuture instead of simply returning it
+	// because unlike readVersionFuture, this actor holds a reference to the transaction
+	Version v = wait(trState->readVersionFuture);
+	return v;
+}
+
+Future<Version> Transaction::getReadVersion() {
+	return Transaction_getReadVersion(trState);
 }
 
 Optional<Version> Transaction::getCachedReadVersion() const {
@@ -9433,9 +9470,15 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 		if (self->version.get() < self->desired.get()) {
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
 			if (self->version.get() < self->desired.get()) {
+				// Avoid requesting a version hugely in the future and causing head-of-line blocking
+				// If the BW is behind and the storage is not, the returned version will still jump.
+				// If the storage is behind and the BW is stuck behind with it, this will repeat requests every *knob*
+				// versions which is not ideal but can be acceptable.
+				Version targetVersion = std::min(
+				    self->desired.get(), self->version.get() + CLIENT_KNOBS->CHANGE_FEED_DESIRED_VERSION_JUMP_MAX);
 				try {
 					ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
-					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
+					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(targetVersion))));
 					if (rep.version > self->version.get()) {
 						self->version.set(rep.version);
 					}

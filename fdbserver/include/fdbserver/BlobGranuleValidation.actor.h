@@ -67,6 +67,8 @@ ACTOR Future<Void> validateForceFlushing(Database cx,
 
 ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug);
 
+ACTOR Future<Void> requestWayInTheFuture(Database cx, KeyRange range, Optional<Reference<Tenant>> tenantName);
+
 ACTOR Future<Void> killBlobWorkers(Database cx);
 #include "flow/unactorcompiler.h"
 
