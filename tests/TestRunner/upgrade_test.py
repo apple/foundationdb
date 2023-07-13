@@ -98,6 +98,7 @@ class UpgradeTest:
         )
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
+        self.progress_success = False
         self.progress_event = Event()
         self.api_version = None
         self.tester_retcode = None
@@ -315,10 +316,14 @@ class UpgradeTest:
 
     # Perform a progress check: Trigger it and wait until it is completed
     def progress_check(self):
-        self.progress_event.clear()
-        os.write(self.ctrl_pipe, b"CHECK\n")
-        self.progress_event.wait(None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
-        if self.progress_event.is_set():
+        self.progress_success = False
+        if not self.output_pipe.closed:
+            self.progress_event.clear()
+            os.write(self.ctrl_pipe, b"CHECK\n")
+            self.progress_event.wait(
+                None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC
+            )
+        if self.progress_success:
             logger.info("Progress check: OK")
         else:
             status = self.cluster.get_status()
@@ -340,8 +345,10 @@ class UpgradeTest:
                 msg = line.strip()
                 logger.info("Received {}".format(msg))
                 if msg == "CHECK_OK":
+                    self.progress_success = True
                     self.progress_event.set()
             self.output_pipe.close()
+            self.progress_event.set()
         except Exception as e:
             logger.error("Error while reading output pipe: {}".format(e))
             logger.error(traceback.format_exc())
