@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -889,14 +890,27 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 					uint64_t ev = bigEndian64(nextSmallestVersion);
 					uint8_t h1 = h;
 					Key vblockPrefix = StringRef(&h1, sizeof(uint8_t)).withPrefix(baLogRangePrefix);
-					tr->clear(KeyRangeRef(StringRef((uint8_t*)&bv, sizeof(uint64_t)).withPrefix(vblockPrefix),
-					                      StringRef((uint8_t*)&ev, sizeof(uint64_t)).withPrefix(vblockPrefix)));
+					KeyRange range = KeyRangeRef(StringRef((uint8_t*)&bv, sizeof(uint64_t)).withPrefix(vblockPrefix),
+					                             StringRef((uint8_t*)&ev, sizeof(uint64_t)).withPrefix(vblockPrefix));
+					tr->clear(range);
+					if (CLIENT_KNOBS->BACKUP_AGENT_VERBOSE_LOGGING) {
+						TraceEvent("EraseLogDataClearLogRanges")
+						    .detail("Range", range)
+						    .detail("Begin", 0)
+						    .detail("End", nextSmallestVersion);
+					}
 				}
 			} else {
 				Standalone<VectorRef<KeyRangeRef>> ranges =
 				    getLogRanges(currBeginVersion, nextSmallestVersion, destUidValue);
 				for (auto& range : ranges) {
 					tr->clear(range);
+					if (CLIENT_KNOBS->BACKUP_AGENT_VERBOSE_LOGGING) {
+						TraceEvent("EraseLogDataClearLogRanges")
+						    .detail("Range", range)
+						    .detail("Begin", currBeginVersion)
+						    .detail("End", nextSmallestVersion);
+					}
 				}
 			}
 		}

@@ -195,6 +195,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
+	init( BACKUP_AGENT_VERBOSE_LOGGING,          false ); if (randomize && BUGGIFY) { BACKUP_AGENT_VERBOSE_LOGGING = true; }
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
