@@ -1847,6 +1847,38 @@ struct AbortTenantMovementImpl {
 	Future<Void> run() { return run(this); }
 };
 
+template <class DB>
+struct MoveStatusImpl {
+	MetaclusterOperationContext<DB> ctx;
+
+	// Initialization parameters
+	TenantGroupName tenantGroup;
+
+	// Result
+	metadata::management::MovementRecord moveRecord;
+
+	MoveStatusImpl(Reference<DB> managementDb, TenantGroupName tenantGroup)
+	  : ctx(managementDb), tenantGroup(tenantGroup) {}
+
+	ACTOR static Future<Void> getMoveRecord(MoveStatusImpl* self, Reference<typename DB::TransactionT> tr) {
+		Optional<metadata::management::MovementRecord> moveRecord =
+		    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, self->tenantGroup));
+		if (!moveRecord.present()) {
+			throw tenant_move_record_missing();
+		}
+		self->moveRecord = moveRecord.get();
+		return Void();
+	}
+
+	ACTOR static Future<Void> run(MoveStatusImpl* self) {
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return getMoveRecord(self, tr); }));
+		return Void();
+	}
+
+	Future<Void> run() { return run(this); }
+};
+
 } // namespace internal
 
 ACTOR template <class DB>
@@ -1911,6 +1943,13 @@ Future<Void> abortTenantMovement(Reference<DB> db,
 	}
 	wait(impl.run());
 	return Void();
+}
+
+ACTOR template <class DB>
+Future<metadata::management::MovementRecord> moveStatus(Reference<DB> db, TenantGroupName tenantGroup) {
+	state internal::MoveStatusImpl<DB> impl(db, tenantGroup);
+	wait(impl.run());
+	return impl.moveRecord;
 }
 
 } // namespace metacluster

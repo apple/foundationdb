@@ -33,6 +33,7 @@
 #include "flow/ThreadHelper.actor.h"
 
 #include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterMetadata.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -351,11 +352,13 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 constexpr char moveTenantUsageMessage[] =
-    "Usage: tenant move <start|switch|finish|abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n"
+    "Usage: tenant move <start|switch|finish|abort|status> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n"
     "Helps orchestrate the move of a tenant group across 2 data clusters in a metacluster.\n"
     "TENANT_GROUP must be assigned to SOURCE_CLUSTER at the beginning of the movement\n"
     "SOURCE_CLUSTER and DESTINATION_CLUSTER must be distinct from each other.\n"
-    "The abort command will fail if there are any unlocked tenants in the group.\n";
+    "The abort command will fail if there are any unlocked tenants in the group.\n"
+    "The status command will print out the contents of the specified move record and only takes the tenant group as an "
+    "argument.\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
@@ -457,19 +460,62 @@ ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<S
 	return true;
 }
 
+ACTOR Future<bool> tenantMoveStatusCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() > 4) {
+		fmt::print(moveTenantUsageMessage);
+		return false;
+	}
+	TenantGroupName tenantGroup = tokens[3];
+	state metacluster::metadata::management::MovementRecord moveRecord;
+	try {
+		wait(store(moveRecord, metacluster::moveStatus(db, tenantGroup)));
+	} catch (Error& e) {
+		fmt::print(stderr, "ERROR: {}\n", e.what());
+		if (e.code() == error_code_tenant_move_record_missing) {
+			fmt::print(stderr, "No move in progress was found for tenant group {}\n", tenantGroup);
+		}
+		return false;
+	}
+	fmt::print("Move in progress for tenant group {}:\n"
+	           "	Source Cluster:			{}\n"
+	           "	Destination Cluster: 	{}\n"
+	           "	Movement State:			{}\n"
+	           "	Version:				{}\n"
+	           "	Aborting:				{}\n",
+	           tenantGroup,
+	           moveRecord.srcCluster,
+	           moveRecord.dstCluster,
+	           metacluster::metadata::management::moveStateToString(moveRecord.mState),
+	           moveRecord.version,
+	           moveRecord.aborting);
+	return true;
+}
+
 ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	// Status only needs 4 tokens
+	if (tokens.size() < 4) {
+		fmt::print(moveTenantUsageMessage);
+		return false;
+	}
+	state StringRef step = tokens[2];
+	state bool result = false;
+	if (step == "status"_sr) {
+		wait(store(result, tenantMoveStatusCommand(db, tokens)));
+		return result;
+	}
+
+	// Rest of the commands expect 6 tokens
 	if (tokens.size() < 6) {
 		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
-	StringRef step = tokens[2];
-	state bool result = false;
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
 	if (srcCluster == dstCluster) {
 		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
+
 	if (step == "start"_sr) {
 		wait(store(result, tenantMoveStartCommand(db, tokens)));
 	} else if (step == "switch"_sr) {

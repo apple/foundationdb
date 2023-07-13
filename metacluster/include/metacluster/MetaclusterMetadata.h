@@ -104,6 +104,9 @@ struct ConnectionStringCodec {
 // step of the movement
 enum class MovementState { START_LOCK, START_CREATE, SWITCH_HYBRID, SWITCH_METADATA, FINISH_UNLOCK };
 
+std::string moveStateToString(MovementState moveState);
+MovementState stringToMoveState(std::string stateStr);
+
 struct MovementRecord {
 	UID runId;
 	ClusterName srcCluster;
