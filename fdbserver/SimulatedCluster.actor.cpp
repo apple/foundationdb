@@ -38,7 +38,6 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/RESTSimKmsVault.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -804,7 +803,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				}
 				if (processRunHTTPServer(processMode)) {
 					fmt::print("Process {0} run http server\n", ip.toString());
-					TraceEvent("RunHTTPServer").detail("IP", ip.toString());
 					futures.push_back(runSimHTTPServer());
 				}
 
@@ -1085,8 +1083,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				    .detail("Address", NetworkAddress(ips[i], listenPort, true, false))
 				    .detail("ZoneId", localities.zoneId())
 				    .detail("DataHall", localities.dataHallId())
-				    .detail("Folder", myFolders[i])
-				    .detail("ProcessMode", processMode);
+				    .detail("Folder", myFolders[i]);
 			}
 
 			CODE_PROBE(bootCount >= 1, "Simulated machine rebooted");
@@ -2478,7 +2475,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (testConfig.simHTTPServerEnabled) {
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
 			fmt::print("sim http machines = {0}\n", simHTTPMachines);
-			TraceEvent("SimHTTPServerEnabled").detail("Count", simHTTPMachines);
 		}
 
 		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
@@ -2736,7 +2732,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	}
 
 	// TODO (IPv6) Use IPv6?
-	g_simulator->testSystem =
+	auto testSystem =
 	    g_simulator->newProcess("TestSystem",
 	                            IPAddress(0x01010101),
 	                            1,
@@ -2751,8 +2747,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                            "",
 	                            currentProtocolVersion(),
 	                            false);
-	g_simulator->testSystem->excludeFromRestarts = true;
-	wait(g_simulator->onProcess(g_simulator->testSystem, TaskPriority::DefaultYield));
+	testSystem->excludeFromRestarts = true;
+	wait(g_simulator->onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	CODE_PROBE(true, "Simulation start");
@@ -2763,9 +2759,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
-		if (testConfig.simHTTPServerEnabled) {
-			RestSimKms::initConfig(dataFolder);
-		}
 		if (rebooting) {
 			wait(timeoutError(restartSimulatedSystem(&systemActors,
 			                                         dataFolder,
@@ -2780,9 +2773,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 			if (restoring) {
 				startingConfiguration = "usable_regions=1"_sr;
 			}
-			if (testConfig.simHTTPServerEnabled) {
-				wait(RestSimKms::registerHTTPServer());
-			}
 		} else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors,
@@ -2795,9 +2785,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     protocolVersion,
 			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
-			if (testConfig.simHTTPServerEnabled) {
-				wait(RestSimKms::registerHTTPServer());
-			}
 		}
 
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
@@ -2881,9 +2868,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	TraceEvent("TracingMissingCodeProbes").log();
 	probe::traceMissedProbes(probe::ExecutionContext::Simulation);
 	TraceEvent("SimulatedSystemDestruct").log();
-	if (g_simulator->initRESTSimKmsVaultConfigFilesDone) {
-		wait(RestSimKms::cleanupConfigFiles());
-	}
 	g_simulator->stop();
 	destructed = true;
 	wait(Never());

@@ -167,7 +167,7 @@ public:
 	// isTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
 	virtual Future<Reference<IConnection>> connect(const std::string& host,
 	                                               const std::string& service,
-	                                               const bool isTLS = false);
+	                                               bool isTLS = false);
 
 	// Listen for connections on the given local address
 	virtual Reference<IListener> listen(NetworkAddress localAddr) = 0;

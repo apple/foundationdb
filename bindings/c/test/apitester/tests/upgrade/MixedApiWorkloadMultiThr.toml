@@ -4,13 +4,13 @@ multiThreaded = true
 buggify = true
 databasePerTransaction = false
 minFdbThreads = 2
-maxFdbThreads = 8
+maxFdbThreads = 4
 minDatabases = 2
-maxDatabases = 8
+maxDatabases = 4
 minClientThreads = 2
-maxClientThreads = 8
+maxClientThreads = 4
 minClients = 2
-maxClients = 4
+maxClients = 2
 
     [[test.workload]]
     name = 'ApiCorrectness'

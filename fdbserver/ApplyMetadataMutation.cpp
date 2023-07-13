@@ -78,7 +78,7 @@ public:
 	                           bool initialCommit_,
 	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
-	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
+	    txnStateStore(proxyCommitData_.txnStateStore.getPtr()), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    confChange(confChange_), logSystem(logSystem_), version(version), popVersion(popVersion_),
 	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
 	    cacheInfo(&proxyCommitData_.cacheInfo),
@@ -103,7 +103,7 @@ public:
 	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
 	                           EncryptionAtRestMode encryptMode)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit), cipherKeys(cipherKeys_),
+	    txnStateStore(resolverData_.txnStateStore.getPtr()), toCommit(resolverData_.toCommit), cipherKeys(cipherKeys_),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache), encryptMode(encryptMode),
 	    initialCommit(resolverData_.initialCommit), forResolver(true) {

@@ -33,9 +33,6 @@
 
 namespace RESTKmsConnectorUtils {
 
-extern const char* HTTP_CONTENT_TYPE;
-extern const char* HTTP_ACCEPT;
-
 extern const char* BASE_CIPHER_ID_TAG;
 extern const char* BASE_CIPHER_TAG;
 extern const char* CIPHER_KEY_DETAILS_TAG;
@@ -96,6 +93,8 @@ private:
 	double readTS; // Approach assists refreshing token based on time of creation
 };
 using ValidationTokenMap = std::unordered_map<std::string, ValidationTokenCtx>;
+
+HTTP::Headers getHTTPHeaders();
 
 void addVersionToDoc(rapidjson::Document& doc, const int requestVersion);
 void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
