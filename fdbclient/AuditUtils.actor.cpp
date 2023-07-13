@@ -736,3 +736,18 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 
 	return res;
 }
+
+ACTOR Future<std::string> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	if (auditType == AuditType::ValidateStorageServerShard) {
+		return "ssshard not supported yet";
+	}
+	state std::vector<AuditStorageState> auditStates = wait(getAuditStateByRange(cx, auditType, auditId, auditRange));
+	std::vector<KeyRange> unfinishedRanges;
+	for (int i = 0; i < auditStates.size(); i++) {
+		AuditPhase phase = auditStates[i].getPhase();
+		if (phase == AuditPhase::Invalid) {
+			unfinishedRanges.push_back(auditStates[i].range);
+		}
+	}
+	return describe(unfinishedRanges);
+}

@@ -5475,8 +5475,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 		                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
 		Future<Version> grvF = tr->getReadVersion();
 		if (!grvF.isReady()) {
-			TraceEvent(
-			    g_network->isSimulated() ? SevError : SevWarnAlways, "AuditStorageReadServerKeysGRVError", serverID);
+			TraceEvent(SevWarnAlways, "AuditStorageReadServerKeysGRVError", serverID);
 			throw audit_storage_cancelled();
 		}
 		Version readAtVersion = grvF.get();
@@ -5564,9 +5563,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 		}
 		Future<Version> grvF = tr->getReadVersion();
 		if (!grvF.isReady()) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-			           "AuditStorageReadKeyServersGRVError",
-			           auditServerId);
+			TraceEvent(SevWarnAlways, "AuditStorageReadKeyServersGRVError", auditServerId);
 			throw audit_storage_cancelled();
 		}
 		Version readAtVersion = grvF.get();
@@ -6183,8 +6180,6 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 				TraceEvent(SevDebug, "AuditStorageShardReplicaNewRoundBegin", data->thisServerID)
 				    .suppressFor(10.0)
-				    .setMaxEventLength(80000)
-				    .setMaxFieldLength(20000)
 				    .detail("AuditID", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditType", req.type)
