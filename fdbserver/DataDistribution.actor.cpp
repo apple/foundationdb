@@ -2625,6 +2625,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 
 	try {
 		audit->overallIssuedDoAuditCount++;
+		ASSERT(req.ddId.isValid());
 		ErrorOr<AuditStorageState> vResult = wait(ssi.auditStorage.getReplyUnlessFailedFor(
 		    req, /*sustainedFailureDuration=*/2.0, /*sustainedFailureSlope=*/0));
 		if (vResult.isError()) {

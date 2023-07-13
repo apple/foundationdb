@@ -584,10 +584,6 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 				break;
 			}
 			// If this is the same dd, the phase must be following
-			TraceEvent("PersistAuditStateByRange")
-			    .detail("AuditID", auditState.id)
-			    .detail("AuditType", auditState.getType())
-			    .detail("AuditPhase", auditState.getPhase());
 			ASSERT(ddAuditState.getPhase() == AuditPhase::Running || ddAuditState.getPhase() == AuditPhase::Failed);
 			if (ddAuditState.getPhase() == AuditPhase::Failed) {
 				throw audit_storage_cancelled();

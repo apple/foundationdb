@@ -390,6 +390,7 @@ struct ValidateStorage : TestWorkload {
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
 					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
 					                        AuditType::ValidateHA);
+					req.ddId = deterministicRandom()->randomUniqueID();
 					Optional<AuditStorageState> vResult =
 					    wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
 					if (!vResult.present()) {
