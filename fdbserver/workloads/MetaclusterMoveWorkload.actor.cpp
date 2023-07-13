@@ -439,7 +439,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
-				if (err.code() == error_code_metacluster_no_capacity) {
+				if (err.code() == error_code_cluster_no_capacity) {
 					wait(increaseMetaclusterCapacity(self));
 					continue;
 				}
