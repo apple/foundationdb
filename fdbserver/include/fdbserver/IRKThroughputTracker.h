@@ -75,7 +75,7 @@ public:
 class ClientThroughputTracker : public IRKThroughputTracker {
 	struct ThroughputSmoother {
 		HoltLinearSmoother smoother;
-		ThroughputSmoother() : smoother(1.0, 1.0) {}
+		ThroughputSmoother();
 	};
 
 	ThrottlingIdMap<ThroughputSmoother> throughput;

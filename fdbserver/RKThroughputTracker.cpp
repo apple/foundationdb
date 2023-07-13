@@ -177,6 +177,10 @@ int ServerThroughputTracker::storageServersTracked() const {
 	return throughput.size();
 }
 
+ClientThroughputTracker::ThroughputSmoother::ThroughputSmoother()
+  : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME,
+             SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
+
 ClientThroughputTracker::~ClientThroughputTracker() = default;
 
 double ClientThroughputTracker::getThroughput(ThrottlingId const& throttlingId) const {
