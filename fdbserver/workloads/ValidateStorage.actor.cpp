@@ -83,13 +83,12 @@ struct ValidateStorage : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR Future<UID> triggerAuditStorageForType(Database cx, AuditType type, std::string context) {
+	ACTOR Future<UID> triggerAuditStorageForType(Database cx,
+	                                             AuditType type,
+	                                             std::string context,
+	                                             KeyRange auditRange = allKeys) {
 		// Send audit request until the cluster accepts the request
 		state UID auditId;
-		std::vector<KeyRangeRef> auditKeysCollection = { partialKeys1, partialKeys2, partialKeys3, partialKeys4,
-			                                             partialKeys5, partialKeys6, partialKeys7, partialKeys8,
-			                                             partialKeys9, allKeys };
-		state KeyRangeRef auditRange = deterministicRandom()->randomChoice(auditKeysCollection);
 		loop {
 			try {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
@@ -109,6 +108,9 @@ struct ValidateStorage : TestWorkload {
 				    .detail("Context", context)
 				    .detail("AuditType", type)
 				    .detail("AuditRange", auditRange);
+				if (auditRange.empty() && e.code() == error_code_audit_storage_failed) {
+					break;
+				}
 				wait(delay(1));
 			}
 		}
@@ -280,9 +282,6 @@ struct ValidateStorage : TestWorkload {
 		wait(self->testAuditStorageIDGenerator(self, cx));
 		TraceEvent("TestAuditStorageIDGeneratorDone");
 
-		wait(self->testGetAuditStateWhenNoOngingAudit(self, cx));
-		TraceEvent("TestGetAuditStateDone");
-
 		wait(self->testAuditStorageConcurrentRunForDifferentType(self, cx));
 		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
 
@@ -426,8 +425,16 @@ struct ValidateStorage : TestWorkload {
 	                                      AuditType type,
 	                                      std::string context,
 	                                      bool stopWaitWhenCleared = false) {
+		std::vector<KeyRangeRef> auditKeysCollection = { partialKeys1, partialKeys2, partialKeys3, partialKeys4,
+			                                             partialKeys5, partialKeys6, partialKeys7, partialKeys8,
+			                                             partialKeys9, allKeys };
+		state KeyRangeRef auditRange = deterministicRandom()->randomChoice(auditKeysCollection);
 		// Send audit request until the server accepts the request
-		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context));
+		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context, auditRange));
+		if (auditRange.empty()) {
+			ASSERT(!auditId.isValid());
+			return UID();
+		}
 		// Wait until the request completes
 		wait(self->waitAuditStorageUntilComplete(cx, type, auditId, context, stopWaitWhenCleared));
 		// Check internal persist state
@@ -448,6 +455,8 @@ struct ValidateStorage : TestWorkload {
 		UID auditIdD = wait(self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality"));
 		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD);
+		wait(self->testGetAuditStateWhenNoOngingAudit(self, cx));
+		TraceEvent("TestGetAuditStateDone");
 		return Void();
 	}
 
@@ -456,7 +465,7 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestAuditStorageIDGeneratorBegin").detail("AuditType", type);
 		state UID auditIdA = wait(self->auditStorageForType(self, cx, type, "FirstRunInTestIDGenerator"));
 		state UID auditIdB = wait(self->auditStorageForType(self, cx, type, "SecondRunInTestIDGenerator"));
-		if (auditIdA == auditIdB) {
+		if (auditIdA == auditIdB && auditIdA.isValid()) {
 			TraceEvent(SevError, "TestAuditStorageIDGeneratorError")
 			    .detail("AuditType", type)
 			    .detail("AuditIDA", auditIdA)
@@ -469,9 +478,8 @@ struct ValidateStorage : TestWorkload {
 
 	ACTOR Future<Void> testGetAuditStateWhenNoOngingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
 		TraceEvent("TestGetAuditStateBegin").detail("AuditType", type);
-		;
 		std::vector<AuditStorageState> res1 = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
-		if (res1.size() != 1) {
+		if (res1.size() > 1) { // == 0 if empty range when testAuditStorageFunctionality
 			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res1.size());
 		}
 		std::vector<AuditStorageState> res2 =

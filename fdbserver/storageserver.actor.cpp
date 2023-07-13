@@ -5587,6 +5587,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 	return res;
 }
 
+// Check consistency between StorageServer->shardInfo and ServerKeys system key space
 ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
@@ -5622,7 +5623,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	state int64_t remoteReadBytes = 0;
 
 	try {
-		while (true) {
+		loop {
 			try {
 				if (data->version.get() == 0) {
 					failureReason = "SS version is 0";
@@ -5649,6 +5650,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 
 				// Transactional read of serverKeys
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
 				serverKeyCompleteRange = serverKeyRes.completeRange;
 				serverKeyReadAtVersion = serverKeyRes.readAtVersion;
@@ -5665,6 +5667,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					wait(delay(0.5));
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
 					serverKeyCompleteRange = serverKeyRes.completeRange;
 					serverKeyReadAtVersion = serverKeyRes.readAtVersion;
@@ -5826,6 +5829,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	return Void();
 }
 
+// Check consistency between KeyServers and ServerKeys system key space
 ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateLocationMetadata);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
@@ -5861,7 +5865,7 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 	state int64_t remoteReadBytes = 0;
 
 	try {
-		while (true) {
+		loop {
 			try {
 				// Read
 				actors.clear();
@@ -5874,6 +5878,7 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Read KeyServers
 				wait(store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
 				completeRangeByKeyServer = keyServerRes.completeRange;
@@ -6073,7 +6078,7 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 	return Void();
 }
 
-ACTOR Future<Void> auditStorageUserDataQ(StorageServer* data, AuditStorageRequest req) {
+ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
@@ -6103,7 +6108,7 @@ ACTOR Future<Void> auditStorageUserDataQ(StorageServer* data, AuditStorageReques
 	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
 
 	try {
-		while (true) {
+		loop {
 			try {
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 				TraceEvent(SevDebug, "AuditStorageUserDataNewRoundBegin", data->thisServerID)
@@ -6121,6 +6126,7 @@ ACTOR Future<Void> auditStorageUserDataQ(StorageServer* data, AuditStorageReques
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Get SS interfaces
 				std::vector<Future<Optional<Value>>> serverListEntries;
@@ -13988,6 +13994,17 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
+				// Check req
+				if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty()) {
+					// ddId is used when persist progress
+					TraceEvent(SevWarnAlways, "AuditRequestInvalid") // unexpected
+					    .detail("AuditRange", req.range)
+					    .detail("DDId", req.ddId)
+					    .detail("AuditId", req.id)
+					    .detail("AuditType", req.getType());
+					req.reply.sendError(audit_storage_cancelled());
+					continue;
+				}
 				// Check existing audit task states
 				if (self->auditTasks.contains(req.getType())) {
 					if (req.id != self->auditTasks[req.getType()].first) {
@@ -14013,15 +14030,13 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				// Prepare for the new audit task
 				if (!self->auditTasks.contains(req.getType()) ||
 				    self->auditTasks[req.getType()].second.getResult().isReady()) {
-					ASSERT(req.id.isValid());
 					self->auditTasks[req.getType()] = std::make_pair(req.id, ActorCollection(true));
 				}
 				// Start the new audit task
-				ASSERT(req.ddId.isValid()); // ddId is used when persist progress
 				if (req.getType() == AuditType::ValidateHA) {
-					self->auditTasks[req.getType()].second.add(auditStorageUserDataQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateReplica) {
-					self->auditTasks[req.getType()].second.add(auditStorageUserDataQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
 					self->auditTasks[req.getType()].second.add(auditShardLocationMetadataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {

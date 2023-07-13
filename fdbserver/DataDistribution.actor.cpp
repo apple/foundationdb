@@ -1986,11 +1986,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	    .detail("AuditState", auditState.toString())
 	    .detail("Context", context);
 	ASSERT(auditState.id.isValid());
-	if (auditState.range.empty()) {
-		TraceEvent(SevWarn, "DDRunAuditStorageEmptyRange", self->ddId)
-		    .detail("AuditState", auditState.toString())
-		    .detail("Context", context);
-	}
+	ASSERT(!auditState.range.empty());
 	ASSERT(auditState.getPhase() == AuditPhase::Running);
 	auditState.ddId = self->ddId; // make sure any existing audit state claims the current DD
 	std::shared_ptr<DDAudit> audit = std::make_shared<DDAudit>(auditState);
@@ -2182,6 +2178,11 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		holder = FlowLock::Releaser(self->auditStorageSsShardLaunchingLock);
 	} else {
 		req.reply.sendError(not_implemented());
+		return Void();
+	}
+
+	if (req.range.empty()) {
+		req.reply.sendError(audit_storage_failed());
 		return Void();
 	}
 
