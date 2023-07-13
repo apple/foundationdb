@@ -312,7 +312,7 @@ else()
     --process-number 3
     )
 
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+  if(NOT USE_SANITIZER)
     add_python_venv_test(NAME fdb_c_client_config_tests
       COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
       --build-dir ${CMAKE_BINARY_DIR}

@@ -265,12 +265,12 @@ void WorkloadManager::run() {
 		iter->start();
 	}
 	scheduler->join();
-	if (ctrlInputThread.joinable()) {
-		ctrlInputThread.join();
-	}
 	if (outputPipe.is_open()) {
 		outputPipe << "DONE" << std::endl;
 		outputPipe.close();
+	}
+	if (ctrlInputThread.joinable()) {
+		ctrlInputThread.join();
 	}
 	if (failed()) {
 		log::error("{} workloads failed", numWorkloadsFailed);
