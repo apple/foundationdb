@@ -370,8 +370,8 @@ if(WITH_PYTHON)
     restarting/from_71.3.0/CycleTestRestart-2.txt)
   #TODO: Reenable this test once knob issue is fixed (FDBCORE-5417):
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
+    TEST_FILES restarting/from_71.3.1/BlobGranuleRestartCorrectness-1.toml
+    restarting/from_71.3.1/BlobGranuleRestartCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.toml
     restarting/from_71.3.0/SnapCycleRestart-2.toml)
@@ -394,8 +394,14 @@ if(WITH_PYTHON)
     TEST_FILES restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
+    TEST_FILES restarting/to_71.3.1/ConfigureStorageMigrationTestRestart-1.toml
+	restarting/to_71.3.1/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.3.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.1/CycleTestRestart-1.toml
+	restarting/to_71.3.1/CycleTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
     restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
