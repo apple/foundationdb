@@ -5799,6 +5799,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 				}
 			} catch (Error& e) {
+				data->stopTrackShardAssignment();
 				wait(tr.onError(e));
 			}
 
@@ -5829,7 +5830,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	return Void();
 }
 
-ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStorageRequest req) {
+ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateLocationMetadata);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
@@ -14027,7 +14028,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				} else if (req.getType() == AuditType::ValidateReplica) {
 					self->auditTasks[req.getType()].second.add(auditStorageUserDataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->auditTasks[req.getType()].second.add(auditStorageLocationMetadataQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditShardLocationMetadataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
 					self->auditTasks[req.getType()].second.add(auditStorageServerShardQ(self, req));
 				} else {
