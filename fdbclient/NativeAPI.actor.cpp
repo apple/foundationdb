@@ -9454,9 +9454,15 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 		if (self->version.get() < self->desired.get()) {
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
 			if (self->version.get() < self->desired.get()) {
+				// Avoid requesting a version hugely in the future and causing head-of-line blocking
+				// If the BW is behind and the storage is not, the returned version will still jump.
+				// If the storage is behind and the BW is stuck behind with it, this will repeat requests every *knob*
+				// versions which is not ideal but can be acceptable.
+				Version targetVersion = std::min(
+				    self->desired.get(), self->version.get() + CLIENT_KNOBS->CHANGE_FEED_DESIRED_VERSION_JUMP_MAX);
 				try {
 					ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
-					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
+					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(targetVersion))));
 					if (rep.version > self->version.get()) {
 						self->version.set(rep.version);
 					}
