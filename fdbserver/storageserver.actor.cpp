@@ -5467,6 +5467,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 		                        range,
 		                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 		                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+		Version readAtVersion = wait(tr->getReadVersion());
 		TraceEvent(SevVerbose, "AuditStorageGetThisServerKeysFromServerKeysReadDone", serverID)
 		    .detail("Range", range)
 		    .detail("Prefix", serverKeysPrefixFor(serverID))
@@ -5486,9 +5487,6 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 			}
 		}
 		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
-		Future<Version> getGrvF = tr->getReadVersion();
-		ASSERT(getGrvF.isReady());
-		const Version readAtVersion = getGrvF.get();
 		TraceEvent(SevVerbose, "AuditStorageGetThisServerKeysFromServerKeysEnd", serverID)
 		    .detail("AduitServerID", serverID)
 		    .detail("Range", range)
@@ -5546,6 +5544,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 		actors.push_back(store(UIDtoTagMap, tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
 		wait(waitForAll(actors));
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+		Version readAtVersion = wait(tr->getReadVersion());
 		TraceEvent(SevVerbose, "AuditStorageGetThisServerKeysFromKeyServersReadDone", auditServerId)
 		    .detail("Range", range)
 		    .detail("ResultSize", readResult.size())
@@ -5570,9 +5569,6 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 			}
 		}
 		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
-		Future<Version> getGrvF = tr->getReadVersion();
-		ASSERT(getGrvF.isReady());
-		const Version readAtVersion = getGrvF.get();
 		TraceEvent(SevInfo, "AuditStorageGetThisServerKeysFromKeyServersEnd", auditServerId)
 		    .detail("Range", range)
 		    .detail("CompleteRange", completeRange)
@@ -6170,7 +6166,7 @@ ACTOR Future<Void> auditStorageUserDataQ(StorageServer* data, AuditStorageReques
 				data->actors.add(getKeyValuesQ(data, localReq));
 				fs.push_back(errorOr(localReq.reply.getFuture()));
 				std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
-				// Note: getAll() must keep the order of fs and fs must keep the order of
+				// Note: getAll() must keep the order of fs
 
 				// Check read result
 				for (int i = 0; i < reps.size(); ++i) {
@@ -6355,7 +6351,6 @@ ACTOR Future<Void> auditStorageUserDataQ(StorageServer* data, AuditStorageReques
 					    .detail("AuditServer", data->thisServerID)
 					    .detail("CompleteRange", res.range);
 					if (!complete) {
-						ASSERT(claimRange.end < rangeToRead.end);
 						rangeToReadBegin = claimRange.end;
 					} else { // complete
 						req.reply.send(res);
