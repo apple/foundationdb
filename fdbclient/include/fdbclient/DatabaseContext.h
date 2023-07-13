@@ -594,7 +594,8 @@ public:
 	Counter feedPops;
 	Counter feedPopsFallback;
 
-	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
+	DDSketch<double> latencies, readLatencies, readRangeLatencies, commitLatencies, GRVLatencies, keyLocationLatencies,
+	    mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
