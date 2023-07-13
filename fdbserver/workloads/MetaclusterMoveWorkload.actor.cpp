@@ -122,18 +122,14 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return tenant;
 	}
 
-	Optional<TenantGroupName> chooseTenantGroup(Optional<ClusterName> cluster = Optional<ClusterName>()) {
-		Optional<TenantGroupName> tenantGroup;
-		if (deterministicRandom()->coinflip()) {
-			if (!cluster.present()) {
-				tenantGroup =
-				    TenantGroupNameRef(format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
-			} else {
-				auto const& existingGroups = dataDbs[cluster.get()].tenantGroups;
-				if (!existingGroups.empty()) {
-					tenantGroup = deterministicRandom()->randomChoice(
-					    std::vector<TenantGroupName>(existingGroups.begin(), existingGroups.end()));
-				}
+	TenantGroupName chooseTenantGroup(Optional<ClusterName> cluster = Optional<ClusterName>()) {
+		TenantGroupName tenantGroup =
+		    TenantGroupNameRef(format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
+		if (cluster.present()) {
+			auto const& existingGroups = dataDbs[cluster.get()].tenantGroups;
+			if (!existingGroups.empty()) {
+				tenantGroup = deterministicRandom()->randomChoice(
+				    std::vector<TenantGroupName>(existingGroups.begin(), existingGroups.end()));
 			}
 		}
 
@@ -252,7 +248,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				}
 				return Void();
 			} catch (Error& e) {
-				if (e.code() != error_code_metacluster_no_capacity) {
+				if (e.code() != error_code_cluster_no_capacity) {
 					throw;
 				}
 
@@ -279,12 +275,12 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					auto testData = self->createdTenants[tId];
 					if (testData.cluster != expectedCluster || !testData.tenantGroup.present() ||
 					    testData.tenantGroup.get() != tenantGroup) {
-						TraceEvent("MetaclusterMoveVerifyTenantLocationsFailed")
+						TraceEvent(SevError, "MetaclusterMoveVerifyTenantLocationsFailed")
 						    .detail("ExpectedTenantGroup", tenantGroup)
 						    .detail("ActualTenantGroup", testData.tenantGroup)
 						    .detail("ExpectedCluster", expectedCluster)
 						    .detail("ActualCluster", testData.cluster);
-						return false;
+						ASSERT(false);
 					}
 				}
 
@@ -308,11 +304,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				        mq;
 				state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints;
 
-				state Tuple beginTuple = Tuple::makeTuple(tenantGroup, "", TenantName(""_sr), KeyRef(""_sr));
-				state Tuple endTuple = Tuple::makeTuple(tenantGroup, "\xff", TenantName("\xff"_sr), KeyRef("\xff"_sr));
+				state Tuple beginTuple = Tuple::makeTuple(tenantGroup, "", ""_sr, ""_sr);
+				state Tuple endTuple = Tuple::makeTuple(tenantGroup, "\xff", "\xff"_sr, "\xff"_sr);
 				state std::pair<TenantGroupName, std::string> beginPair = std::make_pair(tenantGroup, "");
 				state std::pair<TenantGroupName, std::string> endPair = std::make_pair(tenantGroup, "\xff");
-				state int limit = 10;
+				state int limit = 1;
 
 				state Future<Void> mrFuture = store(
 				    mr,
@@ -898,15 +894,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			existingGroups = self->dataDbs[srcCluster].tenantGroups;
 		}
 
-		Optional<TenantGroupName> optionalTenantGroup;
-		tries = 0;
-		while (!optionalTenantGroup.present()) {
-			if (++tries >= tryLimit) {
-				return Void();
-			}
-			optionalTenantGroup = self->chooseTenantGroup(srcCluster);
-		}
-		state TenantGroupName tenantGroup = optionalTenantGroup.get();
+		state TenantGroupName tenantGroup = self->chooseTenantGroup(srcCluster);
 		state bool aborted;
 
 		// List of commands expected to fail after successful completion of specified step

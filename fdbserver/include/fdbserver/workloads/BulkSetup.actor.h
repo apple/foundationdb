@@ -93,13 +93,6 @@ Future<uint64_t> setupRange(Database cx,
 		if (tenants.size() > 0) {
 			tenant = deterministicRandom()->randomChoice(tenants);
 		}
-		if (tenant.present()) {
-			TraceEvent("SetupRangeTenant")
-			    .detail("TenantName", tenant.get()->name)
-			    .detail("TenantId", tenant.get()->id());
-		} else {
-			TraceEvent("SetupRangeTenantMissing");
-		}
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
 		try {
@@ -165,13 +158,6 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {
 			tenant = deterministicRandom()->randomChoice(tenants);
-		}
-		if (tenant.present()) {
-			TraceEvent("SetupRangeWorkerTenant")
-			    .detail("TenantName", tenant.get()->name)
-			    .detail("TenantId", tenant.get()->id());
-		} else {
-			TraceEvent("SetupRangeWorkerTenantMissing");
 		}
 		if (keySaveIncrement > 0) {
 			keysLoaded += job.second - job.first;

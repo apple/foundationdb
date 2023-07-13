@@ -394,7 +394,6 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	wait(checkTenantMode(tr, clusterType));
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
-
 	if (tenantEntry.present()) {
 		state typename transaction_future_type<Transaction, RangeReadResult>::type prefixRangeFuture =
 		    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
@@ -489,7 +488,6 @@ Future<Void> configureTenantTransaction(Transaction tr,
 	ASSERT(updatedTenantEntry.id == originalEntry.id);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-
 	TenantMetadata::tenantMap().set(tr, updatedTenantEntry.id, updatedTenantEntry);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 

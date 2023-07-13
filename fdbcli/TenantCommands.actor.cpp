@@ -465,7 +465,7 @@ ACTOR Future<bool> tenantMoveStatusCommand(Reference<IDatabase> db, std::vector<
 		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
-	TenantGroupName tenantGroup = tokens[3];
+	state TenantGroupName tenantGroup = tokens[3];
 	state metacluster::metadata::management::MovementRecord moveRecord;
 	try {
 		wait(store(moveRecord, metacluster::moveStatus(db, tenantGroup)));
@@ -512,6 +512,7 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
 	if (srcCluster == dstCluster) {
+		fmt::print("ERROR: source cluster must be different from destination cluster\n");
 		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
@@ -1250,10 +1251,20 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 		static std::vector<const char*> opts = { "<NAME>", "<UID>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "move") && tokens.size() < 6) {
-		static std::vector<const char*> opts = {
-			"<start|switch|finish|abort>", "TENANT_GROUP", "SOURCE_CLUSTER", "DESTINATION_CLUSTER"
-		};
-		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		if (tokens.size() < 3) {
+			static std::vector<const char*> opts = {
+				"<start|switch|finish|abort|status>", "TENANT_GROUP", "SOURCE_CLUSTER", "DESTINATION_CLUSTER"
+			};
+			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		} else if (tokens[2] == "status"_sr) {
+			if (tokens.size() < 4) {
+				static std::vector<const char*> opts = { "TENANT_GROUP" };
+				return std::vector<const char*>(opts.begin() + tokens.size() - 3, opts.end());
+			}
+		} else { // start, switch, finish, abort
+			static std::vector<const char*> opts = { "TENANT_GROUP", "SOURCE_CLUSTER", "DESTINATION_CLUSTER" };
+			return std::vector<const char*>(opts.begin() + tokens.size() - 3, opts.end());
+		}
 	} else {
 		return {};
 	}

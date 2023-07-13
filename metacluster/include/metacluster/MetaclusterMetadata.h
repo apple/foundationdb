@@ -112,13 +112,15 @@ struct MovementRecord {
 	ClusterName srcCluster;
 	ClusterName dstCluster;
 	MovementState mState;
-	Version version = -1;
+	Version version = invalidVersion;
 	bool aborting = false;
 
 	bool operator==(const MovementRecord& mr) const {
 		return runId == mr.runId && srcCluster == mr.srcCluster && dstCluster == mr.dstCluster && mState == mr.mState &&
 		       version == mr.version && aborting == mr.aborting;
 	}
+
+	bool operator!=(const MovementRecord& mr) const { return !(*this == mr); }
 
 	Tuple pack() const {
 		return Tuple::makeTuple(
