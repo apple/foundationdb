@@ -3436,6 +3436,13 @@ TransactionState::TransactionState(Database cx,
   : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext),
     readVersionObtainedFromGrvProxy(true), tenant_(tenant), tenantSet(tenant.present()) {}
 
+TransactionState::~TransactionState() {
+	// Need to cancel the actors, because otherwise they may access already destroyed
+	// transaction state members
+	readVersionFuture.cancel();
+	startFuture.cancel();
+}
+
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
 
@@ -3516,7 +3523,7 @@ bool TransactionState::hasTenant(ResolveDefaultTenant resolveDefaultTenant) {
 	return tenant_.present();
 }
 
-ACTOR Future<Void> startTransaction(Reference<TransactionState> trState) {
+ACTOR Future<Void> startTransaction(TransactionState* trState) {
 	wait(success(trState->readVersionFuture));
 	if (trState->hasTenant()) {
 		wait(trState->tenant().get()->ready());
@@ -3533,7 +3540,7 @@ Future<Void> TransactionState::startTransaction(uint32_t readVersionFlags) {
 		if (readVersionFuture.isReady() && (!hasTenant() || tenant().get()->ready().isReady())) {
 			startFuture = Void();
 		} else {
-			startFuture = ::startTransaction(Reference<TransactionState>::addRef(this));
+			startFuture = ::startTransaction(this);
 		}
 	}
 
@@ -7233,7 +7240,7 @@ bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority prior
 	return false;
 }
 
-ACTOR Future<Version> getReadVersion_internal(Reference<TransactionState> trState, uint32_t flags) {
+ACTOR Future<Version> getReadVersion_internal(TransactionState* trState, uint32_t flags) {
 	if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
 	    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
 	     trState->options.useGrvCache) &&
@@ -7343,7 +7350,7 @@ ACTOR Future<Version> getReadVersion_internal(Reference<TransactionState> trStat
 Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	ASSERT(!readVersionFuture.isValid());
 
-	return getReadVersion_internal(Reference<TransactionState>::addRef(this), flags);
+	return getReadVersion_internal(this, flags);
 }
 
 Optional<ThrottlingId> TransactionState::getThrottlingId() {
@@ -7382,6 +7389,20 @@ void TransactionState::flushWriteCost() {
 
 int64_t TransactionState::getTotalCost() const {
 	return readCost + writeCost;
+}
+
+ACTOR Future<Version> Transaction_getReadVersion(Reference<TransactionState> trState) {
+	if (!trState->readVersionFuture.isValid()) {
+		trState->readVersionFuture = trState->getReadVersion(0);
+	}
+	// Here are we waiting on readVersionFuture instead of simply returning it
+	// because unlike readVersionFuture, this actor holds a reference to the transaction
+	Version v = wait(trState->readVersionFuture);
+	return v;
+}
+
+Future<Version> Transaction::getReadVersion() {
+	return Transaction_getReadVersion(trState);
 }
 
 Optional<Version> Transaction::getCachedReadVersion() const {
