@@ -21,6 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/ServerThroughputTracker.h"
 #include "fdbserver/TagThrottler.h"
 
 #include <limits>
@@ -181,50 +182,12 @@ class GlobalTagThrottlerImpl {
 
 	std::unordered_map<UID, StorageServerInfo> ssInfos;
 	std::unordered_map<TransactionTag, PerTagStatistics> tagStatistics;
-	std::unordered_map<UID, std::unordered_map<TransactionTag, ThroughputCounters>> throughput;
-
-	// Returns the cost rate for the given tag on the given storage server
-	Optional<double> getCurrentCost(UID storageServerId, TransactionTag tag) const {
-		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!tagToThroughputCounters.present()) {
-			return {};
-		}
-		auto const throughputCounter = tryGet(tagToThroughputCounters.get(), tag);
-		if (!throughputCounter.present()) {
-			return {};
-		}
-		return throughputCounter.get().getCost();
-	}
-
-	// Return the cost rate on the given storage server, summed across all tags
-	Optional<double> getCurrentCost(UID storageServerId) const {
-		auto tagToPerTagThroughput = tryGet(throughput, storageServerId);
-		if (!tagToPerTagThroughput.present()) {
-			return {};
-		}
-		double result = 0;
-		for (const auto& [tag, perTagThroughput] : tagToPerTagThroughput.get()) {
-			result += perTagThroughput.getCost();
-		}
-		return result;
-	}
-
-	// Return the cost rate for the given tag, summed across all storage servers
-	double getCurrentCost(TransactionTag tag) const {
-		double result{ 0.0 };
-		for (const auto& [id, _] : throughput) {
-			result += getCurrentCost(id, tag).orDefault(0);
-		}
-		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
-		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", tag).detail("Cost", result);
-
-		return result;
-	}
+	ServerThroughputTracker throughputTracker;
 
 	// For transactions with the provided tag, returns the average cost that gets associated with the provided storage
 	// server
 	Optional<double> getAverageTransactionCost(TransactionTag tag, UID storageServerId) const {
-		auto const cost = getCurrentCost(storageServerId, tag);
+		auto const cost = throughputTracker.getThroughput(storageServerId, tag);
 		if (!cost.present()) {
 			return {};
 		}
@@ -246,7 +209,7 @@ class GlobalTagThrottlerImpl {
 	// accross the cluster. The minimum cost is one page. If the transaction rate is too low,
 	// return an empty Optional, because no accurate estimation can be made.
 	Optional<double> getAverageTransactionCost(TransactionTag tag, TraceEvent& te) const {
-		auto const cost = getCurrentCost(tag);
+		auto const cost = throughputTracker.getThroughput(tag);
 		auto const stats = tryGet(tagStatistics, tag);
 		if (!stats.present()) {
 			return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
@@ -259,21 +222,6 @@ class GlobalTagThrottlerImpl {
 		} else {
 			return std::max(static_cast<double>(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE), cost / transactionRate);
 		}
-	}
-
-	// Returns the list of all tags performing meaningful work on the given storage server
-	std::vector<TransactionTag> getTagsAffectingStorageServer(UID storageServerId) const {
-		std::vector<TransactionTag> result;
-		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!tagToThroughputCounters.present()) {
-			return {};
-		} else {
-			result.reserve(tagToThroughputCounters.get().size());
-			for (const auto& [t, _] : tagToThroughputCounters.get()) {
-				result.push_back(t);
-			}
-		}
-		return result;
 	}
 
 	Optional<double> getQuota(TransactionTag tag, LimitType limitType) const {
@@ -297,7 +245,7 @@ class GlobalTagThrottlerImpl {
 	double getQuotaRatio(TransactionTagRef tag, UID storageServerId) const {
 		double sumQuota{ 0.0 };
 		double tagQuota{ 0.0 };
-		auto const tagsAffectingStorageServer = getTagsAffectingStorageServer(storageServerId);
+		auto const tagsAffectingStorageServer = throughputTracker.getTagsAffectingStorageServer(storageServerId);
 		for (const auto& t : tagsAffectingStorageServer) {
 			auto const tQuota = getQuota(t, LimitType::TOTAL);
 			sumQuota += tQuota.orDefault(0);
@@ -317,7 +265,7 @@ class GlobalTagThrottlerImpl {
 	Optional<double> getLimitingCost(UID storageServerId) const {
 		auto const ssInfo = tryGet(ssInfos, storageServerId);
 		Optional<double> const throttlingRatio = ssInfo.present() ? ssInfo.get().throttlingRatio : Optional<double>{};
-		Optional<double> const currentCost = getCurrentCost(storageServerId);
+		Optional<double> const currentCost = throughputTracker.getThroughput(storageServerId);
 		if (!throttlingRatio.present() || !currentCost.present()) {
 			return {};
 		}
@@ -429,7 +377,7 @@ class GlobalTagThrottlerImpl {
 		    .detail("LimitingTps", limitingTps)
 		    .detail("ReservedTps", reservedTps)
 		    .detail("DesiredTps", desiredTps)
-		    .detail("NumStorageServers", throughput.size())
+		    .detail("NumStorageServers", throughputTracker.storageServersTracked())
 		    .detail("TotalQuota", totalQuota)
 		    .detail("ReservedQuota", reservedQuota);
 
@@ -536,36 +484,16 @@ public:
 	uint32_t busyWriteTagCount() const { return lastBusyTagCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
-		auto& ssInfo = ssInfos[ss.id];
-		ssInfo.throttlingRatio = ss.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
-		                                                  SERVER_KNOBS->AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER);
-		ssInfo.zoneId = ss.locality.zoneId();
-
-		auto& tagToThroughputCounters = throughput[ss.id];
-		std::unordered_set<TransactionTag> busyReadTags, busyWriteTags;
-		for (const auto& busyReadTag : ss.busiestReadTags) {
-			busyReadTags.insert(busyReadTag.tag);
-			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
-				tagToThroughputCounters[busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
-			}
+	void updateThrottling(Map<UID, StorageQueueInfo> const& sqInfos) {
+		for (auto it = sqInfos.begin(); it != sqInfos.end(); ++it) {
+			auto& ss = it->value;
+			auto& ssInfo = ssInfos[ss.id];
+			ssInfo.throttlingRatio =
+			    ss.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
+			                             SERVER_KNOBS->AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER);
+			ssInfo.zoneId = ss.locality.zoneId();
 		}
-		for (const auto& busyWriteTag : ss.busiestWriteTags) {
-			busyWriteTags.insert(busyWriteTag.tag);
-			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
-				tagToThroughputCounters[busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
-			}
-		}
-
-		for (auto& [tag, throughputCounters] : tagToThroughputCounters) {
-			if (!busyReadTags.count(tag)) {
-				throughputCounters.updateCost(0.0, OpType::READ);
-			}
-			if (!busyWriteTags.count(tag)) {
-				throughputCounters.updateCost(0.0, OpType::WRITE);
-			}
-		}
-		return Void();
+		throughputTracker.update(sqInfos);
 	}
 
 	void setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
@@ -578,9 +506,7 @@ public:
 		for (auto it = tagStatistics.begin(); it != tagStatistics.end();) {
 			const auto& [tag, stats] = *it;
 			if (!stats.recentTransactionsAdded()) {
-				for (auto& [ss, tagToCounters] : throughput) {
-					tagToCounters.erase(tag);
-				}
+				throughputTracker.removeTag(tag);
 				it = tagStatistics.erase(it);
 			} else {
 				++it;
@@ -626,8 +552,8 @@ int64_t GlobalTagThrottler::manualThrottleCount() const {
 bool GlobalTagThrottler::isAutoThrottlingEnabled() const {
 	return true;
 }
-Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
-	return impl->tryUpdateAutoThrottling(ss);
+void GlobalTagThrottler::updateThrottling(Map<UID, StorageQueueInfo> const& sqInfos) {
+	return impl->updateThrottling(sqInfos);
 }
 
 void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
@@ -708,6 +634,7 @@ public:
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *
 		                              SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
+		result.valid = true;
 		return result;
 	}
 };
@@ -755,11 +682,11 @@ public:
 
 	void setCapacity(int index, double value) { storageServers[index].setCapacity(value); }
 
-	std::vector<StorageQueueInfo> getStorageQueueInfos() const {
-		std::vector<StorageQueueInfo> result;
-		result.reserve(storageServers.size());
+	Map<UID, StorageQueueInfo> getStorageQueueInfos() const {
+		Map<UID, StorageQueueInfo> result;
 		for (const auto& storageServer : storageServers) {
-			result.push_back(storageServer.getStorageQueueInfo());
+			auto const sqInfo = storageServer.getStorageQueueInfo();
+			result.insert(mapPair(sqInfo.id, sqInfo));
 		}
 		return result;
 	}
@@ -846,9 +773,7 @@ ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottl
 	loop {
 		wait(delay(1.0));
 		auto const storageQueueInfos = storageServers->getStorageQueueInfos();
-		for (const auto& sq : storageQueueInfos) {
-			globalTagThrottler->tryUpdateAutoThrottling(sq);
-		}
+		globalTagThrottler->updateThrottling(storageServers->getStorageQueueInfos());
 	}
 }
 
