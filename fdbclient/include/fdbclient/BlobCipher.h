@@ -87,25 +87,6 @@ public:
 
 	static const std::unordered_map<int, std::string> usageTypeNames;
 
-	struct CounterSet : public ReferenceCounted<CounterSet> {
-		Counter encryptCPUTimeNS;
-		Counter decryptCPUTimeNS;
-		LatencySample getCipherKeysLatency;
-		LatencySample getLatestCipherKeysLatency;
-
-		CounterSet(CounterCollection& cc, std::string name);
-	};
-
-	static CounterSet& counters(UsageType t) {
-		ASSERT(t < UsageType::MAX);
-		auto& counterSets = getInstance()->counterSets;
-		int index = FLOW_KNOBS->ENCRYPT_KEY_CACHE_ENABLE_DETAIL_LOGGING ? (int)t : (int)UsageType::ALL;
-		if (!counterSets[index].isValid()) {
-			counterSets[index] = makeReference<CounterSet>(getInstance()->cc, usageTypeNames.at(index));
-		}
-		return *counterSets[index];
-	}
-
 private:
 	BlobCipherMetrics();
 
@@ -120,7 +101,8 @@ public:
 	Counter latestCipherKeyCacheMiss;
 	Counter latestCipherKeyCacheNeedsRefresh;
 	LatencySample getBlobMetadataLatency;
-	std::array<Reference<CounterSet>, int(UsageType::MAX)> counterSets;
+	LatencySample getCipherKeysLatency;
+	LatencySample getLatestCipherKeysLatency;
 };
 
 std::string toString(BlobCipherMetrics::UsageType type);
@@ -949,12 +931,19 @@ public:
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
 	                              const int plaintextLen,
 	                              BlobCipherEncryptHeader* header,
-	                              Arena&);
+	                              Arena&,
+	                              double* encryptTime = nullptr);
 	StringRef encrypt(const uint8_t*, const int, BlobCipherEncryptHeaderRef*, Arena&, double* encryptTime = nullptr);
 
-	void encryptInplace(uint8_t* plaintext, const int plaintextLen, BlobCipherEncryptHeader* header);
+	void encryptInplace(uint8_t* plaintext,
+	                    const int plaintextLen,
+	                    BlobCipherEncryptHeader* header,
+	                    double* encryptTime = nullptr);
 
-	void encryptInplace(uint8_t* plaintext, const int plaintextLen, BlobCipherEncryptHeaderRef* headerRef);
+	void encryptInplace(uint8_t* plaintext,
+	                    const int plaintextLen,
+	                    BlobCipherEncryptHeaderRef* headerRef,
+	                    double* encryptTime = nullptr);
 
 private:
 	void init();
@@ -996,14 +985,18 @@ public:
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,
 	                              const int ciphertextLen,
 	                              const BlobCipherEncryptHeader& header,
-	                              Arena&);
+	                              Arena&,
+	                              double* decryptTime = nullptr);
 	StringRef decrypt(const uint8_t* ciphertext,
 	                  const int ciphertextLen,
 	                  const BlobCipherEncryptHeaderRef& headerRef,
 	                  Arena&,
 	                  double* decryptTime = nullptr);
 
-	void decryptInplace(uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);
+	void decryptInplace(uint8_t* ciphertext,
+	                    const int ciphertextLen,
+	                    const BlobCipherEncryptHeader& header,
+	                    double* decryptTime = nullptr);
 
 	void decryptInplace(uint8_t* ciphertext,
 	                    const int ciphertextLen,
@@ -1012,7 +1005,6 @@ public:
 
 private:
 	EVP_CIPHER_CTX* ctx;
-	BlobCipherMetrics::UsageType usageType;
 	Reference<BlobCipherKey> textCipherKey;
 	Optional<Reference<BlobCipherKey>> headerCipherKeyOpt;
 	bool authTokensValidationDone;
