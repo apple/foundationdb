@@ -226,7 +226,9 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	Future<Void> kmsStabilityChecker;
 
 	RESTKmsConnectorCtx()
-	  : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
+	  : uid(deterministicRandom()->randomUniqueID()),
+	    lastKmsUrlsRefreshTs(0),
+	    lastKmsUrlDiscoverTS(0.0) {}
 	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
 };
 
