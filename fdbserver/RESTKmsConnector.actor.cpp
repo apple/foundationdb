@@ -1121,6 +1121,8 @@ ACTOR Future<Void> procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 
 // Check if KMS is table by checking request failure count from RESTClient metrics.
 // Will clear RESTClient metrics afterward, assuming it is the only user of the metrics.
+//
+// TODO(yiwu): make RESTClient periodically report and clear the stats.
 void updateKMSStability(Reference<RESTKmsConnectorCtx> self) {
 	bool stable = true;
 	for (auto& s : self->restClient.statsMap) {
