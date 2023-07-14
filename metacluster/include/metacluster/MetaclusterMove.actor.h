@@ -58,14 +58,14 @@ namespace internal {
 
 FDB_BOOLEAN_PARAM(Aborting);
 
-template <class DB>
-ACTOR static Future<metadata::management::MovementRecord> getMovementRecordNoValidation(
+ACTOR template <class DB>
+static Future<metadata::management::MovementRecord> getMovementRecordNoValidation(
     Reference<typename DB::TransactionT> tr,
     TenantGroupName tenantGroup) {
 	Optional<metadata::management::MovementRecord> moveRecord =
 	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
 	if (!moveRecord.present()) {
-		TraceEvent("TenantMoveStatusRecordNotPresent").detail("TenantGroup", tenantGroup);
+		TraceEvent("TenantMoveRecordNotPresentNoValidation").detail("TenantGroup", tenantGroup);
 		throw tenant_move_record_missing();
 	}
 	return moveRecord.get();
@@ -599,16 +599,15 @@ struct SwitchTenantMovementImpl {
 	ACTOR static Future<RangeReadResult> readTenantData(Reference<ITenant> tenant,
 	                                                    KeyRef begin,
 	                                                    KeyRef end,
-	                                                    int64_t limit) {
-		state ThreadFuture<RangeReadResult> resultFuture;
+	                                                    int64_t limit,
+	                                                    ThreadFuture<RangeReadResult> resultFuture) {
 		state Reference<ITransaction> tr = tenant->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
 				resultFuture = tr->getRange(KeyRangeRef(begin, end), limit);
 				RangeReadResult result = wait(safeThreadFutureToFuture(resultFuture));
-				auto copy = result;
-				return copy;
+				return result;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
@@ -624,12 +623,14 @@ struct SwitchTenantMovementImpl {
 		// what should limit be?
 		state int64_t limit = 10000;
 
+		state ThreadFuture<RangeReadResult> resultFutureSrc;
+		state ThreadFuture<RangeReadResult> resultFutureDst;
 		state RangeReadResult srcRange;
 		state RangeReadResult dstRange;
 
 		loop {
-			wait(store(srcRange, readTenantData(srcTenant, begin, end, limit)) &&
-			     store(dstRange, readTenantData(dstTenant, begin, end, limit)));
+			wait(store(srcRange, readTenantData(srcTenant, begin, end, limit, resultFutureSrc)) &&
+			     store(dstRange, readTenantData(dstTenant, begin, end, limit, resultFutureDst)));
 			if (srcRange != dstRange) {
 				TraceEvent("TenantMoveSwitchDataMismatch")
 				    .detail("TenantName", tName)
@@ -2009,7 +2010,7 @@ Future<metadata::management::MovementRecord> moveStatus(Reference<DB> db, Tenant
 	MetaclusterOperationContext<DB> ctx(db);
 	metadata::management::MovementRecord mr =
 	    wait(ctx.runManagementTransaction([tenantGroup = tenantGroup](Reference<typename DB::TransactionT> tr) {
-		    internal::getMovementRecordNoValidation(tr, tenantGroup);
+		    return internal::getMovementRecordNoValidation<DB>(tr, tenantGroup);
 	    }));
 	return mr;
 }

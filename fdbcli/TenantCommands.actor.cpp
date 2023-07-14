@@ -1265,6 +1265,7 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 			static std::vector<const char*> opts = { "<TENANT_GROUP>", "<SOURCE_CLUSTER>", "<DESTINATION_CLUSTER>" };
 			return std::vector<const char*>(opts.begin() + tokens.size() - 3, opts.end());
 		}
+		return {};
 	} else {
 		return {};
 	}
