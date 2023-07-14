@@ -71,6 +71,12 @@ static Future<metadata::management::MovementRecord> getMovementRecordNoValidatio
 	return moveRecord.get();
 }
 
+static Future<Void> clearDataClusterQuota(Reference<ITransaction> tr, TenantGroupName tenantGroup) {
+	tr->clear(ThrottleApi::getTagQuotaKey(tenantGroup));
+	TenantMetadata::storageQuota().erase(tr, tenantGroup);
+	return Void();
+}
+
 ACTOR template <class Transaction>
 static Future<Optional<metadata::management::MovementRecord>> tryGetMovementRecord(
     Reference<Transaction> tr,
@@ -1319,6 +1325,9 @@ struct FinishTenantMovementImpl {
 		TraceEvent("Breakpoint6");
 		wait(unlockDestinationTenants(self));
 
+		wait(self->srcCtx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return clearDataClusterQuota(tr, self->tenantGroup); }));
+
 		TraceEvent("Breakpoint7");
 		try {
 			wait(purgeSourceBlobRanges(self));
@@ -1726,7 +1735,6 @@ struct AbortTenantMovementImpl {
 		// If no tenant entries exist on dst, they are already deleted or were never created
 		state std::vector<TenantMapEntry> dstEntries;
 		state bool runDelete = true;
-		state int tries = 0;
 		loop {
 			TraceEvent("BreakpointLoop1");
 			try {
@@ -1777,6 +1785,9 @@ struct AbortTenantMovementImpl {
 					                                  return checkValidDelete(
 					                                      self, tr, srcEntries, dstEntries, movementRecord);
 				                                  }));
+				wait(self->dstCtx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+					return clearDataClusterQuota(tr, self->tenantGroup);
+				}));
 				TraceEvent("BreakpointAbort3.3");
 				wait(deleteAllDestinationData(self));
 				TraceEvent("BreakpointAbort3.4");
