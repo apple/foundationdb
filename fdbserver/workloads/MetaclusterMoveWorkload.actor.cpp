@@ -248,7 +248,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				}
 				return Void();
 			} catch (Error& e) {
-				if (e.code() != error_code_cluster_no_capacity) {
+				if (e.code() != error_code_metacluster_no_capacity) {
 					throw;
 				}
 
@@ -607,7 +607,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		// bulkSetup usually expects all clients
 		// but this is being circumvented by the clientId==0 check
 		self->clientCount = 1;
-		TraceEvent("BreakpointStuck1");
 		// container of range-based for with continuation must be a state variable
 		state std::map<ClusterName, DataClusterData> dataDbs = self->dataDbs;
 		for (auto const& [clusterName, dataDb] : dataDbs) {
@@ -636,15 +635,12 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				               0,
 				               dataTenants));
 			}
-			TraceEvent("BreakpointStuck2");
 			// Blobbify all tenants
 			std::vector<Future<bool>> blobFutures;
 			for (Reference<Tenant> tenantRef : dataTenants) {
 				blobFutures.push_back(dbObj->blobbifyRangeBlocking(normalKeys, tenantRef));
 			}
-			TraceEvent("BreakpointStuck3");
 			wait(waitForAll(blobFutures));
-			TraceEvent("BreakpointStuck4");
 		}
 
 		// Set storage and tag quotas
