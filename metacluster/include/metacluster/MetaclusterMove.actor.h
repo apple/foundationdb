@@ -71,24 +71,20 @@ static Future<Optional<metadata::management::MovementRecord>> tryGetMovementReco
 	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
 
 	if (!validMovementStates.empty()) {
-		if (!moveRecord.present()) {
-			if (validMovementStates.contains(Optional<metadata::management::MovementState>())) {
-				return moveRecord;
-			}
-			TraceEvent("TenantMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
-			throw tenant_move_record_missing();
-		}
 		Optional<metadata::management::MovementState> movementState =
 		    moveRecord.map(&metadata::management::MovementRecord::mState);
-
 		if (!validMovementStates.count(movementState)) {
-			TraceEvent("TenantMovementInInvalidState")
-			    .detail("State", movementState)
-			    .detail("SourceCluster", src)
-			    .detail("DestinationCluster", dst)
-			    .detail("TenantGroup", tenantGroup);
-			TraceEvent("TenantMovementInInvalidState").detail("State", movementState);
-			throw invalid_tenant_move();
+			if (!moveRecord.present()) {
+				TraceEvent("TenantMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
+				throw tenant_move_record_missing();
+			} else {	
+				TraceEvent("TenantMovementInInvalidState")
+				    .detail("State", movementState)
+				    .detail("SourceCluster", src)
+				    .detail("DestinationCluster", dst)
+				    .detail("TenantGroup", tenantGroup);
+				throw invalid_tenant_move();
+			}
 		}
 	}
 	if (moveRecord.present()) {
