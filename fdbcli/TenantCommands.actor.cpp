@@ -477,11 +477,11 @@ ACTOR Future<bool> tenantMoveStatusCommand(Reference<IDatabase> db, std::vector<
 		return false;
 	}
 	fmt::print("Move in progress for tenant group {}:\n"
-	           "	Source Cluster:			{}\n"
-	           "	Destination Cluster: 	{}\n"
-	           "	Movement State:			{}\n"
-	           "	Version:				{}\n"
-	           "	Aborting:				{}\n",
+	           "  Source Cluster: {}\n"
+	           "  Destination Cluster: {}\n"
+	           "  Movement State: {}\n"
+	           "  Version: {}\n"
+	           "  Aborting: {}\n",
 	           tenantGroup,
 	           moveRecord.srcCluster,
 	           moveRecord.dstCluster,
@@ -1253,16 +1253,16 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	} else if (tokencmp(tokens[1], "move") && tokens.size() < 6) {
 		if (tokens.size() < 3) {
 			static std::vector<const char*> opts = {
-				"<start|switch|finish|abort|status>", "TENANT_GROUP", "SOURCE_CLUSTER", "DESTINATION_CLUSTER"
+				"<start|switch|finish|abort|status>", "<TENANT_GROUP>", "<SOURCE_CLUSTER>", "<DESTINATION_CLUSTER>"
 			};
 			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 		} else if (tokens[2] == "status"_sr) {
 			if (tokens.size() < 4) {
-				static std::vector<const char*> opts = { "TENANT_GROUP" };
+				static std::vector<const char*> opts = { "<TENANT_GROUP>" };
 				return std::vector<const char*>(opts.begin() + tokens.size() - 3, opts.end());
 			}
 		} else { // start, switch, finish, abort
-			static std::vector<const char*> opts = { "TENANT_GROUP", "SOURCE_CLUSTER", "DESTINATION_CLUSTER" };
+			static std::vector<const char*> opts = { "<TENANT_GROUP>", "<SOURCE_CLUSTER>", "<DESTINATION_CLUSTER>" };
 			return std::vector<const char*>(opts.begin() + tokens.size() - 3, opts.end());
 		}
 	} else {
