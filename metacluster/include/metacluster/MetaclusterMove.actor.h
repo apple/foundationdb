@@ -710,16 +710,6 @@ struct SwitchTenantMovementImpl {
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		TraceEvent("TenantMoveSwitchBegin");
 
-		// Possible Retry
-		TraceEvent("TenantMoveSwitchBegin2");
-		Tuple dstEntry = Tuple::makeTuple(dstName, self->tenantGroup);
-		bool exists = wait(metadata::management::clusterTenantGroupIndex().exists(tr, dstEntry));
-		if (exists) {
-			TraceEvent("TenantMoveSwitchBegin2.1");
-			return Void();
-		}
-		TraceEvent("TenantMoveSwitchBegin3");
-
 		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
 		wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, self->tenantsInGroup)));
 
@@ -730,10 +720,10 @@ struct SwitchTenantMovementImpl {
 
 			// tenantMetadata().tenantMap update assigned cluster
 			if (tenantEntry.assignedCluster != srcName) {
-				// if (tenantEntry.assignedCluster == dstName) {
-				// 	// possible that this is a retry
-				// 	return Void();
-				// }
+				if (tenantEntry.assignedCluster == dstName) {
+					// possible that this is a retry
+					return Void();
+				}
 				TraceEvent(SevError, "TenantMoveSwitchTenantEntryWrongCluster")
 				    .detail("TenantName", tName)
 				    .detail("TenantId", tId)
@@ -1636,10 +1626,10 @@ struct AbortTenantMovementImpl {
 
 			// tenantMetadata().tenantMap update assigned cluster
 			if (tenantEntry.assignedCluster != dstName) {
-				// if (tenantEntry.assignedCluster == srcName) {
-				// 	// possible that this is a retry
-				// 	return Void();
-				// }
+				if (tenantEntry.assignedCluster == srcName) {
+					// possible that this is a retry
+					return Void();
+				}
 				TraceEvent(SevError, "TenantMoveAbortSwitchTenantEntryWrongCluster")
 				    .detail("TenantName", tName)
 				    .detail("TenantId", tId)
