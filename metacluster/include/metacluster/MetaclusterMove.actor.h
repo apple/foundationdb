@@ -1785,9 +1785,6 @@ struct AbortTenantMovementImpl {
 					                                  return checkValidDelete(
 					                                      self, tr, srcEntries, dstEntries, movementRecord);
 				                                  }));
-				wait(self->dstCtx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-					return clearDataClusterQuota(tr, self->tenantGroup);
-				}));
 				TraceEvent("BreakpointAbort3.3");
 				wait(deleteAllDestinationData(self));
 				TraceEvent("BreakpointAbort3.4");
@@ -1801,6 +1798,8 @@ struct AbortTenantMovementImpl {
 				}
 			}
 		}
+		wait(self->dstCtx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return clearDataClusterQuota(tr, self->tenantGroup); }));
 		TraceEvent("BreakpointAbort3.6");
 
 		// Update state and unwind with other steps
