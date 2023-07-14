@@ -680,14 +680,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough
 		// servers left alive to do a coordinators auto (?)
 		if (toKill.size()) {
-			if (!excludeLocalitiesInsteadOfServers) {
-				// Wait for removal to be safe
-				TraceEvent("RemoveAndKill", functionId)
-				    .detail("Step", "Wait For Server Exclusion")
-				    .detail("Addresses", describe(toKill))
-				    .detail("ClusterAvailable", g_simulator->isAvailable());
-				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
-			}
+			// Wait for removal to be safe
+			TraceEvent("RemoveAndKill", functionId)
+			    .detail("Step", "Wait For Server Exclusion")
+			    .detail("Addresses", describe(toKill))
+			    .detail("ClusterAvailable", g_simulator->isAvailable());
+			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "coordinators auto")

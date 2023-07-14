@@ -738,7 +738,7 @@ Optional<ValueRef> DatabaseConfiguration::get(KeyRef key) const {
 	}
 }
 
-bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a) const {
+bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a, const LocalityData& locality) const {
 	return get(encodeExcludedServersKey(AddressExclusion(a.address.ip, a.address.port))).present() ||
 	       get(encodeExcludedServersKey(AddressExclusion(a.address.ip))).present() ||
 	       get(encodeFailedServersKey(AddressExclusion(a.address.ip, a.address.port))).present() ||
@@ -749,7 +749,8 @@ bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a) const {
 	         get(encodeExcludedServersKey(AddressExclusion(a.secondaryAddress.get().ip))).present() ||
 	         get(encodeFailedServersKey(AddressExclusion(a.secondaryAddress.get().ip, a.secondaryAddress.get().port)))
 	             .present() ||
-	         get(encodeFailedServersKey(AddressExclusion(a.secondaryAddress.get().ip))).present()));
+	         get(encodeFailedServersKey(AddressExclusion(a.secondaryAddress.get().ip))).present())) ||
+	       isExcludedLocality(locality);
 }
 std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
