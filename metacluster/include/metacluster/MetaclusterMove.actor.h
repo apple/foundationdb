@@ -58,6 +58,19 @@ namespace internal {
 
 FDB_BOOLEAN_PARAM(Aborting);
 
+template <class DB>
+ACTOR static Future<metadata::management::MovementRecord> getMovementRecordNoValidation(
+    Reference<typename DB::TransactionT> tr,
+    TenantGroupName tenantGroup) {
+	Optional<metadata::management::MovementRecord> moveRecord =
+	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
+	if (!moveRecord.present()) {
+		TraceEvent("TenantMoveStatusRecordNotPresent").detail("TenantGroup", tenantGroup);
+		throw tenant_move_record_missing();
+	}
+	return moveRecord.get();
+}
+
 ACTOR template <class Transaction>
 static Future<Optional<metadata::management::MovementRecord>> tryGetMovementRecord(
     Reference<Transaction> tr,
@@ -77,7 +90,7 @@ static Future<Optional<metadata::management::MovementRecord>> tryGetMovementReco
 			if (!moveRecord.present()) {
 				TraceEvent("TenantMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
 				throw tenant_move_record_missing();
-			} else {	
+			} else {
 				TraceEvent("TenantMovementInInvalidState")
 				    .detail("State", movementState)
 				    .detail("SourceCluster", src)
@@ -1925,39 +1938,6 @@ struct AbortTenantMovementImpl {
 	Future<Void> run() { return run(this); }
 };
 
-template <class DB>
-struct MoveStatusImpl {
-	MetaclusterOperationContext<DB> ctx;
-
-	// Initialization parameters
-	TenantGroupName tenantGroup;
-
-	// Result
-	metadata::management::MovementRecord moveRecord;
-
-	MoveStatusImpl(Reference<DB> managementDb, TenantGroupName tenantGroup)
-	  : ctx(managementDb), tenantGroup(tenantGroup) {}
-
-	ACTOR static Future<Void> getMoveRecord(MoveStatusImpl* self, Reference<typename DB::TransactionT> tr) {
-		Optional<metadata::management::MovementRecord> moveRecord =
-		    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, self->tenantGroup));
-		if (!moveRecord.present()) {
-			TraceEvent("TenantMoveStatusRecordNotPresent").detail("TenantGroup", self->tenantGroup);
-			throw tenant_move_record_missing();
-		}
-		self->moveRecord = moveRecord.get();
-		return Void();
-	}
-
-	ACTOR static Future<Void> run(MoveStatusImpl* self) {
-		wait(self->ctx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return getMoveRecord(self, tr); }));
-		return Void();
-	}
-
-	Future<Void> run() { return run(this); }
-};
-
 } // namespace internal
 
 ACTOR template <class DB>
@@ -2026,9 +2006,12 @@ Future<Void> abortTenantMovement(Reference<DB> db,
 
 ACTOR template <class DB>
 Future<metadata::management::MovementRecord> moveStatus(Reference<DB> db, TenantGroupName tenantGroup) {
-	state internal::MoveStatusImpl<DB> impl(db, tenantGroup);
-	wait(impl.run());
-	return impl.moveRecord;
+	MetaclusterOperationContext<DB> ctx(db);
+	metadata::management::MovementRecord mr =
+	    wait(ctx.runManagementTransaction([tenantGroup = tenantGroup](Reference<typename DB::TransactionT> tr) {
+		    internal::getMovementRecordNoValidation(tr, tenantGroup);
+	    }));
+	return mr;
 }
 
 } // namespace metacluster
