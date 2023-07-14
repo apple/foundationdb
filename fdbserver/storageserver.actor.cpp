@@ -5833,7 +5833,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 					wait(persistAuditStateByServer(data->cx, res));
-					TraceEvent(SevInfo, "AuditStorageSsShardDone", data->thisServerID)
+					TraceEvent(SevInfo, "AuditStorageSsShardPartialDone", data->thisServerID)
+					    .suppressFor(10.0)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("AuditServer", data->thisServerID)
@@ -5873,6 +5874,12 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
+
+	TraceEvent(SevInfo, "AuditStorageSsShardComplete", data->thisServerID)
+	    .detail("AuditId", req.id)
+	    .detail("AuditRange", req.range)
+	    .detail("AuditServer", data->thisServerID)
+	    .detail("CompleteRange", res.range);
 
 	return Void();
 }
@@ -6106,7 +6113,8 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 					}
 					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 					wait(persistAuditStateByRange(data->cx, res));
-					TraceEvent(SevInfo, "AuditStorageShardLocMetadataDone", data->thisServerID)
+					TraceEvent(SevInfo, "AuditStorageShardLocMetadataPartialDone", data->thisServerID)
+					    .suppressFor(10.0)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("Version", readAtVersion)
@@ -6141,6 +6149,12 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
+
+	TraceEvent(SevInfo, "AuditStorageShardLocMetadataComplete", data->thisServerID)
+	    .detail("AuditId", req.id)
+	    .detail("AuditRange", req.range)
+	    .detail("AuditServer", data->thisServerID)
+	    .detail("CompleteRange", res.range);
 
 	return Void();
 }
@@ -6433,32 +6447,30 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 					req.reply.sendError(audit_storage_error());
 					break;
 				} else {
+					if (complete || checkTimes % 20 == 0) {
+						res.range = req.range;
+						res.setPhase(AuditPhase::Complete);
+						if (!req.ddId.isValid()) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "AuditStorageShardReplicaDDIdInvalid",
+							           data->thisServerID);
+							throw audit_storage_cancelled();
+						}
+						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
+						wait(persistAuditStateByRange(data->cx, res));
+					}
 					// Expand persisted complete range
 					if (complete) {
-						res.range = req.range;
-					} else {
-						res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
-					}
-					res.setPhase(AuditPhase::Complete);
-					if (!req.ddId.isValid()) {
-						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "AuditStorageShardReplicaDDIdInvalid",
-						           data->thisServerID);
-						throw audit_storage_cancelled();
-					}
-					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
-					wait(persistAuditStateByRange(data->cx, res));
-					TraceEvent(SevInfo, "AuditStorageShardReplicaDone", data->thisServerID)
-					    .suppressFor(10.0)
-					    .detail("AuditId", req.id)
-					    .detail("AuditRange", req.range)
-					    .detail("AuditServer", data->thisServerID)
-					    .detail("CompleteRange", res.range);
-					if (!complete) {
-						rangeToReadBegin = claimRange.end;
-					} else { // complete
 						req.reply.send(res);
 						break;
+					} else {
+						TraceEvent(SevInfo, "AuditStorageShardReplicaPartialDone", data->thisServerID)
+						    .suppressFor(10.0)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("AuditServer", data->thisServerID)
+						    .detail("CompleteRange", res.range);
+						rangeToReadBegin = claimRange.end;
 					}
 				}
 			} catch (Error& e) {
@@ -6484,6 +6496,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
+	TraceEvent(SevInfo, "AuditStorageShardReplicaComplete", data->thisServerID)
+	    .detail("AuditId", req.id)
+	    .detail("AuditRange", req.range)
+	    .detail("AuditServer", data->thisServerID)
+	    .detail("CompleteRange", res.range);
 
 	return Void();
 }

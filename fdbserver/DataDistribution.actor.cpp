@@ -756,7 +756,8 @@ inline std::shared_ptr<DDAudit> getAuditFromAuditMap(Reference<DataDistributor> 
 
 inline void removeAuditFromAuditMap(Reference<DataDistributor> self, AuditType auditType, UID auditID) {
 	ASSERT(self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
-	self->audits[auditType][auditID]->cancel();
+	std::shared_ptr<DDAudit> audit = self->audits[auditType][auditID];
+	audit->cancel();
 	self->audits[auditType].erase(auditID);
 	TraceEvent(SevDebug, "AuditMapOps", self->ddId)
 	    .detail("Ops", "removeAuditFromAuditMap")
@@ -2357,7 +2358,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					ASSERT(issueDoAuditCount == 0);
 					issueDoAuditCount++;
 					req.ddId = self->ddId; // send this ddid to SS
-					audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));
+					wait(doAuditOnStorageServer(self, audit, ssi, req)); // do audit one by one
 				}
 			}
 			wait(delay(0.1));
@@ -2378,7 +2379,29 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
-		audit->auditStorageAnyChildFailed = true;
+
+		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
+		    e.code() == error_code_audit_storage_cancelled) {
+			throw e;
+		} else if (e.code() == error_code_audit_storage_error) {
+			audit->foundError = true;
+		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+			throw audit_storage_failed();
+		} else {
+			if (e.code() != error_code_audit_storage_failed) {
+				try {
+					bool ssRemoved = wait(checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID));
+					if (ssRemoved) {
+						// It is possible that the input ss has been removed, then silently exit
+						return Void();
+					}
+				} catch (Error& e) {
+					// retry
+				}
+			}
+			audit->retryCount++;
+			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
+		}
 	}
 
 	return Void();
@@ -2466,6 +2489,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	state const AuditType auditType = audit->coreState.getType();
 	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
+	    .detail("AuditRange", audit->coreState.range)
 	    .detail("Range", range)
 	    .detail("AuditType", auditType);
 	state Key begin = range.begin;
@@ -2475,12 +2499,13 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	try {
 		while (begin < range.end) {
 			currentRange = KeyRangeRef(begin, range.end);
-			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRange", self->ddId)
-			    .detail("AuditID", audit->coreState.id)
-			    .detail("CurrentRange", currentRange)
-			    .detail("AuditType", auditType);
 			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
 			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
+			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRange", self->ddId)
+			    .detail("AuditID", audit->coreState.id)
+			    .detail("AuditType", auditType)
+			    .detail("CurrentRangeToSchedule", currentRange)
+			    .detail("NumTaskRanges", rangeLocations.size());
 			// Divide the audit job in to tasks according to KeyServers system mapping
 			state int i = 0;
 			for (i = 0; i < rangeLocations.size(); ++i) {
@@ -2493,6 +2518,16 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					                              auditType,
 					                              audit->coreState.id,
 					                              KeyRangeRef(taskRangeBegin, taskRange.end)));
+					TraceEvent(SevInfo, "DDScheduleAuditOnRangeGetAuditStates", self->ddId)
+					    .detail("AuditID", audit->coreState.id)
+					    .detail("AuditType", auditType)
+					    .detail("AuditRange", audit->coreState.range)
+					    .detail("RangeToSchedule", range)
+					    .detail("CurrentRangeToSchedule", currentRange)
+					    .detail("TaskRange", taskRange)
+					    .detail("TryToIssueRange", KeyRangeRef(taskRangeBegin, taskRange.end))
+					    .detail("RangeToIssue", KeyRangeRef(taskRangeBegin, auditStates.back().range.end))
+					    .detail("NumAuditStates", auditStates.size());
 					ASSERT(!auditStates.empty());
 					taskRangeBegin = auditStates.back().range.end;
 					state int j = 0;
@@ -2615,7 +2650,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           StorageServerInterface ssi,
                                           AuditStorageRequest req) {
 	state AuditType auditType = req.getType();
-	TraceEvent(SevDebug, "DDDoAuditOnStorageServerBegin", self->ddId)
+	TraceEvent(SevInfo, "DDDoAuditOnStorageServerBegin", self->ddId)
 	    .detail("AuditID", req.id)
 	    .detail("Range", req.range)
 	    .detail("AuditType", auditType)
@@ -2668,6 +2703,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 		    .detail("AuditType", auditType);
+		if (req.getType() == AuditType::ValidateStorageServerShard) {
+			throw e; // handled by scheduleAuditStorageShardOnServer
+		}
 		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
 		    e.code() == error_code_audit_storage_cancelled) {
 			throw e;
@@ -2676,24 +2714,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
 		} else {
-			if (req.getType() == AuditType::ValidateStorageServerShard) {
-				if (e.code() != error_code_audit_storage_failed) {
-					try {
-						bool ssRemoved = wait(checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID));
-						if (ssRemoved) {
-							// It is possible that the input ss has been removed, then silently exit
-							return Void();
-						}
-					} catch (Error& e) {
-						// retry
-					}
-				}
-				audit->retryCount++;
-				audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
-			} else {
-				audit->retryCount++;
-				audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
-			}
+			ASSERT(req.getType() != AuditType::ValidateStorageServerShard);
+			audit->retryCount++;
+			audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
 		}
 	}
 	return Void();

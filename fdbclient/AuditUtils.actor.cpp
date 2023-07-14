@@ -741,13 +741,48 @@ ACTOR Future<std::string> getAuditProgress(Database cx, AuditType auditType, UID
 	if (auditType == AuditType::ValidateStorageServerShard) {
 		return "ssshard not supported yet";
 	}
-	state std::vector<AuditStorageState> auditStates = wait(getAuditStateByRange(cx, auditType, auditId, auditRange));
-	std::vector<KeyRange> unfinishedRanges;
-	for (int i = 0; i < auditStates.size(); i++) {
-		AuditPhase phase = auditStates[i].getPhase();
-		if (phase == AuditPhase::Invalid) {
-			unfinishedRanges.push_back(auditStates[i].range);
+	state std::vector<KeyRange> unfinishedRanges;
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	state std::string res = "";
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByRange(cx, auditType, auditId, rangeToRead));
+				TraceEvent("AuditUtilGetAuditProgress")
+				    .detail("RangeToRead", rangeToRead)
+				    .detail("AuditType", auditType)
+				    .detail("AuditId", auditId)
+				    .detail("AuditRange", auditRange)
+				    .detail("NumAuditProgressSections", auditStates.size());
+				printf("AuditUtilGetAuditProgress: %lu\n", auditStates.size());
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						TraceEvent("AuditUtilGetAuditProgressDetails")
+						    .detail("RangeToRead", rangeToRead)
+						    .detail("AuditType", auditType)
+						    .detail("AuditId", auditId)
+						    .detail("AuditRange", auditRange)
+						    .detail("UnfinishedRange", auditStates[i].range);
+						printf("UnfinishedState: %s\n", auditStates[i].toString().c_str());
+						unfinishedRanges.push_back(auditStates[i].range);
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					res = "Imcomplete check: ";
+					break;
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
 		}
 	}
-	return describe(unfinishedRanges);
+	return res + describe(unfinishedRanges);
 }

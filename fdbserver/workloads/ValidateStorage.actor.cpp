@@ -48,9 +48,7 @@ const KeyRangeRef partialKeys3 = KeyRangeRef("\x02"_sr, "\x03"_sr);
 const KeyRangeRef partialKeys4 = KeyRangeRef("\x03"_sr, "\xfe"_sr);
 const KeyRangeRef partialKeys5 = KeyRangeRef("\xfe"_sr, "\xff"_sr);
 const KeyRangeRef partialKeys6 = KeyRangeRef("\x05"_sr, "\xaa"_sr);
-const KeyRangeRef partialKeys7 = KeyRangeRef("\xaa"_sr, "\xaa"_sr);
-const KeyRangeRef partialKeys8 = KeyRangeRef(KeyRef(), KeyRef());
-const KeyRangeRef partialKeys9 = KeyRangeRef("\xff"_sr, "\xff"_sr);
+const KeyRangeRef partialKeys7 = KeyRangeRef(KeyRef(), KeyRef());
 struct ValidateStorage : TestWorkload {
 	static constexpr auto NAME = "ValidateStorageWorkload";
 
@@ -426,8 +424,7 @@ struct ValidateStorage : TestWorkload {
 	                                      std::string context,
 	                                      bool stopWaitWhenCleared = false) {
 		std::vector<KeyRangeRef> auditKeysCollection = { partialKeys1, partialKeys2, partialKeys3, partialKeys4,
-			                                             partialKeys5, partialKeys6, partialKeys7, partialKeys8,
-			                                             partialKeys9, allKeys };
+			                                             partialKeys5, partialKeys6, partialKeys7, allKeys };
 		state KeyRangeRef auditRange = deterministicRandom()->randomChoice(auditKeysCollection);
 		// Send audit request until the server accepts the request
 		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context, auditRange));
