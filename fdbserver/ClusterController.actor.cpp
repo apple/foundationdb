@@ -626,7 +626,7 @@ ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* s
 	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
 	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
 	// and removing them from the cluster.
-	if (self->db.config.isExcludedServer(worker.interf.addresses())) {
+	if (self->db.config.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 		bestFitness = std::max(bestFitness, ProcessClass::ExcludeFit);
 	}
 	return bestFitness;
@@ -1079,8 +1079,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 			self->gotFullyRecoveredConfig = true;
 			db->fullyRecoveredConfig = req.configuration.get();
 			for (auto& it : self->id_worker) {
-				bool isExcludedFromConfig =
-				    db->fullyRecoveredConfig.isExcludedServer(it.second.details.interf.addresses());
+				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(
+				    it.second.details.interf.addresses(), it.second.details.interf.locality);
 				if (it.second.priorityInfo.isExcluded != isExcludedFromConfig) {
 					it.second.priorityInfo.isExcluded = isExcludedFromConfig;
 					if (!it.second.reply.isSet()) {
@@ -1281,7 +1281,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		}
 
 		if (self->gotFullyRecoveredConfig) {
-			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses());
+			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses(), w.locality);
 		}
 	}
 
@@ -2741,7 +2741,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses(),
+				                                    worker.details.interf.locality)) {
 					continue;
 				}
 
