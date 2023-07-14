@@ -71,6 +71,7 @@
 #include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/genericactors.actor.h"
+#include "flow/crc32c.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -7882,16 +7883,43 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	}
 }
 
+// convert a StringRef to Hex string
+static std::string hexStringRef(const StringRef& s) {
+	std::string result;
+	result.reserve(s.size() * 2);
+	for (int i = 0; i < s.size(); i++) {
+		result.append(format("%02x", s[i]));
+	}
+	return result;
+}
+
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	storage->clear(keys);
+	if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
+		TraceEvent("SSBackupKeyClearRange")
+		    .detail("RangeBegin", keys.begin)
+		    .detail("RangeEnd", keys.end)
+		    .detail("HexRangeBegin", hexStringRef(keys.begin))
+		    .detail("HexRangeEnd", hexStringRef(keys.end));
+	}
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
 	}
 }
 
+std::string checksumValue(const ValueRef& s) {
+	return s.size() > 12 ? format("(%d)%08x", s.size(), crc32c_append(0, s.begin(), s.size())) : s.toString();
+}
+
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 	storage->set(kv);
+	if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && kv.key.startsWith(backupLogKeys.begin)) {
+		TraceEvent("SSBackupKeyWriteKeyValue")
+		    .detail("Key", kv.key)
+		    .detail("ChecksumValue", checksumValue(kv.value))
+		    .detail("HexKey", hexStringRef(kv.key));
+	}
 	*kvCommitLogicalBytes += kv.expectedSize();
 }
 
