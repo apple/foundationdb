@@ -184,6 +184,7 @@ public:
 			// including cancellation
 			self->storageQueueInfo.erase(ssi.id());
 			self->storageServerInterfaces.erase(ssi.id());
+			self->healthMetrics.storageStats.erase(ssi.id());
 			throw;
 		}
 	}
@@ -239,8 +240,9 @@ public:
 					}
 				} else {
 					storageServerTrackers.erase(id);
-
 					self->storageServerInterfaces.erase(id);
+					self->storageQueueInfo.erase(id); // remove the entry if an old storage server is absent
+					self->healthMetrics.storageStats.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
