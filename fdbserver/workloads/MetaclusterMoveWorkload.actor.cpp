@@ -35,6 +35,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbserver/Knobs.h"
+#include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -440,6 +441,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
 				if (err.code() == error_code_cluster_no_capacity) {
+					CODE_PROBE(true, "Tenant move prevented by lack of cluster capacity");
 					wait(increaseMetaclusterCapacity(self));
 					continue;
 				}
@@ -612,6 +614,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		for (auto const& [clusterName, dataDb] : dataDbs) {
 			state std::vector<Reference<Tenant>> dataTenants;
 			state Database dbObj = dataDb.db;
+			state std::set<TenantGroupName> dbTenantGroups = dataDb.tenantGroups;
 			// Iterate over each data cluster and attempt to fill some of the tenants with data
 			for (auto const& tId : dataDb.tenants) {
 				TestTenantData testData = self->createdTenants[tId];
@@ -641,21 +644,21 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				blobFutures.push_back(dbObj->blobbifyRangeBlocking(normalKeys, tenantRef));
 			}
 			wait(waitForAll(blobFutures));
-		}
 
-		// Set storage and tag quotas
-		state Reference<ITransaction> tr = self->managementDb->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				for (auto const& [tGroupName, tGroupData] : self->tenantGroups) {
-					ThrottleApi::setTagQuota(tr, tGroupName, self->reservedQuota, self->totalQuota);
-					TenantMetadata::storageQuota().set(tr, tGroupName, self->storageQuota);
+			// Set storage and tag quotas
+			state Reference<ReadYourWritesTransaction> tr = dbObj->createTransaction();
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					for (auto const& tGroupName : dbTenantGroups) {
+						ThrottleApi::setTagQuota(tr, tGroupName, self->reservedQuota, self->totalQuota);
+						TenantMetadata::storageQuota().set(tr, tGroupName, self->storageQuota);
+					}
+					wait(tr->commit());
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
 				}
-				wait(safeThreadFutureToFuture(tr->commit()));
-				break;
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
 
@@ -965,19 +968,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
-		// Remove storage quotas to satisfy metacluster consistency check
-		// since storage quotas write to the \xff tenant subspace
-		state Reference<ITransaction> tr = self->managementDb->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				TenantMetadata::storageQuota().clear(tr);
-				wait(safeThreadFutureToFuture(tr->commit()));
-				break;
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
-		}
 		// The metacluster consistency check runs the tenant consistency check for each cluster
 		state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
 		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::False);
