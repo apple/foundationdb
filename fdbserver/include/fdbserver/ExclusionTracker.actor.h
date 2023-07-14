@@ -108,14 +108,29 @@ struct ExclusionTracker {
 					newFailed.insert(localityFailedAddresses.begin(), localityFailedAddresses.end());
 				}
 
-				self->excluded = newExcluded;
-				self->failed = newFailed;
-				self->changed.trigger();
+				bool foundChange = false;
+				if (self->excluded != newExcluded) {
+					self->excluded = newExcluded;
+					foundChange = true;
+				}
+				if (self->failed != newFailed) {
+					self->failed = newFailed;
+					foundChange = true;
+				}
+
+				if (foundChange) {
+					self->changed.trigger();
+				}
 
 				state Future<Void> watchFuture =
 				    tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey) ||
 				    tr.watch(excludedLocalityVersionKey) || tr.watch(failedLocalityVersionKey);
 				wait(tr.commit());
+				if (excludedLocalityResults.size() > 0 || failedLocalityResults.size() > 0) {
+					// when there are excluded localities we need to monitor for when the worker list changes, so we
+					// must poll
+					watchFuture = watchFuture || delay(10.0);
+				}
 				wait(watchFuture);
 				tr.reset();
 			} catch (Error& e) {
