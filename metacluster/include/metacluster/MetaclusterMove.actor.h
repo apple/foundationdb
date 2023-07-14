@@ -203,15 +203,10 @@ static Future<std::vector<TenantMapEntry>> getTenantEntries(std::vector<std::pai
 
 ACTOR template <class Transaction>
 static Future<Void> updateMoveRecordState(Reference<Transaction> tr,
-                                          Optional<metadata::management::MovementRecord> movementRecord,
+                                          metadata::management::MovementRecord movementRecord,
                                           metadata::management::MovementState mState,
                                           TenantGroupName tenantGroup) {
-	if (!movementRecord.present()) {
-		TraceEvent("TenantMoveRecordUpdateNotPresent").detail("TenantGroup", tenantGroup);
-		throw tenant_move_record_missing();
-	}
-
-	auto updatedMoveRec = movementRecord.get();
+	auto updatedMoveRec = movementRecord;
 	TraceEvent("BreakpointExistingMoveRec")
 	    .detail("TenantGroup", tenantGroup)
 	    .detail("RunID", updatedMoveRec.runId)
@@ -817,8 +812,10 @@ struct SwitchTenantMovementImpl {
 			      metadata::management::MovementState::SWITCH_HYBRID },
 			    [self = self](Reference<typename DB::TransactionT> tr,
 			                  Optional<metadata::management::MovementRecord> movementRecord) {
-				    return updateMoveRecordState(
-				        tr, movementRecord, metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
+				    return updateMoveRecordState(tr,
+				                                 movementRecord.get(),
+				                                 metadata::management::MovementState::SWITCH_HYBRID,
+				                                 self->tenantGroup);
 			    }));
 			wait(applyHybridRanges(self));
 		} catch (Error& e) {
@@ -844,7 +841,7 @@ struct SwitchTenantMovementImpl {
 		    [self = self](Reference<typename DB::TransactionT> tr,
 		                  Optional<metadata::management::MovementRecord> movementRecord) {
 			    return updateMoveRecordState(
-			        tr, movementRecord, metadata::management::MovementState::SWITCH_METADATA, self->tenantGroup);
+			        tr, movementRecord.get(), metadata::management::MovementState::SWITCH_METADATA, self->tenantGroup);
 		    }));
 
 		TraceEvent("BreakpointSwitch4");
@@ -1307,7 +1304,7 @@ struct FinishTenantMovementImpl {
 		    [self = self](Reference<typename DB::TransactionT> tr,
 		                  Optional<metadata::management::MovementRecord> movementRecord) {
 			    return updateMoveRecordState(
-			        tr, movementRecord, metadata::management::MovementState::FINISH_UNLOCK, self->tenantGroup);
+			        tr, movementRecord.get(), metadata::management::MovementState::FINISH_UNLOCK, self->tenantGroup);
 		    }));
 		TraceEvent("Breakpoint6");
 		wait(unlockDestinationTenants(self));
@@ -1795,7 +1792,7 @@ struct AbortTenantMovementImpl {
 		    [self = self](Reference<typename DB::TransactionT> tr,
 		                  Optional<metadata::management::MovementRecord> movementRecord) {
 			    return updateMoveRecordState(
-			        tr, movementRecord, metadata::management::MovementState::START_LOCK, self->tenantGroup);
+			        tr, movementRecord.get(), metadata::management::MovementState::START_LOCK, self->tenantGroup);
 		    }));
 		wait(abortStartLock(self));
 		return Void();
@@ -1816,7 +1813,7 @@ struct AbortTenantMovementImpl {
 		    [self = self](Reference<typename DB::TransactionT> tr,
 		                  Optional<metadata::management::MovementRecord> movementRecord) {
 			    return updateMoveRecordState(
-			        tr, movementRecord, metadata::management::MovementState::START_CREATE, self->tenantGroup);
+			        tr, movementRecord.get(), metadata::management::MovementState::START_CREATE, self->tenantGroup);
 		    }));
 		wait(abortStartCreate(self));
 		return Void();
@@ -1852,7 +1849,7 @@ struct AbortTenantMovementImpl {
 		    [self = self](Reference<typename DB::TransactionT> tr,
 		                  Optional<metadata::management::MovementRecord> movementRecord) {
 			    return updateMoveRecordState(
-			        tr, movementRecord, metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
+			        tr, movementRecord.get(), metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
 		    }));
 		TraceEvent("TenantMoveAfterSwitchHybrid2");
 		wait(abortSwitchHybrid(self));
