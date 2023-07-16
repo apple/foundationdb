@@ -1840,7 +1840,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 		wait(audit->actors.getResult()); // goto exception handler if any actor is failed
-		TraceEvent(SevInfo, "DDAuditStorageCoreResult", self->ddId)
+		TraceEvent(SevInfo, "DDAuditStorageCoreAllActorsComplete", self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", audit->coreState.range)
 		    .detail("AuditType", audit->coreState.getType())
@@ -1857,9 +1857,22 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			audit->auditStorageAnyChildFailed = false;
 			throw retry();
 		} else {
+			// Check audit persist progress to double check if any range omitted to be check
+			if (audit->coreState.getType() == AuditType::ValidateHA ||
+			    audit->coreState.getType() == AuditType::ValidateReplica ||
+			    audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
+				bool allFinish = wait(checkAuditProgressComplete(self->txnProcessor->context(),
+				                                                 audit->coreState.getType(),
+				                                                 audit->coreState.id,
+				                                                 audit->coreState.range));
+				if (!allFinish) {
+					throw retry();
+				}
+			}
+			// TODO: check audit persist progress for ssshard type
 			audit->coreState.setPhase(AuditPhase::Complete);
 		}
-		TraceEvent(SevVerbose, "DDAuditStorageCoreGotResult", self->ddId)
+		TraceEvent(SevVerbose, "DDAuditStorageCoreCompleteAudit", self->ddId)
 		    .detail("Context", context)
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("RetryCount", currentRetryCount)

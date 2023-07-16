@@ -739,3 +739,47 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 
 	return res;
 }
+
+ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	       auditType == AuditType::ValidateLocationMetadata);
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByRange(cx, auditType, auditId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						TraceEvent(SevWarn, "AuditUtilCheckAuditProgressNotFinished")
+						    .detail("AuditID", auditId)
+						    .detail("AuditRange", auditRange)
+						    .detail("AuditType", auditType)
+						    .detail("UnfinishedRange", auditStates[i].range);
+						return false;
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryCount > 30) {
+					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressIncomplete")
+					    .detail("AuditID", auditId)
+					    .detail("AuditRange", auditRange)
+					    .detail("AuditType", auditType);
+					throw audit_storage_failed();
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
+		}
+	}
+	return true;
+}

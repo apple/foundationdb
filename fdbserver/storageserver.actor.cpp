@@ -5571,7 +5571,9 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range)
 	    .detail("AuditServer", data->thisServerID)
-	    .detail("CompleteRange", res.range);
+	    .detail("CompleteRange", res.range)
+	    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
+	    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum);
 
 	return Void();
 }
@@ -5846,7 +5848,9 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range)
 	    .detail("AuditServer", data->thisServerID)
-	    .detail("CompleteRange", res.range);
+	    .detail("CompleteRange", res.range)
+	    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
+	    .detail("NumValidatedKeyServers", cumulatedValidatedKeyServersNum);
 
 	return Void();
 }
@@ -5874,7 +5878,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	state int limit = 1e4;
 	state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int64_t readBytes = 0;
-	state int64_t cumulatedValidatedKeysNum = 0;
+	state int64_t numValidatedKeys = 0;
 	state bool complete = false;
 	state int64_t checkTimes = 0;
 	state Reference<IRateControl> rateLimiter =
@@ -6053,7 +6057,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							TraceEvent(SevVerbose, "SSAuditStorageShardReplicaValidatedKey", data->thisServerID)
 							    .detail("Key", localKV.key);
 						}
-						++cumulatedValidatedKeysNum;
+						++numValidatedKeys;
 						lastKey = localKV.key;
 					}
 					KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
@@ -6114,7 +6118,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 				    .detail("AuditRange", req.range)
 				    .detail("AuditType", req.type)
 				    .detail("CheckTimes", checkTimes)
-				    .detail("CumulatedValidatedKeysNum", cumulatedValidatedKeysNum)
+				    .detail("NumValidatedKeys", numValidatedKeys)
 				    .detail("CurrentValidatedInclusiveRange", claimRange)
 				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
 
@@ -6202,7 +6206,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range)
 	    .detail("AuditServer", data->thisServerID)
-	    .detail("CompleteRange", res.range);
+	    .detail("CompleteRange", res.range)
+	    .detail("CheckTimes", checkTimes)
+	    .detail("NumValidatedKeys", numValidatedKeys);
 
 	return Void();
 }
