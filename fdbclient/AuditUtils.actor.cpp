@@ -137,6 +137,7 @@ ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID aud
 				ASSERT(toCancelState.id == auditId && toCancelState.getType() == auditType);
 				toCancelState.setPhase(AuditPhase::Failed);
 				tr.set(auditKey(toCancelState.getType(), toCancelState.id), auditStorageStateValue(toCancelState));
+				clearAuditProgressMetadata(&tr, toCancelState.getType(), toCancelState.id);
 				wait(tr.commit());
 				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataEnd", auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
@@ -592,6 +593,7 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
 			                 auditStorageStateValue(auditState)));
+			wait(tr.commit());
 			break;
 		} catch (Error& e) {
 			TraceEvent("PersistAuditStateByRangeError")
@@ -683,6 +685,7 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),
 			    auditState.range,
 			    auditStorageStateValue(auditState)));
+			wait(tr.commit());
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -735,54 +738,4 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 	}
 
 	return res;
-}
-
-ACTOR Future<std::string> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
-	if (auditType == AuditType::ValidateStorageServerShard) {
-		return "ssshard not supported yet";
-	}
-	state std::vector<KeyRange> unfinishedRanges;
-	state KeyRange rangeToRead = auditRange;
-	state Key rangeToReadBegin = auditRange.begin;
-	state int retryCount = 0;
-	state std::string res = "";
-	while (rangeToReadBegin < auditRange.end) {
-		loop {
-			try {
-				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
-				state std::vector<AuditStorageState> auditStates =
-				    wait(getAuditStateByRange(cx, auditType, auditId, rangeToRead));
-				TraceEvent("AuditUtilGetAuditProgress")
-				    .detail("RangeToRead", rangeToRead)
-				    .detail("AuditType", auditType)
-				    .detail("AuditId", auditId)
-				    .detail("AuditRange", auditRange)
-				    .detail("NumAuditProgressSections", auditStates.size());
-				printf("AuditUtilGetAuditProgress: %lu\n", auditStates.size());
-				for (int i = 0; i < auditStates.size(); i++) {
-					AuditPhase phase = auditStates[i].getPhase();
-					if (phase == AuditPhase::Invalid) {
-						TraceEvent("AuditUtilGetAuditProgressDetails")
-						    .detail("RangeToRead", rangeToRead)
-						    .detail("AuditType", auditType)
-						    .detail("AuditId", auditId)
-						    .detail("AuditRange", auditRange)
-						    .detail("UnfinishedRange", auditStates[i].range);
-						printf("UnfinishedState: %s\n", auditStates[i].toString().c_str());
-						unfinishedRanges.push_back(auditStates[i].range);
-					}
-				}
-				rangeToReadBegin = auditStates.back().range.end;
-				break;
-			} catch (Error& e) {
-				if (retryCount > 30) {
-					res = "Imcomplete check: ";
-					break;
-				}
-				wait(delay(0.5));
-				retryCount++;
-			}
-		}
-	}
-	return res + describe(unfinishedRanges);
 }

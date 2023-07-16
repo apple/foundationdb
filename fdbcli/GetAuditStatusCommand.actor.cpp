@@ -30,6 +30,51 @@
 
 namespace fdb_cli {
 
+ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	if (auditType == AuditType::ValidateStorageServerShard) {
+		printf("ssshard not supported yet\n");
+	}
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	state int64_t finishCount = 0;
+	state int64_t unfinishedCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByRange(cx, auditType, auditId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						printf("( Unfinished ) %s\n", auditStates[i].range.toString().c_str());
+						++unfinishedCount;
+					} else if (phase == AuditPhase::Error) {
+						printf("( Error   ) %s\n", auditStates[i].range.toString().c_str());
+						++finishCount;
+					} else {
+						++finishCount;
+						continue;
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					printf("Imcomplete check\n");
+					return Void();
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
+		}
+	}
+	printf("Finished range count: %ld\n", finishCount);
+	printf("Unfinished range count: %ld\n", unfinishedCount);
+	return Void();
+}
+
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2 || tokens.size() > 5) {
 		printUsage(tokens[0]);
@@ -66,8 +111,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		const UID id = UID::fromString(tokens[3].toString());
 		state AuditStorageState res = wait(getAuditState(cx, type, id));
 		if (res.getPhase() == AuditPhase::Running) {
-			std::string progress = wait(getAuditProgress(cx, res.getType(), res.id, res.range));
-			printf("Following ranges are not finished:\n%s", progress.c_str());
+			wait(getAuditProgress(cx, res.getType(), res.id, res.range));
 		} else {
 			printf("Already complete\n");
 		}
@@ -110,9 +154,10 @@ CommandFactory getAuditStatusFactory(
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
                 "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
                 "[running|complete|failed|error] count'\n"
+                "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
                 "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`. \n"
-                "If specified, `Count' is how many\n"
-                "rows to audit. If not specified, check all rows in audit.\n"
+                "If specified, `Count' is how many rows to audit.\n"
+                "If not specified, check all rows in audit.\n"
                 "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
                 "See also `audit_storage' command."));
 } // namespace fdb_cli

@@ -2432,10 +2432,11 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 			begin = auditStates.back().range.end;
 			TraceEvent(SevInfo, "DDDispatchAuditStorageDispatch", self->ddId)
 			    .detail("AuditID", audit->coreState.id)
+			    .detail("Range", range)
 			    .detail("CurrentRange", currentRange)
 			    .detail("AuditType", auditType)
 			    .detail("NextBegin", begin)
-			    .detail("RangeEnd", range.end);
+			    .detail("NumAuditStates", auditStates.size());
 			state int i = 0;
 			for (; i < auditStates.size(); i++) {
 				state AuditPhase phase = auditStates[i].getPhase();
@@ -2485,32 +2486,45 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 // Automatically retry until complete or timed out
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
-                                        KeyRange range) {
+                                        KeyRange rangeToSchedule) {
 	state const AuditType auditType = audit->coreState.getType();
 	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditRange", audit->coreState.range)
-	    .detail("Range", range)
-	    .detail("AuditType", auditType);
-	state Key begin = range.begin;
-	state KeyRange currentRange;
+	    .detail("RangeToSchedule", rangeToSchedule)
+	    .detail("AuditType", auditType)
+	    .detail("RemainingBudget", audit->remainingBudgetForAuditTasks.get());
+
+	state Key currentRangeToScheduleBegin = rangeToSchedule.begin;
+	state KeyRange currentRangeToSchedule;
 	state int64_t issueDoAuditCount = 0;
 
 	try {
-		while (begin < range.end) {
-			currentRange = KeyRangeRef(begin, range.end);
+		while (currentRangeToScheduleBegin < rangeToSchedule.end) {
+			currentRangeToSchedule = Standalone(KeyRangeRef(currentRangeToScheduleBegin, rangeToSchedule.end));
 			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
-			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
+			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRangeToSchedule));
 			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRange", self->ddId)
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("AuditType", auditType)
-			    .detail("CurrentRangeToSchedule", currentRange)
-			    .detail("NumTaskRanges", rangeLocations.size());
+			    .detail("RangeToSchedule", rangeToSchedule)
+			    .detail("CurrentRangeToSchedule", currentRangeToSchedule)
+			    .detail("NumTaskRanges", rangeLocations.size())
+			    .detail("RangeLocationsBackKey", rangeLocations.back().range.end);
+
 			// Divide the audit job in to tasks according to KeyServers system mapping
-			state int i = 0;
-			for (i = 0; i < rangeLocations.size(); ++i) {
+			state int assignedRangeTasks = 0;
+			state int rangeLocationIndex = 0;
+			for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 				// For each task, check the progress, and create task request for the unfinished range
-				state KeyRange taskRange = rangeLocations[i].range;
+				state KeyRange taskRange = rangeLocations[rangeLocationIndex].range;
+				TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTask", self->ddId)
+				    .detail("AuditID", audit->coreState.id)
+				    .detail("AuditType", auditType)
+				    .detail("RangeToSchedule", rangeToSchedule)
+				    .detail("CurrentRangeToSchedule", currentRangeToSchedule)
+				    .detail("TaskRange", taskRange);
+
 				state Key taskRangeBegin = taskRange.begin;
 				while (taskRangeBegin < taskRange.end) {
 					state std::vector<AuditStorageState> auditStates =
@@ -2518,21 +2532,21 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					                              auditType,
 					                              audit->coreState.id,
 					                              KeyRangeRef(taskRangeBegin, taskRange.end)));
-					TraceEvent(SevInfo, "DDScheduleAuditOnRangeGetAuditStates", self->ddId)
+					TraceEvent(SevInfo, "DDScheduleAuditOnRangeSubTask", self->ddId)
 					    .detail("AuditID", audit->coreState.id)
 					    .detail("AuditType", auditType)
 					    .detail("AuditRange", audit->coreState.range)
-					    .detail("RangeToSchedule", range)
-					    .detail("CurrentRangeToSchedule", currentRange)
+					    .detail("RangeToSchedule", rangeToSchedule)
+					    .detail("CurrentRangeToSchedule", currentRangeToSchedule)
 					    .detail("TaskRange", taskRange)
-					    .detail("TryToIssueRange", KeyRangeRef(taskRangeBegin, taskRange.end))
-					    .detail("RangeToIssue", KeyRangeRef(taskRangeBegin, auditStates.back().range.end))
+					    .detail("SubTaskBegin", taskRangeBegin)
+					    .detail("SubTaskEnd", auditStates.back().range.end)
 					    .detail("NumAuditStates", auditStates.size());
 					ASSERT(!auditStates.empty());
-					taskRangeBegin = auditStates.back().range.end;
-					state int j = 0;
-					for (j = 0; j < auditStates.size(); ++j) {
-						state AuditPhase phase = auditStates[j].getPhase();
+
+					state int auditStateIndex = 0;
+					for (; auditStateIndex < auditStates.size(); ++auditStateIndex) {
+						state AuditPhase phase = auditStates[auditStateIndex].getPhase();
 						ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
 						if (phase == AuditPhase::Complete) {
 							continue;
@@ -2543,37 +2557,38 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						// Create audit task for the range where the phase is Invalid which indicates
 						// this range has not been audited
 						ASSERT(phase == AuditPhase::Invalid);
-						state AuditStorageRequest req(audit->coreState.id, auditStates[j].range, auditType);
+						state AuditStorageRequest req(
+						    audit->coreState.id, auditStates[auditStateIndex].range, auditType);
 						state StorageServerInterface targetServer;
 						// Set req.targetServers and targetServer, which will be
 						// used to doAuditOnStorageServer
 						// Different audit types have different settings
 						if (auditType == AuditType::ValidateHA) {
-							if (rangeLocations[i].servers.size() < 2) {
+							if (rangeLocations[rangeLocationIndex].servers.size() < 2) {
 								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
 								    .detail("Reason", "Single replica, ignore")
 								    .detail("AuditID", audit->coreState.id)
-								    .detail("Range", range)
+								    .detail("AuditRange", audit->coreState.range)
 								    .detail("AuditType", auditType);
 								return Void();
 							}
 							// pick a server from primary DC
-							auto it = rangeLocations[i].servers.begin();
+							auto it = rangeLocations[rangeLocationIndex].servers.begin();
 							const int idx = deterministicRandom()->randomInt(0, it->second.size());
 							targetServer = it->second[idx];
 							++it;
 							// pick a server from each remote DC
-							for (; it != rangeLocations[i].servers.end(); ++it) {
+							for (; it != rangeLocations[rangeLocationIndex].servers.end(); ++it) {
 								const int idx = deterministicRandom()->randomInt(0, it->second.size());
 								req.targetServers.push_back(it->second[idx].id());
 							}
 						} else if (auditType == AuditType::ValidateReplica) {
-							auto it = rangeLocations[i].servers.begin(); // always compare primary DC
+							auto it = rangeLocations[rangeLocationIndex].servers.begin(); // always compare primary DC
 							if (it->second.size() == 1) {
 								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
 								    .detail("Reason", "Single replica, ignore")
 								    .detail("AuditID", audit->coreState.id)
-								    .detail("Range", range)
+								    .detail("AuditRange", audit->coreState.range)
 								    .detail("AuditType", auditType);
 								return Void();
 							}
@@ -2587,7 +2602,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								req.targetServers.push_back(it->second[i].id());
 							}
 						} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-							auto it = rangeLocations[i].servers.begin(); // always do in primary DC
+							auto it = rangeLocations[rangeLocationIndex].servers.begin(); // always do in primary DC
 							const int idx = deterministicRandom()->randomInt(0, it->second.size());
 							targetServer = it->second[idx];
 						} else {
@@ -2611,18 +2626,31 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						req.ddId = self->ddId; // send this ddid to SS
 						audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 					}
-				}
 
-				// Proceed to the next range if getSourceServerInterfacesForRange is partially read
-				begin = rangeLocations[i].range.end;
+					taskRangeBegin = auditStates.back().range.end;
+					TraceEvent(SevInfo, "DDScheduleAuditOnRangeSubTaskAssigned", self->ddId)
+					    .detail("TaskRange", taskRange)
+					    .detail("NextTaskRangeBegin", taskRangeBegin)
+					    .detail("BreakRangeEnd", taskRange.end);
+				}
+				TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTaskAssigned", self->ddId);
+				++assignedRangeTasks;
 				wait(delay(0.1));
 			}
+			// Proceed to the next range if getSourceServerInterfacesForRange is partially read
+			currentRangeToScheduleBegin = rangeLocations.back().range.end;
+			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeAssigned", self->ddId)
+			    .detail("AssignedRangeTasks", assignedRangeTasks)
+			    .detail("NextCurrentRangeToScheduleBegin", currentRangeToScheduleBegin)
+			    .detail("BreakRangeEnd", rangeToSchedule.end)
+			    .detail("RangeToSchedule", rangeToSchedule);
 		}
 
-		TraceEvent(SevDebug, "DDScheduleAuditOnRangeEnd", self->ddId)
+		TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
 		    .detail("Reason", "End")
 		    .detail("AuditID", audit->coreState.id)
-		    .detail("Range", range)
+		    .detail("AuditRange", audit->coreState.range)
+		    .detail("RangeToSchedule", rangeToSchedule)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 
@@ -2633,7 +2661,8 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		TraceEvent(SevInfo, "DDScheduleAuditOnRangeError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
-		    .detail("Range", range)
+		    .detail("AuditRange", audit->coreState.range)
+		    .detail("RangeToSchedule", rangeToSchedule)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 		audit->auditStorageAnyChildFailed = true;
