@@ -28,7 +28,9 @@
 #include "flow/FileIdentifier.h"
 #include "flow/Error.h"
 #include "flow/swift_support.h"
+#ifdef WITH_SWIFT
 #include <swift/bridging>
+#endif
 
 class Arena;
 
