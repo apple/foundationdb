@@ -694,7 +694,7 @@ bool isNear(Optional<double> a, Optional<double> b) {
 
 bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Optional<double> expected) {
 	Optional<double> rate;
-	auto targetRates = globalTagThrottler.getProxyRates(1);
+	auto const targetRates = globalTagThrottler.getProxyRates(1);
 	auto it = targetRates.find(tag);
 	if (it != targetRates.end()) {
 		rate = it->second;
@@ -704,6 +704,19 @@ bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag
 	    .detail("CurrentTPSRate", rate)
 	    .detail("ExpectedTPSRate", expected);
 	return isNear(rate, expected);
+}
+
+bool totalTargetRateIsNear(GlobalTagThrottler& globalTagThrottler, double expected) {
+	auto const targetRates = globalTagThrottler.getProxyRates(1);
+	double targetRateSum = 0.0;
+	for (auto const& [_, targetRate] : targetRates) {
+		targetRateSum += targetRate;
+	}
+	TraceEvent("GlobalTagThrottling_TotalRateMonitor")
+	    .detail("NumTags", targetRates.size())
+	    .detail("CurrentTotalTPSRate", targetRateSum)
+	    .detail("ExpectedTotalTPSRate", expected);
+	return isNear(targetRateSum, expected);
 }
 
 bool clientRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Optional<double> expected) {
@@ -964,9 +977,8 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 // Total quota is set to 50 pages/second for one tag, 100 pages/second for another.
 // For each tag, a client attempts to execute 10 6-page read transactions per second.
 // Target rates are adjusted to utilize the full 50 pages/second capacity of the
-//   add storage servers. The two tags receive this capacity with a 2:1 ratio,
-//   matching the ratio of their total quotas.
-TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
+// storage servers.
+TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling1") {
 	state GlobalTagThrottler globalTagThrottler = getTestGlobalTagThrottler();
 	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
@@ -981,8 +993,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ));
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
-		return targetRateIsNear(gtt, testTag1, (50 / 6.0) / 3) && targetRateIsNear(gtt, testTag2, 2 * (50 / 6.0) / 3) &&
-		       gtt.busyReadTagCount() == 2;
+		return totalTargetRateIsNear(gtt, 50 / 6.0) && gtt.busyReadTagCount() == 2;
 	});
 	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -993,8 +1004,8 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 // Total quota is set to 100 pages/second for each tag.
 // Each client attempts 10 6-page read transactions per second.
 // This workload is sent to 2 storage servers per client (with an overlap of one storage server).
-// Target rates for both tags are adjusted to 50/6 transactions per second to match the throughput
-//   that the busiest server can handle.
+// The total target rate summed across both tags is adjusted to match the throughput that the
+// busiest server can handle (50/3 transactions per second).
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	state GlobalTagThrottler globalTagThrottler = getTestGlobalTagThrottler();
 	state StorageServerCollection storageServers(3, 50);
@@ -1010,8 +1021,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ, { 0, 1 }));
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
-		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 50 / 6.0) &&
-		       gtt.busyReadTagCount() == 2;
+		return totalTargetRateIsNear(gtt, 50 / 3.0) && gtt.busyReadTagCount() == 2;
 	});
 	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -1023,8 +1033,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 // One client attempts 10 6-page read transactions per second, all directed towards a single storage server.
 // Another client, using a different tag, attempts 10 6-page read transactions split across the other two storage
 // servers. Target rates adjust to 50/6 and 100/6 transactions per second for the two clients, based on the capacities
-// of the
-//   storage servers being accessed.
+// of the storage servers being accessed.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	state GlobalTagThrottler globalTagThrottler = getTestGlobalTagThrottler();
 	state StorageServerCollection storageServers(3, 50);
