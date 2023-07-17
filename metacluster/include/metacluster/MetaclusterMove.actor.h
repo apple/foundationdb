@@ -216,7 +216,7 @@ static Future<std::vector<TenantMapEntry>> getTenantEntries(std::vector<std::pai
 	return results;
 }
 
-ACTOR template <class Transaction>
+template <class Transaction>
 static Future<Void> updateMoveRecordState(Reference<Transaction> tr,
                                           metadata::management::MovementRecord movementRecord,
                                           metadata::management::MovementState mState,
@@ -243,6 +243,125 @@ static Future<Void> purgeAndVerifyTenant(Reference<DB> db, TenantName tenant) {
 	state ThreadFuture<Key> resultFuture = tenantObj->purgeBlobGranules(normalKeys, latestVersion, false);
 	state Key purgeKey = wait(safeThreadFutureToFuture(resultFuture));
 	wait(safeThreadFutureToFuture(tenantObj->waitPurgeGranulesComplete(purgeKey)));
+	return Void();
+}
+
+// By default, assume check for deleting source tenants
+// If aborting, then check the opposite
+ACTOR template <class DB>
+static Future<Void> checkValidDelete(Reference<typename DB::TransactionT> tr,
+                                     TenantGroupName tenantGroup,
+                                     std::vector<std::pair<TenantName, int64_t>> tenantsInGroup,
+                                     ClusterName srcClusterName,
+                                     ClusterName dstClusterName,
+                                     std::vector<TenantMapEntry> srcEntries,
+                                     std::vector<TenantMapEntry> dstEntries,
+                                     Optional<metadata::management::MovementRecord> movementRecord,
+                                     std::vector<std::string>* messages,
+                                     Aborting aborting) {
+	ASSERT(movementRecord.present());
+	state ClusterName deleteClusterName = aborting ? dstClusterName : srcClusterName;
+	state ClusterName otherClusterName = aborting ? srcClusterName : dstClusterName;
+	state std::vector<TenantMapEntry> deleteEntries = aborting ? dstEntries : srcEntries;
+	state std::vector<TenantMapEntry> otherEntries = aborting ? srcEntries : dstEntries;
+	state size_t iterLen = tenantsInGroup.size();
+	if (iterLen != srcEntries.size()) {
+		TraceEvent(SevError, "TenantMoveCheckValidDeleteEntriesSizeDiff")
+		    .detail("SrcEntriesSize", srcEntries.size())
+		    .detail("TenantsInGroup", iterLen);
+		fmt::print(
+		    "Tenant move check delete: The number of source tenant entries does not match the expected number of "
+		    "tenants in the group {}:\n"
+		    "	# Source tenant entries:				{}"
+		    "	# Tenants expected in tenant group:		{}",
+		    tenantGroup,
+		    srcEntries.size(),
+		    iterLen);
+		throw invalid_tenant_move();
+	}
+	if (iterLen != dstEntries.size()) {
+		TraceEvent(SevError, "TenantMoveCheckValidDeleteOtherEntriesSizeDiff")
+		    .detail("DstEntriesSize", dstEntries.size())
+		    .detail("TenantsInGroup", iterLen);
+		fmt::print("Tenant move check delete: The number of destination tenant entries does not match the expected "
+		           "number of tenants in the group {}:\n"
+		           "	# Destination tenant entries:			{}"
+		           "	# Tenants expected in tenant group:		{}",
+		           tenantGroup,
+		           dstEntries.size(),
+		           iterLen);
+		throw invalid_tenant_move();
+	}
+	state int index = 0;
+	for (; index < iterLen; index++) {
+		state TenantName tName = tenantsInGroup[index].first;
+		state int64_t tId = tenantsInGroup[index].second;
+		state TenantMapEntry deleteEntry = deleteEntries[index];
+		state TenantMapEntry otherEntry = otherEntries[index];
+
+		// Assert delete tenant is locked
+		if (deleteEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
+			TraceEvent(SevError, "TenantMoveCheckValidDeleteDeleteTenantNotLocked")
+			    .detail("TenantName", tName)
+			    .detail("TenantID", tId);
+			messages->push_back(fmt::format(
+			    "Tenant move check delete: tenant {} on delete cluster {} is not locked\n", tName, deleteClusterName));
+			throw invalid_tenant_move();
+		}
+
+		// Assert the metacluster recognizes the existence of the other tenant not being deleted
+		Tuple indexTuple = Tuple::makeTuple(otherClusterName, tName, tId);
+		bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
+		if (!result) {
+			TraceEvent(SevError, "TenantMoveCheckValidDeleteTenantClusterMismatch")
+			    .detail("TenantName", tName)
+			    .detail("TenantID", tId)
+			    .detail("ExpectedCluster", otherClusterName);
+			messages->push_back(fmt::format(
+			    "Tenant move check delete: tenant {} does not exist on other cluster {}\n", tName, otherClusterName));
+			throw invalid_tenant_move();
+		}
+
+		// Assert both tenants have the correct tenant group
+		if (!deleteEntry.tenantGroup.present()) {
+			TraceEvent(SevError, "TenantMoveCheckValidDeleteTenantGroupMissing")
+			    .detail("TenantName", tName)
+			    .detail("TenantID", tId);
+			messages->push_back(
+			    fmt::format("Tenant move check delete: tenant group missing for tenant {} on delete cluster {}\n",
+			                tName,
+			                deleteClusterName));
+			throw invalid_tenant_move();
+		}
+		if (!otherEntry.tenantGroup.present()) {
+			TraceEvent(SevError, "TenantMoveCheckValidDeleteTenantGroupMissing")
+			    .detail("TenantName", tName)
+			    .detail("TenantID", tId);
+			messages->push_back(
+			    fmt::format("Tenant move check delete: tenant group missing for tenant {} on other cluster {}\n",
+			                tName,
+			                otherClusterName));
+			throw invalid_tenant_move();
+		}
+		if (deleteEntry.tenantGroup.get() != tenantGroup ||
+		    deleteEntry.tenantGroup.get() != otherEntry.tenantGroup.get()) {
+			TraceEvent(SevError, "TenantMoveCheckValidDeleteTenantGroupMismatch")
+			    .detail("TenantName", tName)
+			    .detail("TenantID", tId)
+			    .detail("ExpectedGroup", tenantGroup)
+			    .detail("DeleteEntryTenantGroup", deleteEntry.tenantGroup.get())
+			    .detail("DestinationEntryTenantGroup", otherEntry.tenantGroup.get());
+			messages->push_back(fmt::format(
+			    "Tenant move check delete: tenant group does not match between corresponding tenant entries:\n"
+			    "	tenant name:						{}"
+			    "	delete entry tenant group:			{}"
+			    "	destination entry tenant group:		{}",
+			    tName,
+			    deleteEntry.tenantGroup.get(),
+			    otherEntry.tenantGroup.get()));
+			throw invalid_tenant_move();
+		}
+	}
 	return Void();
 }
 
@@ -924,97 +1043,99 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkValidUnlock(FinishTenantMovementImpl* self,
-	                                           Reference<typename DB::TransactionT> tr,
-	                                           std::vector<TenantMapEntry> srcEntries,
-	                                           std::vector<TenantMapEntry> dstEntries,
-	                                           Optional<metadata::management::MovementRecord> movementRecord) {
-		ASSERT(movementRecord.present());
-		state size_t iterLen = self->tenantsInGroup.size();
-		if (iterLen != srcEntries.size()) {
-			TraceEvent(SevError, "TenantMoveFinishCheckUnlockSrcEntriesSizeDiff")
-			    .detail("SrcEntriesSize", srcEntries.size())
-			    .detail("TenantsInGroup", iterLen);
-			fmt::print("Tenant move finish: The number of source tenant entries does not match the expected number of "
-			           "tenants in the group {}:\n"
-			           "	# Source tenant entries:				{}"
-			           "	# Tenants expected in tenant group:		{}",
-			           self->tenantGroup,
-			           srcEntries.size(),
-			           iterLen);
-		}
-		if (iterLen != dstEntries.size()) {
-			TraceEvent(SevError, "TenantMoveFinishCheckUnlockDstEntriesSizeDiff")
-			    .detail("DstEntriesSize", dstEntries.size())
-			    .detail("TenantsInGroup", iterLen);
-			fmt::print("Tenant move finish: The number of destination tenant entries does not match the expected "
-			           "number of tenants in the group {}:\n"
-			           "	# Destination tenant entries:			{}"
-			           "	# Tenants expected in tenant group:		{}",
-			           self->tenantGroup,
-			           dstEntries.size(),
-			           iterLen);
-		}
-		state int index = 0;
-		for (; index < iterLen; index++) {
-			state TenantName tName = self->tenantsInGroup[index].first;
-			state int64_t tId = self->tenantsInGroup[index].second;
-			state TenantMapEntry srcEntry = srcEntries[index];
-			state TenantMapEntry dstEntry = dstEntries[index];
+	// ACTOR static Future<Void> checkValidUnlock(FinishTenantMovementImpl* self,
+	//                                            Reference<typename DB::TransactionT> tr,
+	//                                            std::vector<TenantMapEntry> srcEntries,
+	//                                            std::vector<TenantMapEntry> dstEntries,
+	//                                            Optional<metadata::management::MovementRecord> movementRecord) {
+	// 	ASSERT(movementRecord.present());
+	// 	state size_t iterLen = self->tenantsInGroup.size();
+	// 	if (iterLen != srcEntries.size()) {
+	// 		TraceEvent(SevError, "TenantMoveFinishCheckUnlockSrcEntriesSizeDiff")
+	// 		    .detail("SrcEntriesSize", srcEntries.size())
+	// 		    .detail("TenantsInGroup", iterLen);
+	// 		fmt::print("Tenant move finish: The number of source tenant entries does not match the expected number of "
+	// 		           "tenants in the group {}:\n"
+	// 		           "	# Source tenant entries:				{}"
+	// 		           "	# Tenants expected in tenant group:		{}",
+	// 		           self->tenantGroup,
+	// 		           srcEntries.size(),
+	// 		           iterLen);
+	// 	}
+	// 	if (iterLen != dstEntries.size()) {
+	// 		TraceEvent(SevError, "TenantMoveFinishCheckUnlockDstEntriesSizeDiff")
+	// 		    .detail("DstEntriesSize", dstEntries.size())
+	// 		    .detail("TenantsInGroup", iterLen);
+	// 		fmt::print("Tenant move finish: The number of destination tenant entries does not match the expected "
+	// 		           "number of tenants in the group {}:\n"
+	// 		           "	# Destination tenant entries:			{}"
+	// 		           "	# Tenants expected in tenant group:		{}",
+	// 		           self->tenantGroup,
+	// 		           dstEntries.size(),
+	// 		           iterLen);
+	// 	}
+	// 	state int index = 0;
+	// 	for (; index < iterLen; index++) {
+	// 		state TenantName tName = self->tenantsInGroup[index].first;
+	// 		state int64_t tId = self->tenantsInGroup[index].second;
+	// 		state TenantMapEntry srcEntry = srcEntries[index];
+	// 		state TenantMapEntry dstEntry = dstEntries[index];
 
-			// Assert the tenant we are unlocking is on the right cluster
-			Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
-			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
-			if (!result) {
-				TraceEvent(SevError, "TenantMoveFinishUnlockTenantClusterMismatch")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId)
-				    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
-				self->messages.push_back(
-				    fmt::format("Tenant move finish: tenant {} does not exist on destination cluster {}\n",
-				                tName,
-				                self->dstCtx.clusterName.get()));
-				throw invalid_tenant_move();
-			}
-			// Assert src tenant has the correct tenant group
-			if (!srcEntry.tenantGroup.present()) {
-				TraceEvent(SevError, "TenantMoveFinishUnlockTenantGroupMissing")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId);
-				self->messages.push_back(
-				    fmt::format("Tenant move finish: tenant group missing for tenant {}\n", tName));
-				throw invalid_tenant_move();
-			}
-			if (srcEntry.tenantGroup.get() != self->tenantGroup ||
-			    srcEntry.tenantGroup.get() != dstEntry.tenantGroup.get()) {
-				TraceEvent(SevError, "TenantMoveFinishUnlockTenantGroupMismatch")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId)
-				    .detail("ExpectedGroup", self->tenantGroup)
-				    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
-				    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
-				self->messages.push_back(fmt::format(
-				    "Tenant move finish: tenant group does not match between corresponding tenant entries:\n"
-				    "	tenant name:						{}"
-				    "	source entry tenant group:			{}"
-				    "	destination entry tenant group:		{}",
-				    tName,
-				    srcEntry.tenantGroup.get(),
-				    dstEntry.tenantGroup.get()));
-				throw invalid_tenant_move();
-			}
-			// Assert src tenant is locked
-			if (srcEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
-				TraceEvent(SevError, "TenantMoveFinishUnlockMatchingTenantNotLocked")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId);
-				self->messages.push_back(
-				    fmt::format("Tenant move finish: tenant {} on source cluster is not locked\n", tName));
-				throw invalid_tenant_move();
-			}
-		}
-		return Void();
-	}
+	// 		// Assert src tenant is locked
+	// 		if (srcEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
+	// 			TraceEvent(SevError, "TenantMoveFinishUnlockMatchingTenantNotLocked")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId);
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move finish: tenant {} on source cluster is not locked\n", tName));
+	// 			throw invalid_tenant_move();
+	// 		}
+
+	// 		// Assert the tenant we are unlocking is on the right cluster
+	// 		Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
+	// 		bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
+	// 		if (!result) {
+	// 			TraceEvent(SevError, "TenantMoveFinishUnlockTenantClusterMismatch")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId)
+	// 			    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move finish: tenant {} does not exist on destination cluster {}\n",
+	// 			                tName,
+	// 			                self->dstCtx.clusterName.get()));
+	// 			throw invalid_tenant_move();
+	// 		}
+
+	// 		// Assert src tenant has the correct tenant group
+	// 		if (!srcEntry.tenantGroup.present()) {
+	// 			TraceEvent(SevError, "TenantMoveFinishUnlockTenantGroupMissing")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId);
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move finish: tenant group missing for tenant {}\n", tName));
+	// 			throw invalid_tenant_move();
+	// 		}
+	// 		if (srcEntry.tenantGroup.get() != self->tenantGroup ||
+	// 		    srcEntry.tenantGroup.get() != dstEntry.tenantGroup.get()) {
+	// 			TraceEvent(SevError, "TenantMoveFinishUnlockTenantGroupMismatch")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId)
+	// 			    .detail("ExpectedGroup", self->tenantGroup)
+	// 			    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
+	// 			    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
+	// 			self->messages.push_back(fmt::format(
+	// 			    "Tenant move finish: tenant group does not match between corresponding tenant entries:\n"
+	// 			    "	tenant name:						{}"
+	// 			    "	source entry tenant group:			{}"
+	// 			    "	destination entry tenant group:		{}",
+	// 			    tName,
+	// 			    srcEntry.tenantGroup.get(),
+	// 			    dstEntry.tenantGroup.get()));
+	// 			throw invalid_tenant_move();
+	// 		}
+	// 	}
+	// 	return Void();
+	// }
 
 	ACTOR static Future<Void> unlockDestinationTenants(FinishTenantMovementImpl* self) {
 		std::vector<Future<Void>> unlockFutures;
@@ -1043,90 +1164,90 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkValidDelete(FinishTenantMovementImpl* self,
-	                                           Reference<typename DB::TransactionT> tr,
-	                                           std::vector<TenantMapEntry> srcEntries,
-	                                           std::vector<TenantMapEntry> dstEntries,
-	                                           Optional<metadata::management::MovementRecord> movementRecord) {
-		ASSERT(movementRecord.present());
-		state size_t iterLen = self->tenantsInGroup.size();
-		if (iterLen != srcEntries.size()) {
-			TraceEvent(SevError, "TenantMoveFinishCheckUnlockSrcEntriesSizeDiff")
-			    .detail("SrcEntriesSize", srcEntries.size())
-			    .detail("TenantsInGroup", iterLen);
-			fmt::print("Tenant move finish: The number of source tenant entries does not match the expected number of "
-			           "tenants in the group {}:\n"
-			           "	# Source tenant entries:				{}"
-			           "	# Tenants expected in tenant group:		{}",
-			           self->tenantGroup,
-			           srcEntries.size(),
-			           iterLen);
-		}
-		if (iterLen != dstEntries.size()) {
-			TraceEvent(SevError, "TenantMoveFinishCheckUnlockDstEntriesSizeDiff")
-			    .detail("DstEntriesSize", dstEntries.size())
-			    .detail("TenantsInGroup", iterLen);
-			fmt::print("Tenant move finish: The number of destination tenant entries does not match the expected "
-			           "number of tenants in the group {}:\n"
-			           "	# Destination tenant entries:			{}"
-			           "	# Tenants expected in tenant group:		{}",
-			           self->tenantGroup,
-			           dstEntries.size(),
-			           iterLen);
-		}
-		state int index = 0;
-		for (; index < iterLen; index++) {
-			state TenantName tName = self->tenantsInGroup[index].first;
-			state int64_t tId = self->tenantsInGroup[index].second;
-			state TenantMapEntry srcEntry = srcEntries[index];
-			state TenantMapEntry dstEntry = dstEntries[index];
+	// ACTOR static Future<Void> checkValidDelete(FinishTenantMovementImpl* self,
+	//                                            Reference<typename DB::TransactionT> tr,
+	//                                            std::vector<TenantMapEntry> srcEntries,
+	//                                            std::vector<TenantMapEntry> dstEntries,
+	//                                            Optional<metadata::management::MovementRecord> movementRecord) {
+	// 	ASSERT(movementRecord.present());
+	// 	state size_t iterLen = self->tenantsInGroup.size();
+	// 	if (iterLen != srcEntries.size()) {
+	// 		TraceEvent(SevError, "TenantMoveFinishCheckUnlockSrcEntriesSizeDiff")
+	// 		    .detail("SrcEntriesSize", srcEntries.size())
+	// 		    .detail("TenantsInGroup", iterLen);
+	// 		fmt::print("Tenant move finish: The number of source tenant entries does not match the expected number of "
+	// 		           "tenants in the group {}:\n"
+	// 		           "	# Source tenant entries:				{}"
+	// 		           "	# Tenants expected in tenant group:		{}",
+	// 		           self->tenantGroup,
+	// 		           srcEntries.size(),
+	// 		           iterLen);
+	// 	}
+	// 	if (iterLen != dstEntries.size()) {
+	// 		TraceEvent(SevError, "TenantMoveFinishCheckUnlockDstEntriesSizeDiff")
+	// 		    .detail("DstEntriesSize", dstEntries.size())
+	// 		    .detail("TenantsInGroup", iterLen);
+	// 		fmt::print("Tenant move finish: The number of destination tenant entries does not match the expected "
+	// 		           "number of tenants in the group {}:\n"
+	// 		           "	# Destination tenant entries:			{}"
+	// 		           "	# Tenants expected in tenant group:		{}",
+	// 		           self->tenantGroup,
+	// 		           dstEntries.size(),
+	// 		           iterLen);
+	// 	}
+	// 	state int index = 0;
+	// 	for (; index < iterLen; index++) {
+	// 		state TenantName tName = self->tenantsInGroup[index].first;
+	// 		state int64_t tId = self->tenantsInGroup[index].second;
+	// 		state TenantMapEntry srcEntry = srcEntries[index];
+	// 		state TenantMapEntry dstEntry = dstEntries[index];
 
-			// Assert src tenant is locked
-			if (srcEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
-				TraceEvent(SevError, "TenantMoveFinishTenantNotLocked")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId);
-				self->messages.push_back(
-				    fmt::format("Tenant move finish: tenant {} on source cluster is not locked\n", tName));
-				throw invalid_tenant_move();
-			}
+	// 		// Assert src tenant is locked
+	// 		if (srcEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
+	// 			TraceEvent(SevError, "TenantMoveFinishTenantNotLocked")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId);
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move finish: tenant {} on source cluster is not locked\n", tName));
+	// 			throw invalid_tenant_move();
+	// 		}
 
-			// Assert dst tenant exists in metacluster metadata
-			Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
-			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
-			if (!result) {
-				TraceEvent(SevError, "TenantMoveFinishDeleteDataClusterMismatch")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId)
-				    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
-				self->messages.push_back(
-				    fmt::format("Tenant move finish: tenant {} does not exist on destination cluster {}\n",
-				                tName,
-				                self->dstCtx.clusterName.get()));
-				throw invalid_tenant_move();
-			}
+	// 		// Assert dst tenant exists in metacluster metadata
+	// 		Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
+	// 		bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
+	// 		if (!result) {
+	// 			TraceEvent(SevError, "TenantMoveFinishDeleteDataClusterMismatch")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId)
+	// 			    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move finish: tenant {} does not exist on destination cluster {}\n",
+	// 			                tName,
+	// 			                self->dstCtx.clusterName.get()));
+	// 			throw invalid_tenant_move();
+	// 		}
 
-			// Assert matching tenant groups
-			if (dstEntry.tenantGroup != srcEntry.tenantGroup) {
-				TraceEvent(SevError, "TenantMoveFinishDeleteTenantGroupMismatch")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId)
-				    .detail("ExpectedGroup", self->tenantGroup)
-				    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
-				    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
-				self->messages.push_back(fmt::format(
-				    "Tenant move finish: tenant group does not match between corresponding tenant entries:\n"
-				    "	tenant name:						{}"
-				    "	source entry tenant group:			{}"
-				    "	destination entry tenant group:		{}",
-				    tName,
-				    srcEntry.tenantGroup.get(),
-				    dstEntry.tenantGroup.get()));
-				throw invalid_tenant_move();
-			}
-		}
-		return Void();
-	}
+	// 		// Assert matching tenant groups
+	// 		if (dstEntry.tenantGroup != srcEntry.tenantGroup) {
+	// 			TraceEvent(SevError, "TenantMoveFinishDeleteTenantGroupMismatch")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId)
+	// 			    .detail("ExpectedGroup", self->tenantGroup)
+	// 			    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup)
+	// 			    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup);
+	// 			self->messages.push_back(fmt::format(
+	// 			    "Tenant move finish: tenant group does not match between corresponding tenant entries:\n"
+	// 			    "	tenant name:						{}"
+	// 			    "	source entry tenant group:			{}"
+	// 			    "	destination entry tenant group:		{}",
+	// 			    tName,
+	// 			    srcEntry.tenantGroup.get(),
+	// 			    dstEntry.tenantGroup.get()));
+	// 			throw invalid_tenant_move();
+	// 		}
+	// 	}
+	// 	return Void();
+	// }
 
 	ACTOR static Future<bool> checkDestinationVersion(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
 		loop {
@@ -1254,7 +1375,6 @@ struct FinishTenantMovementImpl {
 					}
 				}
 				TraceEvent("Breakpoint4");
-
 				wait(runMoveManagementTransaction(self->tenantGroup,
 				                                  self->srcCtx,
 				                                  self->dstCtx,
@@ -1263,21 +1383,18 @@ struct FinishTenantMovementImpl {
 				                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
 				                                      Reference<typename DB::TransactionT> tr,
 				                                      Optional<metadata::management::MovementRecord> movementRecord) {
-					                                  return checkValidUnlock(
-					                                      self, tr, srcEntries, dstEntries, movementRecord);
+					                                  return checkValidDelete<DB>(tr,
+					                                                              self->tenantGroup,
+					                                                              self->tenantsInGroup,
+					                                                              self->srcCtx.clusterName.get(),
+					                                                              self->dstCtx.clusterName.get(),
+					                                                              srcEntries,
+					                                                              dstEntries,
+					                                                              movementRecord,
+					                                                              &self->messages,
+					                                                              Aborting::False);
 				                                  }));
 				TraceEvent("Breakpoint5");
-				wait(runMoveManagementTransaction(self->tenantGroup,
-				                                  self->srcCtx,
-				                                  self->dstCtx,
-				                                  Aborting::False,
-				                                  { metadata::management::MovementState::SWITCH_METADATA },
-				                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
-				                                      Reference<typename DB::TransactionT> tr,
-				                                      Optional<metadata::management::MovementRecord> movementRecord) {
-					                                  return checkValidDelete(
-					                                      self, tr, srcEntries, dstEntries, movementRecord);
-				                                  }));
 			}
 		} catch (Error& e) {
 			state Error err(e);
@@ -1499,69 +1616,69 @@ struct AbortTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkValidDelete(AbortTenantMovementImpl* self,
-	                                           Reference<typename DB::TransactionT> tr,
-	                                           std::vector<TenantMapEntry> srcEntries,
-	                                           std::vector<TenantMapEntry> dstEntries,
-	                                           Optional<metadata::management::MovementRecord> movementRecord) {
-		ASSERT(movementRecord.present());
-		state size_t iterLen = self->tenantsInGroup.size();
-		ASSERT_EQ(iterLen, srcEntries.size());
-		ASSERT_EQ(iterLen, dstEntries.size());
-		state int index = 0;
-		for (; index < iterLen; index++) {
-			state TenantName tName = self->tenantsInGroup[index].first;
-			state int64_t tId = self->tenantsInGroup[index].second;
-			state TenantMapEntry srcEntry = srcEntries[index];
-			state TenantMapEntry dstEntry = dstEntries[index];
+	// ACTOR static Future<Void> checkValidDelete(AbortTenantMovementImpl* self,
+	//                                            Reference<typename DB::TransactionT> tr,
+	//                                            std::vector<TenantMapEntry> srcEntries,
+	//                                            std::vector<TenantMapEntry> dstEntries,
+	//                                            Optional<metadata::management::MovementRecord> movementRecord) {
+	// 	ASSERT(movementRecord.present());
+	// 	state size_t iterLen = self->tenantsInGroup.size();
+	// 	ASSERT_EQ(iterLen, srcEntries.size());
+	// 	ASSERT_EQ(iterLen, dstEntries.size());
+	// 	state int index = 0;
+	// 	for (; index < iterLen; index++) {
+	// 		state TenantName tName = self->tenantsInGroup[index].first;
+	// 		state int64_t tId = self->tenantsInGroup[index].second;
+	// 		state TenantMapEntry srcEntry = srcEntries[index];
+	// 		state TenantMapEntry dstEntry = dstEntries[index];
 
-			// Assert dst tenant is locked
-			if (dstEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
-				TraceEvent(SevError, "TenantMoveAbortTenantNotLocked")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId);
-				self->messages.push_back(
-				    fmt::format("Tenant move abort: tenant {} on source cluster is not locked\n", tName));
-				throw invalid_tenant_move();
-			}
+	// 		// Assert dst tenant is locked
+	// 		if (dstEntry.tenantLockState != TenantAPI::TenantLockState::LOCKED) {
+	// 			TraceEvent(SevError, "TenantMoveAbortTenantNotLocked")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId);
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move abort: tenant {} on source cluster is not locked\n", tName));
+	// 			throw invalid_tenant_move();
+	// 		}
 
-			// Assert src tenant exists in metacluster metadata
-			// Abort will have switched metadata to source by this point
-			Tuple srcTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
-			bool srcExists = wait(metadata::management::clusterTenantIndex().exists(tr, srcTuple));
-			if (!srcExists) {
-				TraceEvent("TenantMoveAbortDeleteTenantClusterMismatch")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId)
-				    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
-				self->messages.push_back(
-				    fmt::format("Tenant move abort: tenant {} does not exist on source cluster {}\n",
-				                tName,
-				                self->srcCtx.clusterName.get()));
-				throw invalid_tenant_move();
-			}
+	// 		// Assert src tenant exists in metacluster metadata
+	// 		// Abort will have switched metadata to source by this point
+	// 		Tuple srcTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
+	// 		bool srcExists = wait(metadata::management::clusterTenantIndex().exists(tr, srcTuple));
+	// 		if (!srcExists) {
+	// 			TraceEvent("TenantMoveAbortDeleteTenantClusterMismatch")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId)
+	// 			    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move abort: tenant {} does not exist on source cluster {}\n",
+	// 			                tName,
+	// 			                self->srcCtx.clusterName.get()));
+	// 			throw invalid_tenant_move();
+	// 		}
 
-			// Assert matching tenant groups
-			if (dstEntry.tenantGroup != srcEntry.tenantGroup) {
-				TraceEvent(SevError, "TenantMoveAbortDeleteTenantGroupMismatch")
-				    .detail("TenantName", tName)
-				    .detail("TenantID", tId)
-				    .detail("ExpectedGroup", self->tenantGroup)
-				    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
-				    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
-				self->messages.push_back(
-				    fmt::format("Tenant move abort: tenant group does not match between corresponding tenant entries:\n"
-				                "	tenant name:						{}"
-				                "	source entry tenant group:			{}"
-				                "	destination entry tenant group:		{}",
-				                tName,
-				                srcEntry.tenantGroup.get(),
-				                dstEntry.tenantGroup.get()));
-				throw invalid_tenant_move();
-			}
-		}
-		return Void();
-	}
+	// 		// Assert matching tenant groups
+	// 		if (dstEntry.tenantGroup != srcEntry.tenantGroup) {
+	// 			TraceEvent(SevError, "TenantMoveAbortDeleteTenantGroupMismatch")
+	// 			    .detail("TenantName", tName)
+	// 			    .detail("TenantID", tId)
+	// 			    .detail("ExpectedGroup", self->tenantGroup)
+	// 			    .detail("SourceEntryTenantGroup", srcEntry.tenantGroup.get())
+	// 			    .detail("DestinationEntryTenantGroup", dstEntry.tenantGroup.get());
+	// 			self->messages.push_back(
+	// 			    fmt::format("Tenant move abort: tenant group does not match between corresponding tenant entries:\n"
+	// 			                "	tenant name:						{}"
+	// 			                "	source entry tenant group:			{}"
+	// 			                "	destination entry tenant group:		{}",
+	// 			                tName,
+	// 			                srcEntry.tenantGroup.get(),
+	// 			                dstEntry.tenantGroup.get()));
+	// 			throw invalid_tenant_move();
+	// 		}
+	// 	}
+	// 	return Void();
+	// }
 
 	ACTOR static Future<Void> deleteDestinationData(AbortTenantMovementImpl* self, TenantName tName) {
 		state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
@@ -1772,8 +1889,16 @@ struct AbortTenantMovementImpl {
 				                                  [self = self, srcEntries = srcEntries, dstEntries = dstEntries](
 				                                      Reference<typename DB::TransactionT> tr,
 				                                      Optional<metadata::management::MovementRecord> movementRecord) {
-					                                  return checkValidDelete(
-					                                      self, tr, srcEntries, dstEntries, movementRecord);
+					                                  return checkValidDelete<DB>(tr,
+					                                                              self->tenantGroup,
+					                                                              self->tenantsInGroup,
+					                                                              self->srcCtx.clusterName.get(),
+					                                                              self->dstCtx.clusterName.get(),
+					                                                              srcEntries,
+					                                                              dstEntries,
+					                                                              movementRecord,
+					                                                              &self->messages,
+					                                                              Aborting::True);
 				                                  }));
 				TraceEvent("BreakpointAbort3.3");
 				wait(deleteAllDestinationData(self));
