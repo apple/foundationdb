@@ -2971,7 +2971,7 @@ public:
 					    .detail("Server", server->getId())
 					    .detail("IsTss", isTss)
 					    .detail("Reason", "Absent server list item");
-					return Void();
+					return Never();
 				}
 				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
