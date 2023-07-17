@@ -176,7 +176,7 @@ else()
     # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
     # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
     # to use a version that has a fix.
-    add_compile_options(-gdwarf-4)
+    add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
   endif()
 
   if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -535,6 +535,13 @@ if (WITH_SWIFT)
 
   # Enable Swift <-> C++ interoperability.
   set(SwiftOptions "${SwiftOptions} -cxx-interoperability-mode=swift-5.9")
+
+  set(SwiftOptions "${SwiftOptions} -Xcc -DWITH_SWIFT")
+
+  # Supress noisy C++ warnings from Swift.
+  set(SwiftOptions "${SwiftOptions} -Xcc -Wno-deprecated -Xcc -Wno-undefined-var-template")
+  # Supress rapidjson noisy GCC pragma diagnostics.
+  set(SwiftOptions "${SwiftOptions} -Xcc -Wno-unknown-warning-option")
 
   if (FOUNDATIONDB_CROSS_COMPILING)
     # Cross-compilation options.

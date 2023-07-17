@@ -56,6 +56,7 @@ if (WITH_SWIFT)
       "${CMAKE_SOURCE_DIR}/contrib/sqlite"
       "${Boost_DIR}/../../../include"
       "${msgpack_DIR}/include"
+      "${CMAKE_SOURCE_DIR}/contrib/rapidjson"
   )
 
   # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?

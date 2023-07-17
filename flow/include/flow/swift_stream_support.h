@@ -102,7 +102,7 @@ private:
 	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
 	void (*_Nonnull resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
 
-	SwiftContinuationSingleCallbackCInt(void* continuationBox,
+	SwiftContinuationSingleCallbackCInt(void* _Nonnull continuationBox,
 	                                    void (*_Nonnull returning)(void* _Nonnull, int),
 	                                    void (*_Nonnull throwing)(void* _Nonnull, Error))
 	  : continuationBox(continuationBox), resumeWithValue(returning), resumeWithError(throwing) {}
