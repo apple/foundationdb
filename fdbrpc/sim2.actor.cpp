@@ -356,10 +356,6 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		                   std::any_of(peerProcess->childs.begin(),
 		                               peerProcess->childs.end(),
 		                               [&](ISimulator::ProcessInfo* child) { return child && child == process; });
-		if (g_clogging.disconnected(process->address, peerProcess->address)) {
-			TraceEvent("ZZZZDisconnectFromConnect").detail("Address", process->address).detail("Peer", peerProcess->address);
-			throw connection_failed();
-		}
 
 		if (g_clogging.disconnected(process->address.ip, peerProcess->address.ip)) {
 			TraceEvent("SimulatedDisconnection")
