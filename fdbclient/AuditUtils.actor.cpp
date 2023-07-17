@@ -693,7 +693,7 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
 			    .detail("AuditPhase", auditState.getPhase())
-				.detail("AuditServerID", auditState.auditServerId);
+			    .detail("AuditServerID", auditState.auditServerId);
 			wait(tr.onError(e));
 		}
 	}
@@ -723,9 +723,9 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError")
-				.errorUnsuppressed(e)
-				.detail("AuditID", auditId)
-				.detail("AuditType", type)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", type)
 			    .detail("AuditServerID", auditServerId);
 			wait(tr.onError(e));
 		}
