@@ -997,7 +997,6 @@ public:
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
-	std::unordered_map<AuditType, std::pair<UID, ActorCollection>> auditTasks;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -5306,6 +5305,17 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
+	// The trackShardAssignment is correct when at most 1 auditStorageServerShardQ runs
+	// at a time. Currently, this is guaranteed by setting serveAuditStorageParallelismLock == 1
+	// If serveAuditStorageParallelismLock > 1, we need to check trackShardAssignmentMinVersion
+	// to make sure no onging auditStorageServerShardQ is running
+	if (data->trackShardAssignmentMinVersion != invalidVersion) {
+		// Another auditStorageServerShardQ is running
+		req.reply.sendError(audit_storage_failed());
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ExistStorageServerShardAudit") // unexpected
+		    .detail("NewAuditId", req.id)
+		    .detail("NewAuditType", req.getType());
+	}
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
@@ -5465,7 +5475,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					throw audit_storage_failed();
 				}
 				// Get claim range
-				KeyRange claimRange = rangeToRead & serverKeyCompleteRange;
+				KeyRange claimRange = rangeToRead;
+				claimRange = claimRange & serverKeyCompleteRange;
 				if (claimRange.empty()) {
 					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 					           "SSAuditStorageSsShardOverlapRangeEmpty",
@@ -5626,9 +5637,11 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("AuditServer", data->thisServerID)
-					    .detail("CompleteRange", res.range);
-					if (claimRange.end < rangeToRead.end) {
-						rangeToReadBegin = claimRange.end;
+					    .detail("CompleteRange", res.range)
+					    .detail("ClaimRange", claimRange)
+					    .detail("RangeToReadEnd", req.range.end);
+					if (res.range.end < req.range.end) {
+						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
 						break;
@@ -5910,8 +5923,8 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 					    .detail("Version", readAtVersion)
 					    .detail("AuditServerId", data->thisServerID)
 					    .detail("CompleteRange", res.range);
-					if (claimRange.end < rangeToRead.end) {
-						rangeToReadBegin = claimRange.end;
+					if (res.range.end < req.range.end) {
+						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
 						break;
@@ -13845,46 +13858,21 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					    .detail("AuditRange", req.range)
 					    .detail("DDId", req.ddId)
 					    .detail("AuditId", req.id)
-					    .detail("AuditType", req.getType());
+					    .detail("AuditType", req.getType())
+					    .detail("AuditRange", req.range);
 					req.reply.sendError(audit_storage_cancelled());
 					continue;
 				}
-				// Check existing audit task states
-				if (self->auditTasks.contains(req.getType())) {
-					if (req.id != self->auditTasks[req.getType()].first) {
-						// Any task of past audit must be ready
-						if (!self->auditTasks[req.getType()].second.getResult().isReady()) {
-							req.reply.sendError(audit_storage_exceeded_request_limit());
-							TraceEvent(SevWarnAlways, "ExistSSAuditWithDifferentId") // unexpected
-							    .detail("NewAuditId", req.id)
-							    .detail("NewAuditType", req.getType());
-							continue;
-						}
-					} else if (req.getType() == AuditType::ValidateStorageServerShard &&
-					           !self->auditTasks[req.getType()].second.getResult().isReady()) {
-						// Only one ValidateStorageServerShard is allowed to run at a time
-						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
-						    .detail("AuditId", req.id)
-						    .detail("AuditType", req.getType());
-						// Make sure the history collection is not open for the old audit
-						self->stopTrackShardAssignment();
-						self->auditTasks[req.getType()].second.clear(true);
-					}
-				}
-				// Prepare for the new audit task
-				if (!self->auditTasks.contains(req.getType()) ||
-				    self->auditTasks[req.getType()].second.getResult().isReady()) {
-					self->auditTasks[req.getType()] = std::make_pair(req.id, ActorCollection(true));
-				}
 				// Start the new audit task
+				ASSERT(req.id.isValid());
 				if (req.getType() == AuditType::ValidateHA) {
-					self->auditTasks[req.getType()].second.add(auditStorageShardReplicaQ(self, req));
+					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateReplica) {
-					self->auditTasks[req.getType()].second.add(auditStorageShardReplicaQ(self, req));
+					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->auditTasks[req.getType()].second.add(auditShardLocationMetadataQ(self, req));
+					self->actors.add(auditShardLocationMetadataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->auditTasks[req.getType()].second.add(auditStorageServerShardQ(self, req));
+					self->actors.add(auditStorageServerShardQ(self, req));
 				} else {
 					req.reply.sendError(not_implemented());
 				}
