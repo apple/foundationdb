@@ -5534,7 +5534,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				if (ownRangesSeenByKeyServer.empty()) {
 					if (!ownRangesSeenByServerKey.empty()) {
 						std::string error =
-						    format("ServerKeys shows %d ranges that not appear on keyServers for Server(%s): ",
+						    format("ServerKeys shows %zu ranges that not appear on keyServers for Server(%s): ",
 						           ownRangesSeenByServerKey.size(),
 						           data->thisServerID.toString().c_str(),
 						           describe(ownRangesSeenByServerKey).c_str());
