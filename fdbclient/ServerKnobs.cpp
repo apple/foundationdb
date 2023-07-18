@@ -801,6 +801,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
 	init( GLOBAL_TAG_THROTTLING_REPORT_ONLY,                   false );
 	init( GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD,            4096 );
+	init( GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD,         409600.0 );
 
 	init( GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME,        10.0 );
 	init( GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,   2.0 );
