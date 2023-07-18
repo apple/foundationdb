@@ -13854,7 +13854,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				// Check req
 				if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty()) {
 					// ddId is used when persist progress
-					TraceEvent(SevWarnAlways, "AuditRequestInvalid") // unexpected
+					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "AuditRequestInvalid") // unexpected
 					    .detail("AuditRange", req.range)
 					    .detail("DDId", req.ddId)
 					    .detail("AuditId", req.id)
@@ -13864,7 +13864,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					continue;
 				}
 				// Start the new audit task
-				ASSERT(req.id.isValid());
 				if (req.getType() == AuditType::ValidateHA) {
 					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateReplica) {
