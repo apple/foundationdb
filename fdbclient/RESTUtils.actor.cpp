@@ -82,17 +82,15 @@ RESTClientKnobs::RESTClientKnobs() {
 }
 
 void RESTClientKnobs::set(const std::unordered_map<std::string, int>& knobSettings) {
-	TraceEvent trace = TraceEvent("RESTClientSetKnobs");
 
 	for (const auto& itr : knobSettings) {
 		const auto& kItr = RESTClientKnobs::knobMap.find(itr.first);
 		if (kItr == RESTClientKnobs::knobMap.end()) {
-			trace.detail("RESTClientInvalidKnobName", itr.first);
+			TraceEvent("RESTClientInvalidKnobName").detail("KnobName", itr.first);
 			throw rest_invalid_rest_client_knob();
 		}
 		ASSERT_EQ(itr.first.compare(kItr->first), 0);
 		*(kItr->second) = itr.second;
-		trace.detail(itr.first.c_str(), itr.second);
 	}
 }
 

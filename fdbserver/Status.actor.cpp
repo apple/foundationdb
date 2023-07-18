@@ -2988,9 +2988,13 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 }
 
 ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db) {
+	state KMSHealthStatus unhealthy;
+	unhealthy.canConnectToEKP = false;
+	unhealthy.canConnectToKms = false;
+	unhealthy.lastUpdatedTS = now();
 	try {
 		if (!db->get().client.encryptKeyProxy.present()) {
-			return KMSHealthStatus{ false, false, now() };
+			return unhealthy;
 		}
 		KMSHealthStatus reply = wait(timeoutError(
 		    db->get().client.encryptKeyProxy.get().getHealthStatus.getReply(EncryptKeyProxyHealthStatusRequest()),
@@ -3000,7 +3004,7 @@ ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<Server
 		if (e.code() != error_code_timed_out) {
 			throw;
 		}
-		return KMSHealthStatus{ false, false, now() };
+		return unhealthy;
 	}
 }
 
@@ -3085,10 +3089,25 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// Get EKP Health
 		if (db->get().client.encryptKeyProxy.present()) {
 			KMSHealthStatus status = wait(getKMSHealthStatus(db));
-			JsonBuilderObject _statusObj;
-			_statusObj["ekp_is_healthy"] = status.canConnectToEKP;
-			statusObj["encryption_at_rest"] = _statusObj;
-			statusObj["kms_is_healthy"] = status.canConnectToKms;
+
+			// encryption-at-rest status
+			JsonBuilderObject earStatusObj;
+			earStatusObj["ekp_is_healthy"] = status.canConnectToEKP;
+			statusObj["encryption_at_rest"] = earStatusObj;
+
+			JsonBuilderObject kmsStatusObj;
+			kmsStatusObj["kms_is_healthy"] = status.canConnectToKms;
+			if (status.canConnectToEKP) {
+				kmsStatusObj["kms_connector_type"] = status.kmsConnectorType;
+				kmsStatusObj["kms_stable"] = status.kmsStable;
+				JsonBuilderArray kmsUrlsArr;
+				for (const auto& url : status.restKMSUrls) {
+					kmsUrlsArr.push_back(url);
+				}
+				kmsStatusObj["kms_urls"] = kmsUrlsArr;
+			}
+			statusObj["kms"] = kmsStatusObj;
+
 			// TODO: In this scenario we should see if we can fetch any status fields that don't depend on encryption
 			if (!status.canConnectToKms || !status.canConnectToEKP) {
 				return StatusReply(statusObj.getJson());

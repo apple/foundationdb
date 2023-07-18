@@ -41,26 +41,43 @@ struct KMSHealthStatus {
 	bool canConnectToKms;
 	bool canConnectToEKP;
 	double lastUpdatedTS;
+	std::string kmsConnectorType;
+	std::vector<std::string> restKMSUrls;
+	bool kmsStable = true;
 
-	KMSHealthStatus() : canConnectToEKP(false), canConnectToKms(false), lastUpdatedTS(-1) {}
-	KMSHealthStatus(bool canConnectToKms, bool canConnectToEKP, double lastUpdatedTS)
-	  : canConnectToKms(canConnectToKms), canConnectToEKP(canConnectToEKP), lastUpdatedTS(lastUpdatedTS) {}
+	KMSHealthStatus() : canConnectToKms(false), canConnectToEKP(false), lastUpdatedTS(-1), kmsStable(true) {}
 
 	bool operator==(const KMSHealthStatus& other) {
 		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
+	}
+
+	bool healthnessChanged(const KMSHealthStatus& other) {
+		return canConnectToKms != other.canConnectToKms || canConnectToEKP != other.canConnectToEKP;
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "CanConnectToKms(" << canConnectToKms << ")"
 		   << ", CanConnectToEKP(" << canConnectToEKP << ")"
-		   << ", LastUpdatedTS(" << lastUpdatedTS << ")";
+		   << ", LastUpdatedTS(" << lastUpdatedTS << ")"
+		   << ", KMSConnectorType(" << kmsConnectorType << ")"
+		   << ", RESTKmsUrls(";
+		bool firstUrl = true;
+		for (const auto& url : restKMSUrls) {
+			if (!firstUrl) {
+				ss << ", ";
+			}
+			ss << url;
+			firstUrl = false;
+		}
+
+		ss << "), KmsStable(" << kmsStable << ")";
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, canConnectToKms, canConnectToEKP, lastUpdatedTS);
+		serializer(ar, canConnectToKms, canConnectToEKP, lastUpdatedTS, kmsConnectorType, restKMSUrls, kmsStable);
 	}
 };
 
