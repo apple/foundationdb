@@ -223,8 +223,9 @@ Key getApplyKey(Version version, Key backupUid) {
 	return k2.withPrefix(applyLogKeys.begin);
 }
 
-Key getLogKey(Version version, Key backupUid) {
-	int64_t vblock = version / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+Key getLogKey(Version version, Key backupUid, int blockSize) {
+	int64_t vblock = version / blockSize;
+	vblock = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	uint64_t v = bigEndian64(version);
 	uint32_t data = vblock & 0xffffffff;
 	uint8_t hash = (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
@@ -232,6 +233,22 @@ Key getLogKey(Version version, Key backupUid) {
 	Key k2 = k1.withPrefix(backupUid);
 	return k2.withPrefix(backupLogKeys.begin);
 }
+
+namespace {
+TEST_CASE("/backup/logversion") {
+	std::vector<Version> versions = { 100, 841000000 };
+	for (int i = 0; i < 10; i++) {
+		versions.push_back(deterministicRandom()->randomInt64(0, std::numeric_limits<int32_t>::max()));
+	}
+	Key backupUid = "backupUid0"_sr;
+	for (const auto v : versions) {
+		Key k = getLogKey(v, backupUid);
+		Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, backupUid);
+		ASSERT(ranges[0].contains(k));
+	}
+	return Void();
+}
+} // namespace
 
 Version getLogKeyVersion(Key key) {
 	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
