@@ -3098,7 +3098,7 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 			// FIXME: use the configuration to calculate a more precise minimum recovery version.
 			Version minVersion = std::numeric_limits<Version>::max();
 			for (auto& it : replies) {
-				minVersion = std::min(minVersion, it.get().v);
+				minVersion = std::min(minVersion, it.get().kcv);
 			}
 
 			while (self->txsPopVersions.size() && self->txsPopVersions.front().first <= minVersion) {

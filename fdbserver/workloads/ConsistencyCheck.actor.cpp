@@ -146,7 +146,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
+				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", true, 0, 1e5, 0, 0),
 				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
 				if (g_network->isSimulated()) {
 					g_simulator->quiesced = true;

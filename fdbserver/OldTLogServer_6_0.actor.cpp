@@ -1860,7 +1860,7 @@ void getQueuingMetrics(TLogData* self, Reference<LogData> logData, TLogQueuingMe
 	reply.bytesDurable = self->bytesDurable;
 	reply.storageBytes = self->persistentData->getStorageBytes();
 	// FIXME: Add the knownCommittedVersion to this message and change ratekeeper to use that version.
-	reply.v = logData->durableKnownCommittedVersion;
+	reply.kcv = logData->durableKnownCommittedVersion;
 	req.reply.send(reply);
 }
 

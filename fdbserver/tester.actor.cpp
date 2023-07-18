@@ -1629,6 +1629,8 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "runFailureWorkloads",
 	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
+	{ "runRemoteKCVCheck",
+	  [](const std::string& value, TestSpec* spec) { spec->runRemoteKCVCheck = (value == "true"); } },
 	{ "disabledFailureInjectionWorkloads",
 	  [](const std::string& value, TestSpec* spec) {
 	      // Expects a comma separated list of workload names in "value".
@@ -2026,6 +2028,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state bool waitForQuiescenceEnd = false;
 	state bool restorePerpetualWiggleSetting = false;
 	state bool perpetualWiggleEnabled = false;
+	state bool runRemoteKCVCheck = false;
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
@@ -2043,6 +2046,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			waitForQuiescenceEnd = true;
 		if (iter->restorePerpetualWiggleSetting)
 			restorePerpetualWiggleSetting = true;
+		if (iter->runRemoteKCVCheck)
+			runRemoteKCVCheck = true;
 		startDelay = std::max(startDelay, iter->startDelay);
 		databasePingDelay = std::min(databasePingDelay, iter->databasePingDelay);
 		if (iter->simBackupAgents != ISimulator::BackupAgentType::NoBackupAgents)
@@ -2180,7 +2185,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		    .detail("StartDelay", startDelay);
 
 		try {
-			wait(quietDatabase(cx, dbInfo, "Start") ||
+			wait(quietDatabase(cx, dbInfo, "Start", runRemoteKCVCheck) ||
 			     (databasePingDelay == 0.0
 			          ? Never()
 			          : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseStart", startDelay)));
@@ -2235,7 +2240,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 				TraceEvent("QuietDatabaseEndWait");
 				Future<Void> waitConsistencyScanEnd = checkConsistencyScanAfterTest(cx, &consistencyScanState);
 				Future<Void> waitQuietDatabaseEnd =
-				    quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
+				    quietDatabase(cx, dbInfo, "End", runRemoteKCVCheck, 0, 2e6, 2e6) ||
 				    (databasePingDelay == 0.0 ? Never()
 				                              : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd"));
 

@@ -346,11 +346,11 @@ struct TLogQueuingMetricsReply {
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable{ 0 }, bytesInput{ 0 };
 	StorageBytes storageBytes;
-	Version v; // committed version
+	Version kcv;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
+		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, kcv);
 	}
 };
 

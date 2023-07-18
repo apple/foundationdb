@@ -1,0 +1,20 @@
+[configuration]
+minimumRegions = 2
+
+[[test]]
+testTitle = 'FailoverCycle'
+clearAfterTest = false
+runRemoteKCVCheck = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 3000.0
+    testDuration = 300.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'Failover'
+    testDuration = 300.0
+    preFailoverDuration = 90.0
+    afterFailoverDuration = 90.0
+    afterFailbackDuration = 90.0

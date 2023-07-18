@@ -690,41 +690,46 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 	}
 }
 
-// Returns DC lag for simulation runs
-ACTOR Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	loop {
-		if (!g_network->isSimulated() || g_simulator->usableRegions == 1) {
-			return 0;
-		}
-
-		state Optional<TLogInterface> primaryLog;
-		state Optional<TLogInterface> remoteLog;
-		if (dbInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
-			for (const auto& logset : dbInfo->get().logSystemConfig.tLogs) {
-				if (logset.isLocal && logset.locality != tagLocalitySatellite) {
-					for (const auto& tlog : logset.tLogs) {
-						if (tlog.present()) {
-							primaryLog = tlog.interf();
-							break;
-						}
+void setTLogs(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+              Optional<TLogInterface>* primaryLog,
+              Optional<TLogInterface>* remoteLog) {
+	if (dbInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
+		for (const auto& logset : dbInfo->get().logSystemConfig.tLogs) {
+			if (logset.isLocal && logset.locality != tagLocalitySatellite) {
+				for (const auto& tlog : logset.tLogs) {
+					if (tlog.present()) {
+						*primaryLog = tlog.interf();
+						break;
 					}
 				}
-				if (!logset.isLocal) {
-					for (const auto& tlog : logset.tLogs) {
-						if (tlog.present()) {
-							remoteLog = tlog.interf();
-							break;
-						}
+			}
+			if (!logset.isLocal) {
+				for (const auto& tlog : logset.tLogs) {
+					if (tlog.present()) {
+						*remoteLog = tlog.interf();
+						break;
 					}
 				}
 			}
 		}
+	}
+}
 
+// Returns (DC lag, remote kcv) for simulation runs
+ACTOR Future<std::pair<Version, Version>> getDatacenterLag(Database cx,
+                                                           Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	loop {
+		if (!g_network->isSimulated() || g_simulator->usableRegions == 1) {
+			return std::make_pair(0, 0);
+		}
+
+		state Optional<TLogInterface> primaryLog;
+		state Optional<TLogInterface> remoteLog;
+		setTLogs(dbInfo, &primaryLog, &remoteLog);
 		if (!primaryLog.present() || !remoteLog.present()) {
 			wait(dbInfo->onChange());
 			continue;
 		}
-
 		ASSERT(primaryLog.present());
 		ASSERT(remoteLog.present());
 
@@ -739,10 +744,8 @@ ACTOR Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBI
 			if (onChange.isReady()) {
 				break;
 			}
-
-			TraceEvent("DCLag").detail("Primary", primaryMetrics.get().v).detail("Remote", remoteMetrics.get().v);
-			ASSERT(primaryMetrics.get().v >= 0 && remoteMetrics.get().v >= 0);
-			return primaryMetrics.get().v - remoteMetrics.get().v;
+			ASSERT(primaryMetrics.get().kcv >= 0 && remoteMetrics.get().kcv >= 0);
+			return std::make_pair(primaryMetrics.get().kcv - remoteMetrics.get().kcv, remoteMetrics.get().kcv);
 		}
 	}
 }
@@ -1013,11 +1016,30 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 	return Void();
 }
 
-// Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
-// requires the database to be available and healthy in order to succeed.
+void checkStuckRemoteKCV(Version dcLag, Version& remoteKCV, Version& previousRemoteKCV, int& numRemoteKCVStuck) {
+	const int maxKCVStuckLimit = 10;
+	if (remoteKCV == previousRemoteKCV) {
+		numRemoteKCVStuck++;
+	} else {
+		numRemoteKCVStuck = 0;
+		previousRemoteKCV = remoteKCV;
+	}
+	if (remoteKCV != 0 // sometimes there is data loss and it becomes zero
+	    && dcLag > 0 // remoteKCV needs to lag behind
+	    && numRemoteKCVStuck >= maxKCVStuckLimit) {
+		TraceEvent(SevError, "RemoteKCVStuckError")
+		    .detail("DCLag", dcLag)
+		    .detail("RemoteKCV", remoteKCV)
+		    .detail("Stuck", numRemoteKCVStuck)
+		    .log();
+	}
+}
+// Waits until a database quiets down in simulation(no data in flight, small tlog queue, low SQ, no active data
+// distribution). This requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string phase,
+                                        bool runRemoteKCVCheck,
                                         int64_t dataInFlightGate = 2e6,
                                         int64_t maxTLogQueueGate = 5e6,
                                         int64_t maxStorageServerQueueGate = 5e6,
@@ -1035,7 +1057,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<bool> dataDistributionActive;
 	state Future<bool> storageServersRecruiting;
 	state Future<int64_t> versionOffset;
-	state Future<Version> dcLag;
+	state Future<std::pair<Version, Version>> dcLagResult;
+	state Version dcLag;
+	state Version remoteKCV;
+	state Version previousRemoteKCV = 0;
 	state Version maxDcLag = 30e6;
 	state std::string traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str()).log();
@@ -1060,6 +1085,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
+	state int numRemoteKCVStuck = 0;
 	loop {
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
@@ -1076,12 +1102,14 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
 			storageServersRecruiting = getStorageServersRecruiting(cx, distributorWorker, distributorUID);
 			versionOffset = getVersionOffset(cx, distributorWorker, dbInfo);
-			dcLag = getDatacenterLag(cx, dbInfo);
+			dcLagResult = getDatacenterLag(cx, dbInfo);
 
 			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
-			     success(storageServersRecruiting) && success(versionOffset) && success(dcLag));
+			     success(storageServersRecruiting) && success(versionOffset) && success(dcLagResult));
 
+			dcLag = dcLagResult.get().first;
+			remoteKCV = dcLagResult.get().second;
 			maxVersionOffset += dbInfo->get().recoveryCount * SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
 
 			auto check = checker.startIteration(phase);
@@ -1097,11 +1125,12 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			    .add(evt, "DataDistributionActive", dataDistributionActive.get(), true, std::equal_to<>())
 			    .add(evt, "StorageServersRecruiting", storageServersRecruiting.get(), false, std::equal_to<>())
 			    .add(evt, "VersionOffset", versionOffset.get(), maxVersionOffset)
-			    .add(evt, "DatacenterLag", dcLag.get(), maxDcLag);
-
+			    .add(evt, "DatacenterLag", dcLag, maxDcLag);
 			evt.detail("RecoveryCount", dbInfo->get().recoveryCount).detail("NumSuccesses", numSuccesses);
 			evt.log();
-
+			if (runRemoteKCVCheck) {
+				checkStuckRemoteKCV(dcLag, remoteKCV, previousRemoteKCV, numRemoteKCVStuck);
+			}
 			if (check.success()) {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
@@ -1172,6 +1201,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 Future<Void> quietDatabase(Database const& cx,
                            Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                            std::string phase,
+                           bool runRemoteKCVCheck,
                            int64_t dataInFlightGate,
                            int64_t maxTLogQueueGate,
                            int64_t maxStorageServerQueueGate,
@@ -1181,6 +1211,7 @@ Future<Void> quietDatabase(Database const& cx,
 	return waitForQuietDatabase(cx,
 	                            dbInfo,
 	                            phase,
+	                            runRemoteKCVCheck,
 	                            dataInFlightGate,
 	                            maxTLogQueueGate,
 	                            maxStorageServerQueueGate,

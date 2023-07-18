@@ -1312,7 +1312,7 @@ void getQueuingMetrics(TLogData* self, TLogQueuingMetricsRequest const& req) {
 	reply.bytesInput = self->bytesInput;
 	reply.bytesDurable = self->bytesDurable;
 	reply.storageBytes = self->persistentData->getStorageBytes();
-	reply.v = self->prevVersion;
+	reply.kcv = self->prevVersion;
 	req.reply.send(reply);
 }
 

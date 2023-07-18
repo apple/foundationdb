@@ -1827,11 +1827,11 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				break;
 			}
 
-			if (primaryMetrics.get().v > 0 && remoteMetrics.get().v > 0) {
+			if (primaryMetrics.get().kcv > 0 && remoteMetrics.get().kcv > 0) {
 				bool oldDifferenceTooLarge = !self->versionDifferenceUpdated ||
 				                             self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
 				self->versionDifferenceUpdated = true;
-				self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+				self->datacenterVersionDifference = primaryMetrics.get().kcv - remoteMetrics.get().kcv;
 
 				if (oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					checkOutstandingRequests(self);

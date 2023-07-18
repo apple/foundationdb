@@ -283,6 +283,7 @@ public:
 		runConsistencyCheck = g_network->isSimulated();
 		runConsistencyCheckOnCache = false;
 		runConsistencyCheckOnTSS = true;
+		runRemoteKCVCheck = false;
 		waitForQuiescenceBegin = true;
 		waitForQuiescenceEnd = true;
 		simCheckRelocationDuration = false;
@@ -301,7 +302,8 @@ public:
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
 	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
 	    waitForQuiescenceEnd(true), restorePerpetualWiggleSetting(true), simCheckRelocationDuration(false),
-	    simConnectionFailuresDisableDuration(0), simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
+	    runRemoteKCVCheck(false), simConnectionFailuresDisableDuration(0),
+	    simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
 	    simDrAgents(ISimulator::BackupAgentType::NoBackupAgents) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if (databasePingDelay < 0)
@@ -328,6 +330,7 @@ public:
 	                                    // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
 	                                    // storage wiggle the same setting as before during testing, this value should
 	                                    // be set true.
+	bool runRemoteKCVCheck;
 
 	bool simCheckRelocationDuration; // If set to true, then long duration relocations generate SevWarnAlways messages.
 	                                 // Once any workload sets this to true, it will be true for the duration of the
@@ -362,6 +365,7 @@ ACTOR Future<Void> databaseWarmer(Database cx);
 Future<Void> quietDatabase(Database const& cx,
                            Reference<AsyncVar<struct ServerDBInfo> const> const&,
                            std::string phase,
+                           bool runRemoteKCVCheck = false,
                            int64_t dataInFlightGate = 2e6,
                            int64_t maxTLogQueueGate = 5e6,
                            int64_t maxStorageServerQueueGate = 5e6,
