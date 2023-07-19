@@ -1777,7 +1777,7 @@ struct AbortTenantMovementImpl {
 		wait(self->dstCtx.initializeContext());
 		loop {
 			try {
-				wait(runMoveManagementTransaction(
+				bool exitSignal = wait(runMoveManagementTransaction(
 				    self->tenantGroup,
 				    self->srcCtx,
 				    self->dstCtx,
@@ -1787,6 +1787,9 @@ struct AbortTenantMovementImpl {
 				                  Optional<metadata::management::MovementRecord> movementRecord) {
 					    return initAbort(self, tr, movementRecord);
 				    }));
+				if (exitSignal) {
+					return Void();
+				}
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_tenant_move_record_missing) {
