@@ -1178,6 +1178,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                    10 );
 	init( BLOB_RESTORE_MLOGS_RETENTION_SECS,  isSimulated ?  180 : 3600 * 24 * 14 );
 	init( BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE,         10000 );
+	init( BLOB_RESTORE_SKIP_EMPTY_RANGES,                      true  );
 
 	init( BLOB_GRANULES_FLUSH_BATCH_SIZE,      isSimulated ?  2 : 64 );
 

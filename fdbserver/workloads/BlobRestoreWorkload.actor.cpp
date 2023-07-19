@@ -83,6 +83,18 @@ struct BlobRestoreWorkload : TestWorkload {
 			// disable manifest backup and log truncation
 			wait(disableManifestBackup(cx));
 
+			// check if we have manifest
+			Reference<BlobConnectionProvider> manifestStore =
+			    BlobConnectionProvider::newBlobConnectionProvider(self->blobManifestUrl_.toString());
+			Reference<BackupContainerFileSystem> container = manifestStore->getForRead("");
+			BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(container->listFiles(""));
+			if (filesAndSizes.empty()) {
+				fmt::print("Skip blob restore test because of missing manifest\n");
+				CODE_PROBE(true, "Skip blob restore test because of missing manifest", probe::decoration::rare);
+				return Void();
+			}
+
+			// check if we have mutation logs
 			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
 			if (self->restoreTargetVersion_ == invalidVersion) {
 				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs");
@@ -210,12 +222,12 @@ struct BlobRestoreWorkload : TestWorkload {
 				wait(flushBlobRanges(self->extraDb_, self, {}));
 				return Void();
 			}
-			// TODO need to define more specific error handling
+
 			if (phase == BlobRestorePhase::ERROR) {
 				auto db = SystemDBWriteLockedNow(self->extraDb_.getReference());
 				std::string error = wait(BlobGranuleRestoreConfig().error().getD(db));
 				fmt::print("Unexpected restore error code = {}\n", error);
-				return Void();
+				ASSERT(phase != BlobRestorePhase::ERROR);
 			}
 
 			wait(delay(5)); // delay to avoid busy loop

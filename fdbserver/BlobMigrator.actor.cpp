@@ -111,7 +111,9 @@ private:
 			if (granules.empty()) {
 				TraceEvent("EmptyBlobGranules", self->interf_.id()).log();
 				CODE_PROBE(true, "Blob restore with no blob granules");
-				wait(BlobRestoreController::setError(controller, "No blob granules"));
+				wait(canRestore(self));
+				wait(preloadApplyMutationsKeyVersionMap(self));
+				wait(BlobRestoreController::setPhase(controller, APPLYING_MLOGS, self->interf_.id()));
 				return Void();
 			}
 
@@ -256,13 +258,17 @@ private:
 						decodeKeyServersValue(UIDtoTagMap, it.value, src, dest, srcId, destId);
 
 						if (std::find_if(src.begin(), src.end(), BlobMigratorInterface::isBlobMigrator) == src.end() &&
-						    std::find_if(dest.begin(), dest.end(), BlobMigratorInterface::isBlobMigrator) ==
-						        dest.end()) {
+						    dest.empty()) {
 							continue; // not owned by blob migrator
 						}
 
 						state KeyRangeRef range(it.key, keyServers[i + 1].key);
 						int64_t bytes = sizeInBytes(self, range);
+						if (bytes == 0) {
+							// set a non-zero value even if it's an empty range, so that we don't
+							// move to next phase early
+							bytes = 1;
+						}
 						dprint("   incompleted {}, size: {}\n", range.toString(), bytes);
 						incompleted += bytes;
 					}
