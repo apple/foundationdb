@@ -459,7 +459,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
+		TraceEvent(SevWarn, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 		ASSERT_WE_THINK(e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict);
@@ -596,10 +596,10 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			TraceEvent("PersistAuditStateByRangeError")
+			TraceEvent(SevDebug, "AuditUtilPersistAuditStateByRangeError")
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", auditState.id)
-			    .detail("AuditType", auditState.getPhase())
+			    .detail("AuditType", auditState.getType())
 			    .detail("AuditPhase", auditState.getPhase());
 			wait(tr.onError(e));
 		}
@@ -688,6 +688,12 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditUtilPersistAuditStateByRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase())
+			    .detail("AuditServerID", auditState.auditServerId);
 			wait(tr.onError(e));
 		}
 	}
@@ -716,7 +722,11 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 			auditStates = res_;
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
+			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", type)
+			    .detail("AuditServerID", auditServerId);
 			wait(tr.onError(e));
 		}
 	}
