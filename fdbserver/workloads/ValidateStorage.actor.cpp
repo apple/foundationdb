@@ -71,7 +71,17 @@ struct ValidateStorage : TestWorkload {
 	// We disable failure injection because there is an irrelevant issue:
 	// Remote tLog is failed to rejoin to CC
 	// Once this issue is fixed, we should be able to enable the failure injection
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
+	// This workload is not compatible with following workload because they will race in changing the DD mode
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys",
+		             "DataLossRecovery",
+		             "IDDTxnProcessorApiCorrectness",
+		             "PerpetualWiggleStatsWorkload",
+		             "PhysicalShardMove",
+		             "StorageCorruption",
+		             "StorageServerCheckpointRestoreTest",
+		             "Attrition" });
+	}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
@@ -293,6 +303,12 @@ struct ValidateStorage : TestWorkload {
 
 		wait(self->testAuditStorageProgress(self, cx));
 		TraceEvent("TestAuditStorageProgressDone");
+
+		wait(self->testAuditStorageWhenDDSecurityMode(self, cx));
+		TraceEvent("TestAuditStorageWhenDDSecurityModeDone");
+
+		wait(self->testAuditStorageWhenDDBackToNormalMode(self, cx));
+		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");
 
 		return Void();
 	}
@@ -707,6 +723,44 @@ struct ValidateStorage : TestWorkload {
 			}
 		}
 		TraceEvent("TestAuditStorageProgressEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageWhenDDSecurityMode(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageWhenDDSecurityModeBegin");
+		int _ = wait(setDDMode(cx, 2));
+		UID auditIdA =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDSecurityMode"));
+		TraceEvent("TestFunctionalityHADoneWhenDDSecurityMode", auditIdA);
+		UID auditIdB =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDSecurityMode"));
+		TraceEvent("TestFunctionalityReplicaDoneWhenDDSecurityMode", auditIdB);
+		UID auditIdC = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDSecurityMode"));
+		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDSecurityMode", auditIdC);
+		UID auditIdD = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDSecurityMode"));
+		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDSecurityMode", auditIdD);
+		TraceEvent("TestAuditStorageWhenDDSecurityModeEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageWhenDDBackToNormalMode(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageWhenDDBackToNormalModeBegin");
+		int _ = wait(setDDMode(cx, 1));
+		UID auditIdA =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDBackToNormalMode"));
+		TraceEvent("TestFunctionalityHADoneWhenDDBackToNormalMode", auditIdA);
+		UID auditIdB = wait(
+		    self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDBackToNormalMode"));
+		TraceEvent("TestFunctionalityReplicaDoneWhenDDBackToNormalMode", auditIdB);
+		UID auditIdC = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDBackToNormalMode"));
+		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDBackToNormalMode", auditIdC);
+		UID auditIdD = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDBackToNormalMode"));
+		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDBackToNormalMode", auditIdD);
+		TraceEvent("TestAuditStorageWhenDDBackToNormalModeEnd");
 		return Void();
 	}
 

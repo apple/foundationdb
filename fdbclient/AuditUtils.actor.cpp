@@ -351,7 +351,11 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		return Void();
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
-		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner");
+		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner")
+		    .detail("CurrentOwner", currentOwner.toString())
+		    .detail("PrevOwner", lock.prevOwner.toString())
+		    .detail("PrevWrite", lock.prevWrite.toString())
+		    .detail("MyOwner", lock.myOwner.toString());
 		throw movekeys_conflict(); // need a new name
 	}
 }
