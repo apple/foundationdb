@@ -42,6 +42,23 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 }
 } // namespace
 
+std::vector<KeyRange> shuffleRanges(std::vector<KeyRange> inputRanges) {
+	std::vector<KeyRange> outputRanges;
+	while (!inputRanges.empty()) {
+		int idx = deterministicRandom()->randomInt(0, inputRanges.size());
+		outputRanges.push_back(inputRanges[idx]);
+		inputRanges.erase(inputRanges.begin() + idx);
+	}
+	return outputRanges;
+}
+
+const KeyRangeRef partialKeys1 = KeyRangeRef(KeyRef(), "\x01"_sr);
+const KeyRangeRef partialKeys2 = KeyRangeRef("\x01"_sr, "\x02"_sr);
+const KeyRangeRef partialKeys3 = KeyRangeRef("\x02"_sr, "\x03"_sr);
+const KeyRangeRef partialKeys4 = KeyRangeRef("\x03"_sr, "\xfe"_sr);
+const KeyRangeRef partialKeys5 = KeyRangeRef("\xfe"_sr, "\xff"_sr);
+const KeyRangeRef partialKeys6 = KeyRangeRef("\x05"_sr, "\xaa"_sr);
+const KeyRangeRef partialKeys7 = KeyRangeRef(KeyRef(), KeyRef());
 struct ValidateStorage : TestWorkload {
 	static constexpr auto NAME = "ValidateStorageWorkload";
 
@@ -74,26 +91,34 @@ struct ValidateStorage : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR Future<UID> triggerAuditStorageForType(Database cx, AuditType type, std::string context) {
+	ACTOR Future<UID> triggerAuditStorageForType(Database cx,
+	                                             AuditType type,
+	                                             std::string context,
+	                                             KeyRange auditRange = allKeys) {
 		// Send audit request until the cluster accepts the request
 		state UID auditId;
 		loop {
 			try {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
-				                                 allKeys,
+				                                 auditRange,
 				                                 type,
 				                                 /*timeoutSecond=*/300));
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
 				    .detail("AuditID", auditId)
-				    .detail("AuditType", type);
+				    .detail("AuditType", type)
+				    .detail("AuditRange", auditRange);
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "TestAuditStorageError")
 				    .errorUnsuppressed(e)
 				    .detail("Context", context)
-				    .detail("AuditType", type);
+				    .detail("AuditType", type)
+				    .detail("AuditRange", auditRange);
+				if (auditRange.empty() && e.code() == error_code_audit_storage_failed) {
+					break;
+				}
 				wait(delay(1));
 			}
 		}
@@ -155,9 +180,10 @@ struct ValidateStorage : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult res = wait(tr.getRange(auditKeyRange(type), GetRangeLimits()));
+				state RangeResult res = wait(tr.getRange(auditKeyRange(type), GetRangeLimits()));
 				ASSERT(!res.more);
-				for (int i = 0; i < res.size(); ++i) {
+				state int i = 0;
+				for (; i < res.size(); ++i) {
 					AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
 					TraceEvent("TestAuditStorageCheckPersistStateExists")
 					    .detail("Context", context)
@@ -168,6 +194,17 @@ struct ValidateStorage : TestWorkload {
 					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
 					       existingAuditState.getPhase() == AuditPhase::Failed ||
 					       existingAuditState.getPhase() == AuditPhase::Running);
+					if (existingAuditState.getPhase() == AuditPhase::Complete) {
+						if (type == AuditType::ValidateStorageServerShard) {
+							RangeResult serverBasedRes = wait(tr.getRange(
+							    auditServerBasedProgressRangeFor(type, existingAuditState.id), GetRangeLimits()));
+							ASSERT(serverBasedRes.empty() && !serverBasedRes.more);
+						} else {
+							RangeResult rangeBasedRes = wait(tr.getRange(
+							    auditRangeBasedProgressRangeFor(type, existingAuditState.id), GetRangeLimits()));
+							ASSERT(rangeBasedRes.empty() && !rangeBasedRes.more);
+						}
+					}
 				}
 				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
 					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
@@ -186,26 +223,6 @@ struct ValidateStorage : TestWorkload {
 				    .detail("Context", context)
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", type);
-				wait(tr.onError(e));
-			}
-		}
-		// Check no audit progress metadata exists
-		tr.reset();
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult rangeBasedRes = wait(tr.getRange(auditRangeBasedProgressRangeFor(type), GetRangeLimits()));
-				ASSERT(rangeBasedRes.empty() && !rangeBasedRes.more);
-				RangeResult serverBasedRes =
-				    wait(tr.getRange(auditServerBasedProgressRangeFor(type), GetRangeLimits()));
-				ASSERT(serverBasedRes.empty() && !serverBasedRes.more);
-				break;
-
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "TestAuditStorageCheckPersistProgressStateError")
-				    .errorUnsuppressed(e)
-				    .detail("AuditID", auditId);
 				wait(tr.onError(e));
 			}
 		}
@@ -265,9 +282,6 @@ struct ValidateStorage : TestWorkload {
 		wait(self->testAuditStorageIDGenerator(self, cx));
 		TraceEvent("TestAuditStorageIDGeneratorDone");
 
-		wait(self->testGetAuditStateWhenNoOngingAudit(self, cx));
-		TraceEvent("TestGetAuditStateDone");
-
 		wait(self->testAuditStorageConcurrentRunForDifferentType(self, cx));
 		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
 
@@ -276,6 +290,9 @@ struct ValidateStorage : TestWorkload {
 
 		wait(self->testAuditStorageCancellation(self, cx));
 		TraceEvent("TestAuditStorageCancellationDone");
+
+		wait(self->testAuditStorageProgress(self, cx));
+		TraceEvent("TestAuditStorageProgressDone");
 
 		return Void();
 	}
@@ -375,6 +392,7 @@ struct ValidateStorage : TestWorkload {
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
 					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
 					                        AuditType::ValidateHA);
+					req.ddId = deterministicRandom()->randomUniqueID();
 					Optional<AuditStorageState> vResult =
 					    wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
 					if (!vResult.present()) {
@@ -410,8 +428,15 @@ struct ValidateStorage : TestWorkload {
 	                                      AuditType type,
 	                                      std::string context,
 	                                      bool stopWaitWhenCleared = false) {
+		std::vector<KeyRangeRef> auditKeysCollection = { partialKeys1, partialKeys2, partialKeys3, partialKeys4,
+			                                             partialKeys5, partialKeys6, partialKeys7, allKeys };
+		state KeyRangeRef auditRange = deterministicRandom()->randomChoice(auditKeysCollection);
 		// Send audit request until the server accepts the request
-		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context));
+		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context, auditRange));
+		if (auditRange.empty()) {
+			ASSERT(!auditId.isValid());
+			return UID();
+		}
 		// Wait until the request completes
 		wait(self->waitAuditStorageUntilComplete(cx, type, auditId, context, stopWaitWhenCleared));
 		// Check internal persist state
@@ -422,16 +447,18 @@ struct ValidateStorage : TestWorkload {
 	ACTOR Future<Void> testAuditStorageFunctionality(ValidateStorage* self, Database cx) {
 		UID auditIdA =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalityHADone");
+		TraceEvent("TestFunctionalityHADone", auditIdA);
 		UID auditIdB =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalityReplicaDone");
+		TraceEvent("TestFunctionalityReplicaDone", auditIdB);
 		UID auditIdC = wait(
 		    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalityShardLocationMetadataDone");
+		TraceEvent("TestFunctionalityShardLocationMetadataDone", auditIdC);
 		UID auditIdD = wait(self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalitySSShardInfoDone");
+		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD);
+		wait(self->testGetAuditStateWhenNoOngingAudit(self, cx));
+		TraceEvent("TestGetAuditStateDone");
 		return Void();
 	}
 
@@ -440,7 +467,7 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestAuditStorageIDGeneratorBegin").detail("AuditType", type);
 		state UID auditIdA = wait(self->auditStorageForType(self, cx, type, "FirstRunInTestIDGenerator"));
 		state UID auditIdB = wait(self->auditStorageForType(self, cx, type, "SecondRunInTestIDGenerator"));
-		if (auditIdA == auditIdB) {
+		if (auditIdA == auditIdB && auditIdA.isValid()) {
 			TraceEvent(SevError, "TestAuditStorageIDGeneratorError")
 			    .detail("AuditType", type)
 			    .detail("AuditIDA", auditIdA)
@@ -453,9 +480,8 @@ struct ValidateStorage : TestWorkload {
 
 	ACTOR Future<Void> testGetAuditStateWhenNoOngingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
 		TraceEvent("TestGetAuditStateBegin").detail("AuditType", type);
-		;
 		std::vector<AuditStorageState> res1 = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
-		if (res1.size() != 1) {
+		if (res1.size() > 1) { // == 0 if empty range when testAuditStorageFunctionality
 			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res1.size());
 		}
 		std::vector<AuditStorageState> res2 =
@@ -602,6 +628,85 @@ struct ValidateStorage : TestWorkload {
 			}
 		}
 		TraceEvent("TestAuditStorageCancellationEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> persistAuditStateByRange(ValidateStorage* self, Database cx, AuditStorageState auditState) {
+		state Transaction tr(cx);
+		state RangeResult auditStates;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(krmSetRange(&tr,
+				                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
+				                 auditState.range,
+				                 auditStorageStateValue(auditState)));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	// Test audit progress persist invariant
+	ACTOR Future<Void> testAuditStorageProgress(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageProgressBegin");
+		state UID auditId = deterministicRandom()->randomUniqueID();
+		state AuditType auditType = AuditType::ValidateHA;
+		state UID ddId = deterministicRandom()->randomUniqueID();
+		std::vector<KeyRange> progressRangesCollection = {
+			KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),   KeyRangeRef("TestKeyB"_sr, "TestKeyBB"_sr),
+			KeyRangeRef("TestKeyA"_sr, "TestKeyBBB"_sr), KeyRangeRef("TestKeyE"_sr, "TestKeyF"_sr),
+			KeyRangeRef("TestKeyC"_sr, "TestKeyD"_sr),   KeyRangeRef("TestKeyBBB"_sr, "TestKeyC"_sr),
+			KeyRangeRef("TestKeyBB"_sr, "TestKeyBC"_sr),
+		};
+		state std::vector<KeyRange> progressRanges = shuffleRanges(progressRangesCollection);
+		state int i = 0;
+		state std::vector<KeyRange> alreadyPersisteRanges;
+		for (; i < progressRanges.size(); i++) {
+			state AuditStorageState auditState(auditId, auditType);
+			auditState.range = progressRanges[i];
+			auditState.ddId = ddId;
+			auditState.setPhase(AuditPhase::Complete);
+			wait(self->persistAuditStateByRange(self, cx, auditState));
+			alreadyPersisteRanges.push_back(progressRanges[i]);
+			std::vector<AuditStorageState> auditStates = wait(getAuditStateByRange(cx, auditType, auditId, allKeys));
+			for (int i = 0; i < auditStates.size(); i++) {
+				KeyRange toCompare = auditStates[i].range;
+				bool overlapped = false;
+				bool fullyCovered = false;
+				std::vector<KeyRange> unCoveredRanges;
+				unCoveredRanges.push_back(toCompare);
+				// check if toCompare is overlapped/fullyCovered by alreadyPersisteRanges
+				for (const auto& persistedRange : alreadyPersisteRanges) {
+					KeyRange overlappedRange = toCompare & persistedRange;
+					if (!overlappedRange.empty()) {
+						overlapped = true;
+					}
+					std::vector<KeyRange> unCoveredRangesNow;
+					for (const auto& unCoveredRange : unCoveredRanges) {
+						std::vector<KeyRangeRef> tmp = unCoveredRange - persistedRange;
+						for (const auto& item : tmp) {
+							unCoveredRangesNow.push_back(item);
+						}
+					}
+					unCoveredRanges = unCoveredRangesNow;
+				}
+				fullyCovered = unCoveredRanges.empty();
+				if (fullyCovered) { // toCompare is fully covered by alreadyPersisteRanges
+					ASSERT(auditStates[i].getPhase() == AuditPhase::Complete);
+				} else {
+					// toCompare cannot be partially covered by alreadyPersisteRanges
+					ASSERT(!overlapped);
+					ASSERT(auditStates[i].getPhase() == AuditPhase::Invalid);
+				}
+			}
+		}
+		TraceEvent("TestAuditStorageProgressEnd");
 		return Void();
 	}
 
