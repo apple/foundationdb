@@ -209,4 +209,5 @@ if (WITH_SWIFT)
     # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is released:
     # target_link_libraries(flow PRIVATE flow_swift)
     add_dependencies(flow flow_swift)
+    add_dependencies(flow_sampling flow_swift)
 endif() # WITH SWIFT
