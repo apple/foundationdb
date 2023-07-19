@@ -901,6 +901,19 @@ struct SwitchTenantMovementImpl {
 		return Void();
 	}
 
+	// Returns true if hybrid ranges have already been applied
+	ACTOR template <class Transaction>
+	static Future<bool> updateMoveRecordStateWrapper(Reference<Transaction> tr,
+	                                                 metadata::management::MovementRecord movementRecord,
+	                                                 metadata::management::MovementState mState,
+	                                                 TenantGroupName tenantGroup) {
+		if (movementRecord.mState == metadata::management::MovementState::SWITCH_METADATA) {
+			return true;
+		}
+		wait(updateMoveRecordState(tr, movementRecord, mState, tenantGroup));
+		return false;
+	}
+
 	ACTOR static Future<Void> run(SwitchTenantMovementImpl* self) {
 		wait(self->dstCtx.initializeContext());
 
@@ -927,31 +940,22 @@ struct SwitchTenantMovementImpl {
 			wait(checkAllTenantData(self));
 		}
 
-		try {
-			wait(runMoveManagementTransaction(
-			    self->tenantGroup,
-			    self->srcCtx,
-			    self->dstCtx,
-			    Aborting::False,
-			    { metadata::management::MovementState::START_CREATE,
-			      metadata::management::MovementState::SWITCH_HYBRID },
-			    [self = self](Reference<typename DB::TransactionT> tr,
-			                  Optional<metadata::management::MovementRecord> movementRecord) {
-				    return updateMoveRecordState(tr,
-				                                 movementRecord.get(),
-				                                 metadata::management::MovementState::SWITCH_HYBRID,
-				                                 self->tenantGroup);
-			    }));
+		bool alreadyApplied = wait(runMoveManagementTransaction(
+		    self->tenantGroup,
+		    self->srcCtx,
+		    self->dstCtx,
+		    Aborting::False,
+		    { metadata::management::MovementState::START_CREATE,
+		      metadata::management::MovementState::SWITCH_HYBRID,
+		      metadata::management::MovementState::SWITCH_METADATA },
+		    [self = self](Reference<typename DB::TransactionT> tr,
+		                  Optional<metadata::management::MovementRecord> movementRecord) {
+			    return updateMoveRecordStateWrapper(
+			        tr, movementRecord.get(), metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
+		    }));
+
+		if (!alreadyApplied) {
 			wait(applyHybridRanges(self));
-		} catch (Error& e) {
-			// Because of timing/retry issues, the move record can progress to SWITCH_METADATA
-			// which isn't part of the valid movement states
-			// If this is the case, don't reapply hybrid ranges and continue working
-			// If the updateMoveRecordState threw invalid_tenant_move for another reason
-			// The call to update again below will re-throw the same error
-			if (e.code() != error_code_invalid_tenant_move) {
-				throw e;
-			}
 		}
 
 		TraceEvent("BreakpointSwitch3");
