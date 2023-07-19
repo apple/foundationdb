@@ -997,7 +997,6 @@ public:
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
-	std::unordered_map<AuditType, std::pair<UID, ActorCollection>> auditTasks;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -5306,20 +5305,38 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
+	// The trackShardAssignment is correct when at most 1 auditStorageServerShardQ runs
+	// at a time. Currently, this is guaranteed by setting serveAuditStorageParallelismLock == 1
+	// If serveAuditStorageParallelismLock > 1, we need to check trackShardAssignmentMinVersion
+	// to make sure no onging auditStorageServerShardQ is running
+	if (data->trackShardAssignmentMinVersion != invalidVersion) {
+		// Another auditStorageServerShardQ is running
+		req.reply.sendError(audit_storage_failed());
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ExistStorageServerShardAudit") // unexpected
+		    .detail("NewAuditId", req.id)
+		    .detail("NewAuditType", req.getType());
+	}
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
 	state AuditStorageState res(req.id, data->thisServerID, req.getType());
 	state std::vector<std::string> errors;
+	state std::vector<Future<Void>> fs;
 	state Transaction tr(data->cx);
 	state AuditGetServerKeysRes serverKeyRes;
 	state Version serverKeyReadAtVersion;
 	state KeyRange serverKeyCompleteRange;
+	state AuditGetKeyServersRes keyServerRes;
+	state Version keyServerReadAtVersion;
+	state KeyRange keyServerCompleteRange;
 	state AuditGetShardInfoRes ownRangesLocalViewRes;
 	state Version localShardInfoReadAtVersion;
-	// We want to find out any mismatch between ownRangesSeenByServerKey and ownRangesLocalView
+	// We want to find out any mismatch between ownRangesSeenByServerKey and ownRangesLocalView and
+	// ownRangesSeenByKeyServerMap
+	state std::unordered_map<UID, std::vector<KeyRange>> ownRangesSeenByKeyServerMap;
 	state std::vector<KeyRange> ownRangesSeenByServerKey;
+	state std::vector<KeyRange> ownRangesSeenByKeyServer;
 	state std::vector<KeyRange> ownRangesLocalView;
 	state std::string failureReason;
 	// Note that since krmReadRange may not return the value of the entire range at a time
@@ -5350,6 +5367,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				// We do not reset retryCount for each partial read range
 				ownRangesLocalView.clear();
 				ownRangesSeenByServerKey.clear();
+				ownRangesSeenByKeyServer.clear();
+				ownRangesSeenByKeyServerMap.clear();
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 
 				// At this point, shard assignment history guarantees to contain assignments
@@ -5371,11 +5390,19 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				// Transactional read of serverKeys
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
+				fs.clear();
+				fs.push_back(
+				    store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
+				fs.push_back(store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
+				wait(waitForAll(fs));
+				// Get serverKeys result
 				serverKeyCompleteRange = serverKeyRes.completeRange;
 				serverKeyReadAtVersion = serverKeyRes.readAtVersion;
-				ownRangesSeenByServerKey = serverKeyRes.ownRanges;
-				remoteReadBytes = serverKeyRes.readBytes;
+				// Get keyServers result
+				keyServerCompleteRange = keyServerRes.completeRange;
+				keyServerReadAtVersion = keyServerRes.readAtVersion;
+				// Get bytes read
+				remoteReadBytes = keyServerRes.readBytes + serverKeyRes.readBytes;
 				// We want to do transactional read at a version newer than data->version
 				while (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
 					if (retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
@@ -5388,15 +5415,30 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
+					fs.clear();
+					fs.push_back(
+					    store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
+					fs.push_back(store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
+					wait(waitForAll(fs));
+					// Get serverKeys result
 					serverKeyCompleteRange = serverKeyRes.completeRange;
 					serverKeyReadAtVersion = serverKeyRes.readAtVersion;
-					ownRangesSeenByServerKey = serverKeyRes.ownRanges;
-					remoteReadBytes = serverKeyRes.readBytes;
+					// Get keyServers result
+					keyServerCompleteRange = keyServerRes.completeRange;
+					keyServerReadAtVersion = keyServerRes.readAtVersion;
+					// Get bytes read
+					remoteReadBytes = keyServerRes.readBytes + serverKeyRes.readBytes;
 				} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
+				// Check versions
 				if (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
 					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 					           "SSAuditStorageSsShardComparedVersionError",
+					           data->thisServerID);
+					throw audit_storage_cancelled();
+				}
+				if (keyServerReadAtVersion != serverKeyReadAtVersion) {
+					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+					           "SSAuditStorageSsShardKSVersionMismatchError",
 					           data->thisServerID);
 					throw audit_storage_cancelled();
 				}
@@ -5432,17 +5474,23 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					failureReason = "Shard assignment history is not empty";
 					throw audit_storage_failed();
 				}
-
-				KeyRange overlappingRange = rangeToRead & serverKeyCompleteRange;
-				if (overlappingRange.empty()) {
+				// Get claim range
+				KeyRange claimRange = rangeToRead;
+				claimRange = claimRange & serverKeyCompleteRange;
+				if (claimRange.empty()) {
 					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 					           "SSAuditStorageSsShardOverlapRangeEmpty",
 					           data->thisServerID);
 					throw audit_storage_cancelled();
 				}
-				claimRange = overlappingRange;
-
-				// We only compare ownRangesLocalView and ownRangesSeenByServerKey within claimRange
+				claimRange = claimRange & keyServerCompleteRange;
+				if (claimRange.empty()) {
+					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+					           "SSAuditStorageSsShardOverlapRangeEmpty",
+					           data->thisServerID);
+					throw audit_storage_cancelled();
+				}
+				// We only compare within claimRange
 				// Get ownRangesLocalView within claimRange
 				for (auto& range : ownRangesLocalViewRes.ownRanges) {
 					KeyRange overlappingRange = range & claimRange;
@@ -5450,6 +5498,25 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						continue;
 					}
 					ownRangesLocalView.push_back(overlappingRange);
+				}
+				// Get ownRangesSeenByServerKey within claimRange
+				for (auto& range : serverKeyRes.ownRanges) {
+					KeyRange overlappingRange = range & claimRange;
+					if (overlappingRange.empty()) {
+						continue;
+					}
+					ownRangesSeenByServerKey.push_back(overlappingRange);
+				}
+				// Get ownRangesSeenByKeyServer within claimRange
+				if (keyServerRes.rangeOwnershipMap.contains(data->thisServerID)) {
+					std::vector mergedRanges = coalesceRangeList(keyServerRes.rangeOwnershipMap[data->thisServerID]);
+					for (auto& range : mergedRanges) {
+						KeyRange overlappingRange = range & claimRange;
+						if (overlappingRange.empty()) {
+							continue;
+						}
+						ownRangesSeenByKeyServer.push_back(overlappingRange);
+					}
 				}
 				TraceEvent(SevInfo, "SSAuditStorageSsShardReadDone", data->thisServerID)
 				    .detail("AuditId", req.id)
@@ -5474,6 +5541,46 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
 
 				// Compare
+				// Compare keyServers and serverKeys
+				if (ownRangesSeenByKeyServer.empty()) {
+					if (!ownRangesSeenByServerKey.empty()) {
+						std::string error =
+						    format("ServerKeys shows %zu ranges that not appear on keyServers for Server(%s): ",
+						           ownRangesSeenByServerKey.size(),
+						           data->thisServerID.toString().c_str(),
+						           describe(ownRangesSeenByServerKey).c_str());
+						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error)
+						    .detail("MismatchedRangeByLocalView", describe(ownRangesSeenByServerKey))
+						    .detail("AuditServer", data->thisServerID);
+					}
+				} else {
+					Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
+					    rangesSame(ownRangesSeenByServerKey, ownRangesSeenByKeyServer);
+					if (anyMismatch.present()) { // mismatch detected
+						KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
+						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().second;
+						std::string error =
+						    format("KeyServers and serverKeys mismatch on Server(%s): ServerKey: %s; KeyServer: %s",
+						           data->thisServerID.toString().c_str(),
+						           mismatchedRangeByServerKey.toString().c_str(),
+						           mismatchedRangeByKeyServer.toString().c_str());
+						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error)
+						    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
+						    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
+						    .detail("AuditServer", data->thisServerID);
+						errors.push_back(error);
+					}
+				}
+
+				// Compare SS shard info and serverKeys
 				Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
 				    rangesSame(ownRangesSeenByServerKey, ownRangesLocalView);
 				if (anyMismatch.present()) { // mismatch detected
@@ -5530,9 +5637,11 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("AuditServer", data->thisServerID)
-					    .detail("CompleteRange", res.range);
-					if (claimRange.end < rangeToRead.end) {
-						rangeToReadBegin = claimRange.end;
+					    .detail("CompleteRange", res.range)
+					    .detail("ClaimRange", claimRange)
+					    .detail("RangeToReadEnd", req.range.end);
+					if (res.range.end < req.range.end) {
+						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
 						break;
@@ -5814,8 +5923,8 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 					    .detail("Version", readAtVersion)
 					    .detail("AuditServerId", data->thisServerID)
 					    .detail("CompleteRange", res.range);
-					if (claimRange.end < rangeToRead.end) {
-						rangeToReadBegin = claimRange.end;
+					if (res.range.end < req.range.end) {
+						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
 						break;
@@ -5887,6 +5996,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	try {
 		loop {
 			try {
+				readBytes = 0;
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 				TraceEvent(SevDebug, "SSAuditStorageShardReplicaNewRoundBegin", data->thisServerID)
 				    .suppressFor(10.0)
@@ -13744,50 +13854,24 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				// Check req
 				if (!req.id.isValid() || !req.ddId.isValid() || req.range.empty()) {
 					// ddId is used when persist progress
-					TraceEvent(SevWarnAlways, "AuditRequestInvalid") // unexpected
+					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "AuditRequestInvalid") // unexpected
 					    .detail("AuditRange", req.range)
 					    .detail("DDId", req.ddId)
 					    .detail("AuditId", req.id)
-					    .detail("AuditType", req.getType());
+					    .detail("AuditType", req.getType())
+					    .detail("AuditRange", req.range);
 					req.reply.sendError(audit_storage_cancelled());
 					continue;
 				}
-				// Check existing audit task states
-				if (self->auditTasks.contains(req.getType())) {
-					if (req.id != self->auditTasks[req.getType()].first) {
-						// Any task of past audit must be ready
-						if (!self->auditTasks[req.getType()].second.getResult().isReady()) {
-							req.reply.sendError(audit_storage_exceeded_request_limit());
-							TraceEvent(SevWarnAlways, "ExistSSAuditWithDifferentId") // unexpected
-							    .detail("NewAuditId", req.id)
-							    .detail("NewAuditType", req.getType());
-							continue;
-						}
-					} else if (req.getType() == AuditType::ValidateStorageServerShard &&
-					           !self->auditTasks[req.getType()].second.getResult().isReady()) {
-						// Only one ValidateStorageServerShard is allowed to run at a time
-						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
-						    .detail("AuditId", req.id)
-						    .detail("AuditType", req.getType());
-						// Make sure the history collection is not open for the old audit
-						self->stopTrackShardAssignment();
-						self->auditTasks[req.getType()].second.clear(true);
-					}
-				}
-				// Prepare for the new audit task
-				if (!self->auditTasks.contains(req.getType()) ||
-				    self->auditTasks[req.getType()].second.getResult().isReady()) {
-					self->auditTasks[req.getType()] = std::make_pair(req.id, ActorCollection(true));
-				}
 				// Start the new audit task
 				if (req.getType() == AuditType::ValidateHA) {
-					self->auditTasks[req.getType()].second.add(auditStorageShardReplicaQ(self, req));
+					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateReplica) {
-					self->auditTasks[req.getType()].second.add(auditStorageShardReplicaQ(self, req));
+					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->auditTasks[req.getType()].second.add(auditShardLocationMetadataQ(self, req));
+					self->actors.add(auditShardLocationMetadataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->auditTasks[req.getType()].second.add(auditStorageServerShardQ(self, req));
+					self->actors.add(auditStorageServerShardQ(self, req));
 				} else {
 					req.reply.sendError(not_implemented());
 				}
