@@ -149,16 +149,6 @@ static void traceKeyValuesSummary(TraceEvent& event,
 	    .detail("TSSReplySummary", tssSummaryString);
 }
 
-// convert a StringRef to Hex string
-static std::string hexStringRef(const StringRef& s) {
-	std::string result;
-	result.reserve(s.size() * 2);
-	for (int i = 0; i < s.size(); i++) {
-		result.append(format("%02x", s[i]));
-	}
-	return result;
-}
-
 static void traceKeyValuesDiff(TraceEvent& event,
                                const KeySelectorRef& begin,
                                const KeySelectorRef& end,
@@ -178,17 +168,15 @@ static void traceKeyValuesDiff(TraceEvent& event,
 			event.detail("MismatchIndex", i);
 			if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i].key != tssKV[i].key) {
 				event.detail("MismatchSSKey", i < ssKV.size() ? ssKV[i].key : "missing"_sr);
-				event.detail("MismatchSSKeyHex", i < ssKV.size() ? hexStringRef(ssKV[i].key) : "missing"_sr);
+				event.detail("MismatchSSKeyHex", i < ssKV.size() ? ssKV[i].key.toHex() : "missing"_sr);
 				event.detail("MismatchTSSKey", i < tssKV.size() ? tssKV[i].key : "missing"_sr);
-				event.detail("MismatchTSSKeyHex", i < tssKV.size() ? hexStringRef(tssKV[i].key) : "missing"_sr)
+				event.detail("MismatchTSSKeyHex", i < tssKV.size() ? tssKV[i].key.toHex() : "missing"_sr)
 				    .setMaxFieldLength(-1);
 			} else {
 				event.detail("MismatchKey", ssKV[i].key);
+				event.detail("MismatchSSKeyHex", ssKV[i].key.toHex());
 				event.detail("MismatchSSValue", traceChecksumValue(ssKV[i].value));
-				event.detail("MismatchSSValueHex", hexStringRef(traceChecksumValue(ssKV[i].value)));
-				event.detail("MismatchTSSValue", traceChecksumValue(tssKV[i].value));
-				event.detail("MismatchTSSValueHex", hexStringRef(traceChecksumValue(tssKV[i].value)))
-				    .setMaxFieldLength(-1);
+				event.detail("MismatchTSSValue", traceChecksumValue(tssKV[i].value)).setMaxFieldLength(-1);
 			}
 			mismatchFound = true;
 			break;

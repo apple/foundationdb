@@ -797,16 +797,6 @@ ACTOR Future<Void> applyMutations(Database cx,
 	}
 }
 
-// convert a StringRef to Hex string
-static std::string hexStringRef(const StringRef& s) {
-	std::string result;
-	result.reserve(s.size() * 2);
-	for (int i = 0; i < s.size(); i++) {
-		result.append(format("%02x", s[i]));
-	}
-	return result;
-}
-
 ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
                                         Key logUidValue,
                                         Key destUidValue,
@@ -908,8 +898,8 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 						    .detail("Range", range)
 						    .detail("Begin", 0)
 						    .detail("End", nextSmallestVersion)
-						    .detail("HexRangeBegin", hexStringRef(range.begin))
-						    .detail("HexRangeEnd", hexStringRef(range.end));
+						    .detail("HexRangeBegin", range.begin.toHex())
+						    .detail("HexRangeEnd", range.end.toHex());
 					}
 				}
 			} else {
@@ -922,8 +912,8 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 						    .detail("Range", range)
 						    .detail("Begin", currBeginVersion)
 						    .detail("End", nextSmallestVersion)
-						    .detail("HexRangeBegin", hexStringRef(range.begin))
-						    .detail("HexRangeEnd", hexStringRef(range.end));
+						    .detail("HexRangeBegin", range.begin.toHex())
+						    .detail("HexRangeEnd", range.end.toHex());
 					}
 				}
 			}

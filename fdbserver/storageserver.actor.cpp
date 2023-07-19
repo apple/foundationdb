@@ -71,7 +71,6 @@
 #include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/genericactors.actor.h"
-#include "flow/crc32c.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -5989,6 +5988,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// Write this_block to storage
 					state KeyValueRef* kvItr = this_block.begin();
+					if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && kvItr != this_block.end() &&
+					    kvItr->key.startsWith(backupLogKeys.begin)) {
+						TraceEvent("SSBackupKeyWriteKeyValue")
+						    .detail("Key", kvItr->key)
+						    .detail("ChecksumValue", kvItr->value.getChecksum())
+						    .detail("HexKey", kvItr->key.toHex())
+						    .detail("Version", fetchVersion);
+					}
 					for (; kvItr != this_block.end(); ++kvItr) {
 						data->storage.writeKeyValue(*kvItr);
 						wait(yield());
@@ -6251,6 +6258,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::FetchingCF) {
+				if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
+					TraceEvent("SSBackupKeyClearRange")
+					    .detail("RangeBegin", keys.begin)
+					    .detail("RangeEnd", keys.end)
+					    .detail("HexRangeBegin", keys.begin.toHex())
+					    .detail("HexRangeEnd", keys.end.toHex())
+					    .detail("FetchVersion", fetchVersion);
+				}
 				data->storage.clearRange(keys);
 				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(keys, invalidVersion);
@@ -6625,6 +6640,22 @@ public:
 				DEBUG_MUTATION("SSUpdateMutation", ver, m, data->thisServerID).detail("FromFetch", fromFetch);
 			}
 
+			if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS) {
+				if (m.type == MutationRef::SetValue && m.param1.startsWith(backupLogKeys.begin) &&
+				    m.param1.endsWith(LiteralStringRef("\x00\x00\x00\x00"))) {
+					TraceEvent("SSBackupKeyApplyMutationSet")
+					    .detail("Key", m.param1)
+					    .detail("HexKey", m.param1.toHex())
+					    .detail("Version", ver);
+				} else if (m.type == MutationRef::ClearRange && m.param1.startsWith(backupLogKeys.begin)) {
+					TraceEvent("SSBackupKeyApplyMutationClear")
+					    .detail("RangeBegin", m.param1)
+					    .detail("RangeEnd", m.param2)
+					    .detail("HexRangeBegin", m.param1.toHex())
+					    .detail("HexRangeEnd", m.param2.toHex())
+					    .detail("Version", ver);
+				}
+			}
 			splitMutation(data, data->shards, m, ver, fromFetch);
 		}
 
@@ -7883,43 +7914,16 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	}
 }
 
-// convert a StringRef to Hex string
-static std::string hexStringRef(const StringRef& s) {
-	std::string result;
-	result.reserve(s.size() * 2);
-	for (int i = 0; i < s.size(); i++) {
-		result.append(format("%02x", s[i]));
-	}
-	return result;
-}
-
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	storage->clear(keys);
-	if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
-		TraceEvent("SSBackupKeyClearRange")
-		    .detail("RangeBegin", keys.begin)
-		    .detail("RangeEnd", keys.end)
-		    .detail("HexRangeBegin", hexStringRef(keys.begin))
-		    .detail("HexRangeEnd", hexStringRef(keys.end));
-	}
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
 	}
 }
 
-std::string checksumValue(const ValueRef& s) {
-	return s.size() > 12 ? format("(%d)%08x", s.size(), crc32c_append(0, s.begin(), s.size())) : s.toString();
-}
-
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 	storage->set(kv);
-	if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && kv.key.startsWith(backupLogKeys.begin)) {
-		TraceEvent("SSBackupKeyWriteKeyValue")
-		    .detail("Key", kv.key)
-		    .detail("ChecksumValue", checksumValue(kv.value))
-		    .detail("HexKey", hexStringRef(kv.key));
-	}
 	*kvCommitLogicalBytes += kv.expectedSize();
 }
 

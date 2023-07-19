@@ -41,6 +41,7 @@
 #include <set>
 #include <type_traits>
 #include <sstream>
+#include "flow/crc32c.h"
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -640,6 +641,20 @@ public:
 
 	// True if both StringRefs reference exactly the same memory
 	bool same(const StringRef& s) const { return data == s.data && length == s.length; }
+
+	// convert a StringRef to Hex string
+	std::string toHex() const {
+		std::string result;
+		result.reserve(length * 2);
+		for (int i = 0; i < length; i++) {
+			result.append(format("%02x", data[i]));
+		}
+		return result;
+	}
+
+	std::string getChecksum() const {
+		return length > 12 ? format("(%d)%08x", length, crc32c_append(0, data, length)) : toString();
+	}
 
 private:
 	// Unimplemented; blocks conversion through std::string
