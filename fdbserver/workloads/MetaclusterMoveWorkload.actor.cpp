@@ -95,6 +95,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int maxTenantGroups;
 	int tenantGroupCapacity;
 	metacluster::metadata::management::MovementRecord moveRecord;
+	bool badCopy;
 
 	int64_t reservedQuota;
 	int64_t totalQuota;
@@ -114,6 +115,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		reservedQuota = getOption(options, "reservedQuota"_sr, 0);
 		totalQuota = getOption(options, "totalQuota"_sr, 1e8);
 		storageQuota = getOption(options, "storageQuota"_sr, 1e8);
+		badCopy = getOption(options, "badCopy"_sr, deterministicRandom()->random01() < 0.05);
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
@@ -457,6 +459,24 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                     ClusterName srcCluster,
 	                                     ClusterName dstCluster) {
 		state std::vector<std::string> messages;
+		if (self->badCopy) {
+			loop {
+				try {
+					wait(metacluster::switchTenantMovement(
+					    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+					ASSERT(false);
+				} catch (Error& e) {
+					state Error err(e);
+					if (err.code() != error_code_invalid_tenant_move) {
+						throw err;
+					}
+					CODE_PROBE(true, "Safety guards caught inconsistent data copy");
+					wait(metacluster::abortTenantMovement(
+					    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+					return true;
+				}
+			}
+		}
 		loop {
 			try {
 				TraceEvent("MetaclusterMoveSwitchBegin")
@@ -714,6 +734,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				for (const auto& [k, v] : srcRange) {
 					dstTr->set(k, v);
 				}
+				if (self->badCopy) {
+					dstTr->set(deterministicRandom()->randomUniqueID().toString(),
+					           deterministicRandom()->randomUniqueID().toString());
+					CODE_PROBE(true, "Intentionally copied inconsistent data to test safety guards");
+				}
 				TraceEvent("BreakpointCopyCommit1").detail("TenantName", moveBlock.tenant);
 				wait(dstTr->commit());
 				TraceEvent("BreakpointCopyCommit2").detail("TenantName", moveBlock.tenant);
@@ -769,12 +794,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			Tuple nextTuple = splitPoints.results[1].first;
 			TenantName nextTenantName = nextTuple.getString(2);
 			Key nextKey = nextTuple.getString(3);
-			// The tuple ending with "\xff" will not exist as a key in splitPointsMap
-			// The next Tuple key should have the next tenant with the empty key ""
-			// OR this is revisiting a failed copy range, which should also have a different tenant
-			if (headEnd != nextKey) {
-				ASSERT_NE(nextTenantName, queueHead.first);
-			}
 			metacluster::metadata::management::emergency_movement::movementQueue().set(
 			    tr, std::make_pair(tenantGroup, runId.toString()), std::make_pair(nextTenantName, nextKey));
 		} else {

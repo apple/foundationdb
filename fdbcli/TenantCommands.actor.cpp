@@ -352,7 +352,8 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 constexpr char moveTenantUsageMessage[] =
-    "Usage: tenant move <start|switch|finish|abort|status> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n"
+    "Usage: tenant emergency_move <start|switch|finish|abort|status> <TENANT_GROUP> <SOURCE_CLUSTER> "
+    "<DESTINATION_CLUSTER> \n\n"
     "Helps orchestrate the move of a tenant group across 2 data clusters in a metacluster.\n"
     "TENANT_GROUP must be assigned to SOURCE_CLUSTER at the beginning of the movement\n"
     "SOURCE_CLUSTER and DESTINATION_CLUSTER must be distinct from each other.\n"
@@ -1137,7 +1138,7 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantLockCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "unlock")) {
 		return tenantLockCommand(db, tokens);
-	} else if (tokencmp(tokens[1], "move")) {
+	} else if (tokencmp(tokens[1], "emergency_move")) {
 		return tenantMoveCommand(db, tokens);
 	} else {
 		printUsage(tokens[0]);
@@ -1250,7 +1251,7 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	} else if (tokencmp(tokens[1], "unlock") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "<UID>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-	} else if (tokencmp(tokens[1], "move") && tokens.size() < 6) {
+	} else if (tokencmp(tokens[1], "emergency_move") && tokens.size() < 6) {
 		if (tokens.size() < 3) {
 			static std::vector<const char*> opts = {
 				"<start|switch|finish|abort|status>", "<TENANT_GROUP>", "<SOURCE_CLUSTER>", "<DESTINATION_CLUSTER>"
