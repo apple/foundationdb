@@ -237,6 +237,93 @@ static Future<Void> updateMoveRecordState(Reference<Transaction> tr,
 	return Void();
 }
 
+// Switch metadata to destination if aborting is false, and vice-versa
+ACTOR template <class DB>
+static Future<Void> switchMetadata(Reference<typename DB::TransactionT> tr,
+                                   TenantGroupName tenantGroup,
+                                   std::vector<std::pair<TenantName, int64_t>> tenantsInGroup,
+                                   ClusterName srcName,
+                                   ClusterName dstName,
+                                   Optional<metadata::management::MovementRecord> movementRecord,
+                                   std::vector<std::string>* messages,
+                                   Aborting aborting) {
+	ASSERT(movementRecord.present());
+	state ClusterName newClusterName = aborting ? srcName : dstName;
+	state ClusterName oldClusterName = aborting ? dstName : srcName;
+	TraceEvent("TenantMoveSwitchBegin");
+
+	state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
+	wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, tenantsInGroup)));
+
+	for (auto& tenantPair : tenantMetadataList) {
+		state TenantName tName = tenantPair.first;
+		state MetaclusterTenantMapEntry tenantEntry = tenantPair.second;
+		state int64_t tId = tenantEntry.id;
+
+		// tenantMetadata().tenantMap update assigned cluster
+		if (tenantEntry.assignedCluster != oldClusterName) {
+			if (tenantEntry.assignedCluster == newClusterName) {
+				// possible that this is a retry
+				return Void();
+			}
+			TraceEvent(SevError, "TenantMoveSwitchTenantEntryWrongCluster")
+			    .detail("TenantName", tName)
+			    .detail("TenantId", tId)
+			    .detail("ExpectedCluster", oldClusterName)
+			    .detail("Src", srcName)
+			    .detail("Dst", dstName)
+			    .detail("EntryCluster", tenantEntry.assignedCluster);
+			messages->push_back(fmt::format("Tenant move switch: tenantEntry with incorrect cluster\n"
+			                                "		expected cluster:	{}\n"
+			                                "		actual cluster:		{}\n",
+			                                oldClusterName,
+			                                tenantEntry.assignedCluster));
+			throw invalid_tenant_move();
+		}
+		tenantEntry.assignedCluster = newClusterName;
+		metadata::management::tenantMetadata().tenantMap.set(tr, tId, tenantEntry);
+
+		// clusterTenantIndex erase tenant index on old, create tenant index on new
+		metadata::management::clusterTenantIndex().erase(tr, Tuple::makeTuple(oldClusterName, tName, tId));
+		metadata::management::clusterTenantIndex().insert(tr, Tuple::makeTuple(newClusterName, tName, tId));
+	}
+
+	// clusterTenantGroupIndex erase group index on old, create group index on new
+	metadata::management::clusterTenantGroupIndex().erase(tr, Tuple::makeTuple(oldClusterName, tenantGroup));
+	metadata::management::clusterTenantGroupIndex().insert(tr, Tuple::makeTuple(newClusterName, tenantGroup));
+
+	// tenantMetadata().tenantGroupMap update assigned cluster
+	state Optional<MetaclusterTenantGroupEntry> groupEntry;
+	wait(store(groupEntry, metadata::management::tenantMetadata().tenantGroupMap.get(tr, tenantGroup)));
+
+	if (!groupEntry.present()) {
+		TraceEvent(SevError, "TenantMoveSwitchGroupEntryMissing").detail("TenantGroup", tenantGroup);
+		messages->push_back(fmt::format("Tenant move switch: tenantGroupEntry missing\n"
+		                                "		group name:	{}\n",
+		                                tenantGroup));
+		throw invalid_tenant_move();
+	}
+	if (groupEntry.get().assignedCluster != oldClusterName) {
+		TraceEvent(SevError, "TenantMoveSwitchGroupEntryIncorrectCluster")
+		    .detail("TenantGroup", tenantGroup)
+		    .detail("ExpectedCluster", oldClusterName)
+		    .detail("GroupEntryAssignedCluster", groupEntry.get().assignedCluster);
+		messages->push_back(fmt::format("Tenant move switch: tenantGroupEntry with incorrect cluster\n"
+		                                "		group name:			{}\n"
+		                                "		expected cluster:	{}\n"
+		                                "		actual cluster:	{}\n",
+		                                tenantGroup,
+		                                oldClusterName,
+		                                groupEntry.get().assignedCluster));
+		throw invalid_tenant_move();
+	}
+	groupEntry.get().assignedCluster = newClusterName;
+	metadata::management::tenantMetadata().tenantGroupMap.set(tr, tenantGroup, groupEntry.get());
+
+	TraceEvent("TenantMoveSwitchEnd");
+	return Void();
+}
+
 ACTOR template <class DB>
 static Future<Void> purgeAndVerifyTenant(Reference<DB> db, TenantName tenant) {
 	state Reference<ITenant> tenantObj = db->openTenant(tenant);
@@ -820,87 +907,6 @@ struct SwitchTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> switchMetadataToDestination(
-	    SwitchTenantMovementImpl* self,
-	    Reference<typename DB::TransactionT> tr,
-	    Optional<metadata::management::MovementRecord> movementRecord) {
-		ASSERT(movementRecord.present());
-		state ClusterName srcName = self->srcCtx.clusterName.get();
-		state ClusterName dstName = self->dstCtx.clusterName.get();
-		TraceEvent("TenantMoveSwitchBegin");
-
-		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
-		wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, self->tenantsInGroup)));
-
-		for (auto& tenantPair : tenantMetadataList) {
-			state TenantName tName = tenantPair.first;
-			state MetaclusterTenantMapEntry tenantEntry = tenantPair.second;
-			state int64_t tId = tenantEntry.id;
-
-			// tenantMetadata().tenantMap update assigned cluster
-			if (tenantEntry.assignedCluster != srcName) {
-				if (tenantEntry.assignedCluster == dstName) {
-					// possible that this is a retry
-					return Void();
-				}
-				TraceEvent(SevError, "TenantMoveSwitchTenantEntryWrongCluster")
-				    .detail("TenantName", tName)
-				    .detail("TenantId", tId)
-				    .detail("ExpectedCluster", srcName)
-				    .detail("Src", srcName)
-				    .detail("Dst", dstName)
-				    .detail("EntryCluster", tenantEntry.assignedCluster);
-				self->messages.push_back(fmt::format("Tenant move switch: tenantEntry with incorrect cluster\n"
-				                                     "		expected cluster:	{}\n"
-				                                     "		actual cluster:		{}\n",
-				                                     srcName,
-				                                     tenantEntry.assignedCluster));
-				throw invalid_tenant_move();
-			}
-			tenantEntry.assignedCluster = dstName;
-			metadata::management::tenantMetadata().tenantMap.set(tr, tId, tenantEntry);
-
-			// clusterTenantIndex erase tenant index on src, create tenant index on dst
-			metadata::management::clusterTenantIndex().erase(tr, Tuple::makeTuple(srcName, tName, tId));
-			metadata::management::clusterTenantIndex().insert(tr, Tuple::makeTuple(dstName, tName, tId));
-		}
-
-		// clusterTenantGroupIndex erase group index on src, create group index on dst
-		metadata::management::clusterTenantGroupIndex().erase(tr, Tuple::makeTuple(srcName, self->tenantGroup));
-		metadata::management::clusterTenantGroupIndex().insert(tr, Tuple::makeTuple(dstName, self->tenantGroup));
-
-		// tenantMetadata().tenantGroupMap update assigned cluster
-		state Optional<MetaclusterTenantGroupEntry> groupEntry;
-		wait(store(groupEntry, metadata::management::tenantMetadata().tenantGroupMap.get(tr, self->tenantGroup)));
-
-		if (!groupEntry.present()) {
-			TraceEvent(SevError, "TenantMoveSwitchGroupEntryMissing").detail("TenantGroup", self->tenantGroup);
-			self->messages.push_back(fmt::format("Tenant move switch: tenantGroupEntry missing\n"
-			                                     "		group name:	{}\n",
-			                                     self->tenantGroup));
-			throw invalid_tenant_move();
-		}
-		if (groupEntry.get().assignedCluster != srcName) {
-			TraceEvent(SevError, "TenantMoveSwitchGroupEntryIncorrectCluster")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("ExpectedCluster", srcName)
-			    .detail("GroupEntryAssignedCluster", groupEntry.get().assignedCluster);
-			self->messages.push_back(fmt::format("Tenant move switch: tenantGroupEntry with incorrect cluster\n"
-			                                     "		group name:			{}\n"
-			                                     "		expected cluster:	{}\n"
-			                                     "		actual cluster:	{}\n",
-			                                     self->tenantGroup,
-			                                     srcName,
-			                                     groupEntry.get().assignedCluster));
-			throw invalid_tenant_move();
-		}
-		groupEntry.get().assignedCluster = dstName;
-		metadata::management::tenantMetadata().tenantGroupMap.set(tr, self->tenantGroup, groupEntry.get());
-
-		TraceEvent("TenantMoveSwitchEnd");
-		return Void();
-	}
-
 	// Returns true if hybrid ranges have already been applied
 	ACTOR template <class Transaction>
 	static Future<bool> updateMoveRecordStateWrapper(Reference<Transaction> tr,
@@ -981,7 +987,14 @@ struct SwitchTenantMovementImpl {
 		                                  { metadata::management::MovementState::SWITCH_METADATA },
 		                                  [self = self](Reference<typename DB::TransactionT> tr,
 		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return switchMetadataToDestination(self, tr, movementRecord);
+			                                  return switchMetadata<DB>(tr,
+			                                                            self->tenantGroup,
+			                                                            self->tenantsInGroup,
+			                                                            self->srcCtx.clusterName.get(),
+			                                                            self->dstCtx.clusterName.get(),
+			                                                            movementRecord,
+			                                                            &self->messages,
+			                                                            Aborting::False);
 		                                  }));
 
 		TraceEvent("BreakpointSwitch5");
@@ -1503,81 +1516,6 @@ struct AbortTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> switchMetadataToSource(AbortTenantMovementImpl* self,
-	                                                 Reference<typename DB::TransactionT> tr) {
-		state ClusterName srcName = self->srcCtx.clusterName.get();
-		state ClusterName dstName = self->dstCtx.clusterName.get();
-
-		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
-		wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, self->tenantsInGroup)));
-		for (auto& tenantPair : tenantMetadataList) {
-			state TenantName tName = tenantPair.first;
-			state MetaclusterTenantMapEntry tenantEntry = tenantPair.second;
-			state int64_t tId = tenantEntry.id;
-
-			// tenantMetadata().tenantMap update assigned cluster
-			if (tenantEntry.assignedCluster != dstName) {
-				if (tenantEntry.assignedCluster == srcName) {
-					// possible that this is a retry
-					return Void();
-				}
-				TraceEvent(SevError, "TenantMoveAbortSwitchTenantEntryWrongCluster")
-				    .detail("TenantName", tName)
-				    .detail("TenantId", tId)
-				    .detail("ExpectedCluster", dstName)
-				    .detail("Src", srcName)
-				    .detail("Dst", dstName)
-				    .detail("EntryCluster", tenantEntry.assignedCluster);
-				self->messages.push_back(fmt::format("Tenant move switch: tenantEntry with incorrect cluster\n"
-				                                     "		expected cluster:	{}\n"
-				                                     "		actual cluster:		{}\n",
-				                                     dstName,
-				                                     tenantEntry.assignedCluster));
-				throw invalid_tenant_move();
-			}
-			tenantEntry.assignedCluster = srcName;
-			metadata::management::tenantMetadata().tenantMap.set(tr, tId, tenantEntry);
-
-			// clusterTenantIndex erase tenant index on dst, create tenant index on src
-			metadata::management::clusterTenantIndex().erase(tr, Tuple::makeTuple(dstName, tName, tId));
-			metadata::management::clusterTenantIndex().insert(tr, Tuple::makeTuple(srcName, tName, tId));
-		}
-
-		// clusterTenantGroupIndex erase group index on dst, create group index on src
-		metadata::management::clusterTenantGroupIndex().erase(tr, Tuple::makeTuple(dstName, self->tenantGroup));
-		metadata::management::clusterTenantGroupIndex().insert(tr, Tuple::makeTuple(srcName, self->tenantGroup));
-
-		// tenantMetadata().tenantGroupMap update assigned cluster
-		state Optional<MetaclusterTenantGroupEntry> groupEntry;
-		wait(store(groupEntry, metadata::management::tenantMetadata().tenantGroupMap.get(tr, self->tenantGroup)));
-
-		if (!groupEntry.present()) {
-			TraceEvent(SevError, "TenantMoveAbortSwitchGroupEntryMissing").detail("TenantGroup", self->tenantGroup);
-			self->messages.push_back(fmt::format("Tenant move abort: tenantGroupEntry missing\n"
-			                                     "		group name:	{}\n",
-			                                     self->tenantGroup));
-			throw invalid_tenant_move();
-		}
-		if (groupEntry.get().assignedCluster != dstName) {
-			TraceEvent(SevError, "TenantMoveAbortSwitchGroupEntryIncorrectCluster")
-			    .detail("TenantGroup", self->tenantGroup)
-			    .detail("ExpectedCluster", dstName)
-			    .detail("GroupEntryAssignedCluster", groupEntry.get().assignedCluster);
-			self->messages.push_back(fmt::format("Tenant move abort: tenantGroupEntry with incorrect cluster\n"
-			                                     "		group name:			{}\n"
-			                                     "		expected cluster:	{}\n"
-			                                     "		actual cluster:	{}\n",
-			                                     self->tenantGroup,
-			                                     dstName,
-			                                     groupEntry.get().assignedCluster));
-			throw invalid_tenant_move();
-		}
-		groupEntry.get().assignedCluster = srcName;
-		metadata::management::tenantMetadata().tenantGroupMap.set(tr, self->tenantGroup, groupEntry.get());
-
-		return Void();
-	}
-
 	ACTOR static Future<Void> abortStartLock(AbortTenantMovementImpl* self) {
 		TraceEvent("BreakpointAbort4");
 		state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
@@ -1743,7 +1681,14 @@ struct AbortTenantMovementImpl {
 			    { metadata::management::MovementState::SWITCH_METADATA },
 			    [self = self](Reference<typename DB::TransactionT> tr,
 			                  Optional<metadata::management::MovementRecord> movementRecord) {
-				    return switchMetadataToSource(self, tr);
+				    return switchMetadata<DB>(tr,
+				                              self->tenantGroup,
+				                              self->tenantsInGroup,
+				                              self->srcCtx.clusterName.get(),
+				                              self->dstCtx.clusterName.get(),
+				                              movementRecord,
+				                              &self->messages,
+				                              Aborting::True);
 			    }));
 		}
 
