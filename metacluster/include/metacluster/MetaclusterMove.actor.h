@@ -1390,7 +1390,10 @@ struct AbortTenantMovementImpl {
 	    AbortTenantMovementImpl* self,
 	    Reference<typename DB::TransactionT> tr,
 	    Optional<metadata::management::MovementRecord> movementRecord) {
-		ASSERT(movementRecord.present());
+		if (!movementRecord.present()) {
+			// Retry already cleared the move record
+			return Void();
+		}
 		state UID runId = movementRecord.get().runId;
 		metadata::management::emergency_movement::emergencyMovements().erase(tr, self->tenantGroup);
 		metadata::management::emergency_movement::movementQueue().erase(
@@ -1534,15 +1537,16 @@ struct AbortTenantMovementImpl {
 
 		wait(unlockSourceTenants(self));
 
-		wait(runMoveManagementTransaction(self->tenantGroup,
-		                                  self->srcCtx,
-		                                  self->dstCtx,
-		                                  Aborting::True,
-		                                  { metadata::management::MovementState::START_LOCK },
-		                                  [self = self](Reference<typename DB::TransactionT> tr,
-		                                                Optional<metadata::management::MovementRecord> movementRecord) {
-			                                  return clearMovementMetadataAbort(self, tr, movementRecord);
-		                                  }));
+		wait(runMoveManagementTransaction(
+		    self->tenantGroup,
+		    self->srcCtx,
+		    self->dstCtx,
+		    Aborting::True,
+		    { Optional<metadata::management::MovementState>(), metadata::management::MovementState::START_LOCK },
+		    [self = self](Reference<typename DB::TransactionT> tr,
+		                  Optional<metadata::management::MovementRecord> movementRecord) {
+			    return clearMovementMetadataAbort(self, tr, movementRecord);
+		    }));
 
 		return Void();
 	}
