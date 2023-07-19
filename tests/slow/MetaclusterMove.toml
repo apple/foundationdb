@@ -15,4 +15,3 @@ runSetup = true
     testName = 'MetaclusterMove'
 	maxTenants = 100
 	maxTenantGroups = 10
-    badCopy = true
