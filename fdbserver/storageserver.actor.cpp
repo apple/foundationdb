@@ -5499,7 +5499,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 					ownRangesLocalView.push_back(overlappingRange);
 				}
-				// Get ownRangesLocalView within claimRange
+				// Get ownRangesSeenByServerKey within claimRange
 				for (auto& range : serverKeyRes.ownRanges) {
 					KeyRange overlappingRange = range & claimRange;
 					if (overlappingRange.empty()) {
@@ -5507,7 +5507,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 					ownRangesSeenByServerKey.push_back(overlappingRange);
 				}
-				// Get ownRangesLocalView within claimRange
+				// Get ownRangesSeenByKeyServer within claimRange
 				if (keyServerRes.rangeOwnershipMap.contains(data->thisServerID)) {
 					std::vector mergedRanges = coalesceRangeList(keyServerRes.rangeOwnershipMap[data->thisServerID]);
 					for (auto& range : mergedRanges) {
