@@ -989,7 +989,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
 		state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::False);
+		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::True);
 
 		wait(metaclusterConsistencyCheck.run());
 

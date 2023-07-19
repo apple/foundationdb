@@ -514,6 +514,7 @@ struct StartTenantMovementImpl {
 				    fmt::format("Tenant move start: destination cluster {} has no more capacity.\n", dstName));
 				throw cluster_no_capacity();
 			}
+			updatedEntry.clusterState = DataClusterState::READY;
 			updatedEntry.allocated.numTenantGroups++;
 			TraceEvent("BreakpointUpdateAllocated1", self->srcCtx.debugId).detail("DstName", dstName);
 			updateClusterMetadata(tr,
@@ -1152,6 +1153,7 @@ struct FinishTenantMovementImpl {
 		// clusterCapacityIndex() reduce allocated capacity of source
 		DataClusterMetadata clusterMetadata = srcCtx.dataClusterMetadata.get();
 		DataClusterEntry updatedEntry = clusterMetadata.entry;
+		updatedEntry.clusterState = DataClusterState::READY;
 		updatedEntry.allocated.numTenantGroups--;
 		updateClusterMetadata(tr, srcName, clusterMetadata, Optional<ClusterConnectionString>(), updatedEntry);
 
@@ -1408,10 +1410,9 @@ struct AbortTenantMovementImpl {
 		// pre-emptively increased for capacity purposes in the Start step
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 
-		// DataClusterMetadata clusterMetadata = self->dstCtx.dataClusterMetadata.get();
-		// Protect against race conditions
 		DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, self->dstCtx.clusterName.get()));
 		DataClusterEntry updatedEntry = clusterMetadata.entry;
+		updatedEntry.clusterState = DataClusterState::READY;
 		updatedEntry.allocated.numTenantGroups--;
 		TraceEvent("BreakpointUpdateAllocated2", self->srcCtx.debugId).detail("DstName", dstName);
 		updateClusterMetadata(tr,

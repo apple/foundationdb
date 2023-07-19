@@ -79,6 +79,8 @@ void updateClusterCapacityIndex(Transaction tr,
 	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
 	TraceEvent("BreakpointUpdate", debugId)
 	    .detail("ClusterName", name)
+	    .detail("PrevEntryState", DataClusterEntry::clusterStateToString(previousEntry.clusterState))
+	    .detail("UpdatedEntryState", DataClusterEntry::clusterStateToString(updatedEntry.clusterState))
 	    .detail("PrevEntryAlloc", previousEntry.allocated.numTenantGroups)
 	    .detail("PrevEntryCapac", previousEntry.capacity.numTenantGroups)
 	    .detail("UpdatedEntryAlloc", updatedEntry.allocated.numTenantGroups)
