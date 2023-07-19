@@ -1334,16 +1334,26 @@ struct AbortTenantMovementImpl {
 	                        std::vector<std::string>& messages)
 	  : srcCtx(managementDb, src), dstCtx(managementDb, dst), tenantGroup(tenantGroup), messages(messages) {}
 
-	ACTOR static Future<Void> initAbort(AbortTenantMovementImpl* self,
+	// Returns true if this can be considered a complete abort
+	ACTOR static Future<bool> initAbort(AbortTenantMovementImpl* self,
 	                                    Reference<typename DB::TransactionT> tr,
 	                                    Optional<metadata::management::MovementRecord> movementRecord) {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		wait(findTenantsInGroup(tr, self->tenantGroup, &self->tenantsInGroup));
 		if (!movementRecord.present()) {
-			TraceEvent("TenantMoveAbortNoMoveRecord").detail("TenantGroup", self->tenantGroup);
-			self->messages.push_back(fmt::format(
-			    "Tenant move abort: no movement in progress for the tenant group: {}\n", self->tenantGroup));
+			// Rare scenario where abort is called immediately after "start"
+			// See no move record while the start tr is still committing
+			// Attempt to re-clear the move record
+			// Conflict should arise if "start" transaction is still in flight
+			bool exitSignal = wait(self->srcCtx.runManagementTransaction(
+			    [self = self](Reference<typename DB::TransactionT> tr) { return clearMoveRecord(self, tr); }));
+			if (exitSignal) {
+				// No conflict, nothing to abort or abort already succeeded
+				return true;
+			}
+			// Conflict, want to refresh the move record
+			// Let outer wrapper take care of retry
 			throw tenant_move_record_missing();
 		} else {
 			self->moveRecord = movementRecord.get();
@@ -1356,7 +1366,7 @@ struct AbortTenantMovementImpl {
 		// Mark movement as aborting and write it into metadata immediately
 		self->moveRecord.aborting = true;
 		metadata::management::emergency_movement::emergencyMovements().set(tr, self->tenantGroup, self->moveRecord);
-		return Void();
+		return false;
 	}
 
 	ACTOR static Future<Void> clearMovementMetadataAbort(
@@ -1779,22 +1789,9 @@ struct AbortTenantMovementImpl {
 				    }));
 				break;
 			} catch (Error& e) {
-				// Rare scenario where abort is called immediately after "start"
-				// See no move record while the start tr is still committing
-				state Error err(e);
-				TraceEvent("TenantMoveInitAbortError").error(err);
-				// Attempt to re-clear the move record
-				// Conflict should arise if "start" transaction is still in flight
-				if (err.code() == error_code_tenant_move_record_missing) {
-					bool exitSignal = wait(self->srcCtx.runManagementTransaction(
-					    [self = self](Reference<typename DB::TransactionT> tr) { return clearMoveRecord(self, tr); }));
-					if (exitSignal) {
-						return Void();
-					} else {
-						continue;
-					}
+				if (e.code() != error_code_tenant_move_record_missing) {
+					throw e;
 				}
-				throw err;
 			}
 		}
 
