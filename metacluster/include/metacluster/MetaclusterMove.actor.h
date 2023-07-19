@@ -892,6 +892,7 @@ struct SwitchTenantMovementImpl {
 				state ThreadFuture<bool> resultFuture = dstTenant->blobbifyRangeBlocking(blobRange);
 				blobFutures.push_back(safeThreadFutureToFuture(resultFuture));
 			}
+			TraceEvent("TenantMoveSwitchBlobRangesApplying").detail("TenantName", tName);
 
 			wait(waitForAll(blobFutures));
 
