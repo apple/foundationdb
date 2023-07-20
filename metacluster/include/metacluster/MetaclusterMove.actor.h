@@ -591,7 +591,6 @@ struct StartTenantMovementImpl {
 
 	ACTOR static Future<std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>>>
 	getAllTenantSplitPointsFromSource(StartTenantMovementImpl* self,
-	                                  Reference<typename DB::TransactionT> tr,
 	                                  std::vector<ThreadFuture<Standalone<VectorRef<KeyRef>>>> resultFutures) {
 		ASSERT(self->tenantsInGroup.size());
 		ASSERT(resultFutures.size() == self->tenantsInGroup.size());
@@ -660,7 +659,7 @@ struct StartTenantMovementImpl {
 	                                                Optional<metadata::management::MovementRecord> movementRecord) {
 		state std::vector<ThreadFuture<Standalone<VectorRef<KeyRef>>>> resultFutures(self->tenantsInGroup.size());
 		state Future<std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>>> splitPointsFuture =
-		    getAllTenantSplitPointsFromSource(self, tr, resultFutures);
+		    getAllTenantSplitPointsFromSource(self, resultFutures);
 
 		ASSERT(movementRecord.present());
 		if (movementRecord.get().mState == metadata::management::MovementState::START_LOCK) {
