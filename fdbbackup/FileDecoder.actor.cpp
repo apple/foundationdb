@@ -741,16 +741,6 @@ public:
 	int lfd = -1; // local file descriptor
 };
 
-// convert a StringRef to Hex string
-std::string hexStringRef(const StringRef& s) {
-	std::string result;
-	result.reserve(s.size() * 2);
-	for (int i = 0; i < s.size(); i++) {
-		result.append(format("%02x", s[i]));
-	}
-	return result;
-}
-
 ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
                                       RangeFile file,
                                       UID uid,
@@ -777,8 +767,7 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 				    .detail("Version", file.version)
 				    .setMaxFieldLength(1000)
 				    .detail("KV", kv);
-				std::cout << file.version << " key: " << hexStringRef(kv.key) << "  value: " << hexStringRef(kv.value)
-				          << std::endl;
+				std::cout << file.version << " key: " << kv.key.toHex() << "  value: " << kv.value.toHex() << std::endl;
 			}
 		}
 	}
@@ -823,7 +812,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 				    .setMaxFieldLength(1000)
 				    .detail("M", m.toString());
 				std::cout << vms.version << "." << sub << " " << typeString[(int)m.type]
-				          << " param1: " << hexStringRef(m.param1) << " param2: " << hexStringRef(m.param2) << "\n";
+				          << " param1: " << m.param1.toHex() << " param2: " << m.param2.toHex() << "\n";
 			}
 		}
 	}
