@@ -761,9 +761,9 @@ ACTOR Future<std::vector<AuditStorageState>> loadAndUpdateAuditMetadataWithNewDD
 	loop {
 		try {
 			auditStates.clear();
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			RangeResult result = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
 			if (result.more || result.size() >= CLIENT_KNOBS->TOO_MANY) {
