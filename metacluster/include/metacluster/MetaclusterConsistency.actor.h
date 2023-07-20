@@ -64,6 +64,10 @@ private:
 				    systemTenantSubspaceKeysFuture = tr->getRange(prefixRange(TenantMetadata::subspace()), 2);
 				RangeResult systemTenantSubspaceKeys = wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
 
+				for (const auto& [k, v] : systemTenantSubspaceKeys.contents()) {
+					TraceEvent("BreakpointEndCheck").detail("Key", k).detail("Value", v);
+				}
+
 				// The only key in the `\xff` tenant subspace should be the tenant id prefix
 				ASSERT(systemTenantSubspaceKeys.size() == 1);
 				return Void();
@@ -133,6 +137,10 @@ private:
 		int64_t totalTenants = 0;
 		for (auto const& [cluster, clusterTenants] : data.clusterTenantMap) {
 			auto itr = countsMap.find(cluster);
+			TraceEvent("BreakpointCons")
+			    .detail("ClusterName", cluster)
+			    .detail("ClusterTenantsSize", clusterTenants.size())
+			    .detail("ItrSecond", itr == countsMap.end() ? -1 : itr->second);
 			ASSERT((clusterTenants.empty() && itr == countsMap.end()) || itr->second == clusterTenants.size());
 			totalTenants += clusterTenants.size();
 		}
@@ -150,6 +158,10 @@ private:
 			if (entry.tenantGroup.present()) {
 				// Count the number of tenant groups allocated in each cluster
 				if (processedTenantGroups.insert(entry.tenantGroup.get()).second) {
+					TraceEvent("BreakpointAllocated1")
+					    .detail("AssignedCluster", entry.assignedCluster)
+					    .detail("TenantGroup", entry.tenantGroup.get())
+					    .detail("TenantName", entry.tenantName);
 					++clusterAllocated[entry.assignedCluster];
 				}
 				// The tenant group should be stored in the same cluster where it is stored in the cluster tenant
@@ -160,6 +172,10 @@ private:
 			} else {
 				// Track the actual tenant group allocation per cluster (a tenant with no group counts against the
 				// allocation)
+				CODE_PROBE(true, "Counting ungrouped tenant");
+				TraceEvent("BreakpointAllocated2")
+				    .detail("AssignedCluster", entry.assignedCluster)
+				    .detail("TenantName", entry.tenantName);
 				++clusterAllocated[entry.assignedCluster];
 			}
 		}
@@ -226,6 +242,9 @@ private:
 
 			std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
 			if (!self->allowPartialMetaclusterOperations) {
+				TraceEvent("BreakpointDataTenantMapSize")
+				    .detail("Cluster", clusterName)
+				    .detail("EntryId", clusterMetadata.entry.id);
 				ASSERT_EQ(data.tenantData.tenantMap.size(), expectedTenants.size());
 			} else {
 				ASSERT_LE(data.tenantData.tenantMap.size(), expectedTenants.size());

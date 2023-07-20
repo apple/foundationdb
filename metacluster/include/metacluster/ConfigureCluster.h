@@ -40,7 +40,10 @@ void updateClusterMetadata(Transaction tr,
                            DataClusterMetadata const& previousMetadata,
                            Optional<ClusterConnectionString> const& updatedConnectionString,
                            Optional<DataClusterEntry> const& updatedEntry,
-                           IsRestoring isRestoring = IsRestoring::False) {
+                           IsRestoring isRestoring = IsRestoring::False,
+                           UID debugId = UID()) {
+	CODE_PROBE(updatedEntry.present() && updatedConnectionString.present(),
+	           "Update configuration and connection string simultaneously");
 
 	if (updatedEntry.present()) {
 		if (previousMetadata.entry.clusterState == DataClusterState::REGISTERING &&
@@ -58,7 +61,7 @@ void updateClusterMetadata(Transaction tr,
 			       updatedEntry.get().clusterState == DataClusterState::RESTORING);
 		}
 		metadata::management::dataClusters().set(tr, name, updatedEntry.get());
-		internal::updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
+		internal::updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get(), debugId);
 	}
 	if (updatedConnectionString.present()) {
 		metadata::management::dataClusterConnectionRecords().set(tr, name, updatedConnectionString.get());

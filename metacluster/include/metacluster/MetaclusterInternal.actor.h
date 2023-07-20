@@ -67,8 +67,22 @@ template <class Transaction>
 void updateClusterCapacityIndex(Transaction tr,
                                 ClusterName name,
                                 DataClusterEntry const& previousEntry,
-                                DataClusterEntry const& updatedEntry) {
+                                DataClusterEntry const& updatedEntry,
+                                UID debugId = UID()) {
+	CODE_PROBE(updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED,
+	           "Update tenant capacity with auto-assignment disabled");
+	CODE_PROBE(updatedEntry.autoTenantAssignment == AutoTenantAssignment::ENABLED,
+	           "Update tenant capacity with auto-assignment enabled");
+
 	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
+	TraceEvent("BreakpointUpdate", debugId)
+	    .detail("ClusterName", name)
+	    .detail("PrevEntryState", DataClusterEntry::clusterStateToString(previousEntry.clusterState))
+	    .detail("UpdatedEntryState", DataClusterEntry::clusterStateToString(updatedEntry.clusterState))
+	    .detail("PrevEntryAlloc", previousEntry.allocated.numTenantGroups)
+	    .detail("PrevEntryCapac", previousEntry.capacity.numTenantGroups)
+	    .detail("UpdatedEntryAlloc", updatedEntry.allocated.numTenantGroups)
+	    .detail("UpdatedEntryCapac", updatedEntry.capacity.numTenantGroups);
 	if (previousEntry.hasCapacity() || updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
 		metadata::management::clusterCapacityIndex().erase(
 		    tr, Tuple::makeTuple(previousEntry.allocated.numTenantGroups, name));
