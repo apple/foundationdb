@@ -26,27 +26,97 @@
 
 namespace fdb_cli {
 
+// Gets a version at which to read from the storage servers
+ACTOR Future<Version> getVersion(Database cx) {
+	loop {
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			Version version = wait(tr.getReadVersion());
+			return version;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get a list of storage servers(persisting keys within range "kr") from the master and compares them with the
+// TLogs. If this is a quiescent check, then each commit proxy needs to respond, otherwise only one needs to
+// respond. Returns false if there is a failure (in this case, keyServersPromise will never be set)
+ACTOR Future<bool> getKeyServers(
+    Database cx,
+    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
+    KeyRangeRef kr) {
+	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
+
+	// Try getting key server locations from the first commit proxy
+	state Future<ErrorOr<GetKeyServerLocationsReply>> keyServerLocationFuture;
+	state Key begin = kr.begin;
+	state Key end = kr.end;
+	state int limitKeyServers = 100;
+	state Span span(deterministicRandom()->randomUniqueID(), "CLI:Check"_loc);
+
+	while (begin < end) {
+		state Reference<CommitProxyInfo> commitProxyInfo =
+		    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
+		keyServerLocationFuture = commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
+		                              .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
+		                                                                                    Optional<TenantNameRef>(),
+		                                                                                    begin,
+		                                                                                    end,
+		                                                                                    limitKeyServers,
+		                                                                                    false,
+		                                                                                    latestVersion,
+		                                                                                    Arena()),
+		                                                       2,
+		                                                       0);
+
+		state bool keyServersInsertedForThisIteration = false;
+		choose {
+			when(ErrorOr<GetKeyServerLocationsReply> shards = wait(keyServerLocationFuture)) {
+				// Get the list of shards if one was returned.
+				if (shards.present() && !keyServersInsertedForThisIteration) {
+					keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
+					keyServersInsertedForThisIteration = true;
+					begin = shards.get().results.back().first.end;
+					break;
+				}
+			}
+			when(wait(cx->onProxiesChanged())) {}
+		} // End of choose
+
+		if (!keyServersInsertedForThisIteration) // Retry the entire workflow
+			wait(delay(1.0));
+	} // End of while
+
+	keyServersPromise.send(keyServers);
+	return true;
+}
+
 // The command is used to get all storage server addresses for a given key.
-ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version) {
-	if (tokens.size() != 2) {
-		printf("getlocation <KEY>\n"
-		       "fetch the storage server address for a given key.\n"
+ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens) {
+	if (tokens.size() != 2 && tokens.size() != 3) {
+		printf("getlocation <KEY> [<KEY2>]\n"
+		       "fetch the storage server address for a given key or range.\n"
 		       "Displays the addresses of storage servers, or `not found' if location is not found.");
 		return false;
 	}
 
-	KeyRangeLocationInfo loc = wait(getKeyLocation_internal(
-	    cx, {}, tokens[1], SpanID(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
-
-	if (loc.locations) {
-		printf("version is %ld\n", version);
-		printf("`%s' is at:\n", printable(tokens[1]).c_str());
-		auto locations = loc.locations->locations();
-		for (int i = 0; locations && i < locations->size(); i++) {
-			printf("  %s\n", locations->getInterface(i).address().toString().c_str());
+	KeyRange kr = KeyRangeRef(tokens[1], tokens.size() == 3 ? tokens[2] : keyAfter(tokens[1]));
+	// find key range locations without GRV
+	state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
+	bool found = wait(getKeyServers(cx, keyServersPromise, kr));
+	if (!found) {
+		printf("[%s, %s]locations not found\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+		return false;
+	}
+	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
+	    keyServersPromise.getFuture().get();
+	for (const auto& [range, servers] : keyServers) {
+		printf("Key range: %s\n", printable(range).c_str());
+		for (const auto& server : servers) {
+			printf("  %s\n", server.address().toString().c_str());
 		}
-	} else {
-		printf("`%s': location not found\n", printable(tokens[1]).c_str());
 	}
 	return true;
 }
@@ -165,73 +235,6 @@ bool checkResults(Version version,
 	return true;
 }
 
-// Gets a version at which to read from the storage servers
-ACTOR Future<Version> getVersion(Database cx) {
-	loop {
-		state Transaction tr(cx);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			Version version = wait(tr.getReadVersion());
-			return version;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// Get a list of storage servers(persisting keys within range "kr") from the master and compares them with the
-// TLogs. If this is a quiescent check, then each commit proxy needs to respond, otherwise only one needs to
-// respond. Returns false if there is a failure (in this case, keyServersPromise will never be set)
-ACTOR Future<bool> getKeyServers(
-    Database cx,
-    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
-    KeyRangeRef kr) {
-	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
-
-	// Try getting key server locations from the first commit proxy
-	state Future<ErrorOr<GetKeyServerLocationsReply>> keyServerLocationFuture;
-	state Key begin = kr.begin;
-	state Key end = kr.end;
-	state int limitKeyServers = 100;
-	state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
-
-	while (begin < end) {
-		state Reference<CommitProxyInfo> commitProxyInfo =
-		    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
-		keyServerLocationFuture = commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
-		                              .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
-		                                                                                    Optional<TenantNameRef>(),
-		                                                                                    begin,
-		                                                                                    end,
-		                                                                                    limitKeyServers,
-		                                                                                    false,
-		                                                                                    latestVersion,
-		                                                                                    Arena()),
-		                                                       2,
-		                                                       0);
-
-		state bool keyServersInsertedForThisIteration = false;
-		choose {
-			when(ErrorOr<GetKeyServerLocationsReply> shards = wait(keyServerLocationFuture)) {
-				// Get the list of shards if one was returned.
-				if (shards.present() && !keyServersInsertedForThisIteration) {
-					keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
-					keyServersInsertedForThisIteration = true;
-					begin = shards.get().results.back().first.end;
-					break;
-				}
-			}
-			when(wait(cx->onProxiesChanged())) {}
-		} // End of choose
-
-		if (!keyServersInsertedForThisIteration) // Retry the entire workflow
-			wait(delay(1.0));
-	} // End of while
-
-	keyServersPromise.send(keyServers);
-	return true;
-}
-
 // The command is used to check the \xff\x02/blog/ keyspace
 ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
 	// ignore tokens for now
@@ -275,7 +278,7 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 
 					replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 				}
-				printf("waiting for %lu replies\n", keyServers[i].second.size());
+				printf("waiting for %lu replies at version: %ld\n", keyServers[i].second.size(), version);
 				wait(waitForAll(replies));
 				if (!checkResults(version, keyServers[i].second, replies, begin, end)) {
 					return false;

@@ -216,7 +216,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 // debug commands: getlocation, getall
-ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens);
 ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
 ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens);
 } // namespace fdb_cli
