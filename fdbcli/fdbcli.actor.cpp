@@ -1635,6 +1635,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "checkall")) {
+					bool _result = wait(makeInterruptable(checkallCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "getversion")) {
 					if (tokens.size() != 1) {
 						printUsage(tokens[0]);

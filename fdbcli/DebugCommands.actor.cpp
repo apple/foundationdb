@@ -92,4 +92,202 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 // hidden commands, no help text for now
 CommandFactory getallCommandFactory("getall");
 
+// check that all replies are the same. Update begin to the next key to check
+bool checkResults(Version version,
+                  const std::vector<StorageServerInterface>& servers,
+                  const std::vector<Future<ErrorOr<GetKeyValuesReply>>>& replies,
+                  KeySelectorRef& begin,
+                  const KeySelectorRef& end) {
+	bool allSame = true;
+	int firstValidServer = -1;
+	for (int j = 0; j < replies.size(); j++) {
+		auto reply = replies[j].get();
+		if (!reply.present() || reply.get().error.present()) {
+			printf("Error from %s: %s\n",
+			       servers[j].address().toString().c_str(),
+			       reply.present() ? reply.get().error.get().what() : "no reply");
+			continue;
+		}
+		GetKeyValuesReply current = reply.get();
+		if (firstValidServer == -1) {
+			firstValidServer = j;
+			continue;
+		}
+		GetKeyValuesReply reference = replies[firstValidServer].get().get();
+
+		// compare the two replicas
+		if (current.data == reference.data && current.more == reference.more) {
+			continue;
+		}
+
+		allSame = false;
+		printf("#%d  %s\n", firstValidServer, servers[firstValidServer].address().toString().c_str());
+		printf("#%d  %s\n", j, servers[j].address().toString().c_str());
+		int currentI = 0, referenceI = 0;
+		while (currentI < current.data.size() || referenceI < reference.data.size()) {
+			if (currentI >= current.data.size()) {
+				printf(" #%d Unique key: %s\n", firstValidServer, printable(reference.data[referenceI].key).c_str());
+				referenceI++;
+			} else if (referenceI >= reference.data.size()) {
+				printf(" #%d Unique key: %s\n", j, printable(current.data[currentI].key).c_str());
+				currentI++;
+			} else {
+				KeyValueRef currentKV = current.data[currentI];
+				KeyValueRef referenceKV = reference.data[referenceI];
+
+				if (currentKV.key == referenceKV.key) {
+					if (currentKV.value != referenceKV.value) {
+						printf(" Value mismatch key: %s\n", printable(currentKV.key).c_str());
+						currentI++;
+						referenceI++;
+					}
+				} else if (currentKV.key < referenceKV.key) {
+					printf(" #%d Unique key: %s\n", j, printable(currentKV.key).c_str());
+					currentI++;
+				} else {
+					printf(" #%d Unique key: %s\n", firstValidServer, printable(referenceKV.key).c_str());
+					referenceI++;
+				}
+			}
+		}
+	}
+
+	if (!allSame)
+		return false;
+
+	if (firstValidServer >= 0 && replies[firstValidServer].get().get().more) {
+		const VectorRef<KeyValueRef>& result = replies[firstValidServer].get().get().data;
+		begin = firstGreaterThan(result[result.size() - 1].key);
+	} else {
+		printf("Same at version %ld\n", version);
+		begin = end; // signal that we're done
+	}
+	return true;
+}
+
+// Gets a version at which to read from the storage servers
+ACTOR Future<Version> getVersion(Database cx) {
+	loop {
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			Version version = wait(tr.getReadVersion());
+			return version;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get a list of storage servers(persisting keys within range "kr") from the master and compares them with the
+// TLogs. If this is a quiescent check, then each commit proxy needs to respond, otherwise only one needs to
+// respond. Returns false if there is a failure (in this case, keyServersPromise will never be set)
+ACTOR Future<bool> getKeyServers(
+    Database cx,
+    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
+    KeyRangeRef kr) {
+	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
+
+	// Try getting key server locations from the first commit proxy
+	state Future<ErrorOr<GetKeyServerLocationsReply>> keyServerLocationFuture;
+	state Key begin = kr.begin;
+	state Key end = kr.end;
+	state int limitKeyServers = 100;
+	state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
+
+	while (begin < end) {
+		state Reference<CommitProxyInfo> commitProxyInfo =
+		    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
+		keyServerLocationFuture = commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
+		                              .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
+		                                                                                    Optional<TenantNameRef>(),
+		                                                                                    begin,
+		                                                                                    end,
+		                                                                                    limitKeyServers,
+		                                                                                    false,
+		                                                                                    latestVersion,
+		                                                                                    Arena()),
+		                                                       2,
+		                                                       0);
+
+		state bool keyServersInsertedForThisIteration = false;
+		choose {
+			when(ErrorOr<GetKeyServerLocationsReply> shards = wait(keyServerLocationFuture)) {
+				// Get the list of shards if one was returned.
+				if (shards.present() && !keyServersInsertedForThisIteration) {
+					keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
+					keyServersInsertedForThisIteration = true;
+					begin = shards.get().results.back().first.end;
+					break;
+				}
+			}
+			when(wait(cx->onProxiesChanged())) {}
+		} // End of choose
+
+		if (!keyServersInsertedForThisIteration) // Retry the entire workflow
+			wait(delay(1.0));
+	} // End of while
+
+	keyServersPromise.send(keyServers);
+	return true;
+}
+
+// The command is used to check the \xff\x02/blog/ keyspace
+ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
+	// ignore tokens for now
+	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
+	state int i = 0;
+	state Version version;
+	state KeySelectorRef begin, end;
+
+	loop {
+		try {
+			state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
+			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, backupLogKeys));
+
+			if (!foundKeyServers) {
+				printf("backup key server locations not found, retrying in 1s...\n");
+				wait(delay(1.0));
+				continue;
+			}
+
+			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
+			    keyServerPromise.getFuture().get();
+			for (i = 0; i < keyServers.size(); i++) { // for each key range
+				const auto& range = keyServers[i].first;
+				const auto& servers = keyServers[i].second;
+				begin = firstGreaterOrEqual(range.begin);
+				end = firstGreaterOrEqual(range.end);
+				printf("Key range: %s\n", printable(range).c_str());
+				for (const auto& server : servers) {
+					printf("  %s\n", server.address().toString().c_str());
+				}
+				wait(store(version, getVersion(cx)));
+				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
+				for (const auto& s : keyServers[i].second) { // for each storage server
+					GetKeyValuesRequest req;
+					req.begin = begin;
+					req.end = end;
+					req.limit = 1e4;
+					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+					req.version = version;
+					req.tags = TagSet();
+
+					replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+				}
+				printf("waiting for %lu replies\n", keyServers[i].second.size());
+				wait(waitForAll(replies));
+				if (!checkResults(version, keyServers[i].second, replies, begin, end)) {
+					return false;
+				}
+				// TODO: if there are more results, continue checking in the same shard
+			}
+		} catch (Error& e) {
+			printf("Retrying for error: %s\n", e.what());
+			wait(onErrorTr.onError(e));
+		}
+	}
+}
+
+CommandFactory checkallCommandFactory("checkall");
 } // namespace fdb_cli
