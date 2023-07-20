@@ -200,6 +200,9 @@ struct CommonStorageCounters {
 	// The number of key-value pairs fetched by fetchKeys()
 	Counter kvFetched;
 
+	// how many waitMetrics is served
+	Counter waitMetrics;
+
 	// name and id are the inputs to CounterCollection initialization. If metrics provided, the caller should guarantee
 	// the lifetime of metrics is longer than this counter
 	CommonStorageCounters(const std::string& name,

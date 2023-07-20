@@ -23,6 +23,8 @@
 #include <numeric>
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MovingWindow.h"
+#include "fdbserver/Knobs.h"
+
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
 class IDDRelocationQueue {
@@ -249,7 +251,6 @@ public:
 	int activeRelocations;
 	int queuedRelocations;
 	int64_t bytesWritten;
-	MovingWindow<int64_t> moveBytesRate;
 	int teamSize;
 	int singleRegionTeamSize;
 
@@ -311,6 +312,15 @@ public:
 		NumberOfTypes,
 	};
 	std::vector<int> retryFindDstReasonCount;
+
+	MovingWindow<int64_t> moveBytesRate{ SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL };
+	Smoother queueRetentionTime{ SERVER_KNOBS->RELOCATION_METRICS_SMOOTHING };
+	MovingWindow<int64_t> relocationCompleteWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
+	MovingWindow<int64_t> relocationCancelWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
+
+	int64_t relocateTotalCount;
+
+	int64_t relocateToSourceCount;
 
 	DDQueue() = default;
 

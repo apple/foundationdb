@@ -29,6 +29,11 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/network.h"
+#include "flow/UnitTest.h"
+
+// The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
+// restarts. Keep it as global static state in simulation.
+static std::unordered_map<BlobMetadataDomainId, Standalone<BlobMetadataDetailsRef>> simBlobMetadataStore;
 
 // The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
 // restarts. Keep it as global static state in simulation.
@@ -104,6 +109,7 @@ private:
 		// a. HMAC_SHA algorithm is used to generate the key (digest)
 		// b. HMAC_SHA uses an 'deterministic' seed (SHA_KEY) and 'data' buffer to generate a vault key
 		// c. To generate variable length vault-key, a known 'char' is used for padding
+		// pragma: allowlist nextline secret
 		const unsigned char SHA_KEY[] = "0c39e7906db6d51ac0573d328ce1b6be";
 
 		// Construct encryption keyStore.

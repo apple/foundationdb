@@ -65,9 +65,9 @@ private:
 		state int64_t window = 0;
 
 		loop {
-			state typename TransactionT::template FutureT<RangeResult> rangeFuture =
+			state typename TransactionT::template FutureT<RangeReadResult> rangeFuture =
 			    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
-			RangeResult range = wait(safeThreadFutureToFuture(rangeFuture));
+			RangeReadResult range = wait(safeThreadFutureToFuture(rangeFuture));
 
 			if (range.size() > 0) {
 				start = self->counters.unpack(range[0].key).getInt(0);
@@ -85,11 +85,11 @@ private:
 				int64_t inc = 1;
 				tr->atomicOp(self->counters.get(start).key(), StringRef((uint8_t*)&inc, 8), MutationRef::AddValue);
 
-				state typename TransactionT::template FutureT<Optional<Value>> countFuture =
+				state typename TransactionT::template FutureT<ValueReadResult> countFuture =
 				    tr->get(self->counters.get(start).key(), Snapshot::True);
 				// }
 
-				Optional<Value> countValue = wait(safeThreadFutureToFuture(countFuture));
+				ValueReadResult countValue = wait(safeThreadFutureToFuture(countFuture));
 
 				int64_t count = 0;
 				if (countValue.present()) {
@@ -112,9 +112,9 @@ private:
 				state int64_t candidate = deterministicRandom()->randomInt(start, start + window);
 
 				// if thread safety is needed, this should be locked {
-				state typename TransactionT::template FutureT<RangeResult> latestCounterFuture =
+				state typename TransactionT::template FutureT<RangeReadResult> latestCounterFuture =
 				    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
-				state typename TransactionT::template FutureT<Optional<Value>> candidateValueFuture =
+				state typename TransactionT::template FutureT<ValueReadResult> candidateValueFuture =
 				    tr->get(self->recent.get(candidate).key());
 				tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 				tr->set(self->recent.get(candidate).key(), ValueRef());

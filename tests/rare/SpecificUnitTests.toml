@@ -11,4 +11,4 @@ runSetup=false
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = 'noSim/'
+    testsMatching = '/'

@@ -49,16 +49,6 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 
 void hexdump(FILE* fout, StringRef val);
 
-/*#undef state
-#include <Windows.h>*/
-
-/*uint64_t getFileSize( const char* filename ) {
-    HANDLE f = CreateFile( filename, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
-OPEN_EXISTING, 0, nullptr); if (f == INVALID_HANDLE_VALUE) return 0; DWORD hi,lo; lo = GetFileSize(f, &hi);
-    CloseHandle(f);
-    return (uint64_t(hi)<<32) + lo;
-}*/
-
 struct SpringCleaningStats {
 	int64_t springCleaningCount;
 	int64_t lazyDeletePages;
@@ -153,18 +143,28 @@ struct PageChecksumCodec {
 		if (!silent) {
 			auto severity = SevError;
 			if (g_network->isSimulated()) {
-				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096;
-				auto lastBlock = (pageNumber * pageLen + 4095) / 4096;
+				// Calculate file offsets for the read/write operation space
+				// Operation starts at a 1-based pageNumber and is of size pageLen
+				int64_t fileOffsetStart = (pageNumber - 1) * pageLen;
+				// End refers to the offset after the operation, not the last byte.
+				int64_t fileOffsetEnd = fileOffsetStart + pageLen;
 
-				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
-				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+				// Convert the file offsets to potentially corrupt block numbers
+				// Corrupt block numbers are 0-based and 4096 bytes in length.
+				int64_t corruptBlockStart = fileOffsetStart / 4096;
+				// corrupt block end is the block number AFTER the operation
+				int64_t corruptBlockEnd = (fileOffsetEnd + 4095) / 4096;
+
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, corruptBlockStart));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename &&
+				    iter->second < corruptBlockEnd) {
 					severity = SevWarnAlways;
 				}
 				TraceEvent("CheckCorruption")
 				    .detail("Filename", filename)
 				    .detail("NextFile", iter->first)
-				    .detail("FirstBlock", firstBlock)
-				    .detail("LastBlock", lastBlock)
+				    .detail("BlockStart", corruptBlockStart)
+				    .detail("BlockEnd", corruptBlockEnd)
 				    .detail("NextBlock", iter->second);
 			}
 			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");

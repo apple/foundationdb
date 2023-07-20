@@ -158,7 +158,7 @@ bool PolicyAcross::validate(std::vector<LocalityEntry> const& solutionSet,
 			}
 		}
 	}
-	if (validMap.size() < _count) {
+	if (_count >= 0 && validMap.size() < _count) {
 		valid = false;
 	} else {
 		for (auto& itValid : validMap) {
@@ -167,7 +167,7 @@ bool PolicyAcross::validate(std::vector<LocalityEntry> const& solutionSet,
 				count++;
 			}
 		}
-		if (count < _count) {
+		if (_count >= 0 && count < _count) {
 			valid = false;
 		}
 	}

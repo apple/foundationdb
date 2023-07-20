@@ -52,6 +52,8 @@ template <class DB>
 struct MetaclusterOperationContext {
 	Reference<DB> managementDb;
 	Reference<IDatabase> dataClusterDb;
+	// TODO: remove debugId in general
+	UID debugId = nondeterministicRandom()->randomUniqueID();
 
 	Optional<ClusterName> clusterName;
 
@@ -72,10 +74,13 @@ struct MetaclusterOperationContext {
 		    dataClusterMetadata.present() ? dataClusterMetadata.get().entry.clusterState : DataClusterState::READY;
 		if (clusterState != DataClusterState::READY && extraSupportedDataClusterStates.count(clusterState) == 0) {
 			if (clusterState == DataClusterState::REGISTERING) {
+				CODE_PROBE(true, "Run metacluster transaction on registering cluster");
 				throw cluster_not_found();
 			} else if (clusterState == DataClusterState::REMOVING) {
+				CODE_PROBE(true, "Run metacluster transaction on removing cluster");
 				throw cluster_removed();
 			} else if (clusterState == DataClusterState::RESTORING) {
+				CODE_PROBE(true, "Run metacluster transaction on restoring cluster");
 				throw cluster_restoring();
 			}
 
@@ -97,6 +102,7 @@ struct MetaclusterOperationContext {
 				// If this transaction is retrying and didn't have the cluster name set at the beginning, clear it
 				// out to be set again in the next iteration.
 				if (!clusterPresentAtStart) {
+					CODE_PROBE(true, "Retry management transaction with unconfigured cluster");
 					self->clearCluster();
 				}
 
@@ -120,9 +126,11 @@ struct MetaclusterOperationContext {
 				// transactions have run on.
 				if (!currentMetaclusterRegistration.present() ||
 				    currentMetaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+					CODE_PROBE(true, "Run management transaction on non-management cluster");
 					throw invalid_metacluster_operation();
 				} else if (self->metaclusterRegistration.present() &&
 				           !self->metaclusterRegistration.get().matches(currentMetaclusterRegistration.get())) {
+					CODE_PROBE(true, "Run management transaction on wrong management cluster", probe::decoration::rare);
 					throw metacluster_mismatch();
 				}
 
@@ -131,6 +139,7 @@ struct MetaclusterOperationContext {
 				// registration entry.
 				if (self->clusterName.present()) {
 					if (!currentDataClusterMetadata.present()) {
+						CODE_PROBE(true, "Run management transaction using deleted data cluster");
 						throw cluster_removed();
 					} else {
 						currentMetaclusterRegistration = currentMetaclusterRegistration.get().toDataClusterRegistration(
@@ -147,6 +156,7 @@ struct MetaclusterOperationContext {
 				// updated cluster metadata in the context and open a connection to the data DB.
 				if (self->dataClusterMetadata.present() &&
 				    self->dataClusterMetadata.get().entry.id != currentDataClusterMetadata.get().entry.id) {
+					CODE_PROBE(true, "Run management transaction using wrong data cluster");
 					throw cluster_removed();
 				} else if (self->clusterName.present()) {
 					self->dataClusterMetadata = currentDataClusterMetadata;
@@ -162,8 +172,10 @@ struct MetaclusterOperationContext {
 				    wait(func(tr));
 
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+				TraceEvent("BreakpointManagementCommit", self->debugId).detail("ClusterName", self->clusterName);
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointManagementError", self->debugId).error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
@@ -173,6 +185,11 @@ struct MetaclusterOperationContext {
 	Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue())>
 	runManagementTransaction(Function func) {
 		return runManagementTransaction(this, func);
+	}
+
+	Future<Void> initializeContext() {
+		// Use an empty lambda
+		return runManagementTransaction([](Reference<typename DB::TransactionT>) { return Future<Void>(Void()); });
 	}
 
 	// Runs a transaction on the data cluster. This requires that a cluster name be set and that a transaction has
@@ -209,12 +226,15 @@ struct MetaclusterOperationContext {
 				// Check that this is the expected data cluster and is part of the right metacluster
 				if (!currentMetaclusterRegistration.present()) {
 					if (!runOnDisconnectedCluster) {
+						CODE_PROBE(true, "Run data cluster transaction on non-data cluster");
 						throw cluster_removed();
 					}
 				} else if (currentMetaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_DATA) {
+					CODE_PROBE(true, "Run data cluster transaction on non-data cluster", probe::decoration::rare);
 					throw cluster_removed();
 				} else if (!self->metaclusterRegistration.get().matches(currentMetaclusterRegistration.get())) {
 					if (!runOnMismatchedCluster) {
+						CODE_PROBE(true, "Run data cluster transaction on wrong data cluster");
 						throw cluster_removed();
 					}
 				}
@@ -223,6 +243,7 @@ struct MetaclusterOperationContext {
 					KeyBackedRangeResult<std::pair<ClusterName, metadata::RestoreId>> activeRestoreId =
 					    wait(activeRestoreIdFuture);
 					if (!activeRestoreId.results.empty()) {
+						CODE_PROBE(true, "Run data cluster transaction on restoring data cluster");
 						throw cluster_restoring();
 					}
 				}
@@ -232,8 +253,10 @@ struct MetaclusterOperationContext {
 				    wait(func(tr));
 
 				wait(safeThreadFutureToFuture(tr->commit()));
+				TraceEvent("BreakpointDataClusterCommit").detail("ClusterName", self->clusterName);
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointDataClusterError").error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}

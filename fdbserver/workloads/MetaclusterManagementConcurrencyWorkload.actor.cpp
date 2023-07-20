@@ -107,6 +107,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 					    .detail("NumTenantGroups", entry.capacity.numTenantGroups);
 					break;
 				}
+
+				CODE_PROBE(true, "Register cluster timed out");
 			}
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRegisterClusterError", debugId)
@@ -154,6 +156,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 					    .detail("ClusterName", clusterName);
 					break;
 				}
+
+				CODE_PROBE(true, "Remove cluster timed out");
 			}
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRemoveClusterError", debugId)
@@ -304,9 +308,11 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				    .detail("NewNumTenantGroups", newNumTenantGroups.orDefault(-1))
 				    .detail("NewConnectionString",
 				            connectionString.map(&ClusterConnectionString::toString).orDefault(""));
+
 				Optional<Optional<metacluster::DataClusterEntry>> result = wait(timeout(
 				    configureImpl(self, clusterName, newNumTenantGroups, connectionString, autoTenantAssignment),
 				    deterministicRandom()->randomInt(1, 30)));
+
 				if (result.present()) {
 					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyConfiguredCluster", debugId)
 					    .detail("ClusterName", clusterName)
@@ -315,6 +321,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 					            connectionString.map(&ClusterConnectionString::toString).orDefault(""));
 					break;
 				}
+
+				CODE_PROBE(true, "Configure cluster timed out");
 			}
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyConfigureClusterError", debugId)
@@ -345,59 +353,68 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
 		try {
-			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestore", debugId)
-			    .detail("ClusterName", clusterName)
-			    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
-
-			if (removeFirst) {
-				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemoveDataCluster", debugId)
+			loop {
+				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestore", debugId)
 				    .detail("ClusterName", clusterName)
 				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
 
-				wait(success(metacluster::removeCluster(self->simMetacluster.managementDb,
-				                                        clusterName,
-				                                        ClusterType::METACLUSTER_MANAGEMENT,
-				                                        metacluster::ForceRemove::True)));
+				if (removeFirst) {
+					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemoveDataCluster", debugId)
+					    .detail("ClusterName", clusterName)
+					    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
 
-				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemovedDataCluster", debugId)
-				    .detail("ClusterName", clusterName)
-				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+					wait(success(errorOr(metacluster::removeCluster(self->simMetacluster.managementDb,
+					                                                clusterName,
+					                                                ClusterType::METACLUSTER_MANAGEMENT,
+					                                                metacluster::ForceRemove::True))));
+
+					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemovedDataCluster", debugId)
+					    .detail("ClusterName", clusterName)
+					    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+				}
+
+				state std::vector<std::string> messages;
+				if (deterministicRandom()->coinflip()) {
+					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRun", debugId)
+					    .detail("ClusterName", clusterName)
+					    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+					wait(metacluster::restoreCluster(self->simMetacluster.managementDb,
+					                                 clusterName,
+					                                 db->getConnectionRecord()->getConnectionString(),
+					                                 applyManagementClusterUpdates,
+					                                 metacluster::RestoreDryRun::True,
+					                                 forceJoin,
+					                                 metacluster::ForceReuseTenantIdPrefix::True,
+					                                 &messages));
+
+					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRunDone", debugId)
+					    .detail("ClusterName", clusterName)
+					    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+					messages.clear();
+				}
+
+				Optional<Void> result =
+				    wait(timeout(metacluster::restoreCluster(self->simMetacluster.managementDb,
+				                                             clusterName,
+				                                             db->getConnectionRecord()->getConnectionString(),
+				                                             applyManagementClusterUpdates,
+				                                             metacluster::RestoreDryRun::False,
+				                                             forceJoin,
+				                                             metacluster::ForceReuseTenantIdPrefix::True,
+				                                             &messages),
+				                 30.0));
+
+				if (result.present()) {
+					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreComplete", debugId)
+					    .detail("ClusterName", clusterName)
+					    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+					break;
+				}
+
+				CODE_PROBE(true, "Restore cluster timed out");
 			}
-
-			state std::vector<std::string> messages;
-			if (deterministicRandom()->coinflip()) {
-				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRun", debugId)
-				    .detail("ClusterName", clusterName)
-				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
-
-				wait(metacluster::restoreCluster(self->simMetacluster.managementDb,
-				                                 clusterName,
-				                                 db->getConnectionRecord()->getConnectionString(),
-				                                 applyManagementClusterUpdates,
-				                                 metacluster::RestoreDryRun::True,
-				                                 forceJoin,
-				                                 metacluster::ForceReuseTenantIdPrefix::True,
-				                                 &messages));
-
-				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRunDone", debugId)
-				    .detail("ClusterName", clusterName)
-				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
-
-				messages.clear();
-			}
-
-			wait(metacluster::restoreCluster(self->simMetacluster.managementDb,
-			                                 clusterName,
-			                                 db->getConnectionRecord()->getConnectionString(),
-			                                 applyManagementClusterUpdates,
-			                                 metacluster::RestoreDryRun::False,
-			                                 forceJoin,
-			                                 metacluster::ForceReuseTenantIdPrefix::True,
-			                                 &messages));
-
-			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreComplete", debugId)
-			    .detail("ClusterName", clusterName)
-			    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreError", debugId)
 			    .error(e)

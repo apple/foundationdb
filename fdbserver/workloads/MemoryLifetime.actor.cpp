@@ -86,13 +86,13 @@ struct MemoryLifetime : KVWorkload {
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", reverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", snapshot);
 					if (getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
-					state RangeResult getRange_res1 =
+					state RangeReadResult getRange_res1 =
 					    wait(tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
 					if (getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
-					RangeResult getRange_res2 =
+					RangeReadResult getRange_res2 =
 					    wait(tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse));
 					ASSERT(getRange_res1.size() == getRange_res2.size());
 					for (int i = 0; i < getRange_res1.size(); i++) {
@@ -125,12 +125,12 @@ struct MemoryLifetime : KVWorkload {
 
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
-					state Optional<Value> get_res1 = wait(tr.get(get_startKey, snapshot));
+					state ValueReadResult get_res1 = wait(tr.get(get_startKey, snapshot));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
-					Optional<Value> get_res2 = wait(tr.get(get_startKey, snapshot));
+					ValueReadResult get_res2 = wait(tr.get(get_startKey, snapshot));
 					ASSERT(get_res1 == get_res2);
 				} else if (op == 2) {
 					state KeySelector getKey_selector = self->getRandomKeySelector();
@@ -140,12 +140,12 @@ struct MemoryLifetime : KVWorkload {
 
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
-					state Key getKey_res1 = wait(tr.getKey(getKey_selector, snapshot));
+					state KeyReadResult getKey_res1 = wait(tr.getKey(getKey_selector, snapshot));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
-					Key getKey_res2 = wait(tr.getKey(getKey_selector, snapshot));
+					KeyReadResult getKey_res2 = wait(tr.getKey(getKey_selector, snapshot));
 					ASSERT(getKey_res1 == getKey_res2);
 				} else if (op == 3) {
 					state Key getAddress_startKey = self->getRandomKey();

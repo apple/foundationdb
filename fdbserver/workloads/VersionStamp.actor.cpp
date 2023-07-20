@@ -192,11 +192,11 @@ struct VersionStampWorkload : TestWorkload {
 		state RangeResult result;
 		loop {
 			try {
-				RangeResult result_ = wait(tr.getRange(
+				RangeReadResult result_ = wait(tr.getRange(
 				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
 				if (self->allowMetadataVersionKey && self->key_commit.count(metadataVersionKey)) {
-					Optional<Value> mVal = wait(tr.get(metadataVersionKey));
+					ValueReadResult mVal = wait(tr.get(metadataVersionKey));
 					if (mVal.present()) {
 						result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey, mVal.get()));
 					}
@@ -253,7 +253,7 @@ struct VersionStampWorkload : TestWorkload {
 					}
 				}
 
-				RangeResult result__ = wait(
+				RangeReadResult result__ = wait(
 				    tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
 				result = result__;
 				ASSERT(result.size() <= self->nodeCount);
@@ -391,7 +391,7 @@ struct VersionStampWorkload : TestWorkload {
 							state ReadYourWritesTransaction cur_tr(cx_is_primary ? cx : extraDB);
 							cur_tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 							try {
-								Optional<Value> vs_value = wait(cur_tr.get(key == metadataVersionKey ? testKey : key));
+								ValueReadResult vs_value = wait(cur_tr.get(key == metadataVersionKey ? testKey : key));
 								if (!vs_value.present()) {
 									error = true;
 									break;

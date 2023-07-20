@@ -135,12 +135,14 @@ struct Resolver : ReferenceCounted<Resolver> {
 	ConflictSet* conflictSet;
 	TransientStorageMetricSample iopsSample;
 
+	EncryptionAtRestMode encryptMode;
+
 	// Use LogSystem as backend for txnStateStore. However, the real commit
 	// happens at commit proxies and we never "write" to the LogSystem at
 	// Resolvers.
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<ILogSystem> logSystem;
-	IKeyValueStore* txnStateStore = nullptr;
+	Reference<IKeyValueStore> txnStateStore;
 	int localTLogCount = -1;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
@@ -186,11 +188,9 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Future<Void> logger;
 
-	EncryptionAtRestMode encryptMode;
-
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount, EncryptionAtRestMode encryptMode)
-	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), encryptMode(encryptMode),
-	    version(-1), conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE),
+	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), version(-1),
+	    conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE), encryptMode(encryptMode),
 	    cc("Resolver", dbgid.toString()), resolveBatchIn("ResolveBatchIn", cc),
 	    resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc),
 	    resolvedBytes("ResolvedBytes", cc), resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),
@@ -215,6 +215,31 @@ struct Resolver : ReferenceCounted<Resolver> {
 	~Resolver() { destroyConflictSet(conflictSet); }
 };
 } // namespace
+
+ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
+	loop {
+		if (self->recentStateTransactionsInfo.size() &&
+		    proxyInfo->lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
+			self->neededVersion.set(std::max(self->neededVersion.get(), prevVersion));
+		}
+
+		// Update queue depth metric before waiting. Check if we're going to be one of the waiters or not.
+		int waiters = self->version.numWaiting();
+		if (self->version.get() < prevVersion) {
+			waiters++;
+		}
+		self->queueDepthDist->sampleRecordCounter(waiters);
+
+		choose {
+			when(wait(self->version.whenAtLeast(prevVersion))) {
+				// Update queue depth metric after waiting.
+				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
+				return Void();
+			}
+			when(wait(self->checkNeededVersion.onTrigger())) {}
+		}
+	}
+}
 
 ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
                                 ResolveTransactionBatchRequest req,
@@ -267,28 +292,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck");
 	}
 
-	loop {
-		if (self->recentStateTransactionsInfo.size() &&
-		    proxyInfo.lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
-			self->neededVersion.set(std::max(self->neededVersion.get(), req.prevVersion));
-		}
-
-		// Update queue depth metric before waiting. Check if we're going to be one of the waiters or not.
-		int waiters = self->version.numWaiting();
-		if (self->version.get() < req.prevVersion) {
-			waiters++;
-		}
-		self->queueDepthDist->sampleRecordCounter(waiters);
-
-		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) {
-				// Update queue depth metric after waiting.
-				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
-				break;
-			}
-			when(wait(self->checkNeededVersion.onTrigger())) {}
-		}
-	}
+	wait(versionReady(self.getPtr(), &proxyInfo, req.prevVersion));
 
 	if (check_yield(TaskPriority::DefaultEndpoint)) {
 		wait(delay(0, TaskPriority::Low) || delay(SERVER_KNOBS->COMMIT_SLEEP_TIME)); // FIXME: Is this still right?
@@ -520,7 +524,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			CODE_PROBE(true, "No outstanding batches for version on proxy", probe::decoration::rare);
+			CODE_PROBE(true, "No outstanding batches for version on proxy");
 			req.reply.send(Never());
 		}
 	} else {
@@ -554,7 +558,7 @@ struct TransactionStateResolveContext {
 	Reference<Resolver> pResolverData;
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
-	IKeyValueStore* pTxnStateStore = nullptr;
+	Reference<IKeyValueStore> pTxnStateStore;
 
 	// Actor streams
 	PromiseStream<Future<Void>>* pActors = nullptr;
@@ -567,7 +571,7 @@ struct TransactionStateResolveContext {
 
 	TransactionStateResolveContext(Reference<Resolver> pResolverData_, PromiseStream<Future<Void>>* pActors_)
 	  : pResolverData(pResolverData_), pTxnStateStore(pResolverData_->txnStateStore), pActors(pActors_) {
-		ASSERT(pTxnStateStore != nullptr || !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+		ASSERT(pTxnStateStore.isValid() || !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 	}
 };
 
@@ -605,7 +609,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
-				auto storageInfo = getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore);
+				auto storageInfo =
+				    getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore.getPtr());
 				ASSERT(storageInfo->tag != invalidTag);
 				tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);

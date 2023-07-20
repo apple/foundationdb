@@ -48,8 +48,10 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 				if (firstTry) {
+					CODE_PROBE(true, "Decommission non-metacluster");
 					throw invalid_metacluster_operation();
 				} else {
+					CODE_PROBE(true, "Decommission retrying after success");
 					return Void();
 				}
 			}
@@ -69,6 +71,7 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
 		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_cluster_not_empty, "Decommission non-empty metacluster");
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}

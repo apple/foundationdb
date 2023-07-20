@@ -37,10 +37,8 @@
 #include <unordered_map>
 #include "fdbclient/FDBOptions.g.h"
 
-#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 #include <unistd.h>
-#elif defined(_WIN32)
-#include <process.h>
 #else
 #error Unsupported platform
 #endif
@@ -245,11 +243,7 @@ bool parseArgs(int argc, char** argv) {
 }
 
 void exitImmediately(int exitCode) {
-#ifdef _WIN32
-	TerminateProcess(GetCurrentProcess(), exitCode);
-#else
 	_exit(exitCode);
-#endif
 }
 
 void checkErrorCodeAndExit(fdb::Error::CodeType e) {

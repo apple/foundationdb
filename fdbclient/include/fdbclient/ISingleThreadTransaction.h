@@ -58,25 +58,25 @@ public:
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
 	virtual Optional<Version> getCachedReadVersion() const = 0;
-	virtual Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) = 0;
-	virtual Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
-	virtual Future<RangeResult> getRange(const KeySelector& begin,
-	                                     const KeySelector& end,
-	                                     int limit,
-	                                     Snapshot = Snapshot::False,
-	                                     Reverse = Reverse::False) = 0;
-	virtual Future<RangeResult> getRange(KeySelector begin,
-	                                     KeySelector end,
-	                                     GetRangeLimits limits,
-	                                     Snapshot = Snapshot::False,
-	                                     Reverse = Reverse::False) = 0;
-	virtual Future<MappedRangeResult> getMappedRange(KeySelector begin,
-	                                                 KeySelector end,
-	                                                 Key mapper,
-	                                                 GetRangeLimits limits,
-	                                                 int matchIndex = MATCH_INDEX_ALL,
-	                                                 Snapshot = Snapshot::False,
-	                                                 Reverse = Reverse::False) = 0;
+	virtual Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False) = 0;
+	virtual Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
+	virtual Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                         const KeySelector& end,
+	                                         int limit,
+	                                         Snapshot = Snapshot::False,
+	                                         Reverse = Reverse::False) = 0;
+	virtual Future<RangeReadResult> getRange(KeySelector begin,
+	                                         KeySelector end,
+	                                         GetRangeLimits limits,
+	                                         Snapshot = Snapshot::False,
+	                                         Reverse = Reverse::False) = 0;
+	virtual Future<MappedRangeReadResult> getMappedRange(KeySelector begin,
+	                                                     KeySelector end,
+	                                                     Key mapper,
+	                                                     GetRangeLimits limits,
+	                                                     int matchIndex = MATCH_INDEX_ALL,
+	                                                     Snapshot = Snapshot::False,
+	                                                     Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;
@@ -112,6 +112,14 @@ public:
 	virtual void debugTransaction(UID dID) = 0;
 	virtual void checkDeferredError() const = 0;
 	virtual void getWriteConflicts(KeyRangeMap<bool>* result) = 0;
+
+	virtual void debugTrace(BaseTraceEvent&& event) = 0;
+	virtual void debugPrint(std::string const& message) = 0;
+
+	template <class... Args>
+	void debugFmtPrint(std::string const& message, Args&&... args) {
+		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
+	};
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;

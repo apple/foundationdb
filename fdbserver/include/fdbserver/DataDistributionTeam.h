@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/StorageServerInterface.h"
+#include <unordered_set>
 
 struct GetTeamRequest;
 namespace data_distribution {
@@ -58,10 +59,12 @@ struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
 	virtual std::vector<UID> const& getServerIDs() const = 0;
-	virtual void addDataInFlightToTeam(int64_t delta) = 0;
-	virtual void addReadInFlightToTeam(int64_t delta) = 0;
+	// Do not add data/read in flight to servers that were already in the src
+	virtual void addDataInFlightToTeam(int64_t delta, const std::unordered_set<UID>& src) = 0;
+	virtual void addReadInFlightToTeam(int64_t delta, const std::unordered_set<UID>& src) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual bool hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
 	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual double getAverageCPU() const = 0;
@@ -102,6 +105,7 @@ FDB_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_BOOLEAN_PARAM(ForReadBalance);
 FDB_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_BOOLEAN_PARAM(FindTeamByServers);
+FDB_BOOLEAN_PARAM(ForRelocateShard);
 
 class TeamSelect {
 public:
@@ -110,8 +114,8 @@ public:
 		WANT_COMPLETE_SRCS, // Try best to select a healthy team consists of servers in completeSources
 		WANT_TRUE_BEST, // Ask for the most or least utilized team in the cluster
 	};
-	TeamSelect() : value(ANY) {}
-	TeamSelect(Value v) : value(v) {}
+	TeamSelect() : value(ANY), forRelocateShard(ForRelocateShard::False) {}
+	TeamSelect(Value v) : value(v), forRelocateShard(ForRelocateShard::False) {}
 	std::string toString() const {
 		switch (value) {
 		case WANT_COMPLETE_SRCS:
@@ -125,9 +129,13 @@ public:
 	}
 
 	bool operator==(const TeamSelect& tmpTeamSelect) { return value == tmpTeamSelect.value; }
+	void setForRelocateShard(ForRelocateShard tmpForRelocate) { forRelocateShard = tmpForRelocate; }
+
+	bool isForRelocateShard() const { return forRelocateShard == ForRelocateShard::True; }
 
 private:
 	Value value;
+	ForRelocateShard forRelocateShard;
 };
 
 struct GetTeamRequest {

@@ -51,7 +51,6 @@
 #include "fdbrpc/AsyncFileChaos.h"
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
-#include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -60,6 +59,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "fdbrpc/genericactors.actor.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
@@ -71,10 +71,10 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 
 ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
-    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false),
-    blobGranulesEnabled(false) {}
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED),
+    blobGranulesEnabled(false), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0),
+    speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
+    allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -588,11 +588,6 @@ private:
 
 int sf_open(const char* filename, int flags, int convFlags, int mode);
 
-#if defined(_WIN32)
-#include <io.h>
-#define O_CLOEXEC 0
-
-#elif defined(__unixish__)
 #define _open ::open
 #define _read ::read
 #define _write ::write
@@ -605,10 +600,6 @@ int sf_open(const char* filename, int flags, int convFlags, int mode);
 int sf_open(const char* filename, int flags, int convFlags, int mode) {
 	return _open(filename, convFlags, mode);
 }
-
-#else
-#error How do i open a file on a new platform?
-#endif
 
 class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
@@ -631,9 +622,7 @@ public:
 		}
 
 		if (openCount == 4000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
-			g_simulator->speedUpSimulation = true;
-			g_simulator->connectionFailuresDisableDuration = 1e6;
+			disableConnectionFailures("TooManyFiles");
 		}
 
 		// Filesystems on average these days seem to start to have limits of around 255 characters for a
@@ -663,7 +652,6 @@ public:
 				throw e;
 			}
 
-			platform::makeTemporary(open_filename.c_str());
 			SimpleFile* simpleFile = new SimpleFile(h, diskParameters, delayOnWrite, filename, open_filename, flags);
 			state Reference<IAsyncFile> file = Reference<IAsyncFile>(simpleFile);
 			wait(g_simulator->onProcess(currentProcess, currentTaskID));
@@ -2547,7 +2535,7 @@ public:
 		Promise<Void> promise;
 		ProcessInfo* machine;
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : promise(std::move(promise)), machine(machine) {}
 	};
 
 	void execTask(struct PromiseTask& t) {
@@ -2826,7 +2814,8 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 void startNewSimulator(bool printSimTime) {
 	ASSERT(!g_network);
 	g_network = g_simulator = new Sim2(printSimTime);
-	g_simulator->connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
+	g_simulator->connectionFailuresDisableDuration =
+	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
 ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
@@ -2928,33 +2917,21 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
 
-#if defined(_WIN32)
-
-/* Opening with FILE_SHARE_DELETE lets simulation actually work on windows - previously renames were always failing.
-   FIXME: Use an actual platform abstraction for this stuff!  Is there any reason we can't use underlying net2 for
-   example? */
-
-#include <Windows.h>
-
-int sf_open(const char* filename, int flags, int convFlags, int mode) {
-	HANDLE wh = CreateFile(filename,
-	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
-	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-	                       nullptr,
-	                       (flags & IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW
-	                       : (flags & IAsyncFile::OPEN_CREATE)  ? OPEN_ALWAYS
-	                                                            : OPEN_EXISTING,
-	                       FILE_ATTRIBUTE_NORMAL,
-	                       nullptr);
-	int h = -1;
-	if (wh != INVALID_HANDLE_VALUE)
-		h = _open_osfhandle((intptr_t)wh, convFlags);
-	else
-		errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EFAULT;
-	return h;
+void enableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator->connectionFailuresDisableDuration = 0;
+		g_simulator->speedUpSimulation = false;
+		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
+	}
 }
 
-#endif
+void disableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
+		g_simulator->speedUpSimulation = true;
+		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+	}
+}
 
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {

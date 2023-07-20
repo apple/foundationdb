@@ -70,10 +70,6 @@ T waitNext(const FutureStream<T>&);
 #define THIS_ADDR uintptr_t(nullptr)
 #endif
 
-#ifdef _MSC_VER
-#pragma warning(disable : 4355) // 'this' : used in base member initializer list
-#endif
-
 // Currently, #ifdef can't be used inside actors, so define no-op versions of these valgrind
 // functions if valgrind is not defined
 #ifndef VALGRIND

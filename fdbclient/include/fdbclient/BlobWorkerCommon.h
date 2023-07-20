@@ -30,7 +30,7 @@ struct BlobWorkerStats {
 	Counter deltaBytesWritten, snapshotBytesWritten;
 	Counter bytesReadFromFDBForInitialSnapshot;
 	Counter bytesReadFromS3ForCompaction;
-	Counter rangeAssignmentRequests, readRequests, summaryReads;
+	Counter rangeAssignmentRequests, readRequests, summaryReads, mutationStreamRequests;
 	Counter wrongShardServer;
 	Counter changeFeedInputBytes;
 	Counter readReqTotalFilesReturned;
@@ -52,6 +52,7 @@ struct BlobWorkerStats {
 	int64_t numRangesAssigned;
 	int64_t mutationBytesBuffered;
 	int activeReadRequests;
+	int activeMutationStreamRequests;
 	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
@@ -89,8 +90,9 @@ struct BlobWorkerStats {
 	    bytesReadFromFDBForInitialSnapshot("BytesReadFromFDBForInitialSnapshot", cc),
 	    bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
 	    rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
-	    summaryReads("SummaryReads", cc), wrongShardServer("WrongShardServer", cc),
-	    changeFeedInputBytes("ChangeFeedInputBytes", cc), readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
+	    summaryReads("SummaryReads", cc), mutationStreamRequests("MutationStreamRequests", cc),
+	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("ChangeFeedInputBytes", cc),
+	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
@@ -98,8 +100,9 @@ struct BlobWorkerStats {
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc),
 	    forceFlushCleanups("ForceFlushCleanups", cc), readDrivenCompactions("ReadDrivenCompactions", cc),
 	    oldFeedSnapshots("OldFeedSnapshots", cc), blockInFlightSnapshots("BlockInFlightSnapshots", cc),
-	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0),
-	    minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0),
+	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), activeMutationStreamRequests(0),
+	    granulesPendingSplitCheck(0), minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0),
+	    lastResidentMemory(0), estimatedMaxResidentMemory(0),
 	    snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
 	                                   id,
 	                                   sampleLoggingInterval,
@@ -108,11 +111,12 @@ struct BlobWorkerStats {
 	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),
 	    deltaUpdateSample("DeltaUpdateMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
-	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
+	    initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
 	    deltaWritesBudget(deltaWritesBudget) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
+		specialCounter(cc, "ActiveMutationStreamRequests", [this]() { return this->activeMutationStreamRequests; });
 		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
 		specialCounter(cc, "MinimumChangeFeedVersion", [this]() { return this->minimumCFVersion; });
 		specialCounter(cc, "CFVersionLag", [this]() { return this->cfVersionLag; });

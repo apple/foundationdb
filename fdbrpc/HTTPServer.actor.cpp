@@ -21,6 +21,7 @@
 #include "fdbrpc/HTTP.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -202,7 +203,7 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	return Void();
 }
 
-struct HelloWorldRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloWorldRequestHandler> {
+struct HelloWorldRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<HelloWorldRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloWorldServerCallback(req, response);
@@ -223,7 +224,7 @@ ACTOR Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req
 	}
 }
 
-struct HelloErrorRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloErrorRequestHandler> {
+struct HelloErrorRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<HelloErrorRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloErrorServerCallback(req, response);
@@ -261,7 +262,7 @@ ACTOR Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> re
 	return Void();
 }
 
-struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
+struct HelloBadMD5RequestHandler final : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloBadMD5ServerCallback(req, response);

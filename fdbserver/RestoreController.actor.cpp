@@ -723,10 +723,10 @@ ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			// Sanity check
-			Optional<Value> numRequests = wait(tr.get(restoreRequestTriggerKey));
+			ValueReadResult numRequests = wait(tr.get(restoreRequestTriggerKey));
 			ASSERT(numRequests.present());
 
-			RangeResult restoreRequestValues = wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult restoreRequestValues = wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!restoreRequestValues.more);
 			if (restoreRequestValues.size()) {
 				for (auto& it : restoreRequestValues) {

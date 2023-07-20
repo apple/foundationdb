@@ -23,6 +23,7 @@
 namespace {
 
 // work around GCC bug 87476 (~9.0)
+// pragma: allowlist nextline secret
 static const uint8_t urlEncodedTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 static const uint8_t regularBase64Table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

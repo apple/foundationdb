@@ -4,7 +4,9 @@ set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are
 # jemalloc
 ################################################################################
 
-include(Jemalloc)
+if(USE_JEMALLOC)
+  find_package(jemalloc 5.3.0 REQUIRED)
+endif()
 
 ################################################################################
 # Valgrind
@@ -36,9 +38,6 @@ if(USE_WOLFSSL)
   endif()
 elseif(USE_OPENSSL)
   set(OPENSSL_USE_STATIC_LIBS TRUE)
-  if(WIN32)
-    set(OPENSSL_MSVC_STATIC_RT ON)
-  endif()
   find_package(OpenSSL)
   if(OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
@@ -104,8 +103,7 @@ else()
   set(WITH_JAVA_BINDING OFF)
   find_package(JNI 1.8)
   find_package(Java 1.8 COMPONENTS Development)
-  # leave FreeBSD JVM compat for later
-  if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND AND NOT (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") AND WITH_C_BINDING)
+  if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND AND WITH_C_BINDING)
     set(WITH_JAVA_BINDING ON)
     include(UseJava)
     enable_language(Java)
@@ -138,8 +136,7 @@ if(NOT BUILD_GO_BINDING OR NOT BUILD_C_BINDING)
   set(WITH_GO_BINDING OFF)
 else()
   find_program(GO_EXECUTABLE go HINTS /usr/local/go/bin/)
-  # building the go binaries is currently not supported on Windows
-  if(GO_EXECUTABLE AND NOT WIN32 AND WITH_C_BINDING)
+  if(GO_EXECUTABLE AND WITH_C_BINDING)
     set(WITH_GO_BINDING ON)
   else()
     set(WITH_GO_BINDING OFF)
@@ -181,7 +178,7 @@ set(ROCKSDB_AVX2 OFF CACHE BOOL "Compile RocksDB with AVX2 enabled")
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL AND NOT WIN32)
+if (SSD_ROCKSDB_EXPERIMENTAL)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)
@@ -219,10 +216,7 @@ endif()
 ################################################################################
 
 set(DEFAULT_COROUTINE_IMPL boost)
-if(WIN32)
-  # boost coroutine not available in windows build environment for now.
-  set(DEFAULT_COROUTINE_IMPL libcoro)
-elseif(NOT APPLE AND NOT USE_ASAN AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+if(NOT APPLE AND NOT USE_ASAN AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
   # revert to libcoro for x86 linux while we investigate a performance regression
   set(DEFAULT_COROUTINE_IMPL libcoro)
 endif()

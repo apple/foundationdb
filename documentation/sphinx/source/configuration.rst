@@ -302,6 +302,7 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``locality-dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
 * ``locality-data-hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
 * ``io-trust-seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
+* ``parentpid``: Die if the process ID of its parent differs from the one given.  The argument should always be ``$PID``, which will be substituted with the process ID of fdbmonitor.  Using this parameter will cause all fdbserver processes started by fdbmonitor to die if fdbmonitor is killed.
 
 .. note:: In addition to the options above, TLS settings as described for the :ref:`TLS plugin <configuring-tls>` can be specified in the [fdbserver] section.
 

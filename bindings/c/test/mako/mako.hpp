@@ -51,6 +51,7 @@ constexpr const int MODE_REPORT = 3;
 
 /* for long arguments */
 enum ArgKind {
+	ARG_KEY_PREFIX,
 	ARG_KEYLEN,
 	ARG_VALLEN,
 	ARG_ACTIVE_TENANTS,
@@ -136,7 +137,7 @@ constexpr const int KNOB_MAX = 256;
 constexpr const int TAGPREFIXLENGTH_MAX = 8;
 constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
-constexpr const std::string_view KEY_PREFIX{ "mako" };
+constexpr const std::string_view DEFAULT_KEY_PREFIX{ "mako" };
 constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
 constexpr const int MAX_REPORT_FILES = 200;
 
@@ -155,6 +156,7 @@ struct Arguments {
 	bool isAnyTimeoutEnabled() const;
 
 	int api_version;
+	std::string key_prefix;
 	int json;
 	int num_processes;
 	int num_threads;

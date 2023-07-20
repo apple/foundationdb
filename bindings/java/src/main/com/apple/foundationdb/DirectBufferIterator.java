@@ -30,13 +30,16 @@ import java.util.NoSuchElementException;
  * Holds the direct buffer that is shared with JNI wrapper. A typical usage is as follows:
  * 
  * The serialization format of result is =>
- *     [int keyCount, boolean more, ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
+ *     [int keyCount, boolean more, float serverBusyness, float rangeBusyness,
+ *      ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
  */
 abstract class DirectBufferIterator implements AutoCloseable {
 	protected ByteBuffer byteBuffer;
 	protected int current = 0;
 	protected int keyCount = -1;
 	protected boolean more = false;
+	protected float serverBusyness = 0.0f;
+	protected float rangeBusyness = 0.0f;
 
 	public DirectBufferIterator(ByteBuffer buffer) {
 		byteBuffer = buffer;
@@ -84,5 +87,7 @@ abstract class DirectBufferIterator implements AutoCloseable {
 
 		keyCount = byteBuffer.getInt();
 		more = byteBuffer.getInt() > 0;
+		serverBusyness = byteBuffer.getFloat();
+		rangeBusyness = byteBuffer.getFloat();
 	}
 }

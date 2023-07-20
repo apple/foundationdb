@@ -54,8 +54,7 @@ public:
 			// NOTE(xwang): in native API, there's code handling the non-equal situation, but in mock world it's
 			// possible for split shards stay in the same location
 			CODE_PROBE(expectedShardCount >= 0 && locations.size() != expectedShardCount,
-			           "Some shard is in the same location.",
-			           probe::decoration::rare);
+			           "Some shard is in the same location.");
 
 			try {
 				Optional<StorageMetrics> res = wait(
@@ -375,6 +374,7 @@ void MockStorageServer::addActor(Future<Void> future) {
 void MockStorageServer::getSplitPoints(const SplitRangeRequest& req) {}
 
 Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	++counters.waitMetrics;
 	return MockStorageServerImpl::waitMetricsTenantAware(this, req);
 }
 

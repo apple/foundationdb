@@ -48,8 +48,8 @@ template <class DB>
 class MetaclusterConsistencyCheck {
 private:
 	Reference<DB> managementDb;
-	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 	MetaclusterData<DB> metaclusterData;
+	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
 	// the case with the current metacluster simulation workloads
@@ -60,9 +60,14 @@ private:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state typename transaction_future_type<typename DB::TransactionT, RangeResult>::type
+				state typename transaction_future_type<typename DB::TransactionT, RangeReadResult>::type
 				    systemTenantSubspaceKeysFuture = tr->getRange(prefixRange(TenantMetadata::subspace()), 2);
-				RangeResult systemTenantSubspaceKeys = wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
+				RangeReadResult systemTenantSubspaceKeys =
+				    wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
+
+				for (const auto& [k, v] : systemTenantSubspaceKeys.contents()) {
+					TraceEvent("BreakpointEndCheck").detail("Key", k).detail("Value", v);
+				}
 
 				// The only key in the `\xff` tenant subspace should be the tenant id prefix
 				ASSERT(systemTenantSubspaceKeys.size() == 1);
@@ -93,6 +98,7 @@ private:
 		ASSERT_LE(data.clusterAllocatedMap.size(), data.dataClusters.size());
 
 		if (data.tenantData.lastTenantId != -1) {
+			CODE_PROBE(true, "Validating last tenant ID");
 			ASSERT(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId) == data.tenantIdPrefix.get());
 		}
 
@@ -106,12 +112,14 @@ private:
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
 			if (!clusterMetadata.entry.hasCapacity() ||
 			    clusterMetadata.entry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
+				CODE_PROBE(!clusterMetadata.entry.hasCapacity(), "Checking cluster with no capacity");
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
 			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				ASSERT_EQ(AutoTenantAssignment::ENABLED, clusterMetadata.entry.autoTenantAssignment);
 				++numFoundInAllocatedMap;
 			} else {
+				CODE_PROBE(true, "Non-ready cluster missing from capacity index", probe::decoration::rare);
 				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
 			}
 
@@ -133,6 +141,10 @@ private:
 		int64_t totalTenants = 0;
 		for (auto const& [cluster, clusterTenants] : data.clusterTenantMap) {
 			auto itr = countsMap.find(cluster);
+			TraceEvent("BreakpointCons")
+			    .detail("ClusterName", cluster)
+			    .detail("ClusterTenantsSize", clusterTenants.size())
+			    .detail("ItrSecond", itr == countsMap.end() ? -1 : itr->second);
 			ASSERT((clusterTenants.empty() && itr == countsMap.end()) || itr->second == clusterTenants.size());
 			totalTenants += clusterTenants.size();
 		}
@@ -150,6 +162,10 @@ private:
 			if (entry.tenantGroup.present()) {
 				// Count the number of tenant groups allocated in each cluster
 				if (processedTenantGroups.insert(entry.tenantGroup.get()).second) {
+					TraceEvent("BreakpointAllocated1")
+					    .detail("AssignedCluster", entry.assignedCluster)
+					    .detail("TenantGroup", entry.tenantGroup.get())
+					    .detail("TenantName", entry.tenantName);
 					++clusterAllocated[entry.assignedCluster];
 				}
 				// The tenant group should be stored in the same cluster where it is stored in the cluster tenant
@@ -160,6 +176,10 @@ private:
 			} else {
 				// Track the actual tenant group allocation per cluster (a tenant with no group counts against the
 				// allocation)
+				CODE_PROBE(true, "Counting ungrouped tenant");
+				TraceEvent("BreakpointAllocated2")
+				    .detail("AssignedCluster", entry.assignedCluster)
+				    .detail("TenantName", entry.tenantName);
 				++clusterAllocated[entry.assignedCluster];
 			}
 		}
@@ -213,6 +233,7 @@ private:
 				ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);
 				ASSERT_LE(data.tenantData.lastTenantId, managementData.tenantData.lastTenantId);
 			} else {
+				CODE_PROBE(true, "Data cluster has no tenants with current tenant ID prefix");
 				for (auto const& [id, tenant] : data.tenantData.tenantMap) {
 					ASSERT_NE(TenantAPI::getTenantIdPrefix(id), managementData.tenantIdPrefix);
 				}
@@ -226,6 +247,9 @@ private:
 
 			std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
 			if (!self->allowPartialMetaclusterOperations) {
+				TraceEvent("BreakpointDataTenantMapSize")
+				    .detail("Cluster", clusterName)
+				    .detail("EntryId", clusterMetadata.entry.id);
 				ASSERT_EQ(data.tenantData.tenantMap.size(), expectedTenants.size());
 			} else {
 				ASSERT_LE(data.tenantData.tenantMap.size(), expectedTenants.size());

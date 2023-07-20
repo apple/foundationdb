@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -26,6 +26,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/ApiRequestHandler.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
@@ -265,7 +266,9 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
-	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getIdFuture(); });
+	return onMainThread([tenant]() -> Future<int64_t> {
+		return map(tenant->getLookupFuture(), [](auto const& info) { return info.id; });
+	});
 }
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
@@ -423,21 +426,21 @@ ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
 	Key k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, k, snapshot]() -> Future<Optional<Value>> {
+	return onMainThread([tr, k, snapshot]() -> Future<ValueReadResult> {
 		tr->checkDeferredError();
 		return tr->get(k, Snapshot{ snapshot });
 	});
 }
 
-ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	KeySelector k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, k, snapshot]() -> Future<Key> {
+	return onMainThread([tr, k, snapshot]() -> Future<KeyReadResult> {
 		tr->checkDeferredError();
 		return tr->getKey(k, Snapshot{ snapshot });
 	});
@@ -464,49 +467,49 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                          const KeySelectorRef& end,
-                                                          int limit,
-                                                          bool snapshot,
-                                                          bool reverse) {
+ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                              const KeySelectorRef& end,
+                                                              int limit,
+                                                              bool snapshot,
+                                                              bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
+	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeReadResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limit, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                          const KeySelectorRef& end,
-                                                          GetRangeLimits limits,
-                                                          bool snapshot,
-                                                          bool reverse) {
+ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+                                                              const KeySelectorRef& end,
+                                                              GetRangeLimits limits,
+                                                              bool snapshot,
+                                                              bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
+	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeReadResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
-ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
-                                                                      GetRangeLimits limits,
-                                                                      int matchIndex,
-                                                                      bool snapshot,
-                                                                      bool reverse) {
+ThreadFuture<MappedRangeReadResult> ThreadSafeTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                          const KeySelectorRef& end,
+                                                                          const StringRef& mapper,
+                                                                          GetRangeLimits limits,
+                                                                          int matchIndex,
+                                                                          bool snapshot,
+                                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeResult> {
+	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeReadResult> {
 		tr->checkDeferredError();
 		return tr->getMappedRange(b, e, h, limits, matchIndex, Snapshot{ snapshot }, Reverse{ reverse });
 	});
@@ -532,46 +535,6 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobG
 		tr->checkDeferredError();
 		return tr->getBlobGranuleRanges(r, rangeLimit);
 	});
-}
-
-ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                                  Version beginVersion,
-                                                                  Optional<Version> readVersion,
-                                                                  ReadBlobGranuleContext granule_context) {
-	// This should not be called directly, bypassMultiversionApi should not be set
-	return ThreadResult<RangeResult>(unsupported_operation());
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	ISingleThreadTransaction* tr = this->tr;
-	KeyRange r = keyRange;
-
-	return onMainThread(
-	    [tr, r, beginVersion, readVersion, readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
-		    tr->checkDeferredError();
-		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
-	    });
-}
-
-ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	// do this work off of fdb network threads for performance!
-	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
-	GranuleMaterializeStats stats;
-	auto ret = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
-	if (!ret.isError()) {
-		ISingleThreadTransaction* tr = this->tr;
-		onMainThreadVoid([tr, stats]() { tr->addGranuleMaterializeStats(stats); });
-	}
-	return ret;
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
@@ -782,6 +745,39 @@ void ThreadSafeTransaction::reset() {
 	onMainThreadVoid([tr]() { tr->reset(); });
 }
 
+void ThreadSafeTransaction::debugTrace(BaseTraceEvent&& ev) {
+	if (ev.isEnabled()) {
+		ISingleThreadTransaction* tr = this->tr;
+		std::shared_ptr<BaseTraceEvent> evPtr = std::make_shared<BaseTraceEvent>(std::move(ev));
+		onMainThreadVoid([tr, evPtr]() { tr->debugTrace(std::move(*evPtr)); });
+	}
+};
+
+void ThreadSafeTransaction::debugPrint(std::string const& message) {
+	ISingleThreadTransaction* tr = this->tr;
+	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
+}
+
+ThreadFuture<ApiResult> ThreadSafeTransaction::execAsyncRequest(ApiRequest request) {
+	if (!request.hasValidHeader()) {
+		return client_invalid_operation();
+	}
+	if (request.getAllocatorInterface() != getAllocatorInterface()) {
+		// the request was allocated with a different client.
+		// The transaction must be retried and the request recreated.
+		return cluster_version_changed();
+	}
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr, request]() -> Future<ApiResult> {
+		tr->checkDeferredError();
+		return handleApiRequest(tr, request);
+	});
+}
+
+FDBAllocatorIfc* ThreadSafeTransaction::getAllocatorInterface() {
+	return localAllocatorInterface();
+}
+
 extern const char* getSourceVersion();
 
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
@@ -873,4 +869,8 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 	MutexHolder holder(lock); // We could use the network thread to protect this action, but then we can't guarantee
 	                          // upon return that the hook is set.
 	threadCompletionHooks.emplace_back(hook, hookParameter);
+}
+
+FDBAllocatorIfc* ThreadSafeApi::getAllocatorInterface() {
+	return localAllocatorInterface();
 }

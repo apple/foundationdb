@@ -210,9 +210,9 @@ public:
 
 	std::string getServerIDsStr() const;
 
-	void addDataInFlightToTeam(int64_t delta) override;
+	void addDataInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) override;
 
-	void addReadInFlightToTeam(int64_t delta) override;
+	void addReadInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) override;
 
 	int64_t getDataInFlightToTeam() const override;
 
@@ -233,6 +233,8 @@ public:
 	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override;
 
 	bool hasHealthyAvailableSpace(double minRatio) const override;
+
+	bool hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const override;
 
 	unsigned getEligibilityCount(int combinedType) { return eligibilityCounter.getCount(combinedType); }
 	void increaseEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.increase(t); }

@@ -133,7 +133,7 @@ struct WorkloadProcess {
 		try {
 			child = childCreator(wcx);
 			TraceEvent("ClientWorkloadOpenDatabase", id).detail("ClusterFileLocation", child->ccr->getLocation());
-			cx = Database::createDatabase(child->ccr, ApiVersion::LATEST_VERSION);
+			cx = Database::createDatabase(child->ccr, ApiVersion::LATEST_VERSION, IsInternal::False);
 			desc = child->description();
 		} catch (Error&) {
 			throw;

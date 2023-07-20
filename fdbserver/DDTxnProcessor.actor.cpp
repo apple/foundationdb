@@ -76,11 +76,11 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				RangeResult keyServersEntries = wait(tr.getRange(lastLessOrEqual(keyServersKey(keys.begin)),
-				                                                 firstGreaterOrEqual(keyServersKey(keys.end)),
-				                                                 SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
+				RangeReadResult keyServersEntries = wait(tr.getRange(lastLessOrEqual(keyServersKey(keys.begin)),
+				                                                     firstGreaterOrEqual(keyServersKey(keys.end)),
+				                                                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
 
 				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
@@ -98,7 +98,7 @@ class DDTxnProcessorImpl {
 				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
 				// The new DD will treat the destination servers as source servers. So the size can be large.
 				else {
-					RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+					RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)
@@ -135,7 +135,7 @@ class DDTxnProcessorImpl {
 				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 				ASSERT(!shards.empty());
 
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 				state int i = 0;
@@ -145,11 +145,11 @@ class DDTxnProcessorImpl {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					std::vector<Future<Optional<Value>>> serverListEntries;
+					std::vector<Future<ValueReadResult>> serverListEntries;
 					for (int j = 0; j < src.size(); ++j) {
 						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
 					}
-					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
 					for (int j = 0; j < serverListValues.size(); ++j) {
 						if (!serverListValues[j].present()) {
@@ -184,7 +184,7 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
 
 				for (auto& kv : replicaKeys) {
 					auto dcId = decodeDatacenterReplicasKey(kv.key);
@@ -215,7 +215,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
+				ValueReadResult val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
 				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 				if (oldReplicas == storageTeamSize) {
 					return oldReplicas;
@@ -275,7 +275,7 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> val = wait(tr.get(healthyZoneKey));
+				ValueReadResult val = wait(tr.get(healthyZoneKey));
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
@@ -288,7 +288,7 @@ class DDTxnProcessorImpl {
 				}
 
 				result->mode = 1;
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
@@ -300,7 +300,7 @@ class DDTxnProcessorImpl {
 				}
 
 				state Future<std::vector<ProcessData>> workers = getWorkers(&tr);
-				state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 				wait(success(workers) && success(serverList));
 				ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -318,7 +318,7 @@ class DDTxnProcessorImpl {
 					}
 				}
 
-				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
 				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
@@ -354,7 +354,7 @@ class DDTxnProcessorImpl {
 					++numDataMoves;
 				}
 
-				RangeResult ads = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult ads = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < ads.size(); ++i) {
 					result->auditStates.push_back(decodeAuditStorageState(ads[i].value));
@@ -382,7 +382,7 @@ class DDTxnProcessorImpl {
 					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 					RangeResult keyServers = wait(krmGetRanges(&tr,
 					                                           keyServersPrefix,
@@ -501,7 +501,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded").log();
 					return Void();
@@ -534,7 +534,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			try {
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isEnabled())
 					return true;
 				if (mode.present()) {
@@ -549,7 +549,7 @@ class DDTxnProcessorImpl {
 					}
 				}
 				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
-				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
+				ValueReadResult readVal = wait(tr.get(moveKeysLockOwnerKey));
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
@@ -588,7 +588,7 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
+	ACTOR static Future<ValueReadResult> readRebalanceDDIgnoreKey(Database cx) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -596,7 +596,7 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
+				ValueReadResult res = wait(tr.get(rebalanceDDIgnoreKey));
 				return res;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -737,7 +737,7 @@ Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
 	return cx->getHealthMetrics(detailed);
 }
 
-Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
+Future<ValueReadResult> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }
 

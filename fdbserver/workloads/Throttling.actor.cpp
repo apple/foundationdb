@@ -105,7 +105,7 @@ struct ThrottlingWorkload : KVWorkload {
 			try {
 				state int i;
 				for (i = 0; i < self->readsPerTransaction; ++i) {
-					state Optional<Value> value = wait(tr.get(self->getRandomKey()));
+					state ValueReadResult value = wait(tr.get(self->getRandomKey()));
 				}
 				for (i = 0; i < self->writesPerTransaction; ++i) {
 					tr.set(self->getRandomKey(), getRandomValue());
@@ -131,7 +131,7 @@ struct ThrottlingWorkload : KVWorkload {
 		state json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
 		loop {
 			try {
-				RangeResult result =
+				RangeReadResult result =
 				    wait(tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!result.more);
 				for (const auto& [k, v] : result) {

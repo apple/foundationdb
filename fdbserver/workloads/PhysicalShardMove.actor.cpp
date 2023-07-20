@@ -240,16 +240,15 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint meta data.
-		state std::vector<CheckpointMetaData> records;
+		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 		loop {
 			records.clear();
 			try {
 				wait(store(records,
-				           getCheckpointMetaData(cx, checkpointRanges, version, format, Optional<UID>(dataMoveId))));
+				           getCheckpointMetaData(cx, restoreRanges, version, format, Optional<UID>(dataMoveId))));
 				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
 				    .detail("Range", describe(checkpointRanges))
-				    .detail("Version", version)
-				    .detail("Checkpoints", describe(records));
+				    .detail("Version", version);
 
 				break;
 			} catch (Error& e) {
@@ -264,42 +263,31 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint.
-		state std::string checkpointDir = abspath("checkpoints");
+		state std::string checkpointDir = abspath("fetchedCheckpoints" + deterministicRandom()->randomAlphaNumeric(6));
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
+		state std::vector<Future<CheckpointMetaData>> checkpointFutures;
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state int i = 0;
-		for (; i < records.size(); ++i) {
-			loop {
-				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
-				try {
-					state CheckpointMetaData record;
+		loop {
+			checkpointFutures.clear();
+			try {
+				for (int i = 0; i < records.size(); ++i) {
+					TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
+					state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+					platform::eraseDirectoryRecursive(currentDir);
+					ASSERT(platform::createDirectory(currentDir));
 					if (asKeyValues) {
-						std::vector<KeyRange> fetchRanges;
-						for (const auto& range : restoreRanges) {
-							for (const auto& cRange : records[i].ranges) {
-								if (cRange.contains(range)) {
-									fetchRanges.push_back(range);
-									break;
-								}
-							}
-						}
-						ASSERT(!fetchRanges.empty());
-						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
-						ASSERT(record.getFormat() == RocksDBKeyValues);
+						checkpointFutures.push_back(
+						    fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first }));
 					} else {
-						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
-						ASSERT(record.getFormat() == format);
+						checkpointFutures.push_back(fetchCheckpoint(cx, records[i].second, currentDir));
 					}
-					fetchedCheckpoints.push_back(record);
-					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].toString());
-					wait(delay(1));
 				}
+				wait(store(fetchedCheckpoints, getAll(checkpointFutures)));
+				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestFetchCheckpointError").errorUnsuppressed(e);
 			}
 		}
 
@@ -399,7 +387,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr.debugTransaction(debugID);
-				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
 
 				for (const auto& kv : res) {
@@ -429,10 +417,10 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			try {
 				Version _readVersion = wait(tr.getReadVersion());
 				readVersion = _readVersion;
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				state ValueReadResult res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
-					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res.contents()));
 				}
 				break;
 			} catch (Error& e) {
@@ -507,7 +495,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		state std::vector<UID> dests(includes.begin(), includes.end());
 		state UID owner = deterministicRandom()->randomUniqueID();
-		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
 		state DDEnabledState ddEnabledState;
 
 		state Transaction tr(cx);
@@ -518,7 +505,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
 
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				Version readVersion = wait(tr.getReadVersion());
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
@@ -572,7 +559,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssId)));
+				ValueReadResult serverListValue = wait(tr.get(serverListKeyFor(ssId)));
 				ASSERT(serverListValue.present());
 				state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 				GetShardStateRequest req(range, GetShardStateRequest::READABLE, true);

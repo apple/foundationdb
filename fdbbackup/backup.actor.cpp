@@ -59,12 +59,6 @@
 #include <string>
 #include <iostream>
 #include <ctime>
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
-#endif
 #include <time.h>
 
 #ifdef __linux__
@@ -79,6 +73,9 @@
 
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// TODO: Stub for --parentpid option
+#undef _HAVE_PARENTPID
 
 // Type of program being executed
 enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, UNDEFINED };
@@ -138,6 +135,7 @@ enum {
 	OPT_PROXY,
 	OPT_TAGNAME,
 	OPT_BACKUPKEYS,
+	OPT_BACKUPKEYS_FILE,
 	OPT_WAITFORDONE,
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
@@ -208,7 +206,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -238,7 +236,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -259,6 +257,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
@@ -287,7 +286,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -321,7 +320,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -351,7 +350,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -378,7 +377,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -405,7 +404,7 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -434,7 +433,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -463,7 +462,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -488,7 +487,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -525,7 +524,7 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
@@ -552,7 +551,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -584,7 +583,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -614,7 +613,7 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -630,7 +629,7 @@ CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_BASEURL, "-b", SO_REQ_SEP },
@@ -657,7 +656,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_RESTORE_TIMESTAMP, "--query-restore-timestamp", SO_REQ_SEP },
@@ -693,7 +692,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 
 // g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
@@ -707,6 +706,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
@@ -742,7 +742,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBAgentOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -773,7 +773,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBStartOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -783,6 +783,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
@@ -804,7 +805,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBStatusOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -835,7 +836,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -865,7 +866,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBAbortOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -896,7 +897,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBPauseOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -931,14 +932,17 @@ const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 extern const char* getSourceVersion();
 
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 void parentWatcher(void* parentHandle) {
-	HANDLE parent = (HANDLE)parentHandle;
-	int signal = WaitForSingleObject(parent, INFINITE);
-	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0)
-		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
-	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+	// Stub for parentWatcher()
+	/*
+HANDLE parent = (HANDLE)parentHandle;
+int signal = WaitForSingleObject(parent, INFINITE);
+CloseHandle(parentHandle);
+if (signal == WAIT_OBJECT_0)
+	criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+	*/
 }
 
 #endif
@@ -999,9 +1003,7 @@ static void printAgentUsage(bool devhelp) {
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1102,6 +1104,8 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
@@ -1141,9 +1145,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1182,6 +1184,8 @@ static void printRestoreUsage(bool devhelp) {
 	printf("  -w, --waitfordone\n");
 	printf("                 Wait for the restore to complete before exiting.  Prints progress updates.\n");
 	printf("  -k KEYS        List of key ranges from the backup to restore.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --remove-prefix PREFIX\n");
 	printf("                 Prefix to remove from the restored keys.\n");
 	printf("  --add-prefix PREFIX\n");
@@ -1228,8 +1232,7 @@ static void printRestoreUsage(bool devhelp) {
 	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1278,9 +1281,7 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1310,6 +1311,8 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
 	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 	printf(TLS_HELP);
@@ -1328,9 +1331,7 @@ static void printDBBackupUsage(bool devhelp) {
 	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1377,18 +1378,6 @@ ProgramExe getProgramType(std::string programExe) {
 	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
 
-	// Remove the extension, if Windows
-#ifdef _WIN32
-	size_t lastDot = programExe.find_last_of(".");
-	if (lastDot != std::string::npos) {
-		size_t lastSlash = programExe.find_last_of("\\");
-
-		// Ensure last dot is after last slash, if present
-		if ((lastSlash == std::string::npos) || (lastSlash < lastDot)) {
-			programExe = programExe.substr(0, lastDot);
-		}
-	}
-#endif
 	// For debugging convenience, remove .debug suffix if present.
 	if (StringRef(programExe).endsWith(".debug"_sr))
 		programExe = programExe.substr(0, programExe.size() - 6);
@@ -1575,7 +1564,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
-		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
+		state Future<ValueReadResult> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1632,12 +1621,12 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state RangeResult tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
-		state std::vector<Future<Optional<Key>>> backupVersion;
+		state RangeReadResult tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
+		state std::vector<Future<ValueReadResult>> backupVersion;
 		state std::vector<Future<EBackupState>> backupStatus;
 		state std::vector<Future<int64_t>> tagRangeBytesDR;
 		state std::vector<Future<int64_t>> tagLogBytesDR;
-		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
+		state Future<ValueReadResult> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
 
 		state std::vector<UID> drTagUids;
 		for (int i = 0; i < tagNames.size(); i++) {
@@ -1694,7 +1683,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
                                  std::string name,
                                  std::string id,
                                  int limit = 1) {
-	state RangeResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True));
+	state RangeReadResult docs = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True));
 	state bool readMore = false;
 	state int i;
 	for (i = 0; i < docs.size(); ++i) {
@@ -1723,7 +1712,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 		if (readMore) {
 			limit = 10000;
-			RangeResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True));
+			RangeReadResult docs2 = wait(tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True));
 			docs = std::move(docs2);
 			readMore = false;
 		}
@@ -1740,7 +1729,7 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state RangeResult kvPairs =
+			state RangeReadResult kvPairs =
 			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), GetRangeLimits::ROW_LIMIT_UNLIMITED));
 			json_spirit::mObject statusDoc;
 			JSONDoc modifier(statusDoc);
@@ -3549,11 +3538,6 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-#endif
-
 		while (args->Next()) {
 			lastError = args->LastError();
 
@@ -3751,6 +3735,15 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				break;
+			case OPT_BACKUPKEYS_FILE:
+				try {
+					std::string line = readFileBytes(args->OptionArg(), 64 * 1024 * 1024);
+					addKeyRange(line, backupKeys);
+				} catch (Error&) {
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				break;
 			case OPT_BACKUPKEYS_FILTER:
 				try {
 					addKeyRange(args->OptionArg(), backupKeysFilter);
@@ -3885,17 +3878,20 @@ int main(int argc, char* argv[]) {
 				inconsistentSnapshotOnly.set(true);
 				break;
 			}
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 			case OPT_PARENTPID: {
 				auto pid_str = args->OptionArg();
 				int parent_pid = atoi(pid_str);
-				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
-				if (!pHandle) {
-					TraceEvent("ParentProcessOpenError").GetLastError();
-					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-					throw platform_error();
-				}
-				startThread(&parentWatcher, pHandle);
+				// Stub for PARENTPID
+				/*
+auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+if (!pHandle) {
+	TraceEvent("ParentProcessOpenError").GetLastError();
+	fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+	throw platform_error();
+}
+startThread(&parentWatcher, pHandle);
+				*/
 				break;
 			}
 #endif

@@ -40,7 +40,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 	ACTOR static Future<int> get(Reference<ISingleThreadTransaction> tr) {
 		state TraceEvent te(SevDebug, "ConfigIncrementGet");
-		Optional<Value> serializedValue = wait(tr->get(getConfigKey()));
+		ValueReadResult serializedValue = wait(tr->get(getConfigKey()));
 		if (!serializedValue.present()) {
 			return 0;
 		} else {

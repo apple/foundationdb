@@ -67,7 +67,7 @@ struct CommitBugWorkload : TestWorkload {
 
 			loop {
 				try {
-					Optional<Value> v = wait(tr.get(key));
+					ValueReadResult v = wait(tr.get(key));
 					if (!v.present() || v.get() != val2) {
 						TraceEvent(SevError, "CommitBugFailed")
 						    .detail("Value", v.present() ? printable(v.get()) : "Not present");
@@ -105,7 +105,7 @@ struct CommitBugWorkload : TestWorkload {
 
 			loop {
 				try {
-					Optional<Value> val = wait(tr.get(key));
+					ValueReadResult val = wait(tr.get(key));
 					state int num = 0;
 					if (val.present()) {
 						num = atoi(val.get().toString().c_str());

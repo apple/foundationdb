@@ -12,7 +12,7 @@
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__)
+#if defined(__linux__) && defined(__AVX__)
 
 #include <sys/time.h>
 
@@ -336,6 +336,6 @@ TEST_CASE("performance/memcpy/rte") {
 	return Void();
 }
 
-#endif // defined (__linux__) || defined (__FreeBSD__)
+#endif // defined(__linux__) && defined(__AVX__)
 
 void forceLinkMemcpyPerfTests() {}

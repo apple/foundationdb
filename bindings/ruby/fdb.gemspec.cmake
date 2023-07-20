@@ -13,7 +13,7 @@ https://apple.github.io/foundationdb/api-ruby.html.
 EOF
   s.authors = ["FoundationDB"]
   s.email = 'fdb-dist@apple.com'
-  s.files = ["${CMAKE_SOURCE_DIR}/LICENSE", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdb.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbdirectory.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbimpl.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdblocality.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdboptions.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbsubspace.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbtuple.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbimpl_v609.rb"]
+  s.files = ["LICENSE", "lib/fdb.rb", "lib/fdbdirectory.rb", "lib/fdbimpl.rb", "lib/fdblocality.rb", "lib/fdboptions.rb", "lib/fdbsubspace.rb", "lib/fdbtuple.rb", "lib/fdbimpl_v609.rb"]
   s.homepage = 'https://www.foundationdb.org'
   s.license = 'Apache-2.0'
   s.add_dependency('ffi', '~> 1.1', '>= 1.1.5')

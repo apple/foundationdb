@@ -39,24 +39,24 @@ public:
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False) override;
-	Future<RangeResult> getRange(KeySelector const& begin,
-	                             KeySelector const& end,
-	                             int limit,
-	                             Snapshot = Snapshot::False,
-	                             Reverse = Reverse::False) override;
-	Future<RangeResult> getRange(KeySelector begin,
-	                             KeySelector end,
-	                             GetRangeLimits limits,
-	                             Snapshot = Snapshot::False,
-	                             Reverse = Reverse::False) override;
-	Future<MappedRangeResult> getMappedRange(KeySelector begin,
-	                                         KeySelector end,
-	                                         Key mapper,
-	                                         GetRangeLimits limits,
-	                                         int matchIndex = MATCH_INDEX_ALL,
-	                                         Snapshot = Snapshot::False,
-	                                         Reverse = Reverse::False) override {
+	Future<ValueReadResult> get(Key const& key, Snapshot = Snapshot::False) override;
+	Future<RangeReadResult> getRange(KeySelector const& begin,
+	                                 KeySelector const& end,
+	                                 int limit,
+	                                 Snapshot = Snapshot::False,
+	                                 Reverse = Reverse::False) override;
+	Future<RangeReadResult> getRange(KeySelector begin,
+	                                 KeySelector end,
+	                                 GetRangeLimits limits,
+	                                 Snapshot = Snapshot::False,
+	                                 Reverse = Reverse::False) override;
+	Future<MappedRangeReadResult> getMappedRange(KeySelector begin,
+	                                             KeySelector end,
+	                                             Key mapper,
+	                                             GetRangeLimits limits,
+	                                             int matchIndex = MATCH_INDEX_ALL,
+	                                             Snapshot = Snapshot::False,
+	                                             Reverse = Reverse::False) override {
 		throw client_invalid_operation();
 	}
 	void set(KeyRef const& key, ValueRef const& value) override;

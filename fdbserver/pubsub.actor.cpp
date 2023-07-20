@@ -107,10 +107,10 @@ ACTOR Future<uint64_t> _createFeed(Database cx, Standalone<StringRef> metadata) 
 	state Transaction tr(cx);
 	loop {
 		try {
-			state Optional<Value> val = wait(tr.get(keyForFeed(id)));
+			state ValueReadResult val = wait(tr.get(keyForFeed(id)));
 			while (val.present()) {
 				id = id + deterministicRandom()->randomInt(1, 100);
-				Optional<Value> v = wait(tr.get(keyForFeed(id)));
+				ValueReadResult v = wait(tr.get(keyForFeed(id)));
 				val = v;
 			}
 			tr.set(keyForFeed(id), metadata);
@@ -135,10 +135,10 @@ ACTOR Future<uint64_t> _createInbox(Database cx, Standalone<StringRef> metadata)
 	state Transaction tr(cx);
 	loop {
 		try {
-			state Optional<Value> val = wait(tr.get(keyForInbox(id)));
+			state ValueReadResult val = wait(tr.get(keyForInbox(id)));
 			while (val.present()) {
 				id += deterministicRandom()->randomInt(1, 100);
-				Optional<Value> v = wait(tr.get(keyForFeed(id)));
+				ValueReadResult v = wait(tr.get(keyForFeed(id)));
 				val = v;
 			}
 			tr.set(keyForInbox(id), metadata);
@@ -161,28 +161,28 @@ ACTOR Future<bool> _createSubscription(Database cx, uint64_t feed, uint64_t inbo
 	TraceEvent("PubSubCreateSubscription").detail("Feed", feed).detail("Inbox", inbox);
 	loop {
 		try {
-			Optional<Value> subscription = wait(tr.get(keyForInboxSubscription(inbox, feed)));
+			ValueReadResult subscription = wait(tr.get(keyForInboxSubscription(inbox, feed)));
 			if (subscription.present()) {
 				// For idempotency, this could exist from a previous transaction from us that succeeded
 				return true;
 			}
-			Optional<Value> inboxVal = wait(tr.get(keyForInbox(inbox)));
+			ValueReadResult inboxVal = wait(tr.get(keyForInbox(inbox)));
 			if (!inboxVal.present()) {
 				return false;
 			}
-			Optional<Value> feedVal = wait(tr.get(keyForFeed(feed)));
+			ValueReadResult feedVal = wait(tr.get(keyForFeed(feed)));
 			if (!feedVal.present()) {
 				return false;
 			}
 
 			// Update the subscriptions of the inbox
-			Optional<Value> subscriptionCountVal = wait(tr.get(keyForInboxSubscriptionCount(inbox)));
+			ValueReadResult subscriptionCountVal = wait(tr.get(keyForInboxSubscriptionCount(inbox)));
 			uint64_t subscriptionCount = valueToUInt64(subscriptionCountVal.get()); // throws if count not present
 			tr.set(keyForInboxSubscription(inbox, feed), StringRef());
 			tr.set(keyForInboxSubscriptionCount(inbox), uInt64ToValue(subscriptionCount + 1));
 
 			// Update the subcribers of the feed
-			Optional<Value> subcriberCountVal = wait(tr.get(keyForFeedSubcriberCount(feed)));
+			ValueReadResult subcriberCountVal = wait(tr.get(keyForFeedSubcriberCount(feed)));
 			uint64_t subcriberCount = valueToUInt64(subcriberCountVal.get()); // throws if count not present
 			tr.set(keyForFeedSubcriber(feed, inbox), StringRef());
 			tr.set(keyForFeedSubcriberCount(inbox), uInt64ToValue(subcriberCount + 1));
@@ -212,7 +212,7 @@ ACTOR Future<Void> updateFeedWatchers(Transaction* tr, uint64_t feed) {
 	state bool first = true;
 	loop {
 		// Grab watching inboxes in swaths of 100
-		state RangeResult watchingInboxes =
+		state RangeReadResult watchingInboxes =
 		    wait((*tr).getRange(firstGreaterOrEqual(keyForFeedWatcher(feed, first ? 0 : highestInbox + 1)),
 		                        firstGreaterOrEqual(keyForFeedWatcher(feed, UINT64_MAX)),
 		                        100)); // REVIEW: does 100 make sense?
@@ -253,14 +253,14 @@ ACTOR Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<Strin
 	TraceEvent("PubSubPost").detail("Feed", feed).detail("Message", messageId);
 	loop {
 		try {
-			Optional<Value> feedValue = wait(tr.get(keyForFeed(feed)));
+			ValueReadResult feedValue = wait(tr.get(keyForFeed(feed)));
 			if (!feedValue.present()) {
 				// No such feed!!
 				return uint64_t(0);
 			}
 
 			// Get globally latest message, set our ID to that less one
-			state RangeResult latestMessage = wait(
+			state RangeReadResult latestMessage = wait(
 			    tr.getRange(firstGreaterOrEqual(keyForMessage(0)), firstGreaterOrEqual(keyForMessage(UINT64_MAX)), 1));
 			if (!latestMessage.size()) {
 				messageId = UINT64_MAX - 1;
@@ -288,7 +288,7 @@ ACTOR Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<Strin
 			tr.set(keyForFeedMessage(feed, messageId), StringRef());
 
 			// Update the count of message that this feed has published
-			Optional<Value> cntValue = wait(tr.get(keyForFeedMessageCount(feed)));
+			ValueReadResult cntValue = wait(tr.get(keyForFeedMessageCount(feed)));
 			uint64_t messageCount(valueToUInt64(cntValue.get()) + 1);
 			tr.set(keyForFeedMessageCount(feed), uInt64ToValue(messageCount));
 
@@ -317,7 +317,7 @@ ACTOR Future<int> singlePassInboxCacheUpdate(Database cx, uint64_t inbox, int sw
 	loop {
 		try {
 			// For each stale feed, update cache with latest message id
-			state RangeResult staleFeeds =
+			state RangeReadResult staleFeeds =
 			    wait(tr.getRange(firstGreaterOrEqual(keyForInboxStaleFeed(inbox, 0)),
 			                     firstGreaterOrEqual(keyForInboxStaleFeed(inbox, UINT64_MAX)),
 			                     swath)); // REVIEW: does 100 make sense?
@@ -333,12 +333,12 @@ ACTOR Future<int> singlePassInboxCacheUpdate(Database cx, uint64_t inbox, int sw
 				state uint64_t feed = valueToUInt64(feedStr);
 
 				// SOMEDAY: change this to be a range query for the highest #'ed message
-				Optional<Value> v = wait(tr.get(keyForFeedLatestMessage(feed)));
+				ValueReadResult v = wait(tr.get(keyForFeedLatestMessage(feed)));
 				state Value latestMessageValue = v.get();
 				// printf("  --> latest message from feed: %s\n", latestMessageValue.toString().c_str());
 
 				// find the messageID which is currently cached for this feed
-				Optional<Value> lastCachedValue = wait(tr.get(keyForInboxCacheByFeed(inbox, feed)));
+				ValueReadResult lastCachedValue = wait(tr.get(keyForInboxCacheByFeed(inbox, feed)));
 				if (lastCachedValue.present()) {
 					uint64_t lastCachedId = valueToUInt64(lastCachedValue.get());
 					// clear out the cache entry in the "by-ID" list for this feed
@@ -376,9 +376,10 @@ ACTOR Future<Void> updateInboxCache(Database cx, uint64_t inbox) {
 }
 
 ACTOR Future<MessageId> getFeedLatestAtOrAfter(Transaction* tr, Feed feed, MessageId position) {
-	state RangeResult lastMessageRange = wait((*tr).getRange(firstGreaterOrEqual(keyForFeedMessage(feed, position)),
-	                                                         firstGreaterOrEqual(keyForFeedMessage(feed, UINT64_MAX)),
-	                                                         1));
+	state RangeReadResult lastMessageRange =
+	    wait((*tr).getRange(firstGreaterOrEqual(keyForFeedMessage(feed, position)),
+	                        firstGreaterOrEqual(keyForFeedMessage(feed, UINT64_MAX)),
+	                        1));
 	if (!lastMessageRange.size())
 		return uint64_t(0);
 	KeyValueRef m = lastMessageRange[0];
@@ -391,7 +392,7 @@ ACTOR Future<Message> getMessage(Transaction* tr, Feed feed, MessageId id) {
 	state Message m;
 	m.originatorFeed = feed;
 	m.messageId = id;
-	Optional<Value> data = wait(tr->get(keyForMessage(id)));
+	ValueReadResult data = wait(tr->get(keyForMessage(id)));
 	m.data = data.get();
 	return m;
 }
@@ -410,11 +411,11 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 		state std::map<MessageId, Feed> feedLatest;
 		try {
 			// Fetch all cached entries for all the feeds to which we are subscribed
-			Optional<Value> cntValue = wait(tr.get(keyForInboxSubscriptionCount(inbox)));
+			ValueReadResult cntValue = wait(tr.get(keyForInboxSubscriptionCount(inbox)));
 			uint64_t subscriptions = valueToUInt64(cntValue.get());
-			state RangeResult feeds = wait(tr.getRange(firstGreaterOrEqual(keyForInboxCacheByID(inbox, 0)),
-			                                           firstGreaterOrEqual(keyForInboxCacheByID(inbox, UINT64_MAX)),
-			                                           subscriptions));
+			state RangeReadResult feeds = wait(tr.getRange(firstGreaterOrEqual(keyForInboxCacheByID(inbox, 0)),
+			                                               firstGreaterOrEqual(keyForInboxCacheByID(inbox, UINT64_MAX)),
+			                                               subscriptions));
 			if (!feeds.size())
 				return messages;
 
@@ -442,9 +443,9 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 
 			// Check the list of dispatching messages to make sure there are no older ones than ours
 			state MessageId earliestMessage = feedLatest.begin()->first;
-			RangeResult dispatching = wait(tr.getRange(firstGreaterOrEqual(keyForDisptchEntry(earliestMessage)),
-			                                           firstGreaterOrEqual(keyForDisptchEntry(UINT64_MAX)),
-			                                           1));
+			RangeReadResult dispatching = wait(tr.getRange(firstGreaterOrEqual(keyForDisptchEntry(earliestMessage)),
+			                                               firstGreaterOrEqual(keyForDisptchEntry(UINT64_MAX)),
+			                                               1));
 			// If there are messages "older" than ours, try this again
 			//  (with a new transaction and a flush of the "stale" feeds
 			if (dispatching.size()) {
@@ -484,9 +485,10 @@ ACTOR Future<std::vector<Message>> _listFeedMessages(Database cx, Feed feed, int
 	TraceEvent("PubSubListFeed").detail("Feed", feed).detail("Count", count).detail("Cursor", cursor);
 	loop {
 		try {
-			state RangeResult messageIds = wait(tr.getRange(firstGreaterOrEqual(keyForFeedMessage(feed, cursor)),
-			                                                firstGreaterOrEqual(keyForFeedMessage(feed, UINT64_MAX)),
-			                                                count));
+			state RangeReadResult messageIds =
+			    wait(tr.getRange(firstGreaterOrEqual(keyForFeedMessage(feed, cursor)),
+			                     firstGreaterOrEqual(keyForFeedMessage(feed, UINT64_MAX)),
+			                     count));
 			if (!messageIds.size())
 				return messages;
 

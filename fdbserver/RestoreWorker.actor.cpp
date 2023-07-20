@@ -155,7 +155,7 @@ ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> se
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult agentValues = wait(tr.getRange(restoreWorkersKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!agentValues.more);
 			// If agentValues.size() < min_num_workers, we should wait for coming workers to register their
 			// workerInterface before we read them once for all
@@ -285,7 +285,7 @@ ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID())
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> _numRequests = wait(tr.get(restoreRequestTriggerKey));
+			ValueReadResult _numRequests = wait(tr.get(restoreRequestTriggerKey));
 			numRequests = _numRequests;
 			if (!numRequests.present()) {
 				state Future<Void> watchForRestoreRequest = tr.watch(restoreRequestTriggerKey);
@@ -321,7 +321,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> leaderValue = wait(tr.get(restoreLeaderKey));
+			ValueReadResult leaderValue = wait(tr.get(restoreLeaderKey));
 			TraceEvent(SevInfo, "FastRestoreLeaderElection")
 			    .detail("Round", count)
 			    .detail("LeaderExisted", leaderValue.present());

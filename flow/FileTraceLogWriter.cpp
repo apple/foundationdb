@@ -23,27 +23,12 @@
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 
-#if defined(__unixish__)
 #define __open ::open
 #define __write ::write
 #define __close ::close
 #define __fsync ::fsync
 #define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
 #define TRACEFILE_MODE 0664
-#elif defined(_WIN32)
-// #include <windows.h>
-// #undef max
-// #undef min
-#include <io.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#define __open _open
-#define __write _write
-#define __close _close
-#define __fsync _commit
-#define TRACEFILE_FLAGS _O_WRONLY | _O_CREAT | _O_EXCL
-#define TRACEFILE_MODE _S_IWRITE
-#endif
 
 #include <fcntl.h>
 #include <cmath>

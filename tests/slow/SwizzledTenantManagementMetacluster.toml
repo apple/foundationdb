@@ -12,7 +12,7 @@ runSetup = true
 
     [[test.workload]]
     testName = 'TenantManagement'
-    maxTenants = 1000
+    maxTenants = 100
     testDuration = 120
 
     [[test.workload]]

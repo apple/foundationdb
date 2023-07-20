@@ -40,6 +40,8 @@ struct BlobWorkerInterface {
 	RequestStream<struct HaltBlobWorkerRequest> haltBlobWorker;
 	RequestStream<struct FlushGranuleRequest> flushGranuleRequest;
 	RequestStream<struct MinBlobVersionRequest> minBlobVersionRequest;
+	// FIXME: needs to be public
+	PublicRequestStream<struct BlobGranuleMutationStreamRequest> mutationStreamRequest;
 
 	struct LocalityData locality;
 	UID myId;
@@ -59,6 +61,7 @@ struct BlobWorkerInterface {
 		streams.push_back(haltBlobWorker.getReceiver());
 		streams.push_back(flushGranuleRequest.getReceiver());
 		streams.push_back(minBlobVersionRequest.getReceiver());
+		streams.push_back(mutationStreamRequest.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 	UID id() const { return myId; }
@@ -89,6 +92,8 @@ struct BlobWorkerInterface {
 			    RequestStream<struct FlushGranuleRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
 			minBlobVersionRequest =
 			    RequestStream<struct MinBlobVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(8));
+			mutationStreamRequest = PublicRequestStream<struct BlobGranuleMutationStreamRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(9));
 		}
 	}
 };
@@ -115,6 +120,8 @@ struct BlobGranuleFileRequest : TimedRequest {
 	bool canCollapseBegin = true;
 	TenantInfo tenantInfo;
 	bool summarize = false;
+	// default to max (no limit)
+	int64_t granuleMutationBytesLimit = std::numeric_limits<int64_t>::max();
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
@@ -123,7 +130,54 @@ struct BlobGranuleFileRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, summarize, reply, arena);
+		serializer(ar,
+		           keyRange,
+		           beginVersion,
+		           readVersion,
+		           canCollapseBegin,
+		           tenantInfo,
+		           summarize,
+		           granuleMutationBytesLimit,
+		           reply,
+		           arena);
+	}
+};
+
+struct BlobGranuleMutationStreamReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 1765093;
+	Arena arena;
+	GranuleDeltas newDeltas;
+
+	BlobGranuleMutationStreamReply() {}
+
+	int expectedSize() const { return sizeof(BlobGranuleMutationStreamReply) + newDeltas.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, newDeltas, arena);
+	}
+};
+
+// this must only be for exactly one granule, the latest granule, and only streaming the memory mutations after the last
+// delta file returned for a request.
+struct BlobGranuleMutationStreamRequest {
+	constexpr static FileIdentifier file_identifier = 5837335;
+	Arena arena;
+	KeyRangeRef keyRange;
+	Version beginVersion = 0;
+	Version readVersion;
+	TenantInfo tenantInfo;
+	int replyBatchSize = -1;
+
+	ReplyPromiseStream<BlobGranuleMutationStreamReply> reply;
+
+	BlobGranuleMutationStreamRequest() {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keyRange, beginVersion, readVersion, tenantInfo, replyBatchSize, reply, arena);
 	}
 };
 

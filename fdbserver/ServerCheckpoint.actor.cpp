@@ -38,9 +38,13 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
 
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
-	state CheckpointFormat format = checkpoint.getFormat();
+	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF || format == RocksDB) {
-		wait(deleteRocksCheckpoint(checkpoint));
+		if (!checkpoint.dir.empty()) {
+			platform::eraseDirectoryRecursive(checkpoint.dir);
+		} else {
+			TraceEvent(SevWarn, "CheckpointDirNotFound").detail("Checkpoint", checkpoint.toString());
+		}
 	} else {
 		throw not_implemented();
 	}
@@ -84,6 +88,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 			throw not_implemented();
 		}
 		initialState.setFormat(RocksDBKeyValues);
+		initialState.ranges = ranges;
 		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion());
 	}
 
@@ -93,4 +98,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 	    .detail("CheckpointMetaData", result.toString())
 	    .detail("Ranges", describe(ranges));
 	return result;
+}
+
+std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId) {
+	return joinPath(baseDir, checkpointId.toString());
+}
+
+std::string fetchedCheckpointDir(const std::string& baseDir, const UID& checkpointId) {
+	return joinPath(baseDir, UID(checkpointId.first(), deterministicRandom()->randomUInt64()).toString());
 }

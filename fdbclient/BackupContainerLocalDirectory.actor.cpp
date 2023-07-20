@@ -241,7 +241,6 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
 	// but only if the source directory is writeable which shouldn't be required for a restore.
 	std::string fullPath = joinPath(m_path, path);
-#ifndef _WIN32
 	if (g_network->isSimulated()) {
 		if (!fileExists(fullPath)) {
 			throw file_not_found();
@@ -255,10 +254,9 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 		fullPath = uniquePath;
 	}
-// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
-// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
-// by the same process that failed the first task execution anyway, which is a very rare case.
-#endif
+	// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
+	// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
+	// by the same process that failed the first task execution anyway, which is a very rare case.
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
 
 	if (g_network->isSimulated()) {

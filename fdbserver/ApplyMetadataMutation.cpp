@@ -78,16 +78,16 @@ public:
 	                           bool initialCommit_,
 	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
-	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
-	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
-	    popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
+	    txnStateStore(proxyCommitData_.txnStateStore.getPtr()), toCommit(toCommit_), cipherKeys(cipherKeys_),
+	    confChange(confChange_), logSystem(logSystem_), version(version), popVersion(popVersion_),
+	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
 	    cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
-	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_) {
+	    encryptMode(encryptMode), initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -103,9 +103,9 @@ public:
 	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
 	                           EncryptionAtRestMode encryptMode)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    cipherKeys(cipherKeys_), encryptMode(encryptMode), txnStateStore(resolverData_.txnStateStore),
-	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
-	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    txnStateStore(resolverData_.txnStateStore.getPtr()), toCommit(resolverData_.toCommit), cipherKeys(cipherKeys_),
+	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
+	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache), encryptMode(encryptMode),
 	    initialCommit(resolverData_.initialCommit), forResolver(true) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
@@ -154,7 +154,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
-	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	std::unordered_map<TenantName, TenantLookupInfo>* tenantNameIndex = nullptr;
 	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
@@ -686,7 +686,7 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore", probe::decoration::rare);
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
@@ -694,10 +694,12 @@ private:
 		if (m.param1.startsWith(prefix)) {
 			TenantMapEntry tenantEntry;
 			if (initialCommit) {
+				CODE_PROBE(true, "Recovering tenant from txn state store");
 				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
 				tenantEntry.setId(txnStateStoreEntry.id);
 				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
 				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
+				tenantEntry.tenantGroup = txnStateStoreEntry.group;
 			} else {
 				tenantEntry = TenantMapEntry::decode(m.param2);
 			}
@@ -707,18 +709,22 @@ private:
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
 				    .detail("Tenant", tenantEntry.tenantName)
+				    .detail("Group", tenantEntry.tenantGroup)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
 				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
+					(*tenantNameIndex)[tenantEntry.tenantName] =
+					    TenantLookupInfo(tenantEntry.id, tenantEntry.tenantGroup);
 				}
 			}
 			if (lockedTenants) {
 				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					CODE_PROBE(true, "ApplyMetadataMutation unlock tenant");
 					lockedTenants->erase(tenantEntry.id);
 				} else {
+					CODE_PROBE(true, "ApplyMetadataMutation lock tenant");
 					lockedTenants->insert(tenantEntry.id);
 				}
 			}
@@ -1174,6 +1180,7 @@ private:
 					auto endItr = endId.present()
 					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
 					                  : lockedTenants->end();
+					CODE_PROBE(startItr != endItr, "Deleting locked tenant");
 					lockedTenants->erase(startItr, endItr);
 				}
 			}

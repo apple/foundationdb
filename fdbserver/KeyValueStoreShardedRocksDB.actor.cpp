@@ -2425,6 +2425,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
 					    .detail("Reason", "RestoreFilesRangesMismatch")
 					    .detail("Ranges", describe(a.ranges))
+					    .setMaxFieldLength(1000)
 					    .detail("FetchedFiles", describe(rkvs));
 					a.done.sendError(failed_to_restore_checkpoint());
 					return;
@@ -3034,10 +3035,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
-	                                                     FlowLock* semaphore,
-	                                                     IThreadPool* pool,
-	                                                     Counter* counter) {
+	ACTOR static Future<RangeResult> read(Reader::ReadRangeAction* action,
+	                                      FlowLock* semaphore,
+	                                      IThreadPool* pool,
+	                                      Counter* counter) {
 		state std::unique_ptr<Reader::ReadRangeAction> a(action);
 		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
 		if (!slot.present()) {
@@ -3049,7 +3050,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		auto fut = a->result.getFuture();
 		pool->post(a.release());
-		Standalone<RangeResultRef> result = wait(fut);
+		RangeResult result = wait(fut);
 
 		return result;
 	}
@@ -3761,6 +3762,94 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 
 	return Void();
 }
+
+TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
+	state std::string localFile = "rocksdb-sst-file-dump.sst";
+	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	// Write nothing to sst file
+	sstWriter->open(localFile);
+	bool anyFileCreated = sstWriter->finish();
+	ASSERT(!anyFileCreated);
+	// Write kvs1 to sst file
+	state std::map<Key, Value> kvs1({ { "a"_sr, "1"_sr },
+	                                  { "ab"_sr, "12"_sr },
+	                                  { "ad"_sr, "14"_sr },
+	                                  { "b"_sr, "2"_sr },
+	                                  { "ba"_sr, "21"_sr },
+	                                  { "c"_sr, "3"_sr },
+	                                  { "d"_sr, "4"_sr },
+	                                  { "e"_sr, "5"_sr },
+	                                  { "h"_sr, "8"_sr },
+	                                  { "ha"_sr, "81"_sr } });
+	sstWriter = newRocksDBSstFileWriter();
+	sstWriter->open(localFile);
+	for (const auto& [key, value] : kvs1) {
+		sstWriter->write(key, value);
+	}
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
+	// Write kvs2 to the same sst file where kvs2 keys are different from kvs1
+	state std::map<Key, Value> kvs2({ { "fa"_sr, "61"_sr },
+	                                  { "fab"_sr, "612"_sr },
+	                                  { "fad"_sr, "614"_sr },
+	                                  { "fb"_sr, "62"_sr },
+	                                  { "fba"_sr, "621"_sr },
+	                                  { "fc"_sr, "63"_sr },
+	                                  { "fd"_sr, "64"_sr },
+	                                  { "fe"_sr, "65"_sr },
+	                                  { "fh"_sr, "68"_sr },
+	                                  { "fha"_sr, "681"_sr } });
+	sstWriter->open(localFile);
+	for (const auto& [key, value] : kvs2) {
+		sstWriter->write(key, value);
+	}
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
+	// Write kvs3 to the same sst file where kvs3 modifies values of kvs2
+	state std::map<Key, Value> kvs3({ { "fa"_sr, "1"_sr },
+	                                  { "fab"_sr, "12"_sr },
+	                                  { "fad"_sr, "14"_sr },
+	                                  { "fb"_sr, "2"_sr },
+	                                  { "fba"_sr, "21"_sr },
+	                                  { "fc"_sr, "3"_sr },
+	                                  { "fd"_sr, "4"_sr },
+	                                  { "fe"_sr, "5"_sr },
+	                                  { "fh"_sr, "8"_sr },
+	                                  { "fha"_sr, "81"_sr } });
+	sstWriter->open(localFile);
+	for (const auto& [key, value] : kvs3) {
+		sstWriter->write(key, value);
+	}
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
+	// Check: sst only contains kv of kvs3
+	rocksdb::Status status;
+	rocksdb::IngestExternalFileOptions ingestOptions;
+	rocksdb::DB* db;
+	rocksdb::Options options;
+	options.create_if_missing = true;
+	status = rocksdb::DB::Open(options, "testdb", &db);
+	ASSERT(status.ok());
+	status = db->IngestExternalFile({ localFile }, ingestOptions);
+	ASSERT(status.ok());
+	std::string value;
+	for (const auto& [key, targetValue] : kvs1) {
+		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
+		ASSERT(status.IsNotFound());
+	}
+	for (const auto& [key, targetValue] : kvs2) {
+		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
+		ASSERT(value != targetValue.toString());
+	}
+	for (const auto& [key, targetValue] : kvs3) {
+		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
+		ASSERT(status.ok());
+		ASSERT(value == targetValue.toString());
+	}
+	delete db;
+	return Void();
+}
+
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL

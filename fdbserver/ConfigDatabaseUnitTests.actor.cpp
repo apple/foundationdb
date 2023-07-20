@@ -342,7 +342,7 @@ class TransactionEnvironment {
 		state Reference<IConfigTransaction> tr =
 		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state Key configKey = encodeConfigKey(configClass, knobName);
-		state Optional<Value> value = wait(tr->get(configKey));
+		state ValueReadResult value = wait(tr->get(configKey));
 		if (expected.present()) {
 			ASSERT_EQ(Tuple::unpack(value.get()).getInt(0), expected.get());
 		} else {
@@ -356,7 +356,7 @@ class TransactionEnvironment {
 		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state KeySelector begin = firstGreaterOrEqual(configClassKeys.begin);
 		state KeySelector end = firstGreaterOrEqual(configClassKeys.end);
-		RangeResult range = wait(tr->getRange(begin, end, 1000));
+		RangeReadResult range = wait(tr->getRange(begin, end, 1000));
 		Standalone<VectorRef<KeyRef>> result;
 		for (const auto& kv : range) {
 			result.push_back_deep(result.arena(), kv.key);
@@ -375,7 +375,7 @@ class TransactionEnvironment {
 		}
 		KeySelector begin = firstGreaterOrEqual(keys.begin);
 		KeySelector end = firstGreaterOrEqual(keys.end);
-		RangeResult range = wait(tr->getRange(begin, end, 1000));
+		RangeReadResult range = wait(tr->getRange(begin, end, 1000));
 		Standalone<VectorRef<KeyRef>> result;
 		for (const auto& kv : range) {
 			result.push_back_deep(result.arena(), kv.key);

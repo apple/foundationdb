@@ -146,7 +146,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		loop {
 			try {
 				Key begin(std::string("log"));
-				RangeResult log = wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult log = wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 				if (!log.empty()) {
 					TraceEvent(SevError, "AtomicOpSetup")
 					    .detail("LogKeySpace", "Not empty")
@@ -227,7 +227,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		try {
 			Key begin(format("log%08x", g));
-			RangeResult log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 			if (log.more) {
 				TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
 			}
@@ -253,7 +253,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		try {
 			Key begin(format("debug%08x", g));
-			RangeResult debuglog = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult debuglog = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 			if (debuglog.more) {
 				TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
 			}
@@ -271,7 +271,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		try {
 			Key begin(format("ops%08x", g));
-			RangeResult ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 			if (ops.more) {
 				TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			}
@@ -297,7 +297,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get mapping between opsKeys and debugKeys
 		state ReadYourWritesTransaction tr1(cx);
 		state std::map<Key, Key> records; // <ops, debugKey>
-		RangeResult debuglog = wait(tr1.getRange(prefixRange(format("debug%08x", g)), CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult debuglog = wait(tr1.getRange(prefixRange(format("debug%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (debuglog.more) {
 			TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
 			return Void();
@@ -309,7 +309,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get log key's value and assign it to the associated debugKey
 		state ReadYourWritesTransaction tr2(cx);
 		state std::map<Key, int64_t> logVal; // debugKey, log's value
-		RangeResult log = wait(tr2.getRange(prefixRange(format("log%08x", g)), CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult log = wait(tr2.getRange(prefixRange(format("log%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (log.more) {
 			TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
 			return Void();
@@ -323,7 +323,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get opsKeys and validate if it has correct value
 		state ReadYourWritesTransaction tr3(cx);
 		state std::map<Key, int64_t> opsVal; // ops key, ops value
-		RangeResult ops = wait(tr3.getRange(prefixRange(format("ops%08x", g)), CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult ops = wait(tr3.getRange(prefixRange(format("ops%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (ops.more) {
 			TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			return Void();
@@ -367,7 +367,8 @@ struct AtomicOpsWorkload : TestWorkload {
 					{
 						// Calculate the accumulated value in the log keyspace for the group g
 						Key begin(format("log%08x", g));
-						RangeResult log_ = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+						RangeReadResult log_ =
+						    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 						log = log_;
 						uint64_t zeroValue = 0;
 						tr.set("xlogResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
@@ -381,7 +382,8 @@ struct AtomicOpsWorkload : TestWorkload {
 					{
 						// Calculate the accumulated value in the ops keyspace for the group g
 						Key begin(format("ops%08x", g));
-						RangeResult ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+						RangeReadResult ops =
+						    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 						uint64_t zeroValue = 0;
 						tr.set("xopsResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
 						for (auto& kv : ops) {
@@ -391,8 +393,8 @@ struct AtomicOpsWorkload : TestWorkload {
 						}
 
 						if (tr.get("xlogResult"_sr).get() != tr.get("xopsResult"_sr).get()) {
-							Optional<Standalone<StringRef>> logResult = tr.get("xlogResult"_sr).get();
-							Optional<Standalone<StringRef>> opsResult = tr.get("xopsResult"_sr).get();
+							ValueReadResult logResult = tr.get("xlogResult"_sr).get();
+							ValueReadResult opsResult = tr.get("xopsResult"_sr).get();
 							ASSERT(logResult.present());
 							ASSERT(opsResult.present());
 							TraceEvent(SevError, "LogMismatch")

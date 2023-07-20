@@ -181,7 +181,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			                                          : &self->memoryDatabase,
 			                                      key);
 			*memLimit -= memRes.expectedSize();
-			Key _res = wait(tr->getKey(key, snapshot));
+			KeyReadResult _res = wait(tr->getKey(key, snapshot));
 			Key res = _res;
 			*memLimit += memRes.expectedSize();
 			if (self->useSystemKeys && res > self->getKeyForIndex(self->nodes))
@@ -264,7 +264,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    limit,
 			    reverse);
 			*memLimit -= memRes.expectedSize();
-			RangeResult _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
+			RangeReadResult _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
 			RangeResult res = _res;
 			*memLimit += memRes.expectedSize();
 
@@ -285,8 +285,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 						if (res[systemKeyCount].key < self->getKeyForIndex(self->nodes))
 							break;
 					if (systemKeyCount > 0) {
-						res = RangeResultRef(VectorRef<KeyValueRef>(&res[systemKeyCount], res.size() - systemKeyCount),
-						                     true);
+						res = RangeResult(
+						    RangeResultRef(VectorRef<KeyValueRef>(&res[systemKeyCount], res.size() - systemKeyCount),
+						                   true),
+						    res.arena());
 						resized = true;
 					}
 				}
@@ -423,7 +425,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			                                                   : &self->memoryDatabase,
 			                                               key);
 			*memLimit -= memRes.expectedSize();
-			Optional<Value> res = wait(tr->get(key, snapshot));
+			ValueReadResult res = wait(tr->get(key, snapshot));
 			*memLimit += memRes.expectedSize();
 			if (res != memRes) {
 				TraceEvent(SevError, "WDRGetWrongResult", randomID)
@@ -1077,7 +1079,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 				self->changeCount.insert(allKeys, 0);
 				doingCommit = false;
 				//TraceEvent("WDRError").errorUnsuppressed(e);
-				if (e.code() == error_code_database_locked) {
+				// When the database is locked, it is still possible to receive a tenant_not_found
+				// error, so treat these errors as if the database was locked
+				if (e.code() == error_code_database_locked || e.code() == error_code_tenant_not_found) {
 					self->memoryDatabase = self->lastCommittedDatabase;
 					self->addedConflicts.insert(allKeys, false);
 					return Void();

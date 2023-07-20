@@ -439,7 +439,7 @@ Optional<StringRef> parseField(Arena& arena,
 				if (decodedString.present()) {
 					auto const tenantPrefix = decodedString.get();
 					if (tenantPrefix.size() != sizeof(TenantId)) {
-						CODE_PROBE(true, "Tenant prefix has an invalid length");
+						CODE_PROBE(true, "Tenant prefix has an invalid length", probe::decoration::rare);
 						return StringRef(arena,
 						                 fmt::format("{}th element of '{}' has an invalid bytewise length of {}",
 						                             i + 1,

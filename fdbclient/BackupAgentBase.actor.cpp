@@ -57,18 +57,9 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	// It would be nice to read the timezone using %z, but it seems not all get_time()
 	// or strptime() implementations handle it correctly in all environments so we
 	// will read the date and time independent of timezone at first and then adjust it.
-#ifdef _WIN32
-	std::istringstream s(timeOnly);
-	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
-	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
-	if (s.fail()) {
-		return -1;
-	}
-#else
 	if (strptime(timeOnly.c_str(), "%Y/%m/%d.%H:%M:%S", &out) == nullptr) {
 		return -1;
 	}
-#endif
 
 	// Read timezone offset in +/-HHMM format then convert to seconds
 	int tzHH;
@@ -89,17 +80,8 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 
 	// localTZOffset is the number of seconds EAST of GMT
 	long localTZOffset;
-#ifdef _WIN32
-	// _get_timezone() returns the number of seconds WEST of GMT
-	if (_get_timezone(&localTZOffset) != 0) {
-		return -1;
-	}
-	// Negate offset to match the orientation of tzOffset
-	localTZOffset = -localTZOffset;
-#else
 	// tm.tm_gmtoff is the number of seconds EAST of GMT
 	localTZOffset = out.tm_gmtoff;
-#endif
 
 	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input
 	// string
@@ -536,7 +518,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			releaser = FlowLock::Releaser(
 			    *lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state RangeResult values = wait(tr.getRange(begin, end, limits));
+			state RangeReadResult values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -608,7 +590,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
+			state RangeReadResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -1014,12 +996,12 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	if (checkBackupUid) {
 		Subspace sourceStates =
 		    Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
-		Optional<Value> v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
+		ValueReadResult v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
 		if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > backupUid)
 			return Void();
 	}
 
-	state RangeResult backupVersions = wait(
+	state RangeReadResult backupVersions = wait(
 	    tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 
 	// Make sure version history key does exist and lower the beginVersion if needed
@@ -1111,7 +1093,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (!endVersion.present() && backupVersions.size() == 1) {
-		RangeResult existingDestUidValues =
+		RangeReadResult existingDestUidValues =
 		    wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 		for (auto it : existingDestUidValues) {
 			if (it.value == destUidValue) {
@@ -1144,7 +1126,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult backupVersions = wait(tr->getRange(
+			state RangeReadResult backupVersions = wait(tr->getRange(
 			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 			state Version readVer = tr->getReadVersion().get();
 
@@ -1163,11 +1145,11 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 				}
 
 				if (!loggedLogUids.count(currLogUid)) {
-					state Future<Optional<Value>> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin)
+					state Future<ValueReadResult> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin)
 					                                                       .get(BackupAgentBase::keySourceStates)
 					                                                       .get(currLogUid)
 					                                                       .pack(DatabaseBackupAgent::keyStateStatus));
-					state Future<Optional<Value>> foundBackupKey = tr->get(
+					state Future<ValueReadResult> foundBackupKey = tr->get(
 					    Subspace(currLogUid.withPrefix("uid->config/"_sr).withPrefix(fileBackupPrefixRange.begin))
 					        .pack("stateEnum"_sr));
 					wait(success(foundDRKey) && success(foundBackupKey));
@@ -1230,7 +1212,7 @@ ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult destUids = wait(
+			state RangeReadResult destUids = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 
 			for (auto destUid : destUids) {

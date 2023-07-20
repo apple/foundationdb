@@ -80,8 +80,8 @@ public:
 	                       bool transactional,
 	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
-	    transactional(transactional), restartOnTimeout(restartOnTimeout),
+	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), restartOnTimeout(restartOnTimeout),
+	    tenantName(tenantName), transactional(transactional),
 	    selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
@@ -150,9 +150,9 @@ public:
 		// can enter DONE state and handle it
 
 		if (retriedErrors.size() >= LARGE_NUMBER_OF_RETRIES) {
-			fmt::print("Transaction succeeded after {} retries on errors: {}\n",
-			           retriedErrors.size(),
-			           fmt::join(retriedErrorCodes(), ", "));
+			log::warn("Transaction succeeded after {} retries on errors: {}",
+			          retriedErrors.size(),
+			          fmt::join(retriedErrorCodes(), ", "));
 		}
 
 		if (transactional) {
@@ -183,6 +183,7 @@ public:
 			return;
 		}
 		txState = TxState::ON_ERROR;
+		retriedErrors.push_back(err);
 		lock.unlock();
 
 		// No need to hold the lock from here on, because ON_ERROR state is handled sequentially, and
@@ -210,6 +211,22 @@ public:
 		}
 	}
 
+	// Complete the transaction with an (unretriable) error
+	void transactionFailed(fdb::Error err) {
+		ASSERT(err);
+		std::unique_lock<std::mutex> lock(mutex);
+		if (txState == TxState::DONE) {
+			return;
+		}
+		txState = TxState::DONE;
+		lock.unlock();
+
+		// No need for lock from here on, because only one thread
+		// can enter DONE state and handle it
+		cleanUp();
+		contAfterDone(err);
+	}
+
 protected:
 	virtual void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) = 0;
 
@@ -228,23 +245,6 @@ protected:
 
 	bool canBeInjectedDatabaseCreateError(fdb::Error::CodeType errCode) {
 		return errCode == error_code_no_cluster_file_found || errCode == error_code_connection_string_invalid;
-	}
-
-	// Complete the transaction with an (unretriable) error
-	void transactionFailed(fdb::Error err) {
-		ASSERT(err);
-		std::unique_lock<std::mutex> lock(mutex);
-		if (txState == TxState::DONE) {
-			return;
-		}
-		txState = TxState::DONE;
-		lock.unlock();
-
-		// No need for lock from here on, because only one thread
-		// can enter DONE state and handle it
-
-		cleanUp();
-		contAfterDone(err);
 	}
 
 	// Handle result of an a transaction onError call
@@ -270,7 +270,12 @@ protected:
 		txState = TxState::IN_PROGRESS;
 		commitCalled = false;
 		lock.unlock();
-		startFct(shared_from_this());
+		try {
+			startFct(shared_from_this());
+		} catch (const fdb::Error& err) {
+			log::error("Error restarting transaction: {}", err.code());
+			transactionFailed(err);
+		}
 	}
 
 	void recreateAndRestartTransaction() {
@@ -297,16 +302,15 @@ protected:
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
 	bool canRetry(fdb::Error lastErr) {
 		ASSERT(txState == TxState::ON_ERROR);
-		retriedErrors.push_back(lastErr);
 		if (retryLimit == 0 || retriedErrors.size() <= retryLimit) {
 			if (retriedErrors.size() == LARGE_NUMBER_OF_RETRIES) {
-				fmt::print("Transaction already retried {} times, on errors: {}\n",
-				           retriedErrors.size(),
-				           fmt::join(retriedErrorCodes(), ", "));
+				log::warn("Transaction already retried {} times, on errors: {}",
+				          retriedErrors.size(),
+				          fmt::join(retriedErrorCodes(), ", "));
 			}
 			return true;
 		}
-		fmt::print("Transaction retry limit reached. Retried on errors: {}\n", fmt::join(retriedErrorCodes(), ", "));
+		log::error("Transaction retry limit reached. Retried on errors: {}", fmt::join(retriedErrorCodes(), ", "));
 		transactionFailed(lastErr);
 		return false;
 	}
@@ -317,6 +321,20 @@ protected:
 			retriedErrorCodes.push_back(e.code());
 		}
 		return retriedErrorCodes;
+	}
+
+	std::string getStateLabel() {
+		const char* stateStr;
+		if (txState == TxState::DONE) {
+			stateStr = "done";
+		} else if (txState == TxState::ON_ERROR) {
+			stateStr = "onerror";
+		} else if (commitCalled) {
+			stateStr = "commit";
+		} else {
+			stateStr = "read";
+		}
+		return stateStr;
 	}
 
 	// Pointer to the transaction executor interface
@@ -382,7 +400,7 @@ protected:
 	bool commitCalled;
 
 	// A history of errors on which the transaction was retried
-	// used only in ON_ERROR and DONE states (no need for mutex)
+	// Must be accessed under mutex, expect when being read in ON_ERROR & DONE states
 	std::vector<fdb::Error> retriedErrors;
 
 	// blob granule base path
@@ -430,6 +448,11 @@ public:
 	                           transactional,
 	                           restartOnTimeout) {}
 
+	std::string getTransactionStatus() override {
+		std::unique_lock<std::mutex> lock(mutex);
+		return fmt::format("{}, retried on [{}]", getStateLabel(), fmt::join(retriedErrorCodes(), ", "));
+	}
+
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
 		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
@@ -452,11 +475,11 @@ protected:
 		err = f.error();
 		auto waitTimeUs = timeElapsedInUs(start);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
-			fmt::print("Long waiting time on a future: {:.3f}s, return code {} ({}), commit called: {}\n",
-			           microsecToSec(waitTimeUs),
-			           err.code(),
-			           err.what(),
-			           commitCalled);
+			log::warn("Long waiting time on a future: {:.3f}s, return code {} ({}), commit called: {}",
+			          microsecToSec(waitTimeUs),
+			          err.code(),
+			          err.what(),
+			          commitCalled);
 		}
 		if (err.code() == error_code_transaction_cancelled) {
 			return;
@@ -481,11 +504,11 @@ protected:
 		auto waitTimeUs = timeElapsedInUs(start);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb::Error err3 = onErrorFuture.error();
-			fmt::print("Long waiting time on onError({}) future: {:.3f}s, return code {} ({})\n",
-			           onErrorArg.code(),
-			           microsecToSec(waitTimeUs),
-			           err3.code(),
-			           err3.what());
+			log::warn("Long waiting time on onError({}) future: {:.3f}s, return code {} ({})",
+			          onErrorArg.code(),
+			          microsecToSec(waitTimeUs),
+			          err3.code(),
+			          err3.what());
 		}
 		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
 		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
@@ -516,6 +539,21 @@ public:
 	                           transactional,
 	                           restartOnTimeout) {}
 
+	std::string getTransactionStatus() override {
+		std::unique_lock<std::mutex> lock(mutex);
+		int numCancelled = 0;
+		for (auto& iter : callbackMap) {
+			if (iter.second.cancelled) {
+				numCancelled++;
+			}
+		}
+		return fmt::format("{}, retried on [{}], {} callbacks, {} cancelled",
+		                   getStateLabel(),
+		                   fmt::join(retriedErrorCodes(), ", "),
+		                   callbackMap.size(),
+		                   numCancelled);
+	}
+
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
 		std::unique_lock<std::mutex> lock(mutex);
@@ -539,10 +577,10 @@ protected:
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onFutureReady(f);
 		} catch (std::exception& err) {
-			fmt::print("Unexpected exception in callback {}\n", err.what());
+			log::error("Unexpected exception in callback {}", err.what());
 			abort();
 		} catch (...) {
-			fmt::print("Unknown error in callback\n");
+			log::error("Unknown error in callback");
 			abort();
 		}
 	}
@@ -564,10 +602,10 @@ protected:
 		fdb::Error err = f.error();
 		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
-			fmt::print("Long waiting time on a future: {:.3f}s, return code {} ({})\n",
-			           microsecToSec(waitTimeUs),
-			           err.code(),
-			           err.what());
+			log::warn("Long waiting time on a future: {:.3f}s, return code {} ({})",
+			          microsecToSec(waitTimeUs),
+			          err.code(),
+			          err.what());
 		}
 		if (err.code() == error_code_transaction_cancelled || cbInfo.cancelled) {
 			return;
@@ -601,10 +639,10 @@ protected:
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onErrorReady(f);
 		} catch (std::exception& err) {
-			fmt::print("Unexpected exception in callback {}\n", err.what());
+			log::error("Unexpected exception in callback {}", err.what());
 			abort();
 		} catch (...) {
-			fmt::print("Unknown error in callback\n");
+			log::error("Unknown error in callback");
 			abort();
 		}
 	}
@@ -613,11 +651,11 @@ protected:
 		auto waitTimeUs = timeElapsedInUs(onErrorCallTimePoint);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb::Error err = onErrorFuture.error();
-			fmt::print("Long waiting time on onError({}): {:.3f}s, return code {} ({})\n",
-			           onErrorArg.code(),
-			           microsecToSec(waitTimeUs),
-			           err.code(),
-			           err.what());
+			log::warn("Long waiting time on onError({}): {:.3f}s, return code {} ({})",
+			          onErrorArg.code(),
+			          microsecToSec(waitTimeUs),
+			          err.code(),
+			          err.what());
 		}
 		injectRandomSleep();
 		auto thisRef = onErrorThisRef;
@@ -726,11 +764,11 @@ public:
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(TOpStartFct startFct,
-	             TOpContFct cont,
-	             std::optional<fdb::BytesRef> tenantName,
-	             bool transactional,
-	             bool restartOnTimeout) override {
+	std::shared_ptr<ITransactionContext> execute(TOpStartFct startFct,
+	                                             TOpContFct cont,
+	                                             std::optional<fdb::BytesRef> tenantName,
+	                                             bool transactional,
+	                                             bool restartOnTimeout) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
@@ -754,10 +792,18 @@ public:
 				                                                transactional,
 				                                                restartOnTimeout);
 			}
-			startFct(ctx);
+			try {
+				startFct(ctx);
+			} catch (const fdb::Error& err) {
+				log::error("Error starting transaction: {}", err.code());
+				static_cast<TransactionContextBase*>(ctx.get())->transactionFailed(err);
+			}
+			return ctx;
 		} catch (...) {
+			log::error("Unexpected exception when starting transaction");
 			cont(fdb::Error(error_code_operation_failed));
 		}
+		return {};
 	}
 
 	std::string getClusterFileForErrorInjection() override {

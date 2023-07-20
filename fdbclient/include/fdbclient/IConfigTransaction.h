@@ -46,7 +46,7 @@ public:
 	void setVersion(Version) override { throw client_invalid_operation(); }
 	VersionVector getVersionVector() const override { throw client_invalid_operation(); }
 	SpanContext getSpanContext() const override { throw client_invalid_operation(); }
-	Future<Key> getKey(KeySelector const& key, Snapshot snapshot = Snapshot::False) override {
+	Future<KeyReadResult> getKey(KeySelector const& key, Snapshot snapshot = Snapshot::False) override {
 		throw client_invalid_operation();
 	}
 	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) override {
@@ -82,4 +82,12 @@ public:
 
 	// Implemented:
 	void getWriteConflicts(KeyRangeMap<bool>* result) override{};
+
+	void debugTrace(BaseTraceEvent&& event) override {
+		event.detail("CommitResult", "Deferred logging unsupported").log();
+	};
+
+	virtual void debugPrint(std::string const& message) override {
+		fmt::print("[Deferred logging unsupported] {}\n", message);
+	}
 };

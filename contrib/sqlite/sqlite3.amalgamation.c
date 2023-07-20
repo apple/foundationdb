@@ -12105,6 +12105,7 @@ typedef struct et_info {   /* Information about each format field */
 ** The following table is searched linearly, so it is good to put the
 ** most frequently used conversion types first.
 */
+// pragma: allowlist nextline secret
 static const char aDigits[] = "0123456789ABCDEF0123456789abcdef";
 static const char aPrefix[] = "-x0\000X0";
 static const et_info fmtinfo[] = {

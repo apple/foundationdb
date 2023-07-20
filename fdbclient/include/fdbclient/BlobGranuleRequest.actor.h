@@ -78,7 +78,7 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> txnDoBlobGranuleRequests(
 		}
 
 		if (!tr->trState->cx->blobWorker_interf.count(workerId)) {
-			Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
+			ValueReadResult workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
 			// we persist in the db.

@@ -37,6 +37,7 @@ namespace metacluster {
 
 ACTOR template <class Transaction>
 Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, ClusterName name) {
+	CODE_PROBE(true, "Try get cluster");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Void> metaclusterRegistrationCheck =

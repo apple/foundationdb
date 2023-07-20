@@ -1836,6 +1836,7 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
 }
 
 TEST_CASE("/backup/s3/v4headers") {
+	// pragma: allowlist nextline secret
 	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
 	// GET without query parameters
 	{

@@ -45,7 +45,7 @@ UID cfKeyToGranuleID(Key cfKey) {
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
 	state KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
-	state RangeResult result = wait(tr->getRange(historyRange, 1, Snapshot::False, Reverse::True));
+	state RangeReadResult result = wait(tr->getRange(historyRange, 1, Snapshot::False, Reverse::True));
 
 	ASSERT(result.size() <= 1);
 
@@ -64,7 +64,7 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 
 	loop {
 		int lim = BUGGIFY ? 2 : 1000;
-		RangeResult res = wait(tr->getRange(KeyRangeRef(*startKey, endKey), lim));
+		RangeReadResult res = wait(tr->getRange(KeyRangeRef(*startKey, endKey), lim));
 		for (auto& it : res) {
 			UID gid;
 			uint8_t fileType;
@@ -659,7 +659,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(BGTenantMap*
 				wait(delay(0));
 				return data->bstore;
 			} else {
-				CODE_PROBE(true, "bstore for unknown tenant");
+				CODE_PROBE(true, "bstore for unknown tenant", probe::decoration::rare);
 				// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
 				// loading to be versioned anyway. 10 retries means it's likely not a transient race with
 				// loading tenants, and instead a persistent issue.

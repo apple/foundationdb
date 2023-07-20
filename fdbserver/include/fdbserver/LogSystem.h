@@ -31,6 +31,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/WorkerInfo.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/Histogram.h"
@@ -555,7 +556,7 @@ struct ILogSystem {
 	// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is
 	// correspondingly less expensive)
 
-	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) = 0;
+	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag, bool useSatellite) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before
 	// sending them to the log router.
@@ -638,16 +639,15 @@ struct ILogSystem {
 	// Returns EpochTagVersionsInfo for old epochs that this log system is aware of, excluding the current epoch.
 	virtual std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const = 0;
 
-	virtual Future<Reference<ILogSystem>> newEpoch(
-	    RecruitFromConfigurationReply const& recr,
-	    Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-	    DatabaseConfiguration const& config,
-	    LogEpoch recoveryCount,
-	    Version recoveryTransactionVersion,
-	    int8_t primaryLocality,
-	    int8_t remoteLocality,
-	    std::vector<Tag> const& allTags,
-	    Reference<AsyncVar<bool>> const& recruitmentStalled) = 0;
+	virtual Future<Reference<ILogSystem>> newEpoch(WorkerRecruitment const& recr,
+	                                               Future<struct RemoteWorkerRecruitment> const& fRemoteWorkers,
+	                                               DatabaseConfiguration const& config,
+	                                               LogEpoch recoveryCount,
+	                                               Version recoveryTransactionVersion,
+	                                               int8_t primaryLocality,
+	                                               int8_t remoteLocality,
+	                                               std::vector<Tag> const& allTags,
+	                                               Reference<AsyncVar<bool>> const& recruitmentStalled) = 0;
 	// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState

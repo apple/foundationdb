@@ -261,7 +261,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				for (restoreIndex = 0; restoreIndex < self->skippedRestoreRanges.size(); restoreIndex++) {
 					state KeyRangeRef range = self->skippedRestoreRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					RangeResult res = wait(tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED));
+					RangeReadResult res = wait(tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED));
 					if (!res.empty()) {
 						TraceEvent(SevError, "BARW_UnexpectedRangePresent").detail("Range", printable(range));
 						return false;
@@ -481,7 +481,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state int rowCount = 0;
 		loop {
 			try {
-				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+				RangeReadResult existingRows = wait(tr.getRange(normalKeys, 1));
 				rowCount = existingRows.size();
 				break;
 			} catch (Error& e) {
@@ -880,6 +881,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			// Ensure that there is no left over key within the backup subspace
 			loop {
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
 
@@ -916,10 +918,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						wait(delay(5.0));
 
 						tr = makeReference<ReadYourWritesTransaction>(cx);
+						tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 						wait(store(taskCount, backupAgent.getTaskCount(tr)));
 					}
 
-					RangeResult agentValues =
+					RangeReadResult agentValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 					// Error if the system keyspace for the backup tag is not empty
@@ -944,7 +947,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup agent configuration keys\n");
 					}
 
-					Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
+					ValueReadResult latestVersion = wait(tr->get(backupLatestVersionsKey));
 					if (latestVersion.present()) {
 						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
 						    .detail("BackupTag", printable(self->backupTag))
@@ -954,10 +957,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup version key\n");
 					}
 
-					RangeResult versions = wait(tr->getRange(
+					RangeReadResult versions = wait(tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 					if (!self->shareLogRange || !versions.size()) {
-						RangeResult logValues = wait(
+						RangeReadResult logValues = wait(
 						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty

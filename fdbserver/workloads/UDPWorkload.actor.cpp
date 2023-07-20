@@ -76,7 +76,7 @@ struct UDPWorkload : TestWorkload {
 		self->serverAddress = localAddress;
 		loop {
 			try {
-				Optional<Value> v = wait(tr.get(key));
+				ValueReadResult v = wait(tr.get(key));
 				if (v.present()) {
 					return Void();
 				}
@@ -223,7 +223,7 @@ struct UDPWorkload : TestWorkload {
 		state std::vector<NetworkAddress> remotes;
 		loop {
 			try {
-				RangeResult range = wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult range = wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				for (auto const& p : range) {
 					auto cID = BinaryReader::fromStringRef<decltype(self->clientId)>(

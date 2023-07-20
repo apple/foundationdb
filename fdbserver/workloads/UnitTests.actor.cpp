@@ -50,6 +50,7 @@ void forceLinkActorCollectionTests();
 void forceLinkDDSketchTests();
 void forceLinkCommitProxyTests();
 void forceLinkWipedStringTests();
+void forceLinkRandomKeyValueUtilsTests();
 void forceLinkSimKmsVaultTests();
 void forceLinkActorFuzzUnitTests();
 void forceLinkRESTSimKmsVaultTest();
@@ -118,6 +119,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkActorCollectionTests();
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
+		forceLinkRandomKeyValueUtilsTests();
 		forceLinkSimKmsVaultTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkRESTSimKmsVaultTest();

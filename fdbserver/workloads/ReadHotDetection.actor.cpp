@@ -141,7 +141,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
-					Optional<Value> v = wait(tr.get(
+					ValueReadResult v = wait(tr.get(
 					    useReadKey
 					        ? self->readKey
 					        : StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, self->keyCount)))));

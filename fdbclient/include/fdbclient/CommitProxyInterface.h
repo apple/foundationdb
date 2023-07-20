@@ -34,7 +34,7 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/VersionVector.h"
 
 #include "fdbrpc/Stats.h"
@@ -64,7 +64,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
-	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
+	PublicRequestStream<struct TenantLookupRequest> tenantLookup;
 	PublicRequestStream<struct GetBlobGranuleLocationsRequest> getBlobGranuleLocations;
 
 	UID id() const { return commit.getEndpoint().token; }
@@ -94,7 +94,8 @@ struct CommitProxyInterface {
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
-			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
+			tenantLookup =
+			    PublicRequestStream<struct TenantLookupRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
 			    commit.getEndpoint().getAdjustedEndpoint(12));
 		}
@@ -114,7 +115,7 @@ struct CommitProxyInterface {
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
-		streams.push_back(getTenantId.getReceiver());
+		streams.push_back(tenantLookup.getReceiver());
 		streams.push_back(getBlobGranuleLocations.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -221,7 +222,7 @@ struct CommitTransactionRequest : TimedRequest {
 	uint32_t flags;
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
-	Optional<TagSet> tagSet;
+	Optional<TransactionTag> throttlingTag;
 	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
@@ -239,7 +240,7 @@ struct CommitTransactionRequest : TimedRequest {
 		           flags,
 		           debugID,
 		           commitCostEstimation,
-		           tagSet,
+		           throttlingTag,
 		           spanContext,
 		           tenantInfo,
 		           idempotencyId,
@@ -269,7 +270,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkDefaultThrottled = false;
 	bool rkBatchThrottled = false;
 
-	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
@@ -284,7 +284,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           version,
 		           locked,
 		           metadataVersion,
-		           tagThrottleInfo,
 		           midShardSize,
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
@@ -314,7 +313,8 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t flags;
 	TransactionPriority priority;
 
-	TransactionTagMap<uint32_t> tags;
+	Optional<ThrottlingId> throttlingId;
+
 	// Not serialized, because this field does not need to be sent to master.
 	// It is used for reporting to clients the amount of time spent delayed by
 	// the TagQueue
@@ -331,10 +331,10 @@ struct GetReadVersionRequest : TimedRequest {
 	                      TransactionPriority priority,
 	                      Version maxVersion,
 	                      uint32_t flags = 0,
-	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
+	                      Optional<ThrottlingId> const& throttlingId = Optional<ThrottlingId>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
-	    debugID(debugID), maxVersion(maxVersion) {
+	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority),
+	    throttlingId(throttlingId), debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -355,11 +355,9 @@ struct GetReadVersionRequest : TimedRequest {
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
-	bool isTagged() const { return !tags.empty(); }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion);
+		serializer(ar, transactionCount, flags, debugID, reply, spanContext, maxVersion, throttlingId);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
@@ -375,23 +373,25 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
-struct GetTenantIdReply {
-	constexpr static FileIdentifier file_identifier = 11441284;
-	int64_t tenantId = TenantInfo::INVALID_TENANT;
+struct TenantLookupInfo {
+	constexpr static FileIdentifier file_identifier = 8018317;
 
-	GetTenantIdReply() {}
-	GetTenantIdReply(int64_t tenantId) : tenantId(tenantId) {}
+	int64_t id = TenantInfo::INVALID_TENANT;
+	Optional<TenantGroupName> group;
+
+	TenantLookupInfo() = default;
+	TenantLookupInfo(int64_t id, Optional<TenantGroupName> const& group = {}) : id(id), group(group) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantId);
+		serializer(ar, id, group);
 	}
 };
 
-struct GetTenantIdRequest {
+struct TenantLookupRequest {
 	constexpr static FileIdentifier file_identifier = 11299717;
 	TenantName tenantName;
-	ReplyPromise<GetTenantIdReply> reply;
+	ReplyPromise<TenantLookupInfo> reply;
 
 	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
 	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
@@ -399,8 +399,8 @@ struct GetTenantIdRequest {
 	// updates from other proxies before answering.
 	Version minTenantVersion;
 
-	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
-	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
+	TenantLookupRequest() : minTenantVersion(latestVersion) {}
+	TenantLookupRequest(TenantNameRef const& tenantName, Version minTenantVersion)
 	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
 
 	bool verify() const { return true; }

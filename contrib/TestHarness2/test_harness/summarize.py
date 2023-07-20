@@ -350,6 +350,8 @@ class Summary:
         self.stderr_severity: str = "40"
         self.will_restart: bool = will_restart
         self.test_dir: Path | None = None
+        self.is_negative_test = False
+        self.negative_test_success = False
         self.max_trace_time = -1
         self.max_trace_time_type = "None"
 
@@ -359,6 +361,7 @@ class Summary:
             self.out.attributes["Statistics"] = stats
         self.out.attributes["JoshuaSeed"] = str(config.joshua_seed)
         self.out.attributes["WillRestart"] = "1" if self.will_restart else "0"
+        self.out.attributes["NegativeTest"] = "1" if self.is_negative_test else "0"
 
         self.handler = ParseHandler(self.out)
         self.register_handlers()
@@ -411,7 +414,8 @@ class Summary:
         return res
 
     def ok(self):
-        return not self.error
+        # logical xor -- a test is successful if there was either no error or we expected errors (negative test)
+        return (not self.error) != self.is_negative_test
 
     def done(self):
         if config.print_coverage:
@@ -596,6 +600,17 @@ class Summary:
                 ]
 
         self.handler.add_handler(("Type", "ProgramStart"), program_start)
+
+        def negative_test_success(attrs: Dict[str, str]):
+            self.negative_test_success = True
+            child = SummaryTree(attrs["Type"])
+            for k, v in attrs:
+                if k != "Type":
+                    child.attributes[k] = v
+            self.out.append(child)
+            pass
+
+        self.handler.add_handler(("Type", "NegativeTestSuccess"), negative_test_success)
 
         def config_string(attrs: Dict[str, str]):
             self.out.attributes["ConfigString"] = attrs["ConfigString"]

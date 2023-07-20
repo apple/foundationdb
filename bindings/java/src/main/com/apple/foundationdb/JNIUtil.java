@@ -85,7 +85,7 @@ public class JNIUtil {
 		OS os = getRunningOS();
 		String path = getPath(os, libName);
 
-		if ((os.getName().equals("linux") && !path.endsWith(".so")) || (os.getName().equals("windows") && !path.endsWith(".dll")) || (os.getName().equals("osx") && !path.endsWith(".jnilib") && !path.endsWith(".dylib"))) {
+		if ((os.getName().equals("linux") && !path.endsWith(".so")) || (os.getName().equals("osx") && !path.endsWith(".jnilib") && !path.endsWith(".dylib"))) {
 			throw new IllegalStateException("OS sanity check failed. System property os.name reports " + os.getName()+" but System.mapLibraryName is looking for " + getLibName(libName));
 		}
 
@@ -183,12 +183,10 @@ public class JNIUtil {
 	private static OS getRunningOS() {
 		String osname = System.getProperty("os.name").toLowerCase();
 		String arch = System.getProperty("os.arch");
-		if (!arch.equals("amd64") && !arch.equals("x86_64") && !arch.equals("aarch64") && !arch.equals("ppc64le")) {
+		if (!arch.equals("amd64") && !arch.equals("x86_64") && !arch.equals("aarch64")) {
 			throw new IllegalStateException("Unknown or unsupported arch: " + arch);
 		}
-		if (osname.startsWith("windows")) {
-			return new OS("windows", arch, /* canDeleteEager */ false);
-		} else if (osname.startsWith("linux")) {
+		if (osname.startsWith("linux")) {
 			return new OS("linux", arch, /* canDeleteEager */ true);
 		} else if (osname.startsWith("mac") || osname.startsWith("darwin")) {
 			return new OS("osx", arch, /* canDeleteEager */ true);

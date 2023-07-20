@@ -75,7 +75,7 @@ struct BulkSetupWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
 		loop {
 			try {
-				RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
+				RangeReadResult kvRange = wait(tr.getRange(begin, end, 1000));
 				if (!kvRange.more && kvRange.size() == 0) {
 					break;
 				}
@@ -105,7 +105,8 @@ struct BulkSetupWorkload : TestWorkload {
 			wait(waitForAll(tenantFutures));
 			for (auto& f : tenantFutures) {
 				ASSERT(f.get().present());
-				workload->tenants.push_back(makeReference<Tenant>(f.get().get().id, f.get().get().tenantName));
+				TenantLookupInfo const tenantLookupInfo(f.get().get().id, f.get().get().tenantGroup);
+				workload->tenants.push_back(makeReference<Tenant>(tenantLookupInfo, f.get().get().tenantName));
 				TraceEvent("BulkSetupCreatedTenant").detail("Tenant", workload->tenants.back());
 			}
 		}

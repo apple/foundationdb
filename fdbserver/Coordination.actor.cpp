@@ -518,11 +518,11 @@ struct LeaderRegisterCollection {
 		if (!self->pStore->exists())
 			return Void();
 		OnDemandStore& store = *self->pStore;
-		state Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
-		state Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
+		state Future<RangeResult> forwardingInfoF = store->readRange(fwdKeys);
+		state Future<RangeResult> forwardingTimeF = store->readRange(fwdTimeKeys);
 		wait(success(forwardingInfoF) && success(forwardingTimeF));
-		Standalone<RangeResultRef> forwardingInfo = forwardingInfoF.get();
-		Standalone<RangeResultRef> forwardingTime = forwardingTimeF.get();
+		RangeResult forwardingInfo = forwardingInfoF.get();
+		RangeResult forwardingTime = forwardingTimeF.get();
 		for (int i = 0; i < forwardingInfo.size(); i++) {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;

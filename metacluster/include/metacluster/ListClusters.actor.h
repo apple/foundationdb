@@ -40,6 +40,7 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Trans
                                                                            ClusterNameRef begin,
                                                                            ClusterNameRef end,
                                                                            int limit) {
+	CODE_PROBE(true, "List clusters");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Void> tenantModeCheck = TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);

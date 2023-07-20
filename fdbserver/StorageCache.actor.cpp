@@ -535,7 +535,7 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		GetValueReply reply(v, true);
+		GetValueReply reply(v, true, ReadMetrics());
 		req.reply.send(reply);
 	} catch (Error& e) {
 		//TraceEvent(SevWarn, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key)
@@ -894,7 +894,7 @@ ACTOR Future<Void> getKey(StorageCacheData* data, GetKeyRequest req) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		GetKeyReply reply(updated, true);
+		GetKeyReply reply(updated, true, ReadMetrics());
 		req.reply.send(reply);
 	} catch (Error& e) {
 		// if (e.code() == error_code_wrong_shard_server) TraceEvent("SCWrongCacheRangeServer").detail("In","getKey");
@@ -1203,7 +1203,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	try {
 		loop {
-			RangeResult rep = wait(tr.getRange(begin, end, limits, Snapshot::True));
+			RangeReadResult rep = wait(tr.getRange(begin, end, limits, Snapshot::True));
 			limits.decrement(rep);
 
 			if (limits.isReached() || !rep.more) {
@@ -2147,7 +2147,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				RangeResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				readVersion = tr.getReadVersion().get();
 				bool currCached = false;
@@ -2195,7 +2195,7 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				Optional<Value> val = wait(tr.get(storageKey));
+				ValueReadResult val = wait(tr.get(storageKey));
 				// This could race with the data distributor trying to remove
 				// the interface - but this is ok, as we don't need to kill
 				// ourselves if FailureMonitor marks us as down (this might save

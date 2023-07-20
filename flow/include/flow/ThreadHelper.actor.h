@@ -35,6 +35,8 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_BOOLEAN_PARAM(AddValueReference);
+
 // Helper actor. Do not use directly!
 namespace internal_thread_helper {
 
@@ -334,6 +336,21 @@ public:
 			callback->destroy();
 	}
 
+	template <class T>
+	T getAndCast(AddValueReference addValueReference) {
+		ThreadSpinLockHolder holder(mutex);
+		if (!isReadyUnsafe())
+			throw future_not_set();
+		if (isErrorUnsafe())
+			throw error;
+
+		if (addValueReference) {
+			addValueReferenceUnsafe();
+		}
+
+		return *static_cast<const T*>(getValuePtrUnsafe());
+	}
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
@@ -501,6 +518,10 @@ protected:
 		this->addref();
 		cancel();
 	}
+
+	// Get a pointer to the value held by the subclass. This can be used to access the underlying value with a
+	// polymorphic type.
+	virtual const void* getValuePtrUnsafe() = 0;
 };
 
 template <class T>
@@ -523,6 +544,8 @@ public:
 		addValueReferenceUnsafe();
 		return value;
 	}
+
+	const void* getValuePtrUnsafe() override { return static_cast<void*>(&value); }
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSingleAssignmentVar<T>>::addref(); }
 
@@ -893,76 +916,6 @@ private:
 	V value;
 	Reference<ThreadSingleAssignmentVar<Void>> nextChange;
 	ThreadSpinLock lock;
-};
-
-// Like a future (very similar to ThreadFuture) but only for computations that already completed. Reuses the SAV's
-// implementation for memory management error handling though. Essentially a future that's returned from a synchronous
-// computation and guaranteed to be complete.
-
-template <class T>
-class ThreadResult {
-public:
-	T get() { return sav->get(); }
-
-	bool isValid() const { return sav != 0; }
-	bool isError() { return sav->isError(); }
-	Error& getError() {
-		if (!isError())
-			throw future_not_error();
-
-		return sav->error;
-	}
-
-	ThreadResult() : sav(0) {}
-	explicit ThreadResult(ThreadSingleAssignmentVar<T>* sav) : sav(sav) {
-		ASSERT(sav->isReady());
-		// sav->addref();
-	}
-	ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {
-		if (sav)
-			sav->addref();
-	}
-	ThreadResult(ThreadResult<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
-	ThreadResult(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
-	ThreadResult(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
-	ThreadResult(const ErrorOr<T> errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
-		if (errorOr.isError()) {
-			sav->sendError(errorOr.getError());
-		} else {
-			sav->send(errorOr.get());
-		}
-	}
-	~ThreadResult() {
-		if (sav)
-			sav->delref();
-	}
-	void operator=(const ThreadFuture<T>& rhs) {
-		if (rhs.sav)
-			rhs.sav->addref();
-		if (sav)
-			sav->delref();
-		sav = rhs.sav;
-	}
-	void operator=(ThreadFuture<T>&& rhs) noexcept {
-		if (sav != rhs.sav) {
-			if (sav)
-				sav->delref();
-			sav = rhs.sav;
-			rhs.sav = 0;
-		}
-	}
-	bool operator==(const ThreadResult& rhs) { return rhs.sav == sav; }
-	bool operator!=(const ThreadResult& rhs) { return rhs.sav != sav; }
-
-	ThreadSingleAssignmentVarBase* getPtr() const { return sav; }
-	ThreadSingleAssignmentVarBase* extractPtr() {
-		auto* p = sav;
-		sav = nullptr;
-		return p;
-	}
-
-private:
-	ThreadSingleAssignmentVar<T>* sav;
 };
 
 #include "flow/unactorcompiler.h"

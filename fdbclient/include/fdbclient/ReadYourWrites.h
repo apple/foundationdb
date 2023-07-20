@@ -79,45 +79,45 @@ public:
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
-	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) override;
-	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) override;
-	Future<RangeResult> getRange(const KeySelector& begin,
-	                             const KeySelector& end,
-	                             int limit,
-	                             Snapshot = Snapshot::False,
-	                             Reverse = Reverse::False) override;
-	Future<RangeResult> getRange(KeySelector begin,
-	                             KeySelector end,
-	                             GetRangeLimits limits,
-	                             Snapshot = Snapshot::False,
-	                             Reverse = Reverse::False) override;
-	Future<RangeResult> getRange(const KeyRange& keys,
-	                             int limit,
-	                             Snapshot snapshot = Snapshot::False,
-	                             Reverse reverse = Reverse::False) {
+	Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False) override;
+	Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False) override;
+	Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                 const KeySelector& end,
+	                                 int limit,
+	                                 Snapshot = Snapshot::False,
+	                                 Reverse = Reverse::False) override;
+	Future<RangeReadResult> getRange(KeySelector begin,
+	                                 KeySelector end,
+	                                 GetRangeLimits limits,
+	                                 Snapshot = Snapshot::False,
+	                                 Reverse = Reverse::False) override;
+	Future<RangeReadResult> getRange(const KeyRange& keys,
+	                                 int limit,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
 		                snapshot,
 		                reverse);
 	}
-	Future<RangeResult> getRange(const KeyRange& keys,
-	                             GetRangeLimits limits,
-	                             Snapshot snapshot = Snapshot::False,
-	                             Reverse reverse = Reverse::False) {
+	Future<RangeReadResult> getRange(const KeyRange& keys,
+	                                 GetRangeLimits limits,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
 		                snapshot,
 		                reverse);
 	}
-	Future<MappedRangeResult> getMappedRange(KeySelector begin,
-	                                         KeySelector end,
-	                                         Key mapper,
-	                                         GetRangeLimits limits,
-	                                         int matchIndex,
-	                                         Snapshot = Snapshot::False,
-	                                         Reverse = Reverse::False) override;
+	Future<MappedRangeReadResult> getMappedRange(KeySelector begin,
+	                                             KeySelector end,
+	                                             Key mapper,
+	                                             GetRangeLimits limits,
+	                                             int matchIndex,
+	                                             Snapshot = Snapshot::False,
+	                                             Reverse = Reverse::False) override;
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key) override;
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
@@ -216,11 +216,17 @@ public:
 	Transaction& getTransaction() { return tr; }
 
 	Optional<Reference<Tenant>> getTenant() { return tr.getTenant(); }
-	TagSet const& getTags() const { return tr.getTags(); }
+	Optional<TransactionTag> getTag() const { return tr.getTag(); }
 
 	// used in template functions as returned Future type
 	template <typename Type>
 	using FutureT = Future<Type>;
+
+	virtual void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
+
+	std::vector<BaseTraceEvent> debugTraces;
+	std::vector<std::string> debugMessages;
 
 private:
 	friend class RYWImpl;

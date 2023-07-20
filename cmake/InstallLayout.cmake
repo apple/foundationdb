@@ -1,25 +1,23 @@
 include(FDBInstall)
 
 function(install_symlink_impl)
-  if (NOT WIN32)
-    set(options "")
-    set(one_value_options TO DESTINATION)
-    set(multi_value_options COMPONENTS)
-    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+  set(options "")
+  set(one_value_options TO DESTINATION)
+  set(multi_value_options COMPONENTS)
+  cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
-    get_filename_component(fname ${SYM_DESTINATION} NAME)
-    get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
-    set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
-    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
-    foreach(component IN LISTS SYM_COMPONENTS)
-      install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${component})
-    endforeach()
-  endif()
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
+  get_filename_component(fname ${SYM_DESTINATION} NAME)
+  get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
+  set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
+  foreach(component IN LISTS SYM_COMPONENTS)
+    install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${component})
+  endforeach()
 endfunction()
 
 function(install_symlink)
-  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
+  if(NOT OPEN_FOR_IDE)
     set(options "")
     set(one_value_options COMPONENT LINK_DIR FILE_DIR LINK_NAME FILE_NAME)
     set(multi_value_options "")
@@ -78,17 +76,15 @@ function(install_symlink)
 endfunction()
 
 function(symlink_files)
-  if (NOT WIN32)
-    set(options "")
-    set(one_value_options LOCATION SOURCE)
-    set(multi_value_options TARGETS)
-    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+  set(options "")
+  set(one_value_options LOCATION SOURCE)
+  set(multi_value_options TARGETS)
+  cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
-    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
-    foreach(component IN LISTS SYM_TARGETS)
-      execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
-    endforeach()
-  endif()
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+  foreach(component IN LISTS SYM_TARGETS)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+  endforeach()
 endfunction()
 
 fdb_install_packages(TGZ DEB EL7 VERSIONED)
@@ -175,12 +171,6 @@ file(MAKE_DIRECTORY "${script_dir}/clients/usr/lib/cmake")
 install(DIRECTORY "${script_dir}/clients/usr/lib/cmake"
   DESTINATION usr/lib
   COMPONENT clients-versioned)
-
-################################################################################
-# Move Docker Setup
-################################################################################
-
-file(COPY "${PROJECT_SOURCE_DIR}/packaging/docker" DESTINATION "${PROJECT_BINARY_DIR}/packages/")
 
 ################################################################################
 # General CPack configuration
@@ -360,25 +350,23 @@ string(RANDOM LENGTH 8 description2)
 set(CLUSTER_DESCRIPTION1 ${description1} CACHE STRING "Cluster description")
 set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 
-if(NOT WIN32)
-  fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
-    DESTINATION etc
-    COMPONENT server)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
-    DESTINATION "usr/lib/foundationdb"
-    COMPONENT server-deb)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
-    DESTINATION "lib/systemd/system"
-    COMPONENT server-el7)
-  install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
-    DESTINATION "etc/init.d"
-    RENAME "foundationdb"
-    COMPONENT server-deb)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
-    DESTINATION "usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/lib/systemd/system"
-    COMPONENT server-versioned)
-  install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
-    DESTINATION "usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/etc/init.d"
-    RENAME "foundationdb"
-    COMPONENT server-versioned)
-endif()
+fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
+  DESTINATION etc
+  COMPONENT server)
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
+  DESTINATION "usr/lib/foundationdb"
+  COMPONENT server-deb)
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
+  DESTINATION "lib/systemd/system"
+  COMPONENT server-el7)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+  DESTINATION "etc/init.d"
+  RENAME "foundationdb"
+  COMPONENT server-deb)
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
+  DESTINATION "usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/lib/systemd/system"
+  COMPONENT server-versioned)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+  DESTINATION "usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/etc/init.d"
+  RENAME "foundationdb"
+  COMPONENT server-versioned)

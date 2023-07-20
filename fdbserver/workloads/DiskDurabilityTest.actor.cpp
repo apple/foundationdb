@@ -90,7 +90,7 @@ struct DiskDurabilityTest : TestWorkload {
 		state Transaction tr(db);
 		loop {
 			try {
-				state RangeResult r = wait(tr.getRange(self->range, GetRangeLimits(1000000)));
+				state RangeReadResult r = wait(tr.getRange(self->range, GetRangeLimits(1000000)));
 				verifyPages = r.size();
 				state int i;
 				for (i = 0; i < r.size(); i++) {
@@ -142,7 +142,7 @@ struct DiskDurabilityTest : TestWorkload {
 						tr.clear(self->encodeKey(targetPages[i]));
 
 					if (!first) {
-						Optional<Value> v = wait(tr.get("syncs"_sr.withPrefix(self->metrics.begin)));
+						ValueReadResult v = wait(tr.get("syncs"_sr.withPrefix(self->metrics.begin)));
 						int64_t count = v.present() ? self->decodeValue(v.get()) : 0;
 						count++;
 						tr.set("syncs"_sr.withPrefix(self->metrics.begin), self->encodeValue(count));

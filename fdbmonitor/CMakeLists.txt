@@ -43,7 +43,6 @@ if(NOT EXISTS ${CMAKE_BINARY_DIR}/sandbox/foundationdb.conf)
     ${CMAKE_BINARY_DIR}/sandbox/foundationdb.conf)
 endif()
 
-# this is not portable on Windows - but fdbmonitor isn't built there anyways...
 add_custom_target(clean_sandbox
   COMMAND rm -rf ${CMAKE_BINARY_DIR}/sandbox/data/* && rm -rf ${CMAKE_BINARY_DIR}/sandbox/logs/*
   COMMENT "Cleaning existing sandbox")

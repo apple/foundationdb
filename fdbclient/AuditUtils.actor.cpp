@@ -33,7 +33,7 @@ ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Tra
 	loop {
 		auditStates.clear();
 		try {
-			RangeResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
+			RangeReadResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
 			for (int i = 0; i < res.size(); ++i) {
 				auditStates.push_back(decodeAuditStorageState(res[i].value));
 			}
@@ -94,7 +94,7 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 
 	loop {
 		try {
-			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
+			ValueReadResult res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
 			TraceEvent("ReadAuditState", id).detail("AuditKey", auditKey(type, id));
 			break;

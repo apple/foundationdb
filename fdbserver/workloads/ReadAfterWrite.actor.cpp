@@ -71,7 +71,7 @@ struct ReadAfterWriteWorkload : KVWorkload {
 				// server after we commit.  Its existence or non-existence is irrelevant.  We write back the exact same
 				// value (or clear the key, if empty) so that the database state is not mutated.  This means this
 				// workload can be paired with any other workload, and it won't affect any results.
-				Optional<Value> value = wait(writeTr.get(key));
+				ValueReadResult value = wait(writeTr.get(key));
 				if (value.present()) {
 					writeTr.set(key, value.get());
 				} else {
@@ -119,4 +119,4 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<ReadAfterWriteWorkload> decryptionReadAfterWriteWorkloadFactory;
+WorkloadFactory<ReadAfterWriteWorkload> ReadAfterWriteWorkloadFactory;

@@ -232,7 +232,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
 	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
 	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
-	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag) final;
+	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag, bool useSatellite) final;
 
 	Version getKnownCommittedVersion() final;
 
@@ -267,8 +267,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
-	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
-	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	Future<Reference<ILogSystem>> newEpoch(WorkerRecruitment const& recr,
+	                                       Future<RemoteWorkerRecruitment> const& fRemoteWorkers,
 	                                       DatabaseConfiguration const& config,
 	                                       LogEpoch recoveryCount,
 	                                       Version recoveryTransactionVersion,
@@ -348,7 +348,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	ACTOR static Future<Void> newRemoteEpoch(TagPartitionedLogSystem* self,
 	                                         Reference<TagPartitionedLogSystem> oldLogSystem,
-	                                         Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                         Future<RemoteWorkerRecruitment> fRemoteWorkers,
 	                                         DatabaseConfiguration configuration,
 	                                         LogEpoch recoveryCount,
 	                                         Version recoveryTransactionVersion,
@@ -356,8 +356,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         std::vector<Tag> allTags);
 
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
-	                                                    RecruitFromConfigurationReply recr,
-	                                                    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                                    WorkerRecruitment recr,
+	                                                    Future<RemoteWorkerRecruitment> fRemoteWorkers,
 	                                                    DatabaseConfiguration configuration,
 	                                                    LogEpoch recoveryCount,
 	                                                    Version recoveryTransactionVersion,

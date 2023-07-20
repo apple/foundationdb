@@ -21,7 +21,7 @@
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
 namespace {
@@ -69,10 +69,10 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 					fmt::print("<empty>\n");
 				}
 			} else {
-				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
-				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
-				Optional<ThrottleApi::TagQuotaValue> quota =
-				    v.map([](Value val) { return ThrottleApi::TagQuotaValue::fromValue(val); });
+				state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
+				Optional<ThrottleApi::ThroughputQuotaValue> quota =
+				    v.map([](Value val) { return ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(val)); });
 
 				if (!quota.present()) {
 					fmt::print("<empty>\n");
@@ -97,22 +97,16 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 			if (quotaType == QuotaType::STORAGE) {
 				TenantMetadata::storageQuota().set(tr, tag, value);
 			} else {
-				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
-				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
-				ThrottleApi::TagQuotaValue quota;
+				state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
+				ThrottleApi::ThroughputQuotaValue quota;
 				if (v.present()) {
-					quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+					quota = ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(v.get()));
 				}
-				// Internally, costs are stored in terms of pages, but in the API,
-				// costs are specified in terms of bytes
 				if (quotaType == QuotaType::TOTAL) {
-					// Round up to nearest page size
-					quota.totalQuota = ((value - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) *
-					                   CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+					quota.totalQuota = value;
 				} else if (quotaType == QuotaType::RESERVED) {
-					// Round up to nearest page size
-					quota.reservedQuota = ((value - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) *
-					                      CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+					quota.reservedQuota = value;
 				}
 				if (!quota.isValid()) {
 					throw invalid_throttle_quota_value();

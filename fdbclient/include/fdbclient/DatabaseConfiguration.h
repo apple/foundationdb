@@ -348,6 +348,9 @@ private:
 	bool isOverridden(std::string key) const;
 	// Overwrite commitProxyCount and/or grvProxyCount if set to -1
 	void overwriteProxiesCount();
+
+public: // Testing
+	void test_setDefaultReplicationPolicy();
 };
 
 #endif

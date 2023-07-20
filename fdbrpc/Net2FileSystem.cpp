@@ -39,7 +39,6 @@
 #include "fdbrpc/AsyncFileChaos.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
-#include "fdbrpc/AsyncFileWinASIO.actor.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"

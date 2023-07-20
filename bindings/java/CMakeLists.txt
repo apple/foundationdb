@@ -32,9 +32,13 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
+  src/main/com/apple/foundationdb/FDBKeyValue.java
+  src/main/com/apple/foundationdb/FDBMappedKeyValue.java
+  src/main/com/apple/foundationdb/FDBResultBytes.java
   src/main/com/apple/foundationdb/FDBTenant.java
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureBool.java
+  src/main/com/apple/foundationdb/FutureBytes.java
   src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureKeyArray.java
@@ -45,8 +49,13 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FutureStrings.java
   src/main/com/apple/foundationdb/FutureVoid.java
   src/main/com/apple/foundationdb/JNIUtil.java
+  src/main/com/apple/foundationdb/KeyArrayResult.java
+  src/main/com/apple/foundationdb/KeyRangeArrayResult.java
   src/main/com/apple/foundationdb/KeySelector.java
   src/main/com/apple/foundationdb/KeyValue.java
+  src/main/com/apple/foundationdb/MappedRangeQuery.java
+  src/main/com/apple/foundationdb/MappedRangeResult.java
+  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/MappedKeyValue.java
   src/main/com/apple/foundationdb/LocalityUtil.java
   src/main/com/apple/foundationdb/NativeFuture.java
@@ -56,14 +65,11 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
-  src/main/com/apple/foundationdb/MappedRangeQuery.java
-  src/main/com/apple/foundationdb/KeyArrayResult.java
-  src/main/com/apple/foundationdb/KeyRangeArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
-  src/main/com/apple/foundationdb/MappedRangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
-  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
+  src/main/com/apple/foundationdb/ReadMetrics.java
+  src/main/com/apple/foundationdb/ResultBytes.java
   src/main/com/apple/foundationdb/ReadTransaction.java
   src/main/com/apple/foundationdb/ReadTransactionContext.java
   src/main/com/apple/foundationdb/subspace/package-info.java
@@ -159,7 +165,7 @@ else()
   target_link_libraries(java_workloads PRIVATE fdb_java_native)
 endif()
 
-if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+if(NOT APPLE AND NOT OPEN_FOR_IDE)
   target_link_options(java_workloads PRIVATE "LINKER:--version-script=${CMAKE_SOURCE_DIR}/bindings/c/external_workload.map,-z,nodelete")
 endif()
 
@@ -239,9 +245,7 @@ if(NOT OPEN_FOR_IDE)
     add_custom_target(copy_libs DEPENDS ${unpack_dir}/lib)
     add_dependencies(unpack_jar copy_libs)
   endif()
-  if(WIN32)
-    set(lib_destination "windows/amd64")
-  elseif(APPLE)
+  if(APPLE)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
       set(lib_destination "osx/aarch64")
     else()
@@ -250,8 +254,6 @@ if(NOT OPEN_FOR_IDE)
   else()
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
       set(lib_destination "linux/aarch64")
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-      set(lib_destination "linux/ppc64le")
     else()
       set(lib_destination "linux/amd64")
     endif()

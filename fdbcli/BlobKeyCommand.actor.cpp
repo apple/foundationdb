@@ -71,8 +71,8 @@ ACTOR Future<bool> printBlobHistory(Database db,
 	state GranuleHistory history;
 	loop {
 		try {
-			RangeResult result =
-			    wait(tr2.getRange(blobGranuleHistoryKeyRangeFor(activeGranule), 1, Snapshot::False, Reverse::True));
+			RangeReadResult result =
+			    wait(tr.getRange(blobGranuleHistoryKeyRangeFor(activeGranule), 1, Snapshot::False, Reverse::True));
 			ASSERT(result.size() <= 1);
 
 			if (result.empty()) {
@@ -128,7 +128,7 @@ ACTOR Future<bool> printBlobHistory(Database db,
 
 		loop {
 			try {
-				Optional<Value> parentHistoryValue = wait(tr2.get(parentHistoryKey));
+				ValueReadResult parentHistoryValue = wait(tr2.get(parentHistoryKey));
 				foundParent = parentHistoryValue.present();
 				if (foundParent) {
 					std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(parentHistoryKey);

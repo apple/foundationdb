@@ -56,6 +56,8 @@ struct ProcessInfo;
 struct MachineInfo;
 } // namespace simulator
 
+constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
+
 class ISimulator : public INetwork {
 
 public:
@@ -454,6 +456,12 @@ struct DiskParameters : ReferenceCounted<DiskParameters> {
 
 // Simulates delays for performing operations on disk
 extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int64_t size, bool sync = false);
+
+// Enables connection failures, i.e., clogging, in simulation
+void enableConnectionFailures(std::string const& context);
+
+// Disables connection failures, i.e., clogging, in simulation
+void disableConnectionFailures(std::string const& context);
 
 class Sim2FileSystem : public IAsyncFileSystem {
 public:

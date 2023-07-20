@@ -177,7 +177,7 @@ struct SimServerContext : ReferenceCounted<SimServerContext>, NonCopyable {
 	std::vector<Future<Void>> listenBinds;
 	std::vector<Reference<IListener>> listeners;
 
-	SimServerContext() : dbgid(deterministicRandom()->randomUniqueID()), running(true), actors(false), nextPort(5000) {}
+	SimServerContext() : dbgid(deterministicRandom()->randomUniqueID()), running(true), nextPort(5000), actors(false) {}
 
 	NetworkAddress newAddress();
 	void registerNewServer(NetworkAddress addr, Reference<IRequestHandler> server);

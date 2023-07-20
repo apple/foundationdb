@@ -371,7 +371,7 @@ public:
 			loop {
 				try {
 					// For now, make this transaction self-conflicting to avoid commit errors
-					Optional<Value> value = wait(transaction->get(data[currentIndex].key));
+					ValueReadResult value = wait(transaction->get(data[currentIndex].key));
 
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
 					     i++) {
@@ -425,7 +425,7 @@ public:
 			// Get the values from the database
 			loop {
 				try {
-					state std::vector<Future<Optional<Value>>> dbValueFutures;
+					state std::vector<Future<ValueReadResult>> dbValueFutures;
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						dbValueFutures.push_back(transaction->get(keys[i]));
@@ -476,7 +476,7 @@ public:
 		state int limit = deterministicRandom()->randomInt(0, 101);
 
 		// Get the range from memory
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
+		state RangeReadResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
 
 		// Get the range from the database
 		state RangeResult dbResults;
@@ -490,7 +490,7 @@ public:
 				readVersion = version;
 
 				KeyRangeRef range(start, end);
-				RangeResult rangeResults = wait(transaction->getRange(range, limit, reverse));
+				RangeReadResult rangeResults = wait(transaction->getRange(range, limit, reverse));
 				dbResults = rangeResults;
 				break;
 			} catch (Error& e) {
@@ -563,7 +563,7 @@ public:
 		state int limit = deterministicRandom()->randomInt(0, 101);
 
 		// Get the range from the memory store
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
+		state RangeReadResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
 
 		// Get the range from the database
 		state RangeResult dbResults;
@@ -576,7 +576,7 @@ public:
 				Version version = wait(transaction->getReadVersion());
 				readVersion = version;
 
-				RangeResult range = wait(transaction->getRange(startSelector, endSelector, limit, reverse));
+				RangeReadResult range = wait(transaction->getRange(startSelector, endSelector, limit, reverse));
 
 				if (endKey == self->store.endKey()) {
 					for (int i = 0; i < range.size(); i++) {
@@ -622,7 +622,7 @@ public:
 
 			loop {
 				try {
-					state std::vector<Future<Standalone<KeyRef>>> dbKeyFutures;
+					state std::vector<Future<KeyReadResult>> dbKeyFutures;
 					for (int i = currentIndex;
 					     i < std::min(currentIndex + self->maxKeysPerTransaction, selectors.size());
 					     i++)
@@ -672,7 +672,7 @@ public:
 					state Key dbKey;
 					loop {
 						try {
-							Key key = wait(tr->getKey(sel));
+							KeyReadResult key = wait(tr->getKey(sel));
 							dbKey = key;
 							break;
 						} catch (Error& e) {
@@ -712,7 +712,7 @@ public:
 			loop {
 				try {
 					// For now, make this transaction self-conflicting to avoid commit errors
-					Optional<Value> value = wait(transaction->get(keys[0]));
+					ValueReadResult value = wait(transaction->get(keys[0]));
 
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++) {
@@ -767,7 +767,7 @@ public:
 		loop {
 			try {
 				// For now, make this transaction self-conflicting to avoid commit errors
-				Optional<Value> value = wait(transaction->get(start));
+				ValueReadResult value = wait(transaction->get(start));
 
 				state KeyRangeRef range(start, end);
 				if (!range.empty()) {

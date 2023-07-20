@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/BooleanParam.h"
@@ -58,10 +59,14 @@ struct TenantMapEntryTxnStateStore {
 	int64_t id = -1;
 	TenantName tenantName;
 	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+	Optional<TenantGroupName> group;
 
 	TenantMapEntryTxnStateStore() {}
-	TenantMapEntryTxnStateStore(int64_t id, TenantName tenantName, TenantAPI::TenantLockState tenantLockState)
-	  : id(id), tenantName(tenantName), tenantLockState(tenantLockState) {}
+	TenantMapEntryTxnStateStore(int64_t id,
+	                            TenantName tenantName,
+	                            TenantAPI::TenantLockState tenantLockState,
+	                            Optional<TenantGroupName> group)
+	  : id(id), tenantName(tenantName), tenantLockState(tenantLockState), group(group) {}
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantMapEntryTxnStateStore decode(ValueRef const& value) {
@@ -70,7 +75,7 @@ struct TenantMapEntryTxnStateStore {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantLockState, tenantName);
+		serializer(ar, id, tenantLockState, tenantName, group);
 	}
 };
 
@@ -101,7 +106,7 @@ struct TenantMapEntry {
 	}
 
 	TenantMapEntryTxnStateStore toTxnStateStoreEntry() const {
-		return TenantMapEntryTxnStateStore(id, tenantName, tenantLockState);
+		return TenantMapEntryTxnStateStore(id, tenantName, tenantLockState, tenantGroup);
 	}
 
 	bool operator==(TenantMapEntry const& other) const;
@@ -211,6 +216,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectMap<TenantGroupName, typename TenantTypes::TenantGroupEntryT, decltype(IncludeVersion()), NullCodec>
 	    tenantGroupMap;
 	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
+	KeyBackedMap<TenantGroupName, ThrottleApi::ThroughputQuotaValue> throughputQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)
@@ -221,6 +227,7 @@ struct TenantMetadataSpecification {
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
 	    storageQuota(subspace.withSuffix("storageQuota/"_sr)),
+	    throughputQuota(subspace.withSuffix("throughputQuota/"_sr)),
 	    lastTenantModification(subspace.withSuffix("lastModification"_sr)) {}
 };
 
@@ -237,6 +244,7 @@ struct TenantMetadata {
 	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
 	static inline auto& storageQuota() { return instance().storageQuota; }
+	static inline auto& throughputQuota() { return instance().throughputQuota; }
 	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
 	// This system keys stores the tenant id prefix that is used during metacluster/standalone cluster creation. If the
 	// key is not present then we will assume the prefix to be 0

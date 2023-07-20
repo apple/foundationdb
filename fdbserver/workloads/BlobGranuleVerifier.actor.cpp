@@ -88,6 +88,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	Future<Void> summaryClient;
 	Future<Void> forceFlushingClient;
+	Future<Void> reqWayInFuture;
 	Promise<Void> triggerSummaryComplete;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -225,7 +226,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				RangeResult history = wait(tr.getRange(cur, 100));
+				RangeReadResult history = wait(tr.getRange(cur, 100));
 				for (auto& it : history) {
 					KeyRange keyRange;
 					Version version;
@@ -511,6 +512,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		} else {
 			forceFlushingClient = Future<Void>(Void());
 		}
+		if (clientId == 0 && deterministicRandom()->random01() < 0.1) {
+			reqWayInFuture = requestWayInTheFuture(cx, normalKeys, {});
+		}
 		return delay(testDuration);
 	}
 
@@ -535,7 +539,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	                                              bool strictMetadataCheck,
 	                                              bool possiblyInFlight) {
 		// change feed
-		Optional<Value> changeFeed = wait(tr->get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
+		ValueReadResult changeFeed = wait(tr->get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
 		if (possiblyInFlight && changeFeed.present()) {
 			fmt::print("WARN: Change Feed for [{0} - {1}): {2} not purged, retrying\n",
 			           granuleRange.begin.printable(),
@@ -546,7 +550,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		ASSERT(!changeFeed.present());
 
 		// file metadata
-		RangeResult fileMetadata = wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
+		RangeReadResult fileMetadata = wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
 		if (possiblyInFlight && !fileMetadata.empty()) {
 			fmt::print("WARN: File metadata for [{0} - {1}): {2} not purged, retrying\n",
 			           granuleRange.begin.printable(),
@@ -558,28 +562,28 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		if (strictMetadataCheck) {
 			// lock
-			Optional<Value> lock = wait(tr->get(blobGranuleLockKeyFor(granuleRange)));
+			ValueReadResult lock = wait(tr->get(blobGranuleLockKeyFor(granuleRange)));
 			if (possiblyInFlight && lock.present()) {
 				return false;
 			}
 			ASSERT(!lock.present());
 
 			// history entry
-			Optional<Value> history = wait(tr->get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
+			ValueReadResult history = wait(tr->get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
 			if (possiblyInFlight && history.present()) {
 				return false;
 			}
 			ASSERT(!history.present());
 
 			// split state
-			RangeResult splitData = wait(tr->getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
+			RangeReadResult splitData = wait(tr->getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
 			if (possiblyInFlight && !splitData.empty()) {
 				return false;
 			}
 			ASSERT(splitData.empty());
 
 			// merge state
-			Optional<Value> merge = wait(tr->get(blobGranuleMergeKeyFor(granuleId)));
+			ValueReadResult merge = wait(tr->get(blobGranuleMergeKeyFor(granuleId)));
 			if (possiblyInFlight && merge.present()) {
 				return false;
 			}
@@ -607,7 +611,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				RangeResult history = wait(tr.getRange(cur, 1000));
+				RangeReadResult history = wait(tr.getRange(cur, 1000));
 				for (auto& it : history) {
 					KeyRange keyRange;
 					Version version;
@@ -675,7 +679,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				RangeResult feeds = wait(tr.getRange(cur, 1000));
+				RangeReadResult feeds = wait(tr.getRange(cur, 1000));
 				for (auto& it : feeds) {
 					KeyRange keyRange;
 					Version version;
@@ -917,11 +921,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				Version ver = wait(tr.getReadVersion());
 				readVersion = ver;
 
-				state PromiseStream<Standalone<RangeResultRef>> results;
+				state PromiseStream<RangeReadResult> results;
 				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
 
 				loop {
-					Standalone<RangeResultRef> res = waitNext(results.getFuture());
+					RangeReadResult res = waitNext(results.getFuture());
 					output.arena().dependsOn(res.arena());
 					output.append(output.arena(), res.begin(), res.size());
 					bufferedBytes += res.expectedSize();

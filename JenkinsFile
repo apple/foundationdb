@@ -1,0 +1,350 @@
+import hudson.model.Result
+import hudson.model.Run
+import jenkins.model.CauseOfInterruption.UserInterruption
+
+pipeline {
+    agent { label 'regular-memory-node-c7' }
+    options { timestamps() }
+    stages {
+        stage('checkout') {
+            steps {
+                script {
+                    repo_url = "https://github.com/snowflakedb/frostdb.git"
+                    scmInfo = checkout scm
+                    println("${scmInfo}")
+                    precommit_job_status = "SUCCESS"
+                    buildcop_members = ['tclinkenbeard',
+                                         'akejriwal',
+                                         'mdvorsky',
+                                         'jshim',
+                                         'jslocum',
+                                         'ajbeamon',
+                                         'dadkins',
+                                         'yajin']
+                    user_id = ""
+                    labels = []
+                    if (env.BRANCH_NAME.startsWith("PR-")) {
+                        //Aborting previous runs if any in progress to avoid running multiple runs for same PR
+                        abortPreviousBuilds()
+                        labels = getLabels()
+                    }
+                }
+            }
+        }
+        stage('Clang Format Check') {
+            steps {
+                script {
+                    println("**** Starting Clang format check  **** ")
+                    def j = build job: "FDB_Build/FDB_clang_format_check",
+                            parameters: [
+                                string(name: 'ARCH', value: "x86_64"),
+                                string(name: 'GIT_REMOTE', value: "${repo_url}"),
+                                string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}")
+                            ],
+                    propagate: false,
+                    wait: true
+
+                    if ("${j.result}" == "SUCCESS") {
+                        currentBuild.result = 'SUCCESS'
+                        createCheck("clang format check", "clang format check", j.absoluteUrl+"/clang", "completed", "success");
+                    } else {
+                        currentBuild.result = 'FAILURE'
+                        println("clang format check failure.")
+                        createCheck("clang format check", "clang format check", j.absoluteUrl+"/clang", "completed", "failure");
+                    }
+                }
+            }
+        }
+        stage('Check Git Comment') {
+            steps {
+                script {
+                    // Checking github comment is only needed if branch is PR-*
+                    if (env.BRANCH_NAME.startsWith("PR-")) {
+                        def trigger_comment = "@fdb-ci precommit start"
+                        def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
+                        println("Build Trigger Cause : ${build_trigger_cause}")
+
+                        if ("${build_trigger_cause}" == "GitHub pull request comment" &&
+                                "${currentBuild.getBuildCauses()[0].commentBody}".contains("${trigger_comment}")) {
+                            println("Moving ahead with pipeline")
+
+                            //extracting the LDAP portion from commentAuthor sfc-gh-xxx
+                            user_id = "${currentBuild.getBuildCauses()[0].commentAuthor}".split("-")[2]
+                            createCheck("github_comment", "Criteria Satisfied", "", "completed", "success");
+
+                            //Check CI is initiated by @fdb-build-cop member when labels are used
+                            println("labels " + labels.size())
+                            if (labels.size() > 0 && labels[0] != "")  {
+                                if (buildcop_members.contains(user_id)) {
+                                    msg = user_id + " approved labels " + labels.join(", ") + " and started CI"
+                                    createCheck("labels_check", msg, msg, "completed", "success");
+                                } else {
+                                    msg = "CI can only be triggered by one of the members of @fdb-build-cop if labels used"
+                                    shortDescription = "Please check with one of the @fdb-build-cop members: " + buildcop_members.join(", ")
+                                    createCheck("labels_check", msg, shortDescription, "completed", "failure");
+                                    error("Aborting the build.")
+                                }
+                            }
+                        } else {
+                            def triggerMessage = "To start Full CI, Please comment: @fdb-ci precommit start"
+                            createCheck("github_comment", triggerMessage, triggerMessage, "completed", "failure");
+                            println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}")
+                            currentBuild.result = 'FAILURE'
+                            error("Aborting the build.")
+                        }
+                    }
+                }
+            }
+        }
+        stage('FDB Build Image') {
+            steps {
+                script {
+                    def dryrun = "true"
+                    def isLatest = "false"
+                    def isRelease = "false"
+                    def git_branch = "${scmInfo.GIT_COMMIT}"
+
+                    // If branch is main, set isLatest = true
+                    if (env.BRANCH_NAME == "main") {
+                        isLatest = "true"
+                        dryrun = "false"
+                    }
+
+                    // If branch is release*, set git_branch='branch_name' to use it in image name tag
+                    if (env.BRANCH_NAME.startsWith("release")) {
+                        git_branch = env.BRANCH_NAME
+                        dryrun = "false"
+                    }
+                    // if any changes detected in path "/contrib/build_image/" run FDB_ECR/Build_Image job
+                    def changedFiles = getChangedFiles()
+                    println(changedFiles)
+                    if (changedFiles.contains("contrib/build_image/")) {
+                        println("**** Starting FDB Build Image Job  **** ")
+                        createCheck("FDB Build Image", "FDB Build Image", "In Progress", "in_progress", "");
+                        def j = build job: "FDB_ECR/Build_Image",
+                                parameters: [
+                                    string(name: 'PLATFORM', value: "x86_64,aarch64"),
+                                    string(name: 'GIT_URL', value: "${repo_url}"),
+                                    string(name: 'GIT_BRANCH', value: "${git_branch}"),
+                                    string(name: 'DOCKER_PATH', value: "contrib/build_image/centos7"),
+                                    string(name: 'DOCKER_FILENAME', value: "Dockerfile"),
+                                    string(name: 'IMAGE_TEMPLATE', value: "frostdb/devel"),
+                                    string(name: 'DOCKER_ARGS', value: "--target devel"),
+                                    booleanParam(name: 'LATEST', value: "${isLatest}"),
+                                    booleanParam(name: 'DRYRUN', value: "${dryrun}")
+                                ],
+                        propagate: false,
+                        wait: true
+
+                        if ("${j.result}" == "SUCCESS") {
+                            currentBuild.result = 'SUCCESS'
+                            createCheck("FDB Build Image", "FDB Build Image", j.absoluteUrl, "completed", "success");
+                        } else {
+                            currentBuild.result = 'FAILURE'
+                            println("FDB Build Image Job failure.")
+                            createCheck("FDB Build Image", "FDB Build Image", j.absoluteUrl, "completed", "failure");
+                        }
+                    }
+                }
+            }
+        }
+        stage('Build and Test') {
+            parallel {
+                stage('Build and Test - PRERELEASE') {
+                    steps {
+                        script {
+                            trigger_job("precommit_prerelease", "precommit_prerelease.yml")
+                        }
+                    }
+                }
+
+                stage('Build and Test - TSAN') {
+                    steps {
+                        script {
+                            trigger_job("precommit_tsan", "precommit_tsan.yml")
+                        }
+                    }
+                }
+
+                stage('Build and Test - ASAN') {
+                    steps {
+                        script {
+                            trigger_job("precommit_asan", "precommit_asan.yml")
+                        }
+                    }
+                }
+
+                stage('Build and Test - UBSAN') {
+                    steps {
+                        script {
+                            trigger_job("precommit_ubsan", "precommit_ubsan.yml")
+                        }
+                    }
+                }
+
+                stage('Build and Test - Valgrind') {
+                    steps {
+                        script {
+                            trigger_job("precommit_valgrind", "precommit_valgrind.yml")
+                        }
+                    }
+                }
+            }
+        }
+        stage('Update Build Status') {
+            steps {
+                script {
+                    if ("${precommit_job_status}" == "SUCCESS") {
+                        currentBuild.result = "SUCCESS"
+                    } else {
+                        currentBuild.result = "FAILURE"
+                    }
+                }
+            }
+        }
+    }
+}
+
+void trigger_job(jobName, profile) {
+    script {
+        if (labels.contains("bypass_all_checks")) {
+            msg = "Skipped due to label 'bypass_all_checks'"
+            createCheck(jobName, msg, msg, "completed", "success");
+            return
+        }
+
+        createCheck(jobName, "Build and Test", "In Progress", "in_progress", "");
+
+        def job_params = [string(name: 'ARCH', value: "x86_64"),
+                         string(name: 'GIT_REMOTE', value: "${repo_url}"),
+                         string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
+                         string(name: 'SLACK_USER_NAME', value: "${user_id}"),
+                         string(name: 'PR_ID', value: "${env.BRANCH_NAME}"),
+                         booleanParam(name: 'ALWAYS_TEST', value: true)]
+
+        def j = build job: 'FDB_BuildAndTest/FDB_Precommit',
+                parameters: job_params + [string('name': 'BUILD_TEST_PROFILE', value: profile)],
+                propagate: false,
+                wait: true
+
+        def logContent = Jenkins.getInstance().getItemByFullName("FDB_BuildAndTest/FDB_Precommit").getBuildByNumber(j.number).logFile.text
+        def logLines = logContent.split("\n")
+        def testCount = 0
+        def buildCount = 0
+        def details = []
+        def jobConclusion = "failure"
+        def failureCount = 0
+        def summary = ""
+
+        //Parsing line "2023-04-03 14:31:28  Build job run status:FAILURE http://job_url_link" to get build_info
+        for (line in logLines) {
+            if (line.contains("Build job run status:")) {
+                buildCount += 1
+                build_details = line.split("Build job run status:")
+                build_info = build_details[1].split(" ")
+                if (build_info[0] != "SUCCESS") {
+                    jobConclusion = "failure"
+                    failureCount += 1
+                }
+                summary += "Build Status: " + build_info[0] + ", Build Job URL : " + build_info[1] + " , "
+            }
+            if (line.contains("Test job run status:")) {
+                testCount += 1
+                build_details = line.split("Test job run status:")
+                build_info = build_details[1].split(" ")
+
+                if (build_info[0] != "SUCCESS") {
+                     // Ignore test failure if label 'bypass_test_failures' is set
+                    if (!labels.contains("bypass_test_failures")) {
+                        jobConclusion = "failure"
+                    }
+                    failureCount += 1
+                }
+
+                summary += " Test " + Integer.toString(testCount) + ": Status: " + build_info[0] +
+                           " Test Job URL : " + build_info[1] + " ,"
+            }
+        }
+
+        if (buildCount > 0 && failureCount == 0) {
+            jobConclusion = "success"
+        }
+
+        if (labels.contains("bypass_test_failures")) {
+            jobConclusion = "success"
+        }
+
+        title = "Failure count : " + Integer.toString(failureCount)
+        createCheck(jobName, title, summary, "completed", jobConclusion);
+
+        if (jobConclusion == "failure") {
+            // In case if any of the build or test fails we will mark current build as FAILURE
+            precommit_job_status = "FAILURE"
+        }
+    }
+}
+
+void createCheck(context, title, summary, jobStatus, jobConclusion) {
+    withCredentials([usernamePassword(credentialsId: 'Jenkins-FDB-GithubApp ',
+    usernameVariable: 'GITHUB_USER',
+    passwordVariable: 'GITHUB_TOKEN')]) {
+        //create check
+        // Handling separate condition for 'in_progress' and 'completed' jobStatus because
+        //as per Github API's providing conclusion will automatically set the status parameter to completed
+        if ("${jobStatus}" == "in_progress") {
+            sh """curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" \\
+                  -X POST https://api.github.com/repos/snowflakedb/frostdb/check-runs \\
+                 -d '{"name":"${context}","head_sha":"${scmInfo["GIT_COMMIT"]}",
+                      "status":"in_progress",
+                      "output":{"title":"${title}","summary":"${summary}"}'
+            """
+        }
+        if ("${jobStatus}" == "completed") {
+            sh """curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" \\
+                  -X POST https://api.github.com/repos/snowflakedb/frostdb/check-runs \\
+                 -d '{"name":"${context}","head_sha":"${scmInfo["GIT_COMMIT"]}",
+                      "status":"completed", "conclusion":"${jobConclusion}",
+                      "output":{"title":"${title}","summary":"${summary}"}'
+            """
+        }
+    }
+}
+
+def getChangedFiles() {
+    def git_dff = sh(script:"git diff HEAD~1 HEAD --name-only", returnStdout: true)
+    return git_dff
+}
+
+def getLabels() {
+    //taking pr_id from branch i.e taking 167 from PR-167
+    pr_id = env.BRANCH_NAME.split("-")[1]
+    withCredentials([usernamePassword(credentialsId: 'Jenkins-FDB-GithubApp',
+    usernameVariable: 'GITHUB_USER',
+    passwordVariable: 'GITHUB_TOKEN')]) {
+        sh """
+            curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" "https://api.github.com/repos/snowflakedb/frostdb/pulls/${pr_id}" -o pr.json
+        """
+    }
+    labels = sh(script:"jq -r '.labels[].name' pr.json; rm pr.json", returnStdout: true)
+    labels = labels.split("\n")
+    return labels
+}
+
+//Aborting previous runs if any in progress
+def abortPreviousBuilds() {
+    //This will look for previous job under Full project name: SnowFlake-FoundationDB/frostdb/<PR-ID>
+    Run previousBuild = currentBuild.rawBuild.getPreviousBuildInProgress()
+
+    while (previousBuild != null) {
+        if (previousBuild.isInProgress()) {
+            def executor = previousBuild.getExecutor()
+            if (executor != null) {
+                echo ">> Aborting older build #${previousBuild.number}"
+                executor.interrupt(Result.ABORTED, new UserInterruption(
+                    "Aborted by newer build #${currentBuild.number}"
+                ))
+            }
+        }
+        previousBuild = previousBuild.getPreviousBuildInProgress()
+    }
+}

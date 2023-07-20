@@ -24,8 +24,6 @@
 #include "fdbrpc/ActorFuzz.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#ifndef WIN32
-
 ACTOR Future<int> actorFuzz0(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
 	state int ifstate = 0;
 	try {
@@ -919,4 +917,3 @@ std::pair<int, int> actorFuzzTests() {
 	                           560881 });
 	return std::make_pair(testsOK, 30);
 }
-#endif // WIN32

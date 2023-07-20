@@ -251,7 +251,7 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			state int i;
@@ -425,6 +425,8 @@ public:
 			    .detail("HighestPriority", 0)
 			    .detail("BytesWritten", 0)
 			    .detail("BytesWrittenAverageRate", 0)
+			    .detail("RelocatorTotalCount", 0)
+			    .detail("RelocatorToSourceTeamCount", 0)
 			    .detail("PriorityRecoverMove", 0)
 			    .detail("PriorityRebalanceUnderutilizedTeam", 0)
 			    .detail("PriorityRebalannceOverutilizedTeam", 0)
@@ -741,7 +743,7 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 			if (self->context->ddEnabledState->sameId(req.requesterID) &&
 			    self->context->ddEnabledState->isBlobRestorePreparing()) {
 				// the sender use at-least once model, so we need to guarantee the idempotence
-				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
+				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest", probe::decoration::rare);
 				continue;
 			}
 			if (self->context->ddEnabledState->trySetBlobRestorePreparing(req.requesterID)) {
@@ -1106,7 +1108,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			configuration = _configuration;
 
 			// get storages
-			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 			state std::vector<StorageServerInterface> storageServers;
 			storageServers.reserve(serverList.size());
@@ -1119,7 +1121,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				workersMap[worker.interf.address()] = worker.interf;
 			}
 
-			Optional<Value> regionsValue = wait(tr.get("usable_regions"_sr.withPrefix(configKeysPrefix)));
+			ValueReadResult regionsValue = wait(tr.get("usable_regions"_sr.withPrefix(configKeysPrefix)));
 			int usableRegions = 1;
 			if (regionsValue.present()) {
 				usableRegions = atoi(regionsValue.get().toString().c_str());
@@ -1173,7 +1175,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			}
 
 			// get coordinators
-			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
+			ValueReadResult coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
 				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
 				throw operation_failed();
@@ -1493,7 +1495,7 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			RangeResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!range.more);
 			std::set<UID> caches;
 			for (auto& kv : range) {
@@ -1867,9 +1869,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
-					CODE_PROBE(true,
-					           "Data distributor received a duplicate finished snapshot request",
-					           probe::decoration::rare);
+					CODE_PROBE(true, "Data distributor received a duplicate finished snapshot request");
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")

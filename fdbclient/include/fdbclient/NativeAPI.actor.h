@@ -48,6 +48,7 @@
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
 FDB_BOOLEAN_PARAM(UseProvisionalProxies);
+FDB_BOOLEAN_PARAM(UseRawAccess);
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -167,8 +168,7 @@ struct TransactionOptions {
 
 	TransactionPriority priority;
 
-	TagSet tags; // All tags set on transaction
-	TagSet readTags; // Tags that can be sent with read requests
+	Optional<TransactionTag> throttlingTag;
 
 	// update clear function if you add a new field
 
@@ -244,13 +244,14 @@ class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, No
 public:
 	Tenant(Database cx, TenantName name);
 	explicit Tenant(int64_t id);
-	Tenant(Future<int64_t> id, Optional<TenantName> name);
+	Tenant(Future<TenantLookupInfo> tenantLookupFuture, Optional<TenantName> name);
 
 	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
 
-	Future<Void> ready() const { return success(idFuture); }
+	Future<Void> ready() const { return success(lookupFuture); }
 	int64_t id() const;
-	Future<int64_t> getIdFuture() const;
+	Optional<TenantGroupName> tenantGroup() const;
+	Future<TenantLookupInfo> getLookupFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 
@@ -258,7 +259,7 @@ public:
 
 private:
 	mutable int64_t bigEndianId = -1;
-	Future<int64_t> idFuture;
+	Future<TenantLookupInfo> lookupFuture;
 };
 
 template <>
@@ -282,10 +283,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
-	// Measured by summing the bytes accessed by each read and write operation
-	// after rounding up to the nearest page size and applying a write penalty
-	int64_t totalCost = 0;
-
 	double proxyTagThrottledDuration = 0.0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
@@ -321,6 +318,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
+	~TransactionState();
+
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 
 	Version readVersion() {
@@ -337,9 +336,25 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
 	Future<Version> getReadVersion(uint32_t flags);
 
+	void addReadCost(uint64_t bytes);
+	void addWriteCost(uint64_t bytes);
+	void flushWriteCost();
+	int64_t getTotalCost() const;
+
 private:
 	Optional<Reference<Tenant>> tenant_;
 	bool tenantSet;
+
+	// Measured by summing the bytes accessed by each read operation
+	// after rounding up to the nearest page size
+	int64_t readCost = 0;
+
+	// Measured by summing the bytes accessed by each write operation
+	// after rounding up to the nearest page size and applying a write penalty
+	int64_t writeCost = 0;
+	bool flushedWriteCost = false;
+
+	Optional<ThrottlingId> getThrottlingId();
 };
 
 class Transaction : NonCopyable {
@@ -348,43 +363,38 @@ public:
 	~Transaction();
 
 	void setVersion(Version v);
-	Future<Version> getReadVersion() {
-		if (!trState->readVersionFuture.isValid()) {
-			trState->readVersionFuture = trState->getReadVersion(0);
-		}
-		return trState->readVersionFuture;
-	}
+	Future<Version> getReadVersion();
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
-	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           int limit,
-	                                           Snapshot = Snapshot::False,
-	                                           Reverse = Reverse::False);
-	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           GetRangeLimits limits,
-	                                           Snapshot = Snapshot::False,
-	                                           Reverse = Reverse::False);
-	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
-	                                           int limit,
-	                                           Snapshot snapshot = Snapshot::False,
-	                                           Reverse reverse = Reverse::False) {
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               int limit,
+	                                               Snapshot = Snapshot::False,
+	                                               Reverse = Reverse::False);
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               GetRangeLimits limits,
+	                                               Snapshot = Snapshot::False,
+	                                               Reverse = Reverse::False);
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeyRange& keys,
+	                                               int limit,
+	                                               Snapshot snapshot = Snapshot::False,
+	                                               Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
 		                snapshot,
 		                reverse);
 	}
-	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
-	                                           GetRangeLimits limits,
-	                                           Snapshot snapshot = Snapshot::False,
-	                                           Reverse reverse = Reverse::False) {
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeyRange& keys,
+	                                               GetRangeLimits limits,
+	                                               Snapshot snapshot = Snapshot::False,
+	                                               Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
@@ -392,40 +402,40 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
-	                                                       const KeySelector& end,
-	                                                       const Key& mapper,
-	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
-	                                                       Snapshot = Snapshot::False,
-	                                                       Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeReadResult> getMappedRange(const KeySelector& begin,
+	                                                           const KeySelector& end,
+	                                                           const Key& mapper,
+	                                                           GetRangeLimits limits,
+	                                                           int matchIndex = MATCH_INDEX_ALL,
+	                                                           Snapshot = Snapshot::False,
+	                                                           Reverse = Reverse::False);
 
 private:
-	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
-	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           const Key& mapper,
-	                                           GetRangeLimits limits,
-	                                           int matchIndex,
-	                                           Snapshot snapshot,
-	                                           Reverse reverse);
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeReadResultFamily>
+	Future<RangeReadResultFamily> getRangeInternal(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               const Key& mapper,
+	                                               GetRangeLimits limits,
+	                                               int matchIndex,
+	                                               Snapshot snapshot,
+	                                               Reverse reverse);
 
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -437,7 +447,7 @@ public:
 		                      snapshot,
 		                      reverse);
 	}
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -492,7 +502,7 @@ public:
 	// May be called only after commit() returns success
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
-	int64_t getTotalCost() const { return trState->totalCost; }
+	int64_t getTotalCost() const { return trState->getTotalCost(); }
 
 	double getTagThrottledDuration() const;
 
@@ -549,7 +559,7 @@ public:
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
-	TagSet const& getTags() const;
+	Optional<TransactionTag> const& getTag() const&;
 	Span span;
 
 	// used in template functions as returned Future type
@@ -558,12 +568,12 @@ public:
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-	Future<RangeResult> getRangeInternal(const KeySelector& begin,
-	                                     const KeySelector& end,
-	                                     const Key& mapper,
-	                                     GetRangeLimits limits,
-	                                     Snapshot snapshot,
-	                                     Reverse reverse);
+	Future<RangeReadResult> getRangeInternal(const KeySelector& begin,
+	                                         const KeySelector& end,
+	                                         const Key& mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot snapshot,
+	                                         Reverse reverse);
 
 	void resetImpl(bool generateNewSpan);
 
@@ -604,14 +614,15 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
                               Optional<UID> dataMoveId = Optional<UID>());
 
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
-// The keyranges of the returned checkpoint is a super-set of `ranges`.
+// Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    std::vector<KeyRange> ranges,
-                                                                    Version version,
-                                                                    CheckpointFormat format,
-                                                                    Optional<UID> dataMoveId = Optional<UID>(),
-                                                                    double timeout = 5.0);
+ACTOR Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+    Database cx,
+    std::vector<KeyRange> ranges,
+    Version version,
+    CheckpointFormat format,
+    Optional<UID> dataMoveId = Optional<UID>(),
+    double timeout = 5.0);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
@@ -679,6 +690,8 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
     StorageMetrics limit,
     StorageMetrics estimated,
     Optional<int> minSplitBytes);
+
+ACTOR Future<RangeReadResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord);
 
 namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(

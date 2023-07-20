@@ -1212,7 +1212,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid, Version begin, Tag tag) {
+Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid,
+                                                                          Version begin,
+                                                                          Tag tag,
+                                                                          bool useSatellite) {
 	bool found = false;
 	for (const auto& log : tLogs) {
 		found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
@@ -1240,8 +1243,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 				}
 			}
 			int bestSet = bestPrimarySet;
-			if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED && bestSatelliteSet != -1 &&
-			    tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
 
@@ -1266,8 +1268,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 				}
 			}
 			int bestSet = bestPrimarySet;
-			if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED && bestSatelliteSet != -1 &&
-			    tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
 			const auto& log = tLogs[bestSet];
@@ -1307,8 +1308,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 				}
 			}
 			int bestSet = bestPrimarySet;
-			if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED && bestSatelliteSet != -1 &&
-			    old.tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && old.tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
 
@@ -1631,16 +1631,15 @@ Future<Void> TagPartitionedLogSystem::endEpoch() {
 	return waitForAll(lockResults);
 }
 
-Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
-    RecruitFromConfigurationReply const& recr,
-    Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-    DatabaseConfiguration const& config,
-    LogEpoch recoveryCount,
-    Version recoveryTransactionVersion,
-    int8_t primaryLocality,
-    int8_t remoteLocality,
-    std::vector<Tag> const& allTags,
-    Reference<AsyncVar<bool>> const& recruitmentStalled) {
+Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(WorkerRecruitment const& recr,
+                                                                Future<RemoteWorkerRecruitment> const& fRemoteWorkers,
+                                                                DatabaseConfiguration const& config,
+                                                                LogEpoch recoveryCount,
+                                                                Version recoveryTransactionVersion,
+                                                                int8_t primaryLocality,
+                                                                int8_t remoteLocality,
+                                                                std::vector<Tag> const& allTags,
+                                                                Reference<AsyncVar<bool>> const& recruitmentStalled) {
 	return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 	                recr,
 	                fRemoteWorkers,
@@ -2542,14 +2541,14 @@ std::vector<Tag> TagPartitionedLogSystem::getLocalTags(int8_t locality, const st
 
 ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSystem* self,
                                                            Reference<TagPartitionedLogSystem> oldLogSystem,
-                                                           Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+                                                           Future<RemoteWorkerRecruitment> fRemoteWorkers,
                                                            DatabaseConfiguration configuration,
                                                            LogEpoch recoveryCount,
                                                            Version recoveryTransactionVersion,
                                                            int8_t remoteLocality,
                                                            std::vector<Tag> allTags) {
 	TraceEvent("RemoteLogRecruitment_WaitingForWorkers").log();
-	state RecruitRemoteFromConfigurationReply remoteWorkers = wait(fRemoteWorkers);
+	state RemoteWorkerRecruitment remoteWorkers = wait(fRemoteWorkers);
 
 	state Reference<LogSet> logSet(new LogSet());
 	logSet->tLogReplicationFactor = configuration.getRemoteTLogReplicationFactor();
@@ -2733,17 +2732,16 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	return Void();
 }
 
-ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
-    Reference<TagPartitionedLogSystem> oldLogSystem,
-    RecruitFromConfigurationReply recr,
-    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-    DatabaseConfiguration configuration,
-    LogEpoch recoveryCount,
-    Version recoveryTransactionVersion,
-    int8_t primaryLocality,
-    int8_t remoteLocality,
-    std::vector<Tag> allTags,
-    Reference<AsyncVar<bool>> recruitmentStalled) {
+ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
+                                                                      WorkerRecruitment recr,
+                                                                      Future<RemoteWorkerRecruitment> fRemoteWorkers,
+                                                                      DatabaseConfiguration configuration,
+                                                                      LogEpoch recoveryCount,
+                                                                      Version recoveryTransactionVersion,
+                                                                      int8_t primaryLocality,
+                                                                      int8_t remoteLocality,
+                                                                      std::vector<Tag> allTags,
+                                                                      Reference<AsyncVar<bool>> recruitmentStalled) {
 	state double startTime = now();
 	state Reference<TagPartitionedLogSystem> logSystem(
 	    new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality, recoveryCount));

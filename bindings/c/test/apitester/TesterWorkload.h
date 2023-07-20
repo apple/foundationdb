@@ -130,11 +130,18 @@ protected:
 	                   std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
 	                   bool failOnError = true);
 
-	// Log an error message, increase error counter
-	void error(const std::string& msg);
+	// Report a workload error. The workload will be considered as failed
+	template <typename... Args>
+	void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		log::error("{:<24}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
+		newErrorReported();
+	}
 
-	// Log an info message
-	void info(const std::string& msg);
+	// Log an info message annotated with the workload Id
+	template <typename... Args>
+	void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		log::info("{:<24}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
+	}
 
 	// Confirm a successfull progress check
 	void confirmProgress();
@@ -152,12 +159,27 @@ private:
 	// that the task is done if no more tasks schedule
 	void scheduledTaskDone();
 
+	// Update workload status after new workload error logged
+	void newErrorReported();
+
 	// Keep track of tasks scheduled by the workload
 	// End workload when this number falls to 0
 	std::atomic<int> tasksScheduled;
 
 	// Number of errors logged
 	std::atomic<int> numErrors;
+
+	// Info on last reported stats
+	TimePoint lastStatsTime;
+	int lastTxCompleted;
+
+	// Context of the pending transaction (may be not set)
+	std::mutex pendingTxMutex;
+	std::shared_ptr<ITransactionContext> pendingTx;
+
+	enum class Action { None, BeginTransaction, ScheduleTask, Continuation };
+	// Last performed action by the workload
+	std::atomic<Action> lastAction;
 
 protected:
 	// Client ID assigned to the workload (a number from 0 to numClients-1)
@@ -174,6 +196,9 @@ protected:
 	// If maxTxTimeoutMs <= 0, no timeout is set
 	int minTxTimeoutMs;
 	int maxTxTimeoutMs;
+
+	// Whether to enable distributed tracing for transactions.
+	bool enableTransactionTracing;
 
 	// Workload identifier, consisting of workload name and client ID
 	std::string workloadId;
