@@ -218,7 +218,7 @@ ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vecto
 // debug commands: getlocation, getall
 ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
 ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
-
+ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens);
 } // namespace fdb_cli
 
 #include "flow/unactorcompiler.h"
