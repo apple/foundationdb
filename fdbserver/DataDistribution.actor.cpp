@@ -372,7 +372,7 @@ public:
 	FlowLock auditStorageReplicaLaunchingLock;
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
-	int auditInitGeneration;
+	bool auditStorageInitStarted;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
@@ -387,7 +387,8 @@ public:
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
 	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
-	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1), auditInitGeneration(0) {}
+	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1),
+	    auditStorageInitStarted(false) {}
 
 	// bootstrap steps
 
@@ -426,15 +427,11 @@ public:
 	}
 
 	// Resume in-memory audit instances and issue background audit metadata cleanup
-	void resumeAuditStorage(Reference<DataDistributor> self,
-	                        std::vector<AuditStorageState> auditStates,
-	                        int selfGeneration) {
-		// Only the latest generation of auditResume can do resumeAuditStorage
-		if (selfGeneration != self->auditInitGeneration) {
+	void resumeAuditStorage(Reference<DataDistributor> self, std::vector<AuditStorageState> auditStates) {
+		if (!self->auditInitialized.canBeSet()) {
 			TraceEvent(
-			    g_network->isSimulated() ? SevError : SevWarnAlways, "AuditStorageResumeGenerationError", self->ddId)
-			    .detail("SelfGeneration", selfGeneration)
-			    .detail("GlobalGeneration", self->auditInitGeneration);
+			    g_network->isSimulated() ? SevError : SevWarnAlways, "AuditStorageResumeOutdatedError", self->ddId)
+			    .detail("NumAuditStates", auditStates.size());
 			return;
 		}
 		if (auditStates.empty()) {
@@ -529,20 +526,15 @@ public:
 		return;
 	}
 
-	ACTOR static Future<Void> initAuditStorage(Reference<DataDistributor> self, int selfGeneration) {
+	ACTOR static Future<Void> initAuditStorage(Reference<DataDistributor> self) {
 		MoveKeyLockInfo lockInfo;
 		lockInfo.myOwner = self->lock.myOwner;
 		lockInfo.prevOwner = self->lock.prevOwner;
 		lockInfo.prevWrite = self->lock.prevWrite;
+		self->auditStorageInitStarted = true;
 		std::vector<AuditStorageState> auditStates = wait(loadAndUpdateAuditMetadataWithNewDDId(
 		    self->txnProcessor->context(), lockInfo, self->context->isDDEnabled(), self->ddId));
-		if (selfGeneration == self->auditInitGeneration) {
-			self->resumeAuditStorage(self, auditStates, selfGeneration);
-		} else {
-			TraceEvent(SevWarnAlways, "AuditStorageInitOutdated", self->ddId)
-			    .detail("SelfGeneration", selfGeneration)
-			    .detail("GlobalGeneration", self->auditInitGeneration);
-		}
+		self->resumeAuditStorage(self, auditStates);
 		return Void();
 	}
 
@@ -586,9 +578,15 @@ public:
 
 			// AuditStorage does not rely on DatabaseConfiguration
 			// AuditStorage read neccessary info purely from system key space
-			if (self->auditInitialized.canBeSet()) {
-				++self->auditInitGeneration;
-				self->addActor.send(self->initAuditStorage(self, self->auditInitGeneration));
+			if (!self->auditStorageInitStarted) {
+				if (self->auditInitialized.canBeSet()) {
+					self->addActor.send(self->initAuditStorage(self));
+				} else {
+					TraceEvent(
+					    g_network->isSimulated() ? SevError : SevWarnAlways, "AuditStorageInitStateError", self->ddId);
+				}
+			} else {
+				TraceEvent(SevVerbose, "DDInitTookMoveKeysLock", self->ddId).log();
 			}
 			// It is possible that an audit request arrives and then DDMode
 			// is set to 2 at this point
