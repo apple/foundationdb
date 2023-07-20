@@ -596,11 +596,11 @@ public:
 			// So, we need to check MoveKeyLock when waitUntilDataDistributorExitSecurityMode
 			wait(waitUntilDataDistributorExitSecurityMode(self)); // Trap DDMode == 2
 			// It is possible DDMode begins with 2 and passes
-			// waitDataDistributorEnabledOrSecurityMode and then set to 0 before
+			// waitDataDistributorEnabled and then set to 0 before
 			// waitUntilDataDistributorExitSecurityMode. For this case,
 			// after waitUntilDataDistributorExitSecurityMode, DDMode is 0.
 			// The init loop does not break and the loop will stuct at
-			// waitDataDistributorEnabledOrSecurityMode in the next iteration.
+			// waitDataDistributorEnabled in the next iteration.
 			TraceEvent("DataDistributorExitSecurityMode").log();
 
 			wait(self->loadDatabaseConfiguration());
