@@ -48,7 +48,6 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 	if (enforceValidTenantId) {
 		ASSERT(id >= 0);
 	} else if (id < 0) {
-		CODE_PROBE(true, "Attempt to convert invalid tenant prefix");
 		return TenantInfo::INVALID_TENANT;
 	}
 	return id;
@@ -152,10 +151,8 @@ bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
 	if (parameter == "tenant_group"_sr) {
-		CODE_PROBE(true, "Configure tenant's group");
 		tenantGroup = value;
 	} else {
-		CODE_PROBE(true, "Invalid tenant configuration parameter");
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}

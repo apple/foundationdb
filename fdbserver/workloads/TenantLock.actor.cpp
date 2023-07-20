@@ -60,7 +60,7 @@ struct TenantLock : TestWorkload {
 				case LockAwareTx::READ_WRITE:
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				}
-				ValueReadResult val = wait(tr.get("foo"_sr));
+				Optional<Value> val = wait(tr.get("foo"_sr));
 				if (val != resultValue) {
 					ASSERT(expectedVal.present() == val.present());
 					ASSERT(!val.present() ||

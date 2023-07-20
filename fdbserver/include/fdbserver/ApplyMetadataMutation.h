@@ -39,7 +39,7 @@
 // Resolver's data for applyMetadataMutations() calls.
 struct ResolverData {
 	const UID dbgid;
-	Reference<IKeyValueStore> txnStateStore;
+	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	Arena arena;
 	// Whether configuration changes. If so, a recovery is forced.
@@ -52,13 +52,13 @@ struct ResolverData {
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	// For initial broadcast
-	ResolverData(UID debugId, Reference<IKeyValueStore> store, KeyRangeMap<ServerCacheInfo>* info, bool& forceRecovery)
+	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info, bool& forceRecovery)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true) {}
 
 	// For transaction batches that contain metadata mutations
 	ResolverData(UID debugId,
 	             Reference<ILogSystem> logSystem,
-	             Reference<IKeyValueStore> store,
+	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
 	             bool& forceRecovery,

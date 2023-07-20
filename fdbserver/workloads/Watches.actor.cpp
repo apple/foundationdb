@@ -132,9 +132,9 @@ struct WatchesWorkload : TestWorkload {
 			loop {
 				state std::unique_ptr<Transaction> tr = std::make_unique<Transaction>(cx);
 				try {
-					state Future<ValueReadResult> setValueFuture = tr->get(setKey);
-					state ValueReadResult watchValue = wait(tr->get(watchKey));
-					ValueReadResult setValue = wait(setValueFuture);
+					state Future<Optional<Value>> setValueFuture = tr->get(setKey);
+					state Optional<Value> watchValue = wait(tr->get(watchKey));
+					Optional<Value> setValue = wait(setValueFuture);
 
 					if (lastValue.present() && lastValue.get() == watchValue) {
 						TraceEvent(SevError, "WatcherTriggeredWithoutChanging")
@@ -157,8 +157,7 @@ struct WatchesWorkload : TestWorkload {
 						//TraceEvent("WatcherSetFinish").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) ).detail("Ver", tr->getCommittedVersion());
 					} else {
 						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
-						state Future<Void> watchFuture =
-						    tr->watch(makeReference<Watch>(watchKey, watchValue.contents()));
+						state Future<Void> watchFuture = tr->watch(makeReference<Watch>(watchKey, watchValue));
 						wait(tr->commit());
 						if (BUGGIFY) {
 							// Make watch future outlive transaction
@@ -166,7 +165,7 @@ struct WatchesWorkload : TestWorkload {
 						}
 						wait(watchFuture);
 						if (watchValue.present())
-							lastValue = watchValue.contents();
+							lastValue = watchValue;
 					}
 					break;
 				} catch (Error& e) {
@@ -193,7 +192,7 @@ struct WatchesWorkload : TestWorkload {
 			loop {
 				try {
 					wait(success(tr.getReadVersion()));
-					ValueReadResult _startValue = wait(tr.get(startKey));
+					Optional<Value> _startValue = wait(tr.get(startKey));
 					if (firstAttempt) {
 						startValue = _startValue;
 						firstAttempt = false;
@@ -224,7 +223,7 @@ struct WatchesWorkload : TestWorkload {
 				state bool finished = false;
 				loop {
 					try {
-						state ValueReadResult endValue = wait(tr2.get(endKey));
+						state Optional<Value> endValue = wait(tr2.get(endKey));
 						if (endValue == expectedValue) {
 							finished = true;
 							break;

@@ -24,7 +24,7 @@
 #include "fmt/format.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleFiles.actor.h"
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"

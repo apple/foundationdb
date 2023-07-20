@@ -101,22 +101,22 @@ struct BackgroundSelectorWorkload : TestWorkload {
 				try {
 					if (forward) {
 						{
-							KeyReadResult res = wait(tr.getKey(KeySelectorRef(allKeys.begin, false, 1)));
+							Standalone<StringRef> res = wait(tr.getKey(KeySelectorRef(allKeys.begin, false, 1)));
 							startKey = res;
 						}
 
 						{
-							KeyReadResult res = wait(tr.getKey(randomizedSelector(startKey, true, diff)));
+							Standalone<StringRef> res = wait(tr.getKey(randomizedSelector(startKey, true, diff)));
 							endKey = res;
 						}
 					} else {
 						{
-							KeyReadResult res = wait(tr.getKey(KeySelectorRef(allKeys.end, false, 0)));
+							Standalone<StringRef> res = wait(tr.getKey(KeySelectorRef(allKeys.end, false, 0)));
 							endKey = res;
 						}
 
 						{
-							KeyReadResult res = wait(tr.getKey(randomizedSelector(endKey, true, -1 * diff)));
+							Standalone<StringRef> res = wait(tr.getKey(randomizedSelector(endKey, true, -1 * diff)));
 							startKey = res;
 						}
 					}
@@ -145,25 +145,27 @@ struct BackgroundSelectorWorkload : TestWorkload {
 				loop {
 					try {
 						if (diff < 0) {
-							RangeReadResult rangeResult_ =
+							RangeResult rangeResult_ =
 							    wait(tr.getRange(randomizedSelector(endKey, true, endDrift),
 							                     randomizedSelector(startKey, true, startDrift + 1),
 							                     self->resultLimit));
 							rangeResult = rangeResult_;
-							KeyReadResult endResult_ = wait(tr.getKey(randomizedSelector(startKey, true, startDrift)));
+							Standalone<StringRef> endResult_ =
+							    wait(tr.getKey(randomizedSelector(startKey, true, startDrift)));
 							endResult = endResult_;
-							KeyReadResult startResult_ = wait(tr.getKey(randomizedSelector(endKey, true, endDrift)));
+							Standalone<StringRef> startResult_ =
+							    wait(tr.getKey(randomizedSelector(endKey, true, endDrift)));
 							startResult = startResult_;
 						} else {
-							RangeReadResult rangeResult_ =
-							    wait(tr.getRange(randomizedSelector(startKey, true, startDrift),
-							                     randomizedSelector(endKey, true, endDrift + 1),
-							                     self->resultLimit));
+							RangeResult rangeResult_ = wait(tr.getRange(randomizedSelector(startKey, true, startDrift),
+							                                            randomizedSelector(endKey, true, endDrift + 1),
+							                                            self->resultLimit));
 							rangeResult = rangeResult_;
-							KeyReadResult startResult_ =
+							Standalone<StringRef> startResult_ =
 							    wait(tr.getKey(randomizedSelector(startKey, true, startDrift)));
 							startResult = startResult_;
-							KeyReadResult endResult_ = wait(tr.getKey(randomizedSelector(endKey, true, endDrift)));
+							Standalone<StringRef> endResult_ =
+							    wait(tr.getKey(randomizedSelector(endKey, true, endDrift)));
 							endResult = endResult_;
 						}
 

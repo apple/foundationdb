@@ -161,11 +161,11 @@ struct ConflictRangeWorkload : TestWorkload {
 					randomLimit = deterministicRandom()->randomInt(1, self->maxKeySpace);
 					reverse.set(deterministicRandom()->coinflip());
 
-					RangeReadResult res = wait(tr1.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                        randomLimit,
-					                                        Snapshot::False,
-					                                        reverse));
+					RangeResult res = wait(tr1.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+					                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                                    randomLimit,
+					                                    Snapshot::False,
+					                                    reverse));
 					if (res.size()) {
 						originalResults = res;
 						break;
@@ -226,19 +226,19 @@ struct ConflictRangeWorkload : TestWorkload {
 					if (self->testReadYourWrites) {
 						trRYOW.clear(KeyRangeRef(StringRef(format("%010d", clearedBegin)),
 						                         StringRef(format("%010d", clearedEnd))));
-						RangeReadResult res = wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                                           KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-						                                           randomLimit,
-						                                           Snapshot::False,
-						                                           reverse));
+						RangeResult res = wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+						                                       KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                                       randomLimit,
+						                                       Snapshot::False,
+						                                       reverse));
 						wait(trRYOW.commit());
 					} else {
 						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
-						RangeReadResult res = wait(tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-						                                        randomLimit,
-						                                        Snapshot::False,
-						                                        reverse));
+						RangeResult res = wait(tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+						                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                                    randomLimit,
+						                                    Snapshot::False,
+						                                    reverse));
 						wait(tr3.commit());
 					}
 				} catch (Error& e) {
@@ -257,11 +257,11 @@ struct ConflictRangeWorkload : TestWorkload {
 						tr1 = Transaction(cx);
 					}
 
-					RangeReadResult res = wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                        randomLimit,
-					                                        Snapshot::False,
-					                                        reverse));
+					RangeResult res = wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+					                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                                    randomLimit,
+					                                    Snapshot::False,
+					                                    reverse));
 					++self->withConflicts;
 
 					if (res.size() == originalResults.size()) {
@@ -330,7 +330,7 @@ struct ConflictRangeWorkload : TestWorkload {
 						    .detail("Original", keyStr2);
 
 						tr4 = Transaction(cx);
-						RangeReadResult res = wait(tr4.getRange(
+						RangeResult res = wait(tr4.getRange(
 						    KeyRangeRef(StringRef(format("%010d", 0)), StringRef(format("%010d", self->maxKeySpace))),
 						    200));
 						std::string allKeyEntries = "";
@@ -343,11 +343,11 @@ struct ConflictRangeWorkload : TestWorkload {
 					throw not_committed();
 				} else {
 					// If the commit is successful, check that the result matches the first execution.
-					RangeReadResult res = wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                        randomLimit,
-					                                        Snapshot::False,
-					                                        reverse));
+					RangeResult res = wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+					                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                                    randomLimit,
+					                                    Snapshot::False,
+					                                    reverse));
 					++self->withoutConflicts;
 
 					if (res.size() == originalResults.size()) {

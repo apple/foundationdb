@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+// There's something in one of the files below that defines a macros
+// a macro that makes boost interprocess break on Windows.
+#define BOOST_DATE_TIME_NO_LIB
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -27,9 +31,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
-#include <thread>
 
-#include "benchmark/benchmark.h"
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -84,15 +86,23 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
 #if defined(__linux__)
 #include <sys/prctl.h>
+#elif defined(__FreeBSD__)
+#include <sys/procctl.h>
 #endif
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
+#endif
+
+#ifdef WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -108,8 +118,7 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION,
-	OPT_BENCHMARK_FILTER,
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -138,6 +147,12 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LOGGROUP,              "--loggroup",                  SO_REQ_SEP },
 	{ OPT_PARENTPID,             "--parentpid",                 SO_REQ_SEP },
 	{ OPT_TRACER,                "--tracer",                    SO_REQ_SEP },
+#ifdef _WIN32
+	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
+	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
+	{ OPT_NOBOX,                 "-q",                          SO_NONE },
+	{ OPT_NOBOX,                 "--no-dialog",                 SO_NONE },
+#endif
 	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
 	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
 	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
@@ -208,7 +223,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-latest-encryption-keys-endpoint", SO_REQ_SEP },
 	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
-	{ OPT_BENCHMARK_FILTER, "--benchmark_filter", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -239,10 +253,40 @@ bool enableFailures = true;
 		return false;                                                                                                  \
 	}
 
+#ifdef _WIN32
+#include <sddl.h>
+
+// It is your
+//    responsibility to properly initialize the
+//    structure and to free the structure's
+//    lpSecurityDescriptor member when you have
+//    finished using it. To free the structure's
+//    lpSecurityDescriptor member, call the
+//    LocalFree function.
+BOOL CreatePermissiveReadWriteDACL(SECURITY_ATTRIBUTES* pSA) {
+	UNSTOPPABLE_ASSERT(pSA != nullptr);
+
+	TCHAR* szSD = TEXT("D:") // Discretionary ACL
+	    TEXT("(A;OICI;GR;;;AU)") // Allow read/write/execute to authenticated users
+	    TEXT("(A;OICI;GA;;;BA)"); // Allow full control to administrators
+
+	return ConvertStringSecurityDescriptorToSecurityDescriptor(
+	    szSD, SDDL_REVISION_1, &(pSA->lpSecurityDescriptor), nullptr);
+}
+#endif
+
 class WorldReadablePermissions {
 public:
 	WorldReadablePermissions() {
-#if (defined(__linux__) || defined(__APPLE__))
+#ifdef _WIN32
+		sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+		sa.bInheritHandle = FALSE;
+		if (!CreatePermissiveReadWriteDACL(&sa)) {
+			TraceEvent("Win32DACLCreationFail").GetLastError();
+			throw platform_error();
+		}
+		permission.set_permissions(&sa);
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 #error Port me!
@@ -250,7 +294,9 @@ public:
 	}
 
 	virtual ~WorldReadablePermissions() {
-#if (defined(__linux__) || defined(__APPLE__))
+#ifdef _WIN32
+		LocalFree(sa.lpSecurityDescriptor);
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 #error Port me!
@@ -261,6 +307,9 @@ public:
 
 private:
 	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+#ifdef _WIN32
+	SECURITY_ATTRIBUTES sa;
+#endif
 };
 
 UID getSharedMemoryMachineId() {
@@ -274,7 +323,8 @@ UID getSharedMemoryMachineId() {
 	UID* machineId = nullptr;
 	int numTries = 0;
 
-	// Permissions object defaults to 0644 on *nix
+	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
+	// On windows, this means that we have to create an elaborate workaround for DACLs
 	WorldReadablePermissions p;
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
@@ -429,7 +479,7 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
-					RangeReadResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
+					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
 					for (int r = 0; r < results.size(); r++) {
 						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
 						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
@@ -470,6 +520,16 @@ Future<Void> startSystemMonitor(std::string dataFolder,
 
 void testIndexedSet();
 
+#ifdef _WIN32
+void parentWatcher(void* parentHandle) {
+	HANDLE parent = (HANDLE)parentHandle;
+	int signal = WaitForSingleObject(parent, INFINITE);
+	CloseHandle(parentHandle);
+	if (signal == WAIT_OBJECT_0)
+		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+}
+#else
 void* parentWatcher(void* arg) {
 	int* parent_pid = (int*)arg;
 	while (1) {
@@ -478,6 +538,7 @@ void* parentWatcher(void* arg) {
 			criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
 	}
 }
+#endif
 
 static void printBuildInformation() {
 	printf("%s", jsonBuildInformation().c_str());
@@ -621,10 +682,13 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
-		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests,"
-		                 " benchmark, skiplisttest, dsltest, versionedmaptest, createtemplatedb, kvfiledump,"
-		                 " flowprocess, changeclusterkey)."
+		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
 		                 " The default is `fdbd'.");
+#ifdef _WIN32
+		printOptionUsage("-n, --newconsole", " Create a new console.");
+		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
+		printOptionUsage("--parentpid PID", " Specify a process after whose termination to exit.");
+#endif
 		printOptionUsage("-f TESTFILE, --testfile",
 		                 " Testfile to run, defaults to `tests/default.txt'.  If role is `unittests', specifies which "
 		                 "unit tests to run as a search prefix.");
@@ -679,9 +743,6 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--use-future-protocol-version [true,false]",
 		                 " Run the process with a simulated future protocol version."
 		                 " This option can be used testing purposes only!");
-		printOptionUsage("--benchmark_filter BENCHMARK_REGEX",
-		                 " Used by benchmark role, executes benchmarks whose names "
-		                 " contain the provided regex.");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
@@ -946,7 +1007,6 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 
 namespace {
 enum class ServerRole {
-	Benchmark,
 	ChangeClusterKey,
 	ConsistencyCheck,
 	CreateTemplateDatabase,
@@ -1026,8 +1086,6 @@ struct CLIOptions {
 	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
 	IPAllowList allowList;
-
-	std::string benchmarkFilter;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1242,8 +1300,6 @@ private:
 					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "changeclusterkey"))
 					role = ServerRole::ChangeClusterKey;
-				else if (!strcmp(sRole, "benchmark"))
-					role = ServerRole::Benchmark;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1366,6 +1422,30 @@ private:
 				maxLogsSet = true;
 				break;
 			}
+#ifdef _WIN32
+			case OPT_PARENTPID: {
+				auto pid_str = args.OptionArg();
+				int parent_pid = atoi(pid_str);
+				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+				if (!pHandle) {
+					TraceEvent("ParentProcessOpenError").GetLastError();
+					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+					throw platform_error();
+				}
+				startThread(&parentWatcher, pHandle, 0, "fdb-parentwatch");
+				break;
+			}
+			case OPT_NEWCONSOLE:
+				FreeConsole();
+				AllocConsole();
+				freopen("CONIN$", "rb", stdin);
+				freopen("CONOUT$", "wb", stdout);
+				freopen("CONOUT$", "wb", stderr);
+				break;
+			case OPT_NOBOX:
+				SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
+				break;
+#else
 			case OPT_PARENTPID: {
 				auto pid_str = args.OptionArg();
 				int* parent_pid = new (int);
@@ -1373,6 +1453,7 @@ private:
 				startThread(&parentWatcher, parent_pid, 0, "fdb-parentwatch");
 				break;
 			}
+#endif
 			case OPT_TRACER: {
 				std::string arg = args.OptionArg();
 				std::string tracer;
@@ -1668,10 +1749,6 @@ private:
 				}
 				break;
 			}
-			case OPT_BENCHMARK_FILTER: {
-				benchmarkFilter = args.OptionArg();
-				break;
-			}
 			}
 		}
 
@@ -1711,7 +1788,7 @@ private:
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests && role != ServerRole::Benchmark) ||
+		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -1860,6 +1937,11 @@ int main(int argc, char* argv[]) {
 
 		// Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
+
+#ifdef _WIN32
+		// Windows needs a gentle nudge to format floats correctly
+		//_set_output_format(_TWO_DIGIT_EXPONENT);
+#endif
 
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
@@ -2343,6 +2425,11 @@ int main(int argc, char* argv[]) {
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
+#elif defined(__FreeBSD__)
+			const int sig = SIGTERM;
+			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
+			if (getppid() == 1) /* parent already died before procctl */
+				flushAndExit(FDB_EXIT_SUCCESS);
 #endif
 
 			if (opts.flowProcessName == "KeyValueStoreProcess") {
@@ -2358,15 +2445,6 @@ int main(int argc, char* argv[]) {
 			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
 			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
-		} else if (role == ServerRole::Benchmark) {
-			Promise<Void> benchmarksDone;
-			std::thread benchmarkThread([benchmarksDone, benchmarkFilter = opts.benchmarkFilter] {
-				benchmark::RunSpecifiedBenchmarks(benchmarkFilter);
-				onMainThreadVoid([benchmarksDone] { benchmarksDone.send(Void()); });
-			});
-			f = stopAfter(benchmarksDone.getFuture());
-			g_network->run();
-			benchmarkThread.join();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

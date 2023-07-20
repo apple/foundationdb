@@ -199,14 +199,14 @@ struct ReadWriteCommonImpl {
 			self->readLatencyCount = 0;
 		}
 	}
-	ACTOR static Future<Void> logLatency(Future<ValueReadResult> f,
+	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
 	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
 	                                     bool shouldRecord) {
 		state double readBegin = now();
-		ValueReadResult value = wait(f);
+		Optional<Value> value = wait(f);
 
 		double latency = now() - readBegin;
 		readMetric->readLatency = latency * 1e9;
@@ -219,14 +219,14 @@ struct ReadWriteCommonImpl {
 		}
 		return Void();
 	}
-	ACTOR static Future<Void> logLatency(Future<RangeReadResult> f,
+	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
 	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
 	                                     bool shouldRecord) {
 		state double readBegin = now();
-		RangeReadResult value = wait(f);
+		RangeResult value = wait(f);
 
 		double latency = now() - readBegin;
 		readMetric->readLatency = latency * 1e9;
@@ -268,12 +268,12 @@ Future<Void> ReadWriteCommon::tracePeriodically() {
 	return ReadWriteCommonImpl::tracePeriodically(this);
 }
 
-Future<Void> ReadWriteCommon::logLatency(Future<ValueReadResult> f, bool shouldRecord) {
+Future<Void> ReadWriteCommon::logLatency(Future<Optional<Value>> f, bool shouldRecord) {
 	return ReadWriteCommonImpl::logLatency(
 	    f, &readLatencies, &readLatencyTotal, &readLatencyCount, readMetric, shouldRecord);
 }
 
-Future<Void> ReadWriteCommon::logLatency(Future<RangeReadResult> f, bool shouldRecord) {
+Future<Void> ReadWriteCommon::logLatency(Future<RangeResult> f, bool shouldRecord) {
 	return ReadWriteCommonImpl::logLatency(
 	    f, &readLatencies, &readLatencyTotal, &readLatencyCount, readMetric, shouldRecord);
 }
@@ -383,6 +383,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool cacheResult;
 	Optional<Key> transactionTag;
 
+	int transactionsTagThrottled{ 0 };
+
 	// hot traffic pattern
 	double hotKeyFraction, forceHotProbability = 0; // key based hot traffic setting
 
@@ -429,7 +431,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (batchPriority) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_BATCH);
 		}
-		if (transactionTag.present() && !tr.getTag().present()) {
+		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
 
@@ -480,6 +482,9 @@ struct ReadWriteWorkload : ReadWriteCommon {
 			m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), Averaged::True);
 			m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), Averaged::True);
 			m.emplace_back("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), Averaged::True);
+			if (transactionTag.present()) {
+				m.emplace_back("Transaction Tag Throttled", transactionsTagThrottled, Averaged::False);
+			}
 		}
 	}
 
@@ -529,6 +534,9 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				wait(tr.warmRange(allKeys));
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_tag_throttled) {
+					++self->transactionsTagThrottled;
+				}
 				wait(tr.onError(e));
 			}
 		}
@@ -704,6 +712,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 						break;
 					} catch (Error& e) {
+						if (e.code() == error_code_tag_throttled) {
+							++self->transactionsTagThrottled;
+						}
+
 						self->transactionFailureMetric->errorCode = e.code();
 						self->transactionFailureMetric->log();
 
@@ -754,8 +766,8 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 
 	while (currentCountIndex < countsOfInterest.size()) {
 		try {
-			state Future<RangeReadResult> countFuture = tr.getRange(keyPrefix, 1000000000);
-			state Future<RangeReadResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
+			state Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
+			state Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
 			wait(success(countFuture) && success(bytesFuture));
 
 			RangeResult counts = countFuture.get();

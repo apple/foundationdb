@@ -1374,15 +1374,6 @@ typedef Int64Metric VersionMetric;
 typedef ContinuousMetric<bool> BoolMetric;
 typedef ContinuousMetric<Standalone<StringRef>> StringMetric;
 
-template <>
-const StringRef Int64Metric::metricType;
-template <>
-const StringRef DoubleMetric::metricType;
-template <>
-const StringRef BoolMetric::metricType;
-template <>
-const StringRef StringMetric::metricType;
-
 // MetricHandle / EventMetricHandle are wrappers for a Reference<MetricType> which provides
 // the following interface conveniences
 //
@@ -1411,7 +1402,7 @@ struct MetricHandle {
 
 	// Initialize this handle to point to a new or existing metric with (name, id).  If a new metric is created then the
 	// handle's current metric's current value will be the new metric's initial value.  This allows Metric handle users
-	// to treat their Metric variables as normal variables and then bind them to actual logging metrics later while
+	// to treate their Metric variables as normal variables and then bind them to actual logging metrics later while
 	// continuing with the current value.
 	void init(StringRef const& name, StringRef const& id = StringRef()) {
 		ref = T::getOrCreateInstance(name, id, true, ref->getValue());

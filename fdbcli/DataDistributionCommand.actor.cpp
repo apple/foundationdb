@@ -42,9 +42,9 @@ ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
 				// hold the returned standalone object's memory
-				state ThreadFuture<RangeReadResult> resultFuture =
+				state ThreadFuture<RangeResult> resultFuture =
 				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeReadResult res = wait(safeThreadFutureToFuture(resultFuture));
+				RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
 				ASSERT(res.size() <= 1);
 				if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 					// only clear the key if it is currently being used to disable all SS failure data movement
@@ -67,8 +67,8 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t D
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<ValueReadResult> resultFuture = tr->get(rebalanceDDIgnoreKey);
-			ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
+			state ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
+			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 			uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
 			if (v.present()) {
 				if (v.get().size() > 0) {

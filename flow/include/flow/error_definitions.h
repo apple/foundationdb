@@ -106,7 +106,6 @@ ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfu
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
 ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been sent, the old request is discarded.")
 ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
-ERROR( blob_granule_mutation_stream_too_old, 1085, "Blob Granule Mutation Stream Too Old")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -128,6 +127,7 @@ ERROR( commit_proxy_failed, 1209, "Master terminating because a CommitProxy fail
 ERROR( resolver_failed, 1210, "Cluster recovery terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( backup_worker_failed, 1212, "Cluster recovery terminating because a backup worker failed")
+ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 ERROR( grv_proxy_failed, 1214, "Cluster recovery terminating because a GRVProxy failed" )
 ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cancelled" )
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
@@ -142,7 +142,6 @@ ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed t
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
-ERROR( test_failed, 1228, "Test failed" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -224,9 +223,7 @@ ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
 ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
 ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
-ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file" )
 ERROR( address_parse_error, 2049, "Failed to parse address" )
-ERROR( unknown_api_request, 2050, "Unknown API request received" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -254,7 +251,6 @@ ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 ERROR( no_external_client_provided, 2123, "No external client library provided." )
 ERROR( all_external_clients_failed, 2124, "All external clients have failed." )
 ERROR( incompatible_client, 2125, "None of the available clients match the protocol version of the cluster." )
-ERROR( too_many_grv_batchers, 2126, "The client is running too many concurrent GRV batchers" )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )
@@ -270,9 +266,6 @@ ERROR( cluster_no_capacity, 2141, "Cluster does not have capacity to perform the
 ERROR( tenant_removed, 2142, "The tenant was removed" )
 ERROR( invalid_tenant_state, 2143, "Operation cannot be applied to tenant in its current state" )
 ERROR( tenant_locked, 2144, "Tenant is locked" )
-ERROR( invalid_tenant_move, 2145, "The tenant movement is invalid" )
-ERROR( tenant_move_failed, 2146, "The tenant movement failed internally but can be retried" )
-ERROR( tenant_move_record_missing, 2147, "There is no tenant movement in progress with the given specifications")
 
 ERROR( invalid_cluster_name, 2160, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2161, "Metacluster operation performed on non-metacluster" )

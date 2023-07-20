@@ -783,7 +783,7 @@ struct MakoWorkload : TestWorkload {
 		for (i = 0; i < self->csSize; ++i) {
 			int idx = csIndex * self->csStepSizeInPartition + i * self->csPartitionSize;
 			csKey = self->keyForIndex(idx);
-			ValueReadResult temp = wait(tr->get(csKey));
+			Optional<Value> temp = wait(tr->get(csKey));
 			if (temp.present()) {
 				Value val = temp.get();
 				result = crc32c_append(result, val.begin(), val.size());
@@ -804,7 +804,7 @@ struct MakoWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
-					ValueReadResult temp = wait(tr.get(self->csKeys[csIdx]));
+					Optional<Value> temp = wait(tr.get(self->csKeys[csIdx]));
 					if (!temp.present()) {
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "NoExistingChecksum")
@@ -842,7 +842,7 @@ struct MakoWorkload : TestWorkload {
 		loop {
 			try {
 				for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
-					ValueReadResult temp = wait(tr.get(self->csKeys[csIdx]));
+					Optional<Value> temp = wait(tr.get(self->csKeys[csIdx]));
 					if (temp.present())
 						TraceEvent("DuplicatePopulationOnSamePrefix").detail("KeyPrefix", self->keyPrefix);
 					wait(self->updateCheckSum(&tr, self, csIdx));

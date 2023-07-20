@@ -31,7 +31,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleFiles.actor.h"
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/BlobWorkerCommon.h"
 

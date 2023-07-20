@@ -96,7 +96,7 @@ struct SidebandWorkload : TestWorkload {
 		state Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
 			try {
-				ValueReadResult val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
+				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
 				if (val.present()) {
 					if (val.get() != serializedInterface)
 						throw operation_failed();
@@ -117,7 +117,7 @@ struct SidebandWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				ValueReadResult val =
+				Optional<Value> val =
 				    wait(tr.get(StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount))));
 				if (!val.present()) {
 					throw operation_failed();
@@ -146,7 +146,7 @@ struct SidebandWorkload : TestWorkload {
 			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
 			loop {
 				try {
-					ValueReadResult val = wait(tr.get(messageKey));
+					Optional<Value> val = wait(tr.get(messageKey));
 					if (val.present()) {
 						commitVersion = tr.getReadVersion().get();
 						++self->keysUnexpectedlyPresent;
@@ -172,7 +172,7 @@ struct SidebandWorkload : TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					ValueReadResult val = wait(tr.get(messageKey));
+					Optional<Value> val = wait(tr.get(messageKey));
 					if (!val.present()) {
 						TraceEvent(SevError, "CausalConsistencyError", self->interf.id())
 						    .detail("MessageKey", messageKey.toString().c_str())

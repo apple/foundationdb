@@ -54,7 +54,7 @@ public:
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
 
 	// Set the value for "backupStartedKey"
-	void setBackupStartedValue(Optional<Value> const& value) { backupStartedValue = value; }
+	void setBackupStartedValue(Optional<Value> value) { backupStartedValue = value; }
 
 	// Returns progress for an epoch.
 	std::map<Tag, Version> getEpochStatus(LogEpoch epoch) const {

@@ -67,7 +67,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				try {
-					RangeReadResult res = wait(tr.getRange(configKeys, 1000));
+					RangeResult res = wait(tr.getRange(configKeys, 1000));
 					ASSERT(res.size() < 1000);
 					for (int i = 0; i < res.size(); i++)
 						self->configuration.set(res[i].key, res[i].value);

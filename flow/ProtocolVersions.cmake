@@ -1,18 +1,18 @@
 # Protocol Versions.
 # This version impacts both communications and the deserialization of certain database and IKeyValueStore keys.
 #
-# The convention is that 'xx' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-# To make a change without a corresponding increase to the xx.y version, increment the 'dev' digit.
+# The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
+# To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
 #
 # The last 2 bytes (4 digits) of the protocol version do not affect compatibility. These two bytes are not currently
 # used and should not be changed from 0.
-#                                                         xxyzdev
-#                                                         vvvvv
-set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00C080000000LL")
-set(FDB_PV_FUTURE_VERSION                       "0x0FDB00C090000000LL")
-set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00C071300000LL")
-set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00C100000000LL")
-set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00C200000000LL")
+#                                                          xyzdev
+#                                                          vvvv
+set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00C071300000LL")
+set(FDB_PV_FUTURE_VERSION                       "0x0FDB00C080000000LL")
+set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00C071200000LL")
+set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00C090000000LL")
+set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00C100000000LL")
 set(FDB_PV_LSB_MASK                             "0xFFFFLL")
 
 # The 5th digit from right is dev version, for example, 2 in 0x0FDB00B061020000LL;

@@ -22,7 +22,6 @@
 #include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
-#include "include/flow/TDMetric.actor.h"
 #include <cctype>
 #include <cstddef>
 #include <string>

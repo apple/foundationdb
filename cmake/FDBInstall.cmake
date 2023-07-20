@@ -6,8 +6,27 @@ function(fdb_install_dirs)
   set(FDB_INSTALL_DIRS ${ARGV} PARENT_SCOPE)
 endfunction()
 
+function(install_symlink_impl)
+  if (NOT WIN32)
+    return()
+  endif()
+  set(options "")
+  set(one_value_options TO DESTINATION)
+  set(multi_value_options COMPONENTS)
+  cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
+  get_filename_component(fname ${SYM_DESTINATION} NAME)
+  get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
+  set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
+  execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
+  foreach(component IN LISTS SYM_COMPONENTS)
+    install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${component})
+  endforeach()
+endfunction()
+
 function(install_symlink)
-  if(NOT OPEN_FOR_IDE)
+  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
     return()
   endif()
   set(options "")
@@ -20,18 +39,64 @@ function(install_symlink)
   foreach(ignored IN LISTS slashes)
     set(rel_path "../${rel_path}")
   endforeach()
+  if("${IN_FILE_DIR}" MATCHES "bin")
+    if("${IN_LINK_DIR}" MATCHES "lib")
+      install_symlink_impl(
+        TO "../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "lib/${IN_LINK_NAME}"
+        COMPONENTS "${IN_COMPONENT}-tgz")
+      install_symlink_impl(
+        TO "../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "usr/lib64/${IN_LINK_NAME}"
+        COMPONENTS
+        "${IN_COMPONENT}-el7"
+        "${IN_COMPONENT}-deb")
+      install_symlink_impl(
+        TO "../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "usr/lib64/${IN_LINK_NAME}"
+        COMPONENTS "${IN_COMPONENT}-deb")
+    elseif("${IN_LINK_DIR}" MATCHES "bin")
+      install_symlink_impl(
+        TO "../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "bin/${IN_LINK_NAME}"
+        COMPONENTS "${IN_COMPONENT}-tgz")
+      install_symlink_impl(
+        TO "../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "usr/bin/${IN_LINK_NAME}"
+        COMPONENTS
+        "${IN_COMPONENT}-el7"
+        "${IN_COMPONENT}-deb")
+    elseif("${IN_LINK_DIR}" MATCHES "fdbmonitor")
+      install_symlink_impl(
+        TO "../../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "lib/foundationdb/${IN_LINK_NAME}"
+        COMPONENTS "${IN_COMPONENT}-tgz")
+      install_symlink_impl(
+        TO "../../${rel_path}bin/${IN_FILE_NAME}"
+        DESTINATION "usr/lib/foundationdb/${IN_LINK_NAME}"
+        COMPONENTS
+        "${IN_COMPONENT}-el7"
+        "${IN_COMPONENT}-deb")
+    else()
+      message(FATAL_ERROR "Unknown LINK_DIR ${IN_LINK_DIR}")
+    endif()
+  else()
+    message(FATAL_ERROR "Unknown FILE_DIR ${IN_FILE_DIR}")
+  endif()
 endfunction()
 
 function(symlink_files)
-  set(options "")
-  set(one_value_options LOCATION SOURCE)
-  set(multi_value_options TARGETS)
-  cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+  if (NOT WIN32)
+    set(options "")
+    set(one_value_options LOCATION SOURCE)
+    set(multi_value_options TARGETS)
+    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
-  foreach(component IN LISTS SYM_TARGETS)
-    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
-  endforeach()
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    foreach(component IN LISTS SYM_TARGETS)
+      execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    endforeach()
+  endif()
 endfunction()
 
 function(pop_front)
@@ -126,7 +191,7 @@ function(copy_install_destinations)
 endfunction()
 
 function(fdb_configure_and_install)
-  if(NOT OPEN_FOR_IDE)
+  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
     set(one_value_options COMPONENT DESTINATION FILE DESTINATION_SUFFIX)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
     foreach(pkg IN LISTS FDB_INSTALL_PACKAGES)
@@ -148,7 +213,7 @@ function(fdb_configure_and_install)
 endfunction()
 
 function(fdb_install)
-  if(NOT OPEN_FOR_IDE)
+  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
     set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX RENAME)
     set(multi_value_options TARGETS FILES PROGRAMS DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")

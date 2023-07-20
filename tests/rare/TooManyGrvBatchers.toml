@@ -1,5 +1,0 @@
-[[test]]
-testTitle='TooManyGrvBatchers'
-
-  [[test.workload]]
-  testName='TooManyGrvBatchers'

@@ -59,27 +59,25 @@ struct ExclusionTracker {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Future<RangeReadResult> fresultsExclude =
-				    tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeReadResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeReadResult> flocalitiesExclude =
+				state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> flocalitiesExclude =
 				    tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeReadResult> flocalitiesFailed =
-				    tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<std::vector<ProcessData>> fworkers = getWorkers(&tr.getTransaction());
 				wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
 				     success(flocalitiesFailed));
 
-				state RangeReadResult excludedResults = fresultsExclude.get();
+				state RangeResult excludedResults = fresultsExclude.get();
 				ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-				state RangeReadResult failedResults = fresultsFailed.get();
+				state RangeResult failedResults = fresultsFailed.get();
 				ASSERT(!failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-				state RangeReadResult excludedLocalityResults = flocalitiesExclude.get();
+				state RangeResult excludedLocalityResults = flocalitiesExclude.get();
 				ASSERT(!excludedLocalityResults.more && excludedLocalityResults.size() < CLIENT_KNOBS->TOO_MANY);
 
-				state RangeReadResult failedLocalityResults = flocalitiesFailed.get();
+				state RangeResult failedLocalityResults = flocalitiesFailed.get();
 				ASSERT(!failedLocalityResults.more && failedLocalityResults.size() < CLIENT_KNOBS->TOO_MANY);
 
 				state std::set<AddressExclusion> newExcluded;

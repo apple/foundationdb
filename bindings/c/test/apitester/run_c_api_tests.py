@@ -34,12 +34,15 @@ import toml
 # fmt: off
 from tmp_cluster import TempCluster
 from local_cluster import TLSConfig
-from test_util import get_logger, initialize_logger_level
 # fmt: on
 
-TESTER_STATS_INTERVAL_SEC = 5
+sys.path[:0] = [
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner"
+    )
+]
 
-logger = get_logger()
+TESTER_STATS_INTERVAL_SEC = 5
 
 
 def random_string(len):
@@ -48,12 +51,32 @@ def random_string(len):
     )
 
 
+def get_logger():
+    return logging.getLogger("foundationdb.run_c_api_tests")
+
+
+def initialize_logger_level(logging_level):
+    logger = get_logger()
+
+    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
+
+    logging.basicConfig(format="%(message)s")
+    if logging_level == "DEBUG":
+        logger.setLevel(logging.DEBUG)
+    elif logging_level == "INFO":
+        logger.setLevel(logging.INFO)
+    elif logging_level == "WARNING":
+        logger.setLevel(logging.WARNING)
+    elif logging_level == "ERROR":
+        logger.setLevel(logging.ERROR)
+
+
 def dump_client_logs(log_dir):
     for log_file in glob.glob(os.path.join(log_dir, "*")):
-        logger.error(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
+        print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
         with open(log_file, "r") as f:
-            logger.error(f.read())
-        logger.error(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file))
+            print(f.read())
+        print(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file))
 
 
 def run_tester(args, cluster, test_file):
@@ -77,12 +100,7 @@ def run_tester(args, cluster, test_file):
         "--log",
         "--log-dir",
         str(log_dir),
-        "--verbosity",
-        args.logging_level,
     ]
-
-    if args.run_with_gdb:
-        cmd = ["gdb", "--args"] + cmd
 
     if args.external_client_library is not None:
         external_client_library = Path(args.external_client_library).resolve()
@@ -111,7 +129,7 @@ def run_tester(args, cluster, test_file):
         knob_name, knob_value = knob.split("=")
         cmd += ["--knob-" + knob_name, knob_value]
 
-    logger.info("Running tester '%s'..." % " ".join(map(str, cmd)))
+    get_logger().info("\nRunning tester '%s'..." % " ".join(map(str, cmd)))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
     ret_code = 1
@@ -130,9 +148,13 @@ def run_tester(args, cluster, test_file):
             reason = signal.Signals(-ret_code).name
         else:
             reason = "exit code: %d" % ret_code
-        logger.error("'%s' did not complete succesfully (%s)" % (cmd[0], reason))
+        get_logger().error(
+            "\n'%s' did not complete succesfully (%s)" % (cmd[0], reason)
+        )
         if log_dir is not None and not args.disable_log_dump:
             dump_client_logs(log_dir)
+
+    get_logger().info("")
     return ret_code
 
 
@@ -191,9 +213,9 @@ def run_tests(args):
         ]
 
     for test_file in test_files:
-        logger.info("=========================================================")
-        logger.info("Running test %s" % test_file)
-        logger.info("=========================================================")
+        get_logger().info("=========================================================")
+        get_logger().info("Running test %s" % test_file)
+        get_logger().info("=========================================================")
         ret_code = run_test(args, os.path.join(args.test_dir, test_file))
         if ret_code != 0:
             num_failed += 1
@@ -266,9 +288,6 @@ def parse_args(argv):
         "--disable-log-dump",
         help="Do not dump logs on error",
         action="store_true",
-    )
-    parser.add_argument(
-        "--run-with-gdb", help="Execute the tester binary from gdb", action="store_true"
     )
 
     return parser.parse_args(argv)

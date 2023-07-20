@@ -62,9 +62,8 @@ const KeyRangeRef keyServersKeyServersKeys("\xff/keyServers/\xff/keyServers/"_sr
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 // These constants are selected to be easily recognized during debugging.
-// Note that the last bit of the follwing constants is 0, indicating that physical shard move is disabled.
 const UID anonymousShardId = UID(0x666666, 0x88888888);
-const uint64_t emptyShardId = 0x2222222;
+const uint64_t emptyShardId = 0x7777777;
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -473,10 +472,7 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
     serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
-const UID newDataMoveId(const uint64_t physicalShardId,
-                        AssignEmptyRange assignEmptyRange,
-                        EnablePhysicalShardMove enablePSM,
-                        UnassignShard unassignShard) {
+const UID newShardId(const uint64_t physicalShardId, AssignEmptyRange assignEmptyRange, UnassignShard unassignShard) {
 	uint64_t split = 0;
 	if (assignEmptyRange) {
 		split = emptyShardId;
@@ -485,11 +481,6 @@ const UID newDataMoveId(const uint64_t physicalShardId,
 	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
-			if (enablePSM) {
-				split |= 1U;
-			} else {
-				split &= ~1U;
-			}
 		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
 	}
 	return UID(physicalShardId, split);
@@ -529,10 +520,9 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 }
 
 bool serverHasKey(ValueRef storedValue) {
-	UID shardId;
+	UID teamId;
 	bool assigned, emptyRange;
-	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-	decodeServerKeysValue(storedValue, assigned, emptyRange, enablePSM, shardId);
+	decodeServerKeysValue(storedValue, assigned, emptyRange, teamId);
 	return assigned;
 }
 
@@ -546,12 +536,7 @@ const Value serverKeysValue(const UID& id) {
 	return wr.toValue();
 }
 
-void decodeServerKeysValue(const ValueRef& value,
-                           bool& assigned,
-                           bool& emptyRange,
-                           EnablePhysicalShardMove& enablePSM,
-                           UID& id) {
-	enablePSM = EnablePhysicalShardMove::False;
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
 	if (value.size() == 0) {
 		assigned = false;
 		emptyRange = false;
@@ -574,9 +559,6 @@ void decodeServerKeysValue(const ValueRef& value,
 		rd >> id;
 		assigned = id.second() != 0;
 		emptyRange = id.second() == emptyShardId;
-		if (id.second() & 1U) {
-			enablePSM = EnablePhysicalShardMove::True;
-		}
 	}
 }
 

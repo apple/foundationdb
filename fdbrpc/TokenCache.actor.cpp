@@ -252,7 +252,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		TRACE_INVALID_PARSED_TOKEN("ErrorWhileVerifyingToken", t).detail("ErrorDetail", err.get());
 		return false;
 	} else if (!verifyOutcome) {
-		CODE_PROBE(true, "Token with invalid signature", probe::decoration::rare);
+		CODE_PROBE(true, "Token with invalid signature");
 		TRACE_INVALID_PARSED_TOKEN("InvalidSignature", t);
 		return false;
 	} else {

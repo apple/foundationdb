@@ -147,7 +147,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureBytes(Tenant_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
+			return new FutureKey(Tenant_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}

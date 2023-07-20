@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#if (defined(__linux__) || defined(__APPLE__))
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 
 #define DLLEXPORT __attribute__((visibility("default")))
 

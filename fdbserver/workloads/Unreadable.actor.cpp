@@ -362,7 +362,7 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
-					ErrorOr<RangeReadResult> value =
+					ErrorOr<RangeResult> value =
 					    wait(errorOr(tr.getRange(range, CLIENT_KNOBS->TOO_MANY, snapshot, reverse)));
 
 					if (snapshot)
@@ -398,7 +398,7 @@ struct UnreadableWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					//TraceEvent("RYWT_GetRangeBefore").detail("Reverse", reverse).detail("Begin", begin.toString()).detail("End", end.toString()).detail("Limit", limit);
-					ErrorOr<RangeReadResult> value = wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
+					ErrorOr<RangeResult> value = wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
@@ -441,7 +441,7 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
-					ErrorOr<ValueReadResult> value = wait(errorOr(tr.get(key, snapshot)));
+					ErrorOr<Optional<Value>> value = wait(errorOr(tr.get(key, snapshot)));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);

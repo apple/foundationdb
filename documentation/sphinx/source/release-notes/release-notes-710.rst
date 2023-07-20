@@ -2,20 +2,6 @@
 Release Notes
 #############
 
-7.1.29
-======
-* Same as 7.1.28 release with AVX enabled.
-
-7.1.28
-======
-* Released with AVX disabled.
-* Changed log router to detect slow peeks and to automatically switch DC for peeking. `(PR #9640) <https://github.com/apple/foundationdb/pull/9640>`_
-* Added multiple prefix filter support for fdbdecode. `(PR #9483) <https://github.com/apple/foundationdb/pull/9483>`_, `(PR #9489) <https://github.com/apple/foundationdb/pull/9489>`_, `(PR #9511) <https://github.com/apple/foundationdb/pull/9511>`_, and `(PR #9560) <https://github.com/apple/foundationdb/pull/9560>`_
-* Enhanced fdbbackup query command to estimate data processing from a specific snapshot to a target version. `(PR #9506) <https://github.com/apple/foundationdb/pull/9506>`_
-* Improved PTree insertion and erase performance for storage servers. `(PR #9508) <https://github.com/apple/foundationdb/pull/9508>`_
-* Added exclude to fdbcli's configure command to prevent faulty TLogs from affecting recovery. `(PR #9404) <https://github.com/apple/foundationdb/pull/9404>`_
-* Fixed getMappedRange metrics. `(PR #9331) <https://github.com/apple/foundationdb/pull/9331>`_
-
 7.1.27
 ======
 * Same as 7.1.26 release with AVX enabled.

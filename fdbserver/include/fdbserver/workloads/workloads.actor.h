@@ -344,8 +344,7 @@ public:
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
                                                  std::vector<TesterInterface> testers,
                                                  TestSpec spec,
-                                                 Optional<TenantName> defaultTenant,
-                                                 bool requireCheckSuccess = true);
+                                                 Optional<TenantName> defaultTenant);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 

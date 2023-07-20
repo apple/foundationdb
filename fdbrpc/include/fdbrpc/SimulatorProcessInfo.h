@@ -27,8 +27,6 @@
 #include "flow/NetworkAddress.h"
 #include "flow/IConnection.h"
 #include "flow/IUDPSocket.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/ChaosMetrics.h"
 
 #include "fdbrpc/SimulatorMachineInfo.h"
 #include "fdbrpc/SimulatorKillType.h"

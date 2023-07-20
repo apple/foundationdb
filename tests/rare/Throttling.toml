@@ -1,22 +1,10 @@
-[configuration]
-# Do not generate remote DC because ratekeeper ignores 
-# storage servers in the other datacenters.
-generateFearless = false
-
 [[test]]
 testTitle='ThrottlingTest'
     [[test.workload]]
     testName='Throttling'
     testDuration = 60.0
     actorsPerClient=10
-    # Performing too many reads per transaction
-    # can cause transactions to timeout with enough
-    # buggification. This causes the cluster to see
-    # no throughput, so the HealthMetricsApi workload
-    # check phase will report invalid health metrics.
-    # Therefore, a small number of reads per transaction
-    # is chosen.
-    readsPerTransaction=2
+    readsPerTransaction=10
     writesPerTransaction=10
     throttlingMultiplier=0.5
     maxBurst=10000

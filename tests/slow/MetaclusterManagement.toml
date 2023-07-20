@@ -13,6 +13,6 @@ runSetup = true
 
     [[test.workload]]
     testName = 'MetaclusterManagement'
-	maxTenants = 100
+	maxTenants = 1000
 	maxTenantGroups = 20
 	testDuration = 60

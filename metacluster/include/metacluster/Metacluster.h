@@ -49,7 +49,6 @@
 #include "metacluster/ListClusters.actor.h"
 #include "metacluster/ListTenantGroups.actor.h"
 #include "metacluster/ListTenants.actor.h"
-#include "metacluster/MetaclusterMove.actor.h"
 #include "metacluster/MetaclusterTypes.h"
 #include "metacluster/RegisterCluster.actor.h"
 #include "metacluster/RemoveCluster.actor.h"

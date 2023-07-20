@@ -76,7 +76,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
 		state KeyRange testRange = KeyRangeRef(key, endKey);
-		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
+		state std::vector<CheckpointMetaData> records;
 
 		TraceEvent("TestCheckpointRestoreBegin");
 		int ignore = wait(setDDMode(cx, 0));
@@ -123,7 +123,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("TestCheckpointFetched").detail("Range", testRange).detail("Version", version);
+		TraceEvent("TestCheckpointFetched")
+		    .detail("Range", testRange)
+		    .detail("Version", version)
+		    .detail("Checkpoints", describe(records));
 
 		state std::string pwd = platform::getWorkingDirectory();
 		state std::string folder = pwd + "/checkpoints";
@@ -132,19 +135,19 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint.
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state std::vector<std::pair<KeyRange, CheckpointMetaData>>::iterator it = records.begin();
-		for (; it != records.end(); ++it) {
+		state int i = 0;
+		for (; i < records.size(); ++i) {
 			loop {
-				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
+				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
 				try {
-					state CheckpointMetaData record = wait(fetchCheckpoint(cx, it->second, folder));
+					state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
 					fetchedCheckpoints.push_back(record);
 					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("TestFetchCheckpointError")
 					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", it->second.toString());
+					    .detail("Checkpoint", records[i].toString());
 					wait(delay(1));
 				}
 			}
@@ -160,13 +163,15 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		try {
 			wait(kvStore->restore(fetchedCheckpoints));
 		} catch (Error& e) {
-			TraceEvent(SevError, "TestRestoreCheckpointError").errorUnsuppressed(e);
+			TraceEvent(SevError, "TestRestoreCheckpointError")
+			    .errorUnsuppressed(e)
+			    .detail("Checkpoint", describe(records));
 		}
 
 		// Compare the keyrange between the original database and the one restored from checkpoint.
 		// For now, it should have been a single key.
 		tr.reset();
-		state RangeReadResult res;
+		state RangeResult res;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -202,10 +207,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		loop {
 			try {
-				state ValueReadResult res = wait(timeoutError(tr.get(key), 30.0));
+				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
-					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res.contents()));
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
 				break;
 			} catch (Error& e) {

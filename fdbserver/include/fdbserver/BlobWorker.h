@@ -23,41 +23,12 @@
 
 #include "fdbclient/BlobWorkerCommon.h"
 
-#include "fdbclient/Notified.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/Knobs.h"
 
 #include <vector>
 
 #include "flow/actorcompiler.h" // has to be last include
-
-// We have a normal target snapshot/delta ratio, but in write-heavy cases where are behind and need to catch up,
-// we want to change this target to get more efficient. To maintain a consistent write amp if the snapshot size is
-// growing without the ability to split, we scale the bytes before recompact to reach the target write amp. We also
-// decrease the target write amp the further behind we are to be more efficient.
-struct WriteAmpTarget {
-	double targetWriteAmp;
-	int bytesBeforeCompact;
-	int targetSnapshotBytes;
-	bool catchingUp;
-
-	WriteAmpTarget() { reset(); }
-
-	void reset() {
-		catchingUp = false;
-		bytesBeforeCompact = SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
-		targetSnapshotBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-		targetWriteAmp = 1.0 * (bytesBeforeCompact + targetSnapshotBytes) / bytesBeforeCompact;
-	}
-
-	void decrease(int deltaBytes);
-
-	void newSnapshotSize(int snapshotSize);
-
-	int getDeltaFileBytes() { return getBytesBeforeCompact() / 10; }
-
-	int getBytesBeforeCompact() { return bytesBeforeCompact; }
-};
 
 struct GranuleStartState {
 	UID granuleID;
@@ -92,7 +63,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 	// for client to know when it is safe to read a certain version and from where (check waitForVersion)
 	Version bufferedDeltaVersion; // largest delta version in currentDeltas (including empty versions)
-	NotifiedVersion pendingDeltaVersion = NotifiedVersion(0); // largest version in progress writing to s3/fdb
+	Version pendingDeltaVersion = 0; // largest version in progress writing to s3/fdb
 	NotifiedVersion durableDeltaVersion; // largest version persisted in s3/fdb
 	NotifiedVersion durableSnapshotVersion; // same as delta vars, except for snapshots
 	Version pendingSnapshotVersion = 0;
@@ -120,7 +91,6 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	GranuleReadStats readStats;
 	bool rdcCandidate;
 	Promise<Void> runRDC;
-	WriteAmpTarget writeAmpTarget;
 
 	void resume();
 	void resetReadStats();
@@ -134,7 +104,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 	inline bool doEarlyReSnapshot() {
 		return runRDC.isSet() ||
-		       (forceCompactVersion <= pendingDeltaVersion.get() && forceCompactVersion > pendingSnapshotVersion);
+		       (forceCompactVersion <= pendingDeltaVersion && forceCompactVersion > pendingSnapshotVersion);
 	}
 };
 

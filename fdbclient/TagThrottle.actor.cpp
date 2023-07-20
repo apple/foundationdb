@@ -21,10 +21,112 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "flow/actorcompiler.h" // has to be last include
+
+double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
+
+void TagSet::addTag(TransactionTagRef tag) {
+	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256); // Tag length is encoded with a single byte
+	ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION < 256); // Number of tags is encoded with a single byte
+
+	if (tag.size() > CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH) {
+		throw tag_too_long();
+	}
+	if (tags.size() >= CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION) {
+		throw too_many_tags();
+	}
+
+	TransactionTagRef tagRef(arena, tag);
+	auto it = find(tags.begin(), tags.end(), tagRef);
+	if (it == tags.end()) {
+		tags.push_back(std::move(tagRef));
+		bytes += tag.size();
+	}
+}
+
+size_t TagSet::size() const {
+	return tags.size();
+}
+
+std::string TagSet::toString(Capitalize capitalize) const {
+	ASSERT(!tags.empty());
+	if (tags.size() == 1) {
+		std::string start = capitalize ? "Tag" : "tag";
+		return format("%s `%s'", start.c_str(), tags[0].toString().c_str());
+	}
+	std::string result = capitalize ? "Tags (" : "tags (";
+	for (int index = 0; index < tags.size() - 1; ++index) {
+		result += format("`%s', ", tags[index].toString().c_str());
+	}
+	return result + format("`%s')", tags.back().toString().c_str());
+}
+
+// Format for throttle key:
+//
+// tagThrottleKeysPrefix + [auto-throttled (1-byte 0/1)] + [priority (1-byte)] + [tag list]
+// tag list consists of 1 or more consecutive tags, each encoded as:
+// tag.size() (1 byte) + tag's bytes. For example, tag 'foo' is: \x03foo
+// The tags are listed in sorted order
+//
+// Currently, the throttle API supports only 1 tag per throttle
+Key TagThrottleKey::toKey() const {
+	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256);
+	ASSERT(tags.size() > 0);
+
+	ASSERT(tags.size() == 1); // SOMEDAY: support multiple tags per throttle
+
+	int size = tagThrottleKeysPrefix.size() + tags.size() + 2;
+	for (auto tag : tags) {
+		ASSERT(tag.size() <= CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH);
+		size += tag.size();
+	}
+
+	Key result;
+
+	uint8_t* str = new (result.arena()) uint8_t[size];
+	result.contents() = StringRef(str, size);
+
+	memcpy(str, tagThrottleKeysPrefix.begin(), tagThrottleKeysPrefix.size());
+	str += tagThrottleKeysPrefix.size();
+
+	*(str++) = (uint8_t)throttleType;
+	*(str++) = (uint8_t)priority;
+
+	for (auto tag : tags) {
+		*(str++) = (uint8_t)tag.size();
+		if (tag.size() > 0) {
+			memcpy(str, tag.begin(), tag.size());
+			str += tag.size();
+		}
+	}
+
+	return result;
+}
+
+TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
+	const uint8_t* str = key.substr(tagThrottleKeysPrefix.size()).begin();
+	TagThrottleType throttleType = TagThrottleType(*(str++));
+	TransactionPriority priority = TransactionPriority(*(str++));
+	TagSet tags;
+
+	while (str < key.end()) {
+		uint8_t size = *(str++);
+		tags.addTag(TransactionTagRef(str, size));
+		str += size;
+	}
+
+	return TagThrottleKey(tags, throttleType, priority);
+}
+
+TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
+	TagThrottleValue throttleValue;
+	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
+	reader >> throttleValue;
+	return throttleValue;
+}
 
 KeyRangeRef const tagQuotaKeys = KeyRangeRef("\xff/tagQuota/"_sr, "\xff/tagQuota0"_sr);
 KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
@@ -33,28 +135,29 @@ Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
 	return tag.withPrefix(tagQuotaPrefix);
 }
 
-bool ThrottleApi::ThroughputQuotaValue::isValid() const {
+bool ThrottleApi::TagQuotaValue::isValid() const {
 	return reservedQuota <= totalQuota && reservedQuota >= 0;
 }
 
-Tuple ThrottleApi::ThroughputQuotaValue::pack() const {
-	return Tuple::makeTuple(reservedQuota, totalQuota);
+Value ThrottleApi::TagQuotaValue::toValue() const {
+	return Tuple::makeTuple(reservedQuota, totalQuota).pack();
 }
 
-ThrottleApi::ThroughputQuotaValue ThrottleApi::ThroughputQuotaValue::unpack(Tuple const& tuple) {
+ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
+	auto tuple = Tuple::unpack(value);
 	if (tuple.size() != 2) {
 		throw invalid_throttle_quota_value();
 	}
-	ThroughputQuotaValue result;
+	TagQuotaValue result;
 	try {
 		result.reservedQuota = tuple.getInt(0);
 		result.totalQuota = tuple.getInt(1);
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ThroughputQuotaValueFailedToDeserialize").error(e);
+		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
 		throw invalid_throttle_quota_value();
 	}
 	if (!result.isValid()) {
-		TraceEvent(SevWarnAlways, "ThrougputQuotaValueInvalidQuotas")
+		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
 		    .detail("ReservedQuota", result.reservedQuota)
 		    .detail("TotalQuota", result.totalQuota);
 		throw invalid_throttle_quota_value();
@@ -62,6 +165,22 @@ ThrottleApi::ThroughputQuotaValue ThrottleApi::ThroughputQuotaValue::unpack(Tupl
 	return result;
 }
 
-bool ThrottleApi::ThroughputQuotaValue::operator==(ThrottleApi::ThroughputQuotaValue const& rhs) const {
-	return reservedQuota == rhs.reservedQuota && totalQuota == rhs.totalQuota;
+TEST_CASE("TagSet/toString") {
+	{
+		TagSet tagSet;
+		tagSet.addTag("a"_sr);
+		ASSERT(tagSet.toString() == "tag `a'");
+		ASSERT(tagSet.toString(Capitalize::True) == "Tag `a'");
+	}
+	{
+		// Order is not guaranteed when multiple tags are present
+		TagSet tagSet;
+		tagSet.addTag("a"_sr);
+		tagSet.addTag("b"_sr);
+		auto tagString = tagSet.toString();
+		ASSERT(tagString == "tags (`a', `b')" || tagString == "tags (`b', `a')");
+		auto capitalizedTagString = tagSet.toString(Capitalize::True);
+		ASSERT(capitalizedTagString == "Tags (`a', `b')" || capitalizedTagString == "Tags (`b', `a')");
+	}
+	return Void();
 }

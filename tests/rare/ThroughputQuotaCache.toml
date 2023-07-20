@@ -1,5 +1,0 @@
-[[test]]
-testTitle='ThroughputQuotaCacheTest'
-
-  [[test.workload]]
-  testName='ThroughputQuotaCache'

@@ -45,8 +45,8 @@ ACTOR static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> d
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state Version rv = wait(safeThreadFutureToFuture(tr->getReadVersion()));
-			state ThreadFuture<ValueReadResult> versionEpochValFuture = tr->get(versionEpochKey);
-			ValueReadResult versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
+			state ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochKey);
+			Optional<Value> versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
 			if (!versionEpochVal.present()) {
 				return Optional<VersionInfo>();
 			}
@@ -62,8 +62,8 @@ ACTOR static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> d
 ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<ITransaction> tr) {
 	loop {
 		try {
-			state ThreadFuture<ValueReadResult> versionEpochValFuture = tr->get(versionEpochSpecialKey);
-			ValueReadResult versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
+			state ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochSpecialKey);
+			Optional<Value> versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
 			return versionEpochVal.present() ? boost::lexical_cast<int64_t>(versionEpochVal.get().toString())
 			                                 : Optional<int64_t>();
 		} catch (Error& e) {

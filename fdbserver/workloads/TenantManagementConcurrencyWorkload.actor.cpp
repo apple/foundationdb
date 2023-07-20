@@ -58,10 +58,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	Database standaloneDb;
 
 	TenantManagementConcurrencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		maxTenants =
-		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
-		maxTenantGroups = deterministicRandom()->randomInt(
-		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
+		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100));
+		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		createMetacluster = getOption(options, "createMetacluster"_sr, true);
 		allowTenantLimitChanges = getOption(options, "allowTenantLimitChanges"_sr, true);
@@ -124,7 +122,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					ValueReadResult val = wait(tr.get(self->testParametersKey));
+					Optional<Value> val = wait(tr.get(self->testParametersKey));
 					if (val.present()) {
 						TestParameters params = TestParameters::decode(val.get());
 						self->useMetacluster = params.useMetacluster;
@@ -206,8 +204,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					    .detail("TenantGroup", entry.tenantGroup);
 					break;
 				}
-
-				CODE_PROBE(true, "Tenant creation timed out");
 			}
 
 			return Void();
@@ -250,8 +246,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					    .detail("TenantName", tenant);
 					break;
 				}
-
-				CODE_PROBE(true, "Tenant deletion timed out");
 			}
 
 			return Void();
@@ -323,8 +317,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					    .detail("TenantGroup", tenantGroup);
 					break;
 				}
-
-				CODE_PROBE(true, "Tenant configure timed out");
 			}
 
 			return Void();
@@ -371,8 +363,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					    .detail("NewTenantName", newTenant);
 					break;
 				}
-
-				CODE_PROBE(true, "Tenant rename timed out");
 			}
 
 			return Void();
@@ -457,8 +447,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					    .detail("UseExistingId", useExistingId);
 					break;
 				}
-
-				CODE_PROBE(true, "Tenant change lock state timed out");
 			}
 
 			return Void();
@@ -468,10 +456,9 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    .detail("TenantName", tenant)
 			    .detail("TenantLockState", TenantAPI::tenantLockStateToString(lockState))
 			    .detail("UseExistingId", useExistingId);
-			if (e.code() == error_code_cluster_removed || e.code() == error_code_cluster_restoring) {
+			if (e.code() == error_code_cluster_removed) {
 				ASSERT(self->useMetacluster && !self->createMetacluster);
-			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_locked &&
-			           e.code() != error_code_invalid_tenant_state) {
+			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_locked) {
 				TraceEvent(SevError, "TenantManagementConcurrencyChangeLockStateFailure", debugId)
 				    .error(e)
 				    .detail("TenantName", tenant)
@@ -489,7 +476,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 5);
+			state int operation = deterministicRandom()->randomInt(0, 4);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {

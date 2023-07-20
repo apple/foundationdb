@@ -115,8 +115,8 @@ public:
 			}
 		}
 		{
-			ValueReadResult outputVal = wait(runRYWTransaction(
-			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> { return tr->get(key); }));
+			Optional<Value> outputVal = wait(runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
 			uint64_t output = 0;
 			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
@@ -132,8 +132,8 @@ public:
 
 		{
 			// Do operation on RYW Layer
-			ValueReadResult outputVal =
-			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+			Optional<Value> outputVal =
+			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 				    tr->clear(key);
 				    tr->atomicOp(key, val, opType);
 				    return tr->get(key);
@@ -179,8 +179,8 @@ public:
 			}
 		}
 		{
-			ValueReadResult outputVal = wait(runRYWTransaction(
-			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> { return tr->get(key); }));
+			Optional<Value> outputVal = wait(runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
 			uint64_t output = 0;
 			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
@@ -196,8 +196,8 @@ public:
 
 		{
 			// Do operation on RYW Layer
-			ValueReadResult outputVal =
-			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+			Optional<Value> outputVal =
+			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 				    tr->clear(key);
 				    tr->atomicOp(key, val, opType);
 				    return tr->get(key);
@@ -253,8 +253,8 @@ public:
 			}
 		}
 		{
-			ValueReadResult outputVal = wait(runRYWTransaction(
-			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> { return tr->get(key); }));
+			Optional<Value> outputVal = wait(runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
 			ASSERT(outputVal.present());
 			Value output = outputVal.get();
 			if (output != opFunc(existingVal, otherVal)) {
@@ -269,8 +269,8 @@ public:
 
 		{
 			// Do operation on RYW Layer
-			ValueReadResult outputVal =
-			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+			Optional<Value> outputVal =
+			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 				    tr->set(key, existingVal);
 				    tr->atomicOp(key, otherVal, opType);
 				    return tr->get(key);
@@ -323,8 +323,8 @@ public:
 		}
 		{
 			// Compare result
-			ValueReadResult outputVal = wait(runRYWTransaction(
-			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> { return tr->get(key); }));
+			Optional<Value> outputVal = wait(runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
 			uint64_t output = 0;
 			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
@@ -342,8 +342,8 @@ public:
 
 		{
 			// Do operation at RYW layer
-			ValueReadResult outputVal =
-			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+			Optional<Value> outputVal =
+			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 				    tr->set(key, val1);
 				    tr->atomicOp(key, val2, opType);
 				    return tr->get(key);
@@ -414,8 +414,8 @@ public:
 		state Optional<uint64_t> expectedOutput;
 		{
 			// Compare result
-			ValueReadResult outputVal = wait(runRYWTransaction(
-			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> { return tr->get(key); }));
+			Optional<Value> outputVal = wait(runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); }));
 			Optional<uint64_t> expectedOutput_ = opFunc(intValue1, intValue2);
 			expectedOutput = expectedOutput_;
 
@@ -439,8 +439,8 @@ public:
 
 		{
 			// Do operation at RYW layer
-			ValueReadResult outputVal =
-			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+			Optional<Value> outputVal =
+			    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 				    if (keySet) {
 					    tr->set(key, val1);
 				    } else {

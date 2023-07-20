@@ -58,7 +58,7 @@ class SimpleConfigTransactionImpl {
 		return reply.generation;
 	}
 
-	ACTOR static Future<ValueReadResult> get(SimpleConfigTransactionImpl* self, KeyRef key) {
+	ACTOR static Future<Optional<Value>> get(SimpleConfigTransactionImpl* self, KeyRef key) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
@@ -84,13 +84,13 @@ class SimpleConfigTransactionImpl {
 			    .detail("Value", reply.value.get().toString());
 		}
 		if (reply.value.present()) {
-			return ValueReadResult(reply.value.get().toValue());
+			return reply.value.get().toValue();
 		} else {
-			return ValueReadResult{};
+			return Optional<Value>{};
 		}
 	}
 
-	ACTOR static Future<RangeReadResult> getConfigClasses(SimpleConfigTransactionImpl* self) {
+	ACTOR static Future<RangeResult> getConfigClasses(SimpleConfigTransactionImpl* self) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
@@ -106,14 +106,14 @@ class SimpleConfigTransactionImpl {
 			    reply,
 			    retryBrokenPromise(self->cti.getClasses, ConfigTransactionGetConfigClassesRequest{ 0, generation })));
 		}
-		RangeReadResult result;
+		RangeResult result;
 		for (const auto& configClass : reply.configClasses) {
 			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
 		}
 		return result;
 	}
 
-	ACTOR static Future<RangeReadResult> getKnobs(SimpleConfigTransactionImpl* self, Optional<Key> configClass) {
+	ACTOR static Future<RangeResult> getKnobs(SimpleConfigTransactionImpl* self, Optional<Key> configClass) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
@@ -129,7 +129,7 @@ class SimpleConfigTransactionImpl {
 			           retryBrokenPromise(self->cti.getKnobs,
 			                              ConfigTransactionGetKnobsRequest{ 0, generation, configClass })));
 		}
-		RangeReadResult result;
+		RangeResult result;
 		for (const auto& knobName : reply.knobNames) {
 			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
 		}
@@ -185,9 +185,9 @@ public:
 		toCommit.mutations.push_back_deep(toCommit.arena, IKnobCollection::createClearMutation(toCommit.arena, key));
 	}
 
-	Future<ValueReadResult> get(KeyRef key) { return get(this, key); }
+	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
-	Future<RangeReadResult> getRange(KeyRangeRef keys) {
+	Future<RangeResult> getRange(KeyRangeRef keys) {
 		if (keys == configClassKeys) {
 			return getConfigClasses(this);
 		} else if (keys == globalConfigKnobKeys) {
@@ -254,26 +254,26 @@ Optional<Version> SimpleConfigTransaction::getCachedReadVersion() const {
 	return impl->getCachedReadVersion();
 }
 
-Future<ValueReadResult> SimpleConfigTransaction::get(Key const& key, Snapshot snapshot) {
+Future<Optional<Value>> SimpleConfigTransaction::get(Key const& key, Snapshot snapshot) {
 	return impl->get(key);
 }
 
-Future<RangeReadResult> SimpleConfigTransaction::getRange(KeySelector const& begin,
-                                                          KeySelector const& end,
-                                                          int limit,
-                                                          Snapshot snapshot,
-                                                          Reverse reverse) {
+Future<RangeResult> SimpleConfigTransaction::getRange(KeySelector const& begin,
+                                                      KeySelector const& end,
+                                                      int limit,
+                                                      Snapshot snapshot,
+                                                      Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}
 	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
-Future<RangeReadResult> SimpleConfigTransaction::getRange(KeySelector begin,
-                                                          KeySelector end,
-                                                          GetRangeLimits limits,
-                                                          Snapshot snapshot,
-                                                          Reverse reverse) {
+Future<RangeResult> SimpleConfigTransaction::getRange(KeySelector begin,
+                                                      KeySelector end,
+                                                      GetRangeLimits limits,
+                                                      Snapshot snapshot,
+                                                      Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

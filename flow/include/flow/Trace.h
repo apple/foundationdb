@@ -54,7 +54,6 @@ inline static bool TRACE_SAMPLE() {
 }
 
 extern thread_local int g_allocation_tracing_disabled;
-extern bool g_traceProcessEvents;
 
 // Each major level of severity has 10 levels of minor levels, which are not all
 // used. when the numbers of severity events in each level are counted, they are
@@ -400,7 +399,6 @@ public:
 
 	bool isEnabled() const { return static_cast<bool>(enabled); }
 
-	BaseTraceEvent& errorUnsuppressed(const class Error& e);
 	BaseTraceEvent& setErrorKind(ErrorKind errorKind);
 
 	explicit operator bool() const { return static_cast<bool>(enabled); }
@@ -417,22 +415,6 @@ public:
 	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
 
 	const TraceEventFields& getFields() const { return fields; }
-	Severity getSeverity() const { return severity; }
-
-	template <class Object>
-	void moveTo(Object& obj) {
-		obj.debugTrace(std::move(*this));
-	}
-
-	template <class Object>
-	void moveTo(Reference<Object> obj) {
-		obj->debugTrace(std::move(*this));
-	}
-
-	template <class Object>
-	void moveTo(Object* obj) {
-		obj->debugTrace(std::move(*this));
-	}
 
 protected:
 	State enabled;
@@ -471,14 +453,25 @@ struct TraceEvent : public BaseTraceEvent {
 	TraceEvent(AuditedEvent, UID id = UID());
 	TraceEvent(Severity, AuditedEvent, UID id = UID());
 
-	BaseTraceEvent& error(const class Error& e);
+	BaseTraceEvent& error(const class Error& e) {
+		if (enabled) {
+			return errorImpl(e, false);
+		}
+		return *this;
+	}
+
 	TraceEvent& errorUnsuppressed(const class Error& e) {
-		BaseTraceEvent::errorUnsuppressed(e);
+		if (enabled) {
+			return errorImpl(e, true);
+		}
 		return *this;
 	}
 
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
+
+private:
+	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 };
 
 class StringRef;

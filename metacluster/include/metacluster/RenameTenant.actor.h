@@ -107,7 +107,6 @@ struct RenameTenantImpl {
 		    wait(metadata::management::clusterTenantCount().getD(tr, tenantEntry.assignedCluster, Snapshot::False, 0));
 
 		if (clusterTenantCount + 1 > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
-			CODE_PROBE(true, "Rename failed due to cluster capacity limit");
 			throw cluster_no_capacity();
 		}
 
@@ -155,7 +154,6 @@ struct RenameTenantImpl {
 			return Void();
 		}
 		if (tenantEntry.get().tenantState == TenantState::REMOVING) {
-			CODE_PROBE(true, "Tenant removed during rename");
 			throw tenant_removed();
 		}
 

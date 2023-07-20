@@ -212,8 +212,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 					try {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-						state ValueReadResult writeFlag = wait(tr->get(writeRecoveryKey));
-						state ValueReadResult versionValue = wait(tr->get(snapshotEndVersionKey));
+						state Optional<Value> writeFlag = wait(tr->get(writeRecoveryKey));
+						state Optional<Value> versionValue = wait(tr->get(snapshotEndVersionKey));
 						TraceEvent("IBackupCheckSpecialKeys")
 						    .detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
 						    .detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");

@@ -65,7 +65,7 @@ struct ReadWriteCommon : KVWorkload {
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
 	std::string valueString;
-	double alpha; // probability for running TransactionB type
+	double alpha; // probability for run TransactionA type
 	// transaction setting
 	bool useRYW;
 
@@ -155,8 +155,8 @@ struct ReadWriteCommon : KVWorkload {
 	}
 
 	Future<Void> tracePeriodically();
-	Future<Void> logLatency(Future<ValueReadResult> f, bool shouldRecord);
-	Future<Void> logLatency(Future<RangeReadResult> f, bool shouldRecord);
+	Future<Void> logLatency(Future<Optional<Value>> f, bool shouldRecord);
+	Future<Void> logLatency(Future<RangeResult> f, bool shouldRecord);
 
 	Future<Void> setup(Database const& cx) override;
 	Future<bool> check(Database const& cx) override;

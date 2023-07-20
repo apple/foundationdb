@@ -13,7 +13,3 @@ repos:
     rev: f8e1b317742036ff11ff86356fd2b68147e169f7  # frozen: 5.0.4
     hooks:
     - id: flake8
--   repo: git@github.com:snowflakedb/casec_precommit.git
-    rev: 30374abd7e4cfcd07a03794bb706812ac9fa8da2
-    hooks:
-    - id: fdb-secret-scanner

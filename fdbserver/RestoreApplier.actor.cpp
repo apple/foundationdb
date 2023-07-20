@@ -271,7 +271,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
     int batchIndex,
     ApplierBatchData::Counters* cc) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state std::vector<Future<ValueReadResult>> fValues(incompleteStagingKeys.size(), Never());
+	state std::vector<Future<Optional<Value>>> fValues(incompleteStagingKeys.size(), Never());
 	state int retries = 0;
 	state UID randomID = deterministicRandom()->randomUniqueID();
 

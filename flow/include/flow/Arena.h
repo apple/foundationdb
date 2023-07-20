@@ -99,8 +99,6 @@ FDB_BOOLEAN_PARAM(FastInaccurateEstimate);
 // Tag struct to indicate that the block containing allocated memory needs to be zero-ed out after use
 struct WipeAfterUse {};
 
-struct ArenaBlock;
-
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
 // on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
 // ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
@@ -135,14 +133,8 @@ public:
 
 	bool sameArena(const Arena& other) const { return impl.getPtr() == other.impl.getPtr(); }
 
-	ArenaBlock* getPtr() const { return impl.getPtr(); }
-
-	static Arena addRef(ArenaBlock* ptr);
-
 private:
-	Arena(ArenaBlock* ptr) : impl(ptr) {}
-
-	Reference<ArenaBlock> impl;
+	Reference<struct ArenaBlock> impl;
 };
 
 template <>
@@ -215,11 +207,6 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	void destroyLeaf();
 	static void* operator new(size_t s) = delete;
 };
-
-inline Arena Arena::addRef(ArenaBlock* ptr) {
-	ptr->addref();
-	return Arena(ptr);
-}
 
 inline void* operator new(size_t size, Arena& p) {
 	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());

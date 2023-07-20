@@ -43,7 +43,7 @@ ACTOR Future<Void> changeFeedList(Database db) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 
-			RangeReadResult result = wait(tr.getRange(changeFeedKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult result = wait(tr.getRange(changeFeedKeys, CLIENT_KNOBS->TOO_MANY));
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
 			printf("Found %d change feeds%s\n", result.size(), result.size() == 0 ? "." : ":");

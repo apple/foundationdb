@@ -1880,8 +1880,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {
 		TraceEvent(SevError, "PacketLimitExceeded")
 		    .detail("ToPeer", destination.getPrimaryAddress())
-		    .detail("Length", (int)len)
-		    .detail("Token", destination.token);
+		    .detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
 		TraceEvent(SevWarn, "LargePacketSent")

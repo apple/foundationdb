@@ -863,11 +863,6 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 	return false;
 }
 
-void DatabaseConfiguration::test_setDefaultReplicationPolicy() {
-	ASSERT(g_network->isSimulated());
-	setDefaultReplicationPolicy();
-}
-
 TEST_CASE("/fdbclient/databaseConfiguration/overwriteCommitProxy") {
 	DatabaseConfiguration conf1;
 	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "5"_sr));

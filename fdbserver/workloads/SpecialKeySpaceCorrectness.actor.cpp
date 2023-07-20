@@ -369,10 +369,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// tenant check that conflict ranges stay the same after commit
 		// and depending on if RYW is disabled
 		{
-			state RangeReadResult readresult1;
-			state RangeReadResult readresult2;
-			state RangeReadResult writeResult1;
-			state RangeReadResult writeResult2;
+			state RangeResult readresult1;
+			state RangeResult readresult2;
+			state RangeResult writeResult1;
+			state RangeResult writeResult2;
 			try {
 				if (disableRyw) {
 					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
@@ -420,11 +420,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						continue;
 					}
 					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
-					state RangeReadResult readConflictRange =
+					state RangeResult readConflictRange =
 					    wait(defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
-					state RangeReadResult writeConflictRange =
+					state RangeResult writeConflictRange =
 					    wait(defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
-					state RangeReadResult conflictKeys =
+					state RangeResult conflictKeys =
 					    wait(defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY));
 
 					// size is 2 because singleKeyRange includes the key after
@@ -496,7 +496,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			const KeyRef startKey = "\xff\xff/transactio"_sr;
 			const KeyRef endKey = "\xff\xff/transaction1"_sr;
-			RangeReadResult result =
+			RangeResult result =
 			    wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			// The whole transaction module should be empty
 			ASSERT(!result.size());
@@ -548,7 +548,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			const KeyRef key = "\xff\xff/cluster_file_path"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(keyAfter(key), false, 2);
-			RangeReadResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(result.readToBegin && result.readThroughEnd);
 			tx->reset();
 		} catch (Error& e) {
@@ -560,7 +560,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			const KeyRef key = "\xff\xff/transaction/a_to_be_the_first"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(key, false, 2);
-			RangeReadResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(result.readToBegin && !result.readThroughEnd);
 			tx->reset();
 		} catch (Error& e) {
@@ -607,7 +607,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			const KeySelector startKeySelector = KeySelectorRef("\xff\xff/test"_sr, true, -200);
 			const KeySelector endKeySelector = KeySelectorRef("test"_sr, true, -10);
-			RangeReadResult result =
+			RangeResult result =
 			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
@@ -619,13 +619,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// test case when registered range is the same as the underlying module
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			state RangeReadResult result =
+			state RangeResult result =
 			    wait(tx->getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
 			                      CLIENT_KNOBS->TOO_MANY));
 			// Note: there's possibility we get zero workers
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
-				ValueReadResult singleRes = wait(tx->get(entry.key));
+				Optional<Value> singleRes = wait(tx->get(entry.key));
 				if (singleRes.present())
 					ASSERT(singleRes.get() == entry.value);
 			}
@@ -810,7 +810,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					ValueReadResult ccStrValue = wait(tx->get(coordinatorsKey));
+					Optional<Value> ccStrValue = wait(tx->get(coordinatorsKey));
 					ASSERT(ccStrValue.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString ccStr(ccStrValue.get().toString());
 					// choose a new description if configuration allows transactions across differently named clusters
@@ -818,7 +818,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					                              ? deterministicRandom()->randomAlphaNumeric(8)
 					                              : ccStr.clusterKeyName().toString();
 					// get current coordinators
-					ValueReadResult processes_key = wait(tx->get(
+					Optional<Value> processes_key = wait(tx->get(
 					    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 					ASSERT(processes_key.present());
 					boost::split(
@@ -874,7 +874,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						// if we repeat doing the change, we will get the error:
 						// CoordinatorsResult::SAME_NETWORK_ADDRESSES
 						if (e.code() == error_code_special_keys_api_failure) {
-							ValueReadResult errorMsg =
+							Optional<Value> errorMsg =
 							    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 							ASSERT(errorMsg.present());
 							std::string errorStr;
@@ -910,7 +910,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				// change successful, now check it is already changed
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					ValueReadResult res = wait(tx->get(coordinatorsKey));
+					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
@@ -950,7 +950,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					} catch (Error& e) {
 						TraceEvent(SevDebug, "CoordinatorsManualChangeRevert").error(e);
 						if (e.code() == error_code_special_keys_api_failure) {
-							ValueReadResult errorMsg =
+							Optional<Value> errorMsg =
 							    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 							ASSERT(errorMsg.present());
 							std::string errorStr;
@@ -984,13 +984,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		loop {
 			try {
 				// maintenance
-				RangeReadResult maintenanceKVs = wait(
+				RangeResult maintenanceKVs = wait(
 				    tx->getRange(SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
 				// By default, no maintenance is going on
 				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
 				// datadistribution
-				RangeReadResult ddKVs = wait(tx->getRange(
-				    SpecialKeySpace::getManagementApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY));
+				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManagementApiCommandRange("datadistribution"),
+				                                      CLIENT_KNOBS->TOO_MANY));
 				// By default, data_distribution/mode := "-1"
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
 				ASSERT(ddKVs[0].key ==
@@ -1023,7 +1023,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				} catch (Error& e) {
 					TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(e);
 					if (e.code() == error_code_special_keys_api_failure) {
-						ValueReadResult errorMsg =
+						Optional<Value> errorMsg =
 						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 						ASSERT(errorMsg.present());
 						std::string errorStr;
@@ -1060,7 +1060,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// the second commit will fail since maintenance not allowed to use while DD disabled for SS
 					// failures
 					if (e.code() == error_code_special_keys_api_failure) {
-						ValueReadResult errorMsg =
+						Optional<Value> errorMsg =
 						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 						ASSERT(errorMsg.present());
 						std::string errorStr;
@@ -1111,17 +1111,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					// check DD disabled for SS failures
-					ValueReadResult val1 = wait(tx->get(healthyZoneKey));
+					Optional<Value> val1 = wait(tx->get(healthyZoneKey));
 					ASSERT(val1.present());
 					auto healthyZone = decodeHealthyZoneValue(val1.get());
 					ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
 					// check DD mode
-					ValueReadResult val2 = wait(tx->get(dataDistributionModeKey));
+					Optional<Value> val2 = wait(tx->get(dataDistributionModeKey));
 					ASSERT(val2.present());
 					// mode should be set to 0
 					ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
 					// check DD disabled for rebalance
-					ValueReadResult val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
 					ASSERT(val3.present() &&
 					       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
 					tx->reset();
@@ -1152,13 +1152,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					// check DD SSFailures key
-					ValueReadResult val1 = wait(tx->get(healthyZoneKey));
+					Optional<Value> val1 = wait(tx->get(healthyZoneKey));
 					ASSERT(!val1.present());
 					// check DD mode
-					ValueReadResult val2 = wait(tx->get(dataDistributionModeKey));
+					Optional<Value> val2 = wait(tx->get(dataDistributionModeKey));
 					ASSERT(!val2.present());
 					// check DD rebalance key
-					ValueReadResult val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
 					ASSERT(!val3.present());
 					tx->reset();
 					break;

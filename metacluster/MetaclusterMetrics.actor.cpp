@@ -54,8 +54,6 @@ ACTOR Future<MetaclusterMetrics> getMetaclusterMetricsImpl(Database db) {
 			    .detail("TenantGroupCapacity", metrics.tenantGroupCapacity)
 			    .detail("TenantGroupsAllocated", metrics.tenantGroupsAllocated);
 
-			CODE_PROBE(true, "Got metacluster metrics");
-
 			return metrics;
 		} catch (Error& e) {
 			TraceEvent("MetaclusterUpdaterError").error(e);

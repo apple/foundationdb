@@ -1,6 +1,17 @@
 fdb_find_sources(FDBRPC_SRCS)
 
-set(COMPILE_EIO ON)
+set(COMPILE_EIO OFF)
+
+if(NOT WIN32)
+  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    find_library(EIO eio)
+    if(NOT EIO)
+      set(COMPILE_EIO ON)
+    endif()
+  else()
+    set(COMPILE_EIO ON)
+  endif()
+endif()
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
   ActorFuzz.actor.cpp
@@ -36,12 +47,18 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
   if(APPLE)
     list(APPEND CORO_SRCS libcoroutine/asm.S)
   endif()
-  list(APPEND CORO_SRCS libcoroutine/context.c)
+  if(NOT WIN32)
+    list(APPEND CORO_SRCS libcoroutine/context.c)
+  endif()
   add_library(coro STATIC ${CORO_SRCS})
   target_link_libraries(coro PRIVATE flow)
   target_include_directories(coro PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libcoroutine)
-  target_compile_definitions(coro PRIVATE USE_UCONTEXT)
-  target_compile_options(coro BEFORE PRIVATE -w) # disable warnings for third party
+  if(WIN32)
+    target_compile_definitions(coro PRIVATE USE_FIBERS)
+  else()
+    target_compile_definitions(coro PRIVATE USE_UCONTEXT)
+    target_compile_options(coro BEFORE PRIVATE -w) # disable warnings for third party
+  endif()
   if(USE_VALGRIND)
     target_link_libraries(coro PUBLIC Valgrind)
   endif()
@@ -64,5 +81,9 @@ if(COMPILE_EIO)
 endif()
 
 target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
+  add_dependencies(tokensign_actors fdbrpc_actors)
+endif()
 
 add_subdirectory(tests)

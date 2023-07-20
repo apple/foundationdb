@@ -687,9 +687,11 @@ func (o TransactionOptions) SetAutoThrottleTag(param string) error {
 	return o.setOpt(801, []byte(param))
 }
 
-// Adds a parent to the Span of this transaction according to traceparent specification from https://www.w3.org/TR/trace-context/
-func (o TransactionOptions) SetTraceParent(param string) error {
-	return o.setOpt(901, []byte(param))
+// Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes
+//
+// Parameter: A byte string of length 16 used to associate the span of this transaction with a parent
+func (o TransactionOptions) SetSpanParent(param []byte) error {
+	return o.setOpt(900, param)
 }
 
 // Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this.

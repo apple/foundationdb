@@ -48,24 +48,24 @@ public:
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<ValueReadResult> get(Key const& key, Snapshot = Snapshot::False) override;
-	Future<RangeReadResult> getRange(KeySelector const& begin,
-	                                 KeySelector const& end,
-	                                 int limit,
-	                                 Snapshot = Snapshot::False,
-	                                 Reverse = Reverse::False) override;
-	Future<RangeReadResult> getRange(KeySelector begin,
-	                                 KeySelector end,
-	                                 GetRangeLimits limits,
-	                                 Snapshot = Snapshot::False,
-	                                 Reverse = Reverse::False) override;
-	Future<MappedRangeReadResult> getMappedRange(KeySelector begin,
-	                                             KeySelector end,
-	                                             Key mapper,
-	                                             GetRangeLimits limits,
-	                                             int matchIndex,
-	                                             Snapshot = Snapshot::False,
-	                                             Reverse = Reverse::False) override {
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False) override;
+	Future<RangeResult> getRange(KeySelector const& begin,
+	                             KeySelector const& end,
+	                             int limit,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(KeySelector begin,
+	                             KeySelector end,
+	                             GetRangeLimits limits,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<MappedRangeResult> getMappedRange(KeySelector begin,
+	                                         KeySelector end,
+	                                         Key mapper,
+	                                         GetRangeLimits limits,
+	                                         int matchIndex,
+	                                         Snapshot = Snapshot::False,
+	                                         Reverse = Reverse::False) override {
 		throw client_invalid_operation();
 	}
 	Future<Void> commit() override;

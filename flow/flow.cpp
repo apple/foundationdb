@@ -82,7 +82,7 @@ using namespace std::literals;
 
 const std::string_view StackLineage::name = "StackLineage"sv;
 
-#if defined(__linux__) && defined(__AVX__) && !defined(MEMORY_SANITIZER) && !DEBUG_DETERMINISM
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER) && !DEBUG_DETERMINISM
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
@@ -97,7 +97,7 @@ __attribute__((visibility("default"))) void* memcpy(void* __restrict __dest, con
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	return memcpy(__dest, __src, __n);
 }
-#endif // defined (__linux__) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
+#endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 
 INetwork* g_network = nullptr;
 
@@ -259,6 +259,14 @@ int vsformat(std::string& outputString, const char* form, va_list args) {
 		outputString = std::string(buf, size);
 		return size;
 	}
+
+#ifdef _WIN32
+	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary
+	// size
+	va_copy(args2, args);
+	size = _vscprintf(form, args2);
+	va_end(args2);
+#endif
 
 	if (size < 0) {
 		return -1;
@@ -581,9 +589,9 @@ struct TestErrorOrMapClass {
 	ErrorOr<StringRef> errorOrSub(int x) const { return errorOrValue.map<StringRef>(&StringRef::substr, (int)x); }
 
 	TestErrorOrMapClass(StringRef value, Optional<Error> optionalValueError)
-	  : value(value), errorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
-	                                                             : ErrorOr<StringRef>(optionalValueError.get())),
-	    constValue(value),
+	  : value(value), constValue(value),
+	    errorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
+	                                               : ErrorOr<StringRef>(optionalValueError.get())),
 	    constErrorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
 	                                                    : ErrorOr<StringRef>(optionalValueError.get())) {}
 };

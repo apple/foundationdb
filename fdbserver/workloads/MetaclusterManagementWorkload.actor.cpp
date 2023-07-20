@@ -105,10 +105,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), metaclusterCreated(deterministicRandom()->coinflip()) {
-		maxTenants =
-		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
-		maxTenantGroups = deterministicRandom()->randomInt(
-		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
+		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
+		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		useExistingMetacluster = getOption(options, "useExistingMetacluster"_sr, false);
 		allowTenantIdPrefixReuse = deterministicRandom()->coinflip();
@@ -116,21 +114,15 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	}
 
 	Optional<int64_t> generateTenantIdPrefix() {
-		Optional<int64_t> newPrefix;
-		if (allowTenantIdPrefixReuse && deterministicRandom()->coinflip()) {
-			newPrefix = 0;
-		} else {
-			for (int i = 0; i < 20 && !newPrefix.present(); ++i) {
-				int64_t candidate = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-				                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
-				if (allowTenantIdPrefixReuse || !usedPrefixes.count(candidate)) {
-					newPrefix = candidate;
-				}
+		for (int i = 0; i < 20; ++i) {
+			int64_t newPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+			                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
+			if (allowTenantIdPrefixReuse || !usedPrefixes.count(newPrefix)) {
+				return newPrefix;
 			}
 		}
 
-		CODE_PROBE(newPrefix.present() && usedPrefixes.count(newPrefix.get()), "Reusing tenant ID prefix");
-		return newPrefix;
+		return false;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
@@ -266,8 +258,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		bool dataValid = !dataDb.present() || (dataDb.get()->version >= MetaclusterVersion::MIN_SUPPORTED &&
 		                                       dataDb.get()->version <= MetaclusterVersion::MAX_SUPPORTED);
 
-		CODE_PROBE(!managementValid, "Management cluster invalid version");
-		CODE_PROBE(!dataValid, "Data cluster invalid version");
 		return managementValid && dataValid;
 	}
 
@@ -558,8 +548,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			if (detachCluster) {
 				dataDb->detached = true;
-				CODE_PROBE(!dataDb->ungroupedTenants.empty(), "Detach ungrouped tenants");
-				CODE_PROBE(!dataDb->tenantGroups.empty(), "Detach tenant groups");
 				for (auto const& t : dataDb->ungroupedTenants) {
 					self->ungroupedTenants.erase(t);
 				}
@@ -668,8 +656,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 		}
 
-		CODE_PROBE(foundTenantCollision, "Resolved tenant collision for restore", probe::decoration::rare);
-		CODE_PROBE(foundGroupCollision, "Resolved group collision for restore", probe::decoration::rare);
 		return foundTenantCollision || foundGroupCollision;
 	}
 
@@ -740,9 +726,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				if (error.code() == error_code_conflicting_restore ||
 				    error.code() == error_code_cluster_already_exists) {
 					ASSERT(retried);
-					CODE_PROBE(true,
-					           "MetaclusterManagementWorkload: timed out restore conflicts with retried restore",
-					           probe::decoration::rare);
+					CODE_PROBE(true, "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
 					continue;
 				} else if (error.code() == error_code_cluster_not_found) {
 					ASSERT(!dataDb->registered);
@@ -761,7 +745,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						ASSERT(self->allowTenantIdPrefixReuse);
 						ASSERT(!messages.empty());
 						ASSERT(messages[0].find("has the same ID"));
-						CODE_PROBE(true, "Reused tenant ID", probe::decoration::rare);
 						return Void();
 					}
 				} else if (error.code() == error_code_invalid_metacluster_configuration) {

@@ -30,8 +30,6 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 
 	int addValue;
 	int iterations;
-	int completedIterations = 0;
-	int potentialIterations = 0;
 	bool initialize;
 	int initialValue;
 	Key sumKey;
@@ -47,12 +45,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		sumKey = getOption(options, "sumKey"_sr, "sumKey"_sr);
 	}
 
-	Future<Void> setup(Database const& cx) override {
-		if (initialize) {
-			return setInitialValue(cx, this);
-		}
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId) {
@@ -69,10 +62,13 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(Database cx, SimpleAtomicAddWorkload* self) {
+		if (self->initialize) {
+			wait(setInitialValue(cx, self));
+		}
 		for (int i = 0; i < self->iterations; ++i) {
 			self->clients.push_back(timeout(applyAtomicAdd(cx, self), self->testDuration, Void()));
 		}
-		wait(waitForAll(self->clients));
+		waitForAll(self->clients);
 		return Void();
 	}
 
@@ -84,7 +80,6 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 				TraceEvent("SAASetInitialValue").detail("Key", self->sumKey).detail("Value", val);
 				tr.set(self->sumKey, val);
 				wait(tr.commit());
-				TraceEvent("SAASetInitialValueDone").detail("Key", self->sumKey).detail("Value", val);
 				break;
 			} catch (Error& e) {
 				TraceEvent("SAASetInitialValueError").error(e);
@@ -98,14 +93,10 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		state Value val = StringRef((const uint8_t*)&self->addValue, sizeof(self->addValue));
 		loop {
-			// FIXME: only count potential iteration if it's an error where it's unknown if the commit applied or not,
-			// like commit_unknown_result
-			self->potentialIterations++;
 			try {
 				TraceEvent("SAABegin").detail("Key", self->sumKey).detail("Value", val);
 				tr.atomicOp(self->sumKey, val, MutationRef::AddValue);
 				wait(tr.commit());
-				self->completedIterations++;
 				break;
 			} catch (Error& e) {
 				TraceEvent("SAABeginError").error(e);
@@ -117,34 +108,22 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 
 	ACTOR static Future<bool> _check(Database cx, SimpleAtomicAddWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
-		// Any iteration that committed is guaranteed to be committed and counted.
-		// Any iteration that did not finish may or may not have committed and thus may or may not count
-		state uint64_t expectedMaxValue = self->addValue * self->potentialIterations;
-		state uint64_t expectedMinValue = self->addValue * self->completedIterations;
-		CODE_PROBE(expectedMaxValue != expectedMinValue, "SimpleAtomicAdd had failures and/or incomplete operations");
+		state uint64_t expectedValue = self->addValue * self->iterations;
 		if (self->initialize) {
-			expectedMaxValue += self->initialValue;
-			expectedMinValue += self->initialValue;
+			expectedValue += self->initialValue;
 		}
 		loop {
 			try {
 				TraceEvent("SAACheckKey").log();
-				ValueReadResult actualValue = wait(tr.get(self->sumKey));
+				Optional<Value> actualValue = wait(tr.get(self->sumKey));
 				uint64_t actualValueInt = 0;
 				if (actualValue.present()) {
 					memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());
 				}
-				bool correct = (actualValueInt >= expectedMinValue && actualValueInt <= expectedMaxValue);
-				TraceEvent(correct ? SevInfo : SevError, "SAACheck")
-				    .detail("InitialValue", self->initialize ? self->initialValue : 0)
-				    .detail("AddValue", self->addValue)
-				    .detail("PotentialIterations", self->potentialIterations)
-				    .detail("CompletedIterations", self->completedIterations)
-				    .detail("ExpectedMinValue", expectedMinValue)
-				    .detail("ExpectedMaxValue", expectedMaxValue)
-				    .detail("ActualValue", actualValueInt)
-				    .detail("Correct", correct);
-				return correct;
+				TraceEvent("SAACheckEqual")
+				    .detail("ExpectedValue", expectedValue)
+				    .detail("ActualValue", actualValueInt);
+				return (expectedValue == actualValueInt);
 			} catch (Error& e) {
 				TraceEvent("SAACheckError").error(e);
 				wait(tr.onError(e));

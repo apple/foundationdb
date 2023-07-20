@@ -41,7 +41,6 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Trans
                                                                            TenantName end,
                                                                            int limit,
                                                                            int offset = 0) {
-	CODE_PROBE(true, "List tenants");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	auto future = metadata::management::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit + offset);
 	return fmap(
@@ -59,7 +58,6 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenantsTransa
                                                                                       TenantName begin,
                                                                                       TenantName end,
                                                                                       int limit) {
-	CODE_PROBE(true, "List tenant group tenants");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state KeyBackedSet<Tuple>::RangeResultType result =
 	    wait(metadata::management::tenantMetadata().tenantGroupTenantIndex.getRange(
@@ -93,7 +91,6 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
     Transaction tr,
     std::vector<std::pair<TenantName, int64_t>> tenantIds) {
 
-	CODE_PROBE(true, "List tenant metadata");
 	state int idIdx = 0;
 	state std::vector<Future<Optional<MetaclusterTenantMapEntry>>> futures;
 	for (; idIdx < tenantIds.size(); ++idIdx) {
@@ -184,7 +181,6 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 					}
 				}
 
-				CODE_PROBE(true, "List tenant multiple batches");
 				begin = keyAfter(tenantBatch.back().first);
 			}
 		} catch (Error& e) {

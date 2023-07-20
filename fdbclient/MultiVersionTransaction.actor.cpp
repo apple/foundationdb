@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#ifdef __unixish__
 #include <fcntl.h>
+#endif
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
@@ -46,7 +48,9 @@
 #include "flow/UnitTest.h"
 #include "flow/Trace.h"
 
+#ifdef __unixish__
 #include <fcntl.h>
+#endif // __unixish__
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -80,69 +84,52 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<ValueReadResult> DLTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<Optional<Value>> DLTransaction::get(const KeyRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f = api->transactionGet(tr, key.begin(), key.size(), snapshot);
 
-	return toThreadFuture<ValueReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Optional<Value>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t present;
 		const uint8_t* value;
 		int valueLength;
 		FdbCApi::fdb_error_t error = api->futureGetValue(f, &present, &value, &valueLength);
 		ASSERT(!error);
-
-		float serverBusyness = 0.0;
-		float rangeBusyness = 0.0;
-		if (api->futureGetReadBusyness) {
-			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
-			ASSERT(!error);
-		}
-
 		if (present) {
 			// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-			return ValueReadResult(Optional<Value>(Value(ValueRef(value, valueLength), Arena())),
-			                       ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+			return Optional<Value>(Value(ValueRef(value, valueLength), Arena()));
 		} else {
-			return ValueReadResult(Optional<Value>(), ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+			return Optional<Value>();
 		}
 	});
 }
 
-ThreadFuture<KeyReadResult> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f =
 	    api->transactionGetKey(tr, key.getKey().begin(), key.getKey().size(), key.orEqual, key.offset, snapshot);
 
-	return toThreadFuture<KeyReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const uint8_t* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
 
-		float serverBusyness = 0.0;
-		float rangeBusyness = 0.0;
-		if (api->futureGetReadBusyness) {
-			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
-			ASSERT(!error);
-		}
-
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return KeyReadResult(Key(KeyRef(key, keyLength), Arena()),
-		                     ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+		return Key(KeyRef(key, keyLength), Arena());
 	});
 }
 
-ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                      const KeySelectorRef& end,
-                                                      int limit,
-                                                      bool snapshot,
-                                                      bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                  const KeySelectorRef& end,
+                                                  int limit,
+                                                  bool snapshot,
+                                                  bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                      const KeySelectorRef& end,
-                                                      GetRangeLimits limits,
-                                                      bool snapshot,
-                                                      bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                  const KeySelectorRef& end,
+                                                  GetRangeLimits limits,
+                                                  bool snapshot,
+                                                  bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetRange(tr,
 	                                                 begin.getKey().begin(),
 	                                                 begin.getKey().size(),
@@ -158,46 +145,37 @@ ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeySelectorRef& begi
 	                                                 0,
 	                                                 snapshot,
 	                                                 reverse);
-	return toThreadFuture<RangeReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBKeyValue* kvs;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
 		ASSERT(!error);
 
-		float serverBusyness = 0.0;
-		float rangeBusyness = 0.0;
-		if (api->futureGetReadBusyness) {
-			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
-			ASSERT(!error);
-		}
-
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeReadResult(
-		    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()),
-		    ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
 	});
 }
 
-ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot, bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot, bool reverse) {
 	return getRange(
 	    firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeyRangeRef& keys,
-                                                      GetRangeLimits limits,
-                                                      bool snapshot,
-                                                      bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
+                                                  GetRangeLimits limits,
+                                                  bool snapshot,
+                                                  bool reverse) {
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<MappedRangeReadResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                  const KeySelectorRef& end,
-                                                                  const StringRef& mapper,
-                                                                  GetRangeLimits limits,
-                                                                  int matchIndex,
-                                                                  bool snapshot,
-                                                                  bool reverse) {
+ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                              const KeySelectorRef& end,
+                                                              const StringRef& mapper,
+                                                              GetRangeLimits limits,
+                                                              int matchIndex,
+                                                              bool snapshot,
+                                                              bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
 	                                                       begin.getKey().begin(),
 	                                                       begin.getKey().size(),
@@ -216,25 +194,16 @@ ThreadFuture<MappedRangeReadResult> DLTransaction::getMappedRange(const KeySelec
 	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
-	return toThreadFuture<MappedRangeReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
 		ASSERT(!error);
 
-		float serverBusyness = 0.0;
-		float rangeBusyness = 0.0;
-		if (api->futureGetReadBusyness) {
-			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
-			ASSERT(!error);
-		}
-
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return MappedRangeReadResult(
-		    MappedRangeResult(MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more),
-		                      Arena()),
-		    ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+		return MappedRangeResult(
+		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
 	});
 }
 
@@ -321,6 +290,72 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRa
 		                                          Arena());
 	});
 }
+
+ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                          Version beginVersion,
+                                                          Optional<Version> readVersion,
+                                                          ReadBlobGranuleContext granuleContext) {
+	return unsupported_operation();
+}
+
+ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> DLTransaction::readBlobGranulesStart(
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
+	if (!api->transactionReadBlobGranulesStart) {
+		return unsupported_operation();
+	}
+
+	int64_t rv = readVersion.present() ? readVersion.get() : latestVersion;
+
+	FdbCApi::FDBFuture* f = api->transactionReadBlobGranulesStart(tr,
+	                                                              keyRange.begin.begin(),
+	                                                              keyRange.begin.size(),
+	                                                              keyRange.end.begin(),
+	                                                              keyRange.end.size(),
+	                                                              beginVersion,
+	                                                              rv,
+	                                                              readVersionOut);
+
+	return ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>>(
+	    (ThreadSingleAssignmentVar<Standalone<VectorRef<BlobGranuleChunkRef>>>*)(f));
+};
+
+ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
+    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Version readVersion,
+    ReadBlobGranuleContext granuleContext) {
+	if (!api->transactionReadBlobGranulesFinish) {
+		return unsupported_operation();
+	}
+
+	// convert back to fdb future for API
+	FdbCApi::FDBFuture* f = (FdbCApi::FDBFuture*)(startFuture.extractPtr());
+
+	// FIXME: better way to convert here?
+	FdbCApi::FDBReadBlobGranuleContext context;
+	context.userContext = granuleContext.userContext;
+	context.start_load_f = granuleContext.start_load_f;
+	context.get_load_f = granuleContext.get_load_f;
+	context.free_load_f = granuleContext.free_load_f;
+	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
+	context.granuleParallelism = granuleContext.granuleParallelism;
+
+	FdbCApi::FDBResult* r = api->transactionReadBlobGranulesFinish(tr,
+	                                                               f,
+	                                                               keyRange.begin.begin(),
+	                                                               keyRange.begin.size(),
+	                                                               keyRange.end.begin(),
+	                                                               keyRange.end.size(),
+	                                                               beginVersion,
+	                                                               readVersion,
+	                                                               &context);
+
+	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
+};
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
 DLTransaction::summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) {
@@ -453,36 +488,8 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
-void DLTransaction::debugTrace(BaseTraceEvent&& event) {
-	event.detail("CommitResult", "Deferred logging unsupported").log();
-};
-
-void DLTransaction::debugPrint(std::string const& message) {
-	fmt::print("[Deferred logging unsupported] {}\n", message);
-}
-
 ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
-}
-
-ThreadFuture<ApiResult> DLTransaction::execAsyncRequest(ApiRequest request) {
-	if (!api->transactionExecAsync) {
-		return unsupported_operation();
-	}
-	FdbCApi::FDBFuture* f = api->transactionExecAsync(tr, request.getFDBRequest());
-	return toThreadFuture<ApiResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FDBResult* result;
-		FdbCApi::fdb_error_t error = api->futureGetResult(f, &result);
-		ASSERT(!error);
-		return ApiResult::fromPtr(result);
-	});
-}
-
-FDBAllocatorIfc* DLTransaction::getAllocatorInterface() {
-	if (!api->getAllocatorInterface) {
-		throw unsupported_operation();
-	}
-	return api->getAllocatorInterface();
 }
 
 // DLTenant
@@ -975,11 +982,6 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_create_database_from_connection_string",
 	                   headerVersion >= ApiVersion::withCreateDBFromConnString().version());
-	loadClientFunction(&api->getAllocatorInterface,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_get_allocator_interface",
-	                   headerVersion >= ApiVersion::withEvolvableApi().version());
 
 	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
@@ -1161,16 +1163,23 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_blob_granule_ranges",
 	                   headerVersion >= 710);
+	loadClientFunction(
+	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
+	loadClientFunction(&api->transactionReadBlobGranulesStart,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_read_blob_granules_start",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->transactionReadBlobGranulesFinish,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_read_blob_granules_finish",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->transactionSummarizeBlobGranules,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_summarize_blob_granules",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->transactionExecAsync,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_exec_async",
-	                   headerVersion >= ApiVersion::withEvolvableApi().version());
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
 	                   fdbCPath,
@@ -1204,13 +1213,6 @@ void DLApi::init() {
 	                   "fdb_future_get_granule_summary_array",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
-	loadClientFunction(&api->futureGetResult,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_future_get_result",
-	                   headerVersion >= ApiVersion::withEvolvableApi().version());
-	loadClientFunction(
-	    &api->futureGetReadBusyness, lib, fdbCPath, "fdb_future_get_read_busyness", headerVersion >= 800000);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -1348,13 +1350,6 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
 
-FDBAllocatorIfc* DLApi::getAllocatorInterface() {
-	if (!api->getAllocatorInterface) {
-		throw unsupported_operation();
-	}
-	return api->getAllocatorInterface();
-}
-
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
                                                  Optional<Reference<MultiVersionTenant>> tenant,
@@ -1467,69 +1462,69 @@ ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	return executeOperation(&ITransaction::getReadVersion);
 }
 
-ThreadFuture<ValueReadResult> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::get, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<KeyReadResult> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::getKey, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                                const KeySelectorRef& end,
-                                                                int limit,
-                                                                bool snapshot,
-                                                                bool reverse) {
-	return executeOperation<RangeReadResult>(&ITransaction::getRange,
-	                                         begin,
-	                                         end,
-	                                         std::forward<int>(limit),
-	                                         std::forward<bool>(snapshot),
-	                                         std::forward<bool>(reverse));
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
+                                                            const KeySelectorRef& end,
+                                                            int limit,
+                                                            bool snapshot,
+                                                            bool reverse) {
+	return executeOperation<RangeResult>(&ITransaction::getRange,
+	                                     begin,
+	                                     end,
+	                                     std::forward<int>(limit),
+	                                     std::forward<bool>(snapshot),
+	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                                const KeySelectorRef& end,
-                                                                GetRangeLimits limits,
-                                                                bool snapshot,
-                                                                bool reverse) {
-	return executeOperation<RangeReadResult>(&ITransaction::getRange,
-	                                         begin,
-	                                         end,
-	                                         std::forward<GetRangeLimits>(limits),
-	                                         std::forward<bool>(snapshot),
-	                                         std::forward<bool>(reverse));
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
+                                                            const KeySelectorRef& end,
+                                                            GetRangeLimits limits,
+                                                            bool snapshot,
+                                                            bool reverse) {
+	return executeOperation<RangeResult>(&ITransaction::getRange,
+	                                     begin,
+	                                     end,
+	                                     std::forward<GetRangeLimits>(limits),
+	                                     std::forward<bool>(snapshot),
+	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                                int limit,
-                                                                bool snapshot,
-                                                                bool reverse) {
-	return executeOperation<RangeReadResult>(&ITransaction::getRange,
-	                                         keys,
-	                                         std::forward<int>(limit),
-	                                         std::forward<bool>(snapshot),
-	                                         std::forward<bool>(reverse));
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                            int limit,
+                                                            bool snapshot,
+                                                            bool reverse) {
+	return executeOperation<RangeResult>(&ITransaction::getRange,
+	                                     keys,
+	                                     std::forward<int>(limit),
+	                                     std::forward<bool>(snapshot),
+	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                                GetRangeLimits limits,
-                                                                bool snapshot,
-                                                                bool reverse) {
-	return executeOperation<RangeReadResult>(&ITransaction::getRange,
-	                                         keys,
-	                                         std::forward<GetRangeLimits>(limits),
-	                                         std::forward<bool>(snapshot),
-	                                         std::forward<bool>(reverse));
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                            GetRangeLimits limits,
+                                                            bool snapshot,
+                                                            bool reverse) {
+	return executeOperation<RangeResult>(&ITransaction::getRange,
+	                                     keys,
+	                                     std::forward<GetRangeLimits>(limits),
+	                                     std::forward<bool>(snapshot),
+	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<MappedRangeReadResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                            const KeySelectorRef& end,
-                                                                            const StringRef& mapper,
-                                                                            GetRangeLimits limits,
-                                                                            int matchIndex,
-                                                                            bool snapshot,
-                                                                            bool reverse) {
+ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                        const KeySelectorRef& end,
+                                                                        const StringRef& mapper,
+                                                                        GetRangeLimits limits,
+                                                                        int matchIndex,
+                                                                        bool snapshot,
+                                                                        bool reverse) {
 	return executeOperation(&ITransaction::getMappedRange,
 	                        begin,
 	                        end,
@@ -1568,6 +1563,52 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlo
     const KeyRangeRef& keyRange,
     int rangeLimit) {
 	return executeOperation(&ITransaction::getBlobGranuleRanges, keyRange, std::forward<int>(rangeLimit));
+}
+
+ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                                    Version beginVersion,
+                                                                    Optional<Version> readVersion,
+                                                                    ReadBlobGranuleContext granuleContext) {
+	// FIXME: prevent from calling this from another main thread?
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		Version readVersionOut;
+		auto f = tr.transaction->readBlobGranulesStart(keyRange, beginVersion, readVersion, &readVersionOut);
+		auto abortableF = abortableFuture(f, tr.onChange);
+		abortableF.blockUntilReadyCheckOnMainThread();
+		if (abortableF.isError()) {
+			return ThreadResult<RangeResult>(abortableF.getError());
+		}
+		if (granuleContext.debugNoMaterialize) {
+			return ThreadResult<RangeResult>(blob_granule_not_materialized());
+		}
+		return tr.transaction->readBlobGranulesFinish(
+		    abortableF, keyRange, beginVersion, readVersionOut, granuleContext);
+	} else {
+		return abortableTimeoutResult<RangeResult>(tr.onChange);
+	}
+}
+
+ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> MultiVersionTransaction::readBlobGranulesStart(
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
+	return executeOperation(&ITransaction::readBlobGranulesStart,
+	                        keyRange,
+	                        std::forward<Version>(beginVersion),
+	                        std::forward<Optional<Version>>(readVersion),
+	                        std::forward<Version*>(readVersionOut));
+}
+
+ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranulesFinish(
+    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Version readVersion,
+    ReadBlobGranuleContext granuleContext) {
+	// can't call this directly
+	return ThreadResult<RangeResult>(unsupported_operation());
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> MultiVersionTransaction::summarizeBlobGranules(
@@ -1823,16 +1864,15 @@ ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 }
 
 template <class T>
-TypedApiResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Void> abortSignal) {
+ThreadResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Void> abortSignal) {
 	// If database initialization failed, return the initialization error
 	auto dbError = db->dbState->getInitializationError();
 	if (dbError.isError()) {
-		return TypedApiResult<T>::createError(dbError.getError());
+		return ThreadResult<T>(dbError.getError());
 	}
 	ThreadFuture<T> abortable = abortableFuture(makeTimeout<T>(), abortSignal);
 	abortable.blockUntilReadyCheckOnMainThread();
-	ASSERT(abortable.isError());
-	return TypedApiResult<T>::createError(abortable.getError());
+	return ThreadResult<T>((ThreadSingleAssignmentVar<T>*)abortable.extractPtr());
 }
 
 void MultiVersionTransaction::reset() {
@@ -1874,29 +1914,6 @@ MultiVersionTransaction::~MultiVersionTransaction() {
 bool MultiVersionTransaction::isValid() {
 	auto tr = getTransaction();
 	return tr.transaction.isValid();
-}
-
-void MultiVersionTransaction::debugTrace(BaseTraceEvent&& event) {
-	auto tr = getTransaction();
-	tr.transaction->debugTrace(std::move(event));
-}
-
-void MultiVersionTransaction::debugPrint(std::string const& message) {
-	auto tr = getTransaction();
-	tr.transaction->debugPrint(message);
-}
-
-ThreadFuture<ApiResult> MultiVersionTransaction::execAsyncRequest(ApiRequest request) {
-	return executeOperation<ApiResult>(&ITransaction::execAsyncRequest, std::forward<ApiRequest>(request));
-}
-
-FDBAllocatorIfc* MultiVersionTransaction::getAllocatorInterface() {
-	auto tr = getTransaction();
-	if (tr.transaction) {
-		return tr.transaction->getAllocatorInterface();
-	}
-
-	return MultiVersionApi::api->getAllocatorInterface();
 }
 
 // MultiVersionTenant
@@ -2835,6 +2852,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		}
 	}
 }
+#if defined(__unixish__)
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	ASSERT_GE(threadCount, 1);
 	// Copy library for each thread configured per version
@@ -2902,6 +2920,17 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 
 	return paths;
 }
+#else // if defined (__unixish__)
+std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+	if (threadCount > 1) {
+		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
+		throw unsupported_operation();
+	}
+	std::vector<std::pair<std::string, bool>> paths;
+	paths.push_back({ path, false });
+	return paths;
+}
+#endif // if defined (__unixish__)
 
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);
@@ -2986,7 +3015,12 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		if (networkStartSetup) {
 			throw invalid_option();
 		}
+#if defined(__unixish__)
 		threadCount = extractIntOption(value, 1, 1024);
+#else
+		// multiple client threads are not supported on windows.
+		threadCount = extractIntOption(value, 1, 1);
+#endif
 	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
 		validateOption(value, true, false, false);
 		tmpDir = abspath(value.get().toString());
@@ -3286,10 +3320,6 @@ Reference<IDatabase> MultiVersionApi::createDatabaseFromConnectionString(const c
 	return createDatabase(ClusterConnectionRecord::fromConnectionString(connectionString));
 }
 
-FDBAllocatorIfc* MultiVersionApi::getAllocatorInterface() {
-	return localClient->api->getAllocatorInterface();
-}
-
 void MultiVersionApi::updateSupportedVersions() {
 	if (networkSetup) {
 		Standalone<VectorRef<uint8_t>> versionStr;
@@ -3326,8 +3356,8 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
-				state ThreadFuture<ValueReadResult> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
-				ValueReadResult clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
+				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
+				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
 				ASSERT(clusterIdVal.present());
 				clusterId = clusterIdVal.get().toString();
 				ASSERT(UID::fromString(clusterId).isValid());

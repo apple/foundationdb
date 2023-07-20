@@ -39,7 +39,7 @@ Version keyRefToVersion(KeyRef key, int prefixLen) {
 
 namespace mutation_log_reader {
 
-RangeResult RangeResultBlock::consume() {
+Standalone<RangeResultRef> RangeResultBlock::consume() {
 	Version stopVersion = std::min(lastVersion,
 	                               (firstVersion + CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE - 1) /
 	                                   CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE) +
@@ -51,8 +51,8 @@ RangeResult RangeResultBlock::consume() {
 	if (indexToRead < result.size()) {
 		firstVersion = keyRefToVersion(result[indexToRead].key, prefixLen); // the version of result[indexToRead]
 	}
-	return RangeResult(RangeResultRef(result.slice(startIndex, indexToRead), result.more, result.readThrough),
-	                   result.arena());
+	return Standalone<RangeResultRef>(
+	    RangeResultRef(result.slice(startIndex, indexToRead), result.more, result.readThrough), result.arena());
 }
 
 void PipelinedReader::startReading(Database cx) {
@@ -84,7 +84,7 @@ ACTOR Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				RangeReadResult kvs = wait(tr.getRange(KeyRangeRef(begin, end), limits));
+				RangeResult kvs = wait(tr.getRange(KeyRangeRef(begin, end), limits));
 
 				// No more results, send end of stream
 				if (!kvs.empty()) {
@@ -137,11 +137,11 @@ ACTOR Future<Void> MutationLogReader::initializePQ(MutationLogReader* self) {
 	return Void();
 }
 
-Future<RangeResult> MutationLogReader::getNext() {
+Future<Standalone<RangeResultRef>> MutationLogReader::getNext() {
 	return getNext_impl(this);
 }
 
-ACTOR Future<RangeResult> MutationLogReader::getNext_impl(MutationLogReader* self) {
+ACTOR Future<Standalone<RangeResultRef>> MutationLogReader::getNext_impl(MutationLogReader* self) {
 	loop {
 		if (self->finished == 256) {
 			state int i;
@@ -153,7 +153,7 @@ ACTOR Future<RangeResult> MutationLogReader::getNext_impl(MutationLogReader* sel
 		mutation_log_reader::RangeResultBlock top = self->priorityQueue.top();
 		self->priorityQueue.pop();
 		uint8_t hash = top.hash;
-		state RangeResult ret = top.consume();
+		state Standalone<RangeResultRef> ret = top.consume();
 		if (top.empty()) {
 			self->pipelinedReaders[(int)hash]->release();
 			try {

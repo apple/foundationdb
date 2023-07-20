@@ -23,6 +23,8 @@
 
 #if defined(__GNUG__)
 #define force_inline inline __attribute__((__always_inline__))
+#elif defined(_MSC_VER)
+#define force_inline __forceinline
 #else
 #error Missing force inline
 #endif

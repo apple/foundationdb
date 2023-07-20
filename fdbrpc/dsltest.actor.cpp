@@ -1222,7 +1222,12 @@ void dsltest() {
 	printf("\n");
 
 	printf("Running actor fuzz tests:\n");
+	// Only include this test outside of Windows because of MSVC compiler bug
+#ifndef WIN32
 	auto afResults = actorFuzzTests();
+#else
+	std::pair<int, int> afResults(0, 0);
+#endif
 	printf("Actor fuzz tests: %d/%d passed\n", afResults.first, afResults.second);
 	startt = timer();
 	for (int i = 0; i < 1000000; i++)

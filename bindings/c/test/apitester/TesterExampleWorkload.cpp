@@ -49,7 +49,8 @@ public:
 				        ctx->continueAfter(future, [this, ctx, future, value]() {
 					        std::optional<fdb::Value> res = copyValueRef(future.get());
 					        if (res != value) {
-						        error("expected: {} actual: {}", fdb::toCharsRef(value), fdb::toCharsRef(res));
+						        error(fmt::format(
+						            "expected: {} actual: {}", fdb::toCharsRef(value), fdb::toCharsRef(res)));
 					        }
 					        ctx->done();
 				        });

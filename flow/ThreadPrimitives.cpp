@@ -26,10 +26,18 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#undef min
+#undef max
+#endif
+
 extern std::string format(const char* form, ...);
 
 Event::Event() {
-#if defined(__linux__)
+#ifdef _WIN32
+	ev = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+#elif defined(__linux__) || defined(__FreeBSD__)
 	int result = sem_init(&sem, 0, 0);
 	if (result)
 		criticalError(FDB_EXIT_INIT_SEMAPHORE,
@@ -48,7 +56,9 @@ Event::Event() {
 }
 
 Event::~Event() {
-#if defined(__linux__)
+#ifdef _WIN32
+	CloseHandle(ev);
+#elif defined(__linux__) || defined(__FreeBSD__)
 	sem_destroy(&sem);
 #elif defined(__APPLE__)
 	semaphore_destroy(self, sem);
@@ -58,7 +68,9 @@ Event::~Event() {
 }
 
 void Event::set() {
-#if defined(__linux__)
+#ifdef _WIN32
+	SetEvent(ev);
+#elif defined(__linux__) || defined(__FreeBSD__)
 	sem_post(&sem);
 #elif defined(__APPLE__)
 	semaphore_signal(sem);
@@ -68,7 +80,9 @@ void Event::set() {
 }
 
 void Event::block() {
-#if defined(__linux__)
+#ifdef _WIN32
+	WaitForSingleObject(ev, INFINITE);
+#elif defined(__linux__) || defined(__FreeBSD__)
 	int ret;
 	do {
 		ret = sem_wait(&sem);

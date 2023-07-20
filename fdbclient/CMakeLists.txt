@@ -69,11 +69,7 @@ if(WITH_AWS_BACKUP)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-target_include_directories(fdbclient PUBLIC 
-  "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  "${CMAKE_CURRENT_BINARY_DIR}/include"
-  "${CMAKE_SOURCE_DIR}/bindings/c"
-  "${CMAKE_BINARY_DIR}/bindings/c")
+target_include_directories(fdbclient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
@@ -82,14 +78,13 @@ target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 # fdbserver retain sampling functionality in client code while disabling
 # sampling for pure clients.
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-target_include_directories(fdbclient_sampling PUBLIC 
-  "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  "${CMAKE_CURRENT_BINARY_DIR}/include"
-  "${CMAKE_SOURCE_DIR}/bindings/c"
-  "${CMAKE_BINARY_DIR}/bindings/c")
+target_include_directories(fdbclient_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 add_dependencies(fdbclient_sampling fdboptions)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack PRIVATE rapidxml)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(fdbclient_sampling_actors fdbclient_actors)
+endif()
 
 add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface

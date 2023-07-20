@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#ifndef _WIN32
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -501,3 +502,9 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 }
+#else // _WIN32
+
+int main() {
+	return 0;
+}
+#endif // _WIN32

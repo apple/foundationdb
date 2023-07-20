@@ -20,21 +20,72 @@
 
 package com.apple.foundationdb;
 
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+
+import java.util.Arrays;
+
 /**
- * A key/value pair and associated metrics from a read operation.
+ * A key/value pair. Range read operation on FoundationDB return {@code KeyValue}s.
+ *  This is a simple value type; mutating it won't affect your {@code Transaction} or
+ *  the {@code Database}.
+ *
  */
-public interface KeyValue extends ReadMetrics {
+public class KeyValue {
+	private final byte[] key, value;
+
+	/**
+	 * Constructs a new {@code KeyValue} from the specified key and value.
+	 *
+	 * @param key the key portion of the pair
+	 * @param value the value portion of the pair
+	 */
+	public KeyValue(byte[] key, byte[] value) {
+		this.key = key;
+		this.value = value;
+	}
+
 	/**
 	 * Gets the key from the pair.
 	 *
 	 * @return the key
 	 */
-	public byte[] getKey();
+	public byte[] getKey() {
+		return this.key;
+	}
 
 	/**
 	 * Gets the value from the pair.
 	 *
 	 * @return the value
 	 */
-	public byte[] getValue();
+	public byte[] getValue() {
+		return this.value;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (obj == null)
+			return false;
+		if (obj == this)
+			return true;
+		if (!(obj instanceof KeyValue))
+			return false;
+
+		KeyValue rhs = (KeyValue) obj;
+		return Arrays.equals(key, rhs.key) && Arrays.equals(value, rhs.value);
+	}
+
+	@Override
+	public int hashCode() {
+		return 17 + (37 * Arrays.hashCode(key) + Arrays.hashCode(value));
+	}
+
+	@Override
+	public String toString() {
+		final StringBuilder sb = new StringBuilder("KeyValue{");
+		sb.append("key=").append(ByteArrayUtil.printable(key));
+		sb.append(", value=").append(ByteArrayUtil.printable(value));
+		sb.append('}');
+		return sb.toString();
+	}
 }

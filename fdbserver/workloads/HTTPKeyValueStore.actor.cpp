@@ -148,7 +148,7 @@ ACTOR Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
 
 static Reference<SimHTTPKVStore> globalKVStore = Reference<SimHTTPKVStore>();
 
-struct KeyValueRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<KeyValueRequestHandler> {
+struct KeyValueRequestHandler : HTTP::IRequestHandler, ReferenceCounted<KeyValueRequestHandler> {
 
 	// global kv store for all request handler instances during simulation
 	Reference<SimHTTPKVStore> myKVStore;
@@ -198,7 +198,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 	PerfIntCounter getCount, putCount, connectCount, failedConnectCount;
 
 	HTTPKeyValueStoreWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), getCount("GetCount"), putCount("PutCount"), connectCount("ConnectCount"),
+	  : TestWorkload(wcx), putCount("PutCount"), getCount("GetCount"), connectCount("ConnectCount"),
 	    failedConnectCount("FailedConnectCount") {
 		testDuration = getOption(options, "testDuration"_sr, 30.0);
 		nodeCount = getOption(options, "nodeCount"_sr, 100);

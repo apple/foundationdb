@@ -3,9 +3,17 @@
 # Support preference of static libs by adjusting CMAKE_FIND_LIBRARY_SUFFIXES
 if(LIBRESSL_USE_STATIC_LIBS)
   set(_libressl_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
-  set(CMAKE_FIND_LIBRARY_SUFFIXES .a )
+  if(WIN32)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  else()
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a )
+  endif()
 endif()
+
 set(_LibreSSL_HINTS "")
+if(WIN32)
+  set(_LibreSSL_HINTS "C:\\Program Files\\LibreSSL")
+endif()
 
 find_path(LIBRESSL_INCLUDE_DIR
   NAMES

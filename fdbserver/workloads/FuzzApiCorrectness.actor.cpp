@@ -65,7 +65,7 @@ struct ExceptionContract {
 		    e.code() == error_code_future_version || e.code() == error_code_transaction_cancelled ||
 		    e.code() == error_code_key_too_large || e.code() == error_code_value_too_large ||
 		    e.code() == error_code_process_behind || e.code() == error_code_batch_transaction_throttled ||
-		    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_tenant_name_required) {
+		    e.code() == error_code_tag_throttled || e.code() == error_code_grv_proxy_memory_limit_exceeded) {
 			return;
 		}
 
@@ -273,7 +273,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override { return success; }
+	Future<bool> check(Database const& cx) override {
+		if (!writeSystemKeys) { // there must be illegal access during data load
+			return illegalTenantAccess;
+		}
+		return success;
+	}
 
 	Key getKeyForIndex(int tenantNum, int idx) {
 		idx += minNode;
@@ -342,11 +347,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							if (now() - startTime > self->testDuration)
 								return Void();
 							try {
-								if (tenantNum == -1) {
-									tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-									if (self->useSystemKeys) {
-										tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-									}
+								if (self->useSystemKeys && tenantNum == -1) {
+									tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 								}
 								if (self->specialKeysRelaxed)
 									tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
@@ -361,7 +363,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								tr->clear(KeyRangeRef(self->getKeyForIndex(tenantNum, i),
 								                      self->getKeyForIndex(tenantNum, end)));
 
-								state bool wroteKeys = false;
 								for (int j = i; j < end; j++) {
 									if (deterministicRandom()->random01() < self->initialKeyDensity) {
 										Key key = self->getKeyForIndex(tenantNum, j);
@@ -369,22 +370,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 											Value value = self->getRandomValue();
 											value = value.substr(
 											    0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
-											wroteKeys = true;
 											tr->set(key, value);
 										}
 									}
 								}
 								wait(unsafeThreadFutureToFuture(tr->commit()));
-								ASSERT(tenantNum != -1 || self->writeSystemKeys || !cx->getTenantMode().present() ||
-								       cx->getTenantMode() != TenantMode::REQUIRED || !wroteKeys);
 								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 								break;
 							} catch (Error& e) {
 								if (e.code() == error_code_illegal_tenant_access) {
 									ASSERT(!self->writeSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
-									ASSERT(!cx->getTenantMode().present() ||
-									       cx->getTenantMode() == TenantMode::REQUIRED);
 									self->illegalTenantAccess = true;
 									break;
 								}
@@ -499,13 +495,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 				if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || cancelled) {
 					throw not_committed();
-				} else if (e.code() == error_code_illegal_tenant_access ||
-				           e.code() == error_code_tenant_name_required) {
+				} else if (e.code() == error_code_illegal_tenant_access) {
 					ASSERT_EQ(tenantNum, -1);
-					ASSERT(!cx->getTenantMode().present() || cx->getTenantMode() == TenantMode::REQUIRED);
-					if (e.code() == error_code_tenant_name_required) {
-						ASSERT(!rawAccess && !self->useSystemKeys);
-					}
+					ASSERT_EQ(cx->getTenantMode(), TenantMode::REQUIRED);
 					return Void();
 				}
 
@@ -763,8 +755,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGet : public BaseTest<TestGet, ValueReadResult> {
-		typedef BaseTest<TestGet, ValueReadResult> base_type;
+	struct TestGet : public BaseTest<TestGet, Optional<Value>> {
+		typedef BaseTest<TestGet, Optional<Value>> base_type;
 		Key key;
 
 		TestGet(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -807,8 +799,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetKey : public BaseTest<TestGetKey, KeyReadResult> {
-		typedef BaseTest<TestGetKey, KeyReadResult> base_type;
+	struct TestGetKey : public BaseTest<TestGetKey, Key> {
+		typedef BaseTest<TestGetKey, Key> base_type;
 		KeySelector keysel;
 
 		TestGetKey(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -832,8 +824,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange0 : public BaseTest<TestGetRange0, RangeReadResult> {
-		typedef BaseTest<TestGetRange0, RangeReadResult> base_type;
+	struct TestGetRange0 : public BaseTest<TestGetRange0, RangeResult> {
+		typedef BaseTest<TestGetRange0, RangeResult> base_type;
 		KeySelector keysel1, keysel2;
 		int limit;
 
@@ -889,8 +881,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange1 : public BaseTest<TestGetRange1, RangeReadResult> {
-		typedef BaseTest<TestGetRange1, RangeReadResult> base_type;
+	struct TestGetRange1 : public BaseTest<TestGetRange1, RangeResult> {
+		typedef BaseTest<TestGetRange1, RangeResult> base_type;
 		KeySelector keysel1, keysel2;
 		GetRangeLimits limits;
 
@@ -939,8 +931,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange2 : public BaseTest<TestGetRange2, RangeReadResult> {
-		typedef BaseTest<TestGetRange2, RangeReadResult> base_type;
+	struct TestGetRange2 : public BaseTest<TestGetRange2, RangeResult> {
+		typedef BaseTest<TestGetRange2, RangeResult> base_type;
 		Key key1, key2;
 		int limit;
 
@@ -1006,8 +998,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange3 : public BaseTest<TestGetRange3, RangeReadResult> {
-		typedef BaseTest<TestGetRange3, RangeReadResult> base_type;
+	struct TestGetRange3 : public BaseTest<TestGetRange3, RangeResult> {
+		typedef BaseTest<TestGetRange3, RangeResult> base_type;
 		Key key1, key2;
 		GetRangeLimits limits;
 

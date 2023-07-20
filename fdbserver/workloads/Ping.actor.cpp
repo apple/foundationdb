@@ -105,7 +105,7 @@ struct PingWorkload : TestWorkload {
 		state Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
 			try {
-				ValueReadResult val = wait(tr.get(StringRef(format("Ping/Client/%d", self->clientId))));
+				Optional<Value> val = wait(tr.get(StringRef(format("Ping/Client/%d", self->clientId))));
 				if (val.present()) {
 					if (val.get() != serializedInterface)
 						throw operation_failed();
@@ -128,7 +128,7 @@ struct PingWorkload : TestWorkload {
 				state std::vector<PingWorkloadInterface> result;
 				state int i;
 				for (i = 0; i < self->clientCount; i++) {
-					ValueReadResult val = wait(tr.get(StringRef(format("Ping/Client/%d", i))));
+					Optional<Value> val = wait(tr.get(StringRef(format("Ping/Client/%d", i))));
 					if (!val.present()) {
 						throw operation_failed();
 					}

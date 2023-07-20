@@ -220,41 +220,32 @@ StringRef urlEncodedTestData[][2] = {
 	{ "\x93"_sr, "kw"_sr },
 	{ "\xfcpF\xd2\x15\x03\x8a\xcb\\#!\xa1\x95\x18\x13\xfcpoN\rh=\xa5\x05\xe5\x00\xf8<\xc3\x8b'C\x90\xfc\xa0x\x13"
 	  "8q\r\xd4\xca\xc9Yjv"_sr,
-	  // pragma: allowlist nextline secret
 	  "_HBG0hUDistcIyGhlRgT_HBvTg1oPaUF5QD4PMOLJ0OQ_KB4EzhxDdTKyVlqdg"_sr },
 	{ "\xdd\xbb\x91>@\x9d\x88\x01Qb\x97[\xc3Q\xf6Q\\LF\xe2}\xfb\xf0\xe8\x98\xba\x8c\xc7\xc9\x0e$\xe4q\xcf;\xe4"
 	  "e\x02"
 	  "DA\xa9\x9a\xf0r\xc9\xf0\xd2-\x98"_sr,
-	  // pragma: allowlist nextline secret
 	  "3buRPkCdiAFRYpdbw1H2UVxMRuJ9-_DomLqMx8kOJORxzzvkZQJEQama8HLJ8NItmA"_sr },
 	{ "2\x7f\x98\xfe\xb4\x05\x18.%.\xd0\x14\xea\x8e+\xa5\xc5\xbd"
 	  "F-Lm\x04\x1aQ\xde\x1e\x9c\x12\xe6\x81{\x9dj\xe8\x9cP\xf4\xf7\x8a<\x12"_sr,
-	  // pragma: allowlist nextline secret
 	  "Mn-Y_rQFGC4lLtAU6o4rpcW9Ri1MbQQaUd4enBLmgXudauicUPT3ijwS"_sr },
 	{ "\xa3"
 	  "b\xc9\x13|\x94\xab)}\xf4N\xbc\xb2\xc5$\x15\xed\xb0\x98\xa4v\x8b\x91\xe4M\xb8\xde!\x94"_sr,
-	  // pragma: allowlist nextline secret
 	  "o2LJE3yUqyl99E68ssUkFe2wmKR2i5HkTbjeIZQ"_sr },
 	{ "\xa0\xe9\xb4=4\xba\xbd\xbd\xaa\xfd\x96\xcb\x03\xd3\xb7\xc9\xb7i7\x18$^\xba\xe5\xb3\x8a\xf4O\xdb"_sr,
-	  // pragma: allowlist nextline secret
 	  "oOm0PTS6vb2q_ZbLA9O3ybdpNxgkXrrls4r0T9s"_sr },
 	{ "\x10\xf4zscNoE\xfd\xc5\x8d\x16\x82t|y\n\xcf\xe8\x98\xf8)\xcd\xefm\xe2\xe1%\x17\x05T9;Zb\x05\x02\xc7"
 	  "B\x8c\xc5\xc5\x95"
 	  "8\xf2"_sr,
-	  // pragma: allowlist nextline secret
 	  "EPR6c2NOb0X9xY0WgnR8eQrP6Jj4Kc3vbeLhJRcFVDk7WmIFAsdCjMXFlTjy"_sr },
 	{ "NG\"hA\xff\\\xf5lD\xf7\x08"
 	  "7\xb9\t\x07\xa5\xb9\xac\x0b\x9fT+\xfa"_sr,
-	  // pragma: allowlist nextline secret
 	  "TkciaEH_XPVsRPcIN7kJB6W5rAufVCv6"_sr },
 	{ "\xbd\xf5\xb0\x8eh1\x1b\xd1\x13q\x88z0*b\x9cNg\x88\x88MBD\x17\xec\xb0yc3\xbb"_sr,
-	  // pragma: allowlist nextline secret
 	  "vfWwjmgxG9ETcYh6MCpinE5niIhNQkQX7LB5YzO7"_sr },
 	{ "&\xe0> \xfc\xea\x8e\xc1[I\xec\xe8\x03\x15\tc\x9b\x0f"
 	  "d\x13"
 	  "d\xab\xa5\x16\xa2p\x91\xd5\x11\xf5X\xa7\xbd\xe1\xa1"
 	  "B\x8e\xe8\xddn2\xbf\x97"_sr,
-	  // pragma: allowlist nextline secret
 	  "JuA-IPzqjsFbSezoAxUJY5sPZBNkq6UWonCR1RH1WKe94aFCjujdbjK_lw"_sr },
 	{ "|W,\xa5\xce\x83\xb0\xec\x87\x86\xd0<O\x94\x97"
 	  "0F"_sr,
@@ -266,22 +257,18 @@ StringRef urlEncodedTestData[][2] = {
 	{ "X\xfe\xcd\x1f\xc8\x8f\xe3\xca"
 	  "6\x96\x8c\x87\xcd\xbaJ!\xabq\x8c\x97)#\xfb\xda\xb8\xa9\xe9"
 	  "a\x0c\xe2\x10\xe9\xe7\x16\x96\xb5"_sr,
-	  // pragma: allowlist nextline secret
 	  "WP7NH8iP48o2loyHzbpKIatxjJcpI_vauKnpYQziEOnnFpa1"_sr },
 	{ "\xf1\n@\x18\xc3"
 	  "F\xc4\xf8\x1c\xa9\xa9\xdb\x15\xcb\xd0V\xe4P\x8b\x8b\xaf\xf2\xfc\xb7\x1d\xa6p\n\xa3\x13,.\x12#"_sr,
-	  // pragma: allowlist nextline secret
 	  "8QpAGMNGxPgcqanbFcvQVuRQi4uv8vy3HaZwCqMTLC4SIw"_sr },
 	{ "h\x9e\xe0X_\x1c\x04\xe3\xaf\xac\xe3\x18JK/\xe7\xbc"
 	  "D\xf5"
 	  "B\xfbK(Q\x8c\n\xca\xfc^\xd9\xdb\xb4\xea\xae\xb8"_sr,
-	  // pragma: allowlist nextline secret
 	  "aJ7gWF8cBOOvrOMYSksv57xE9UL7SyhRjArK_F7Z27Tqrrg"_sr },
 	{ "\x9aX\xb2Q\xf0\x85R`\xc1\xbb\x95\xe7\x10\xe3\xd0x\n"_sr, "mliyUfCFUmDBu5XnEOPQeAo"_sr },
 	{ "\xa7\x1f"
 	  "0\x90P\xab\x1fwJ\x86\x82Tj\xd0Ob\xa4\xac+\xc9"
 	  "4;\x86\\\x8b\xb6"_sr,
-	  // pragma: allowlist nextline secret
 	  "px8wkFCrH3dKhoJUatBPYqSsK8k0O4Zci7Y"_sr },
 	{ "\x0e"
 	  "C\x87u-\x12\x8a\xe4\x11"
@@ -289,16 +276,13 @@ StringRef urlEncodedTestData[][2] = {
 	  "a5\xcds\x1ez?J4\x02?@g\xaa-\xc4\xe0\x80\xe1!\xc0\x1d\x16\x1e"
 	  "Em\xa8"
 	  "a\xc8\x9d<\xd1"_sr,
-	  // pragma: allowlist nextline secret
 	  "DkOHdS0SiuQRRrZhNc1zHno_SjQCP0Bnqi3E4IDhIcAdFh5FbahhyJ080Q"_sr },
 	{ "\xb7\xf6\xb6\\\xd3&\xf5"
 	  "F\xb1\x86\xd8n%\xb5"
 	  "a\x1d^Iv\xbe\x9bO\xcb\xca\xd2"_sr,
-	  // pragma: allowlist nextline secret
 	  "t_a2XNMm9UaxhthuJbVhHV5Jdr6bT8vK0g"_sr },
 	{ "\xc0+\xea\xb9\x01\xf2\xe8\x8e\xf2\x0ft\x8b\xa0\xa4\x0cq=\xa6"
 	  "c\xf1v\x9b\x81\xc7*\xd0\xe8Z\x04\"\t\xe8>\xd5w\xddQI\xc9\xba\x8f"_sr,
-	  // pragma: allowlist nextline secret
 	  "wCvquQHy6I7yD3SLoKQMcT2mY_F2m4HHKtDoWgQiCeg-1XfdUUnJuo8"_sr },
 	{ "\xac"
 	  "5\x8aH\xc9q\xad\xbe\x1f\x80\xed\xe1"_sr,
@@ -307,11 +291,9 @@ StringRef urlEncodedTestData[][2] = {
 	  "dR\x8f\xc2\xac\xb3\xc7\x9f\xc0\xf0"
 	  "C3L\xbe"
 	  "E\xe5\xf1\xc4% \xec\xe9"_sr,
-	  // pragma: allowlist nextline secret
 	  "MH2Clbsn8t9kUo_CrLPHn8DwQzNMvkXl8cQlIOzp"_sr },
 	{ "\x8b\xab\xd7\xf9\xa5\xd8H\x1d"_sr, "i6vX-aXYSB0"_sr },
 	{ "i!\xdc\xb7~9\x7f\xad\xa0\x9d\x1e\xcc\xedTj\xe3\xe2\x88Q\x1e\xaa\xf9\xc3\xc5\xc5\xcdq\x9e\x07~\x9e\xcb\xf3\xd3\xb2\xec\xe0[m+\x0c\x9c"_sr,
-	  // pragma: allowlist nextline secret
 	  "aSHct345f62gnR7M7VRq4-KIUR6q-cPFxc1xngd-nsvz07Ls4FttKwyc"_sr },
 	{ "\x01-{.s\xa5qF4\x1f"
 	  "a\x11\xe4\x1eN"_sr,
@@ -324,7 +306,6 @@ StringRef urlEncodedTestData[][2] = {
 	  "2\xe7k3\xe8\"\x0b\xcb\x80\xa5\x96,\xba\xef\x1c\xe3\xd8\x16"
 	  "C1\xccI\x8a]W\xf0\xbf\xaf\x19"
 	  "4\xf9\r*<^?8C\x81\xd3(\xc6"_sr,
-	  // pragma: allowlist nextline secret
 	  "3g4WVhIPpK8y52sz6CILy4Clliy67xzj2BZDMcxJil1X8L-vGTT5DSo8Xj84Q4HTKMY"_sr },
 	{ "\xe1\xe2\x8a"
 	  "8v\x1f\xe0|\xccIJ\t"_sr,

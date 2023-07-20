@@ -237,8 +237,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
 			CODE_PROBE(!stopDifferentialFuture.isReady(),
-			           "Restore starts at specified time - stopDifferential not ready",
-			           probe::decoration::rare);
+			           "Restore starts at specified time - stopDifferential not ready");
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
@@ -360,7 +359,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state int rowCount = 0;
 		loop {
 			try {
-				RangeReadResult existingRows = wait(tr.getRange(normalKeys, 1));
+				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
 				rowCount = existingRows.size();
 				break;
 			} catch (Error& e) {
@@ -496,7 +495,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time", probe::decoration::rare);
+			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {
@@ -701,7 +700,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
 					}
 
-					RangeReadResult agentValues =
+					RangeResult agentValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 					// Error if the system keyspace for the backup tag is not empty
@@ -726,7 +725,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup agent configuration keys\n");
 					}
 
-					ValueReadResult latestVersion = wait(tr->get(backupLatestVersionsKey));
+					Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
 					if (latestVersion.present()) {
 						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
 						    .detail("BackupTag", printable(self->backupTag))
@@ -736,10 +735,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup version key\n");
 					}
 
-					RangeReadResult versions = wait(tr->getRange(
+					RangeResult versions = wait(tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 					if (!self->shareLogRange || !versions.size()) {
-						RangeReadResult logValues = wait(
+						RangeResult logValues = wait(
 						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 						// Error if the log/mutation keyspace for the backup tag  is not empty

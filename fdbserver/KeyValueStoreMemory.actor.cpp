@@ -58,10 +58,21 @@ public:
 	void dispose() override {
 		recovering.cancel();
 		log->dispose();
-		log = nullptr;
+		if (reserved_buffer != nullptr) {
+			delete[] reserved_buffer;
+			reserved_buffer = nullptr;
+		}
 		delete this;
 	}
-	void close() override { delete this; }
+	void close() override {
+		recovering.cancel();
+		log->close();
+		if (reserved_buffer != nullptr) {
+			delete[] reserved_buffer;
+			reserved_buffer = nullptr;
+		}
+		delete this;
+	}
 
 	// IKeyValueStore
 	KeyValueStoreType getType() const override { return type; }
@@ -283,18 +294,6 @@ public:
 	// when being used as TxnStateStore backend.
 	Future<EncryptionAtRestMode> encryptionMode() override {
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
-	}
-
-	~KeyValueStoreMemory() {
-		recovering.cancel();
-		if (log) {
-			log->close();
-			log = nullptr;
-		}
-		if (reserved_buffer != nullptr) {
-			delete[] reserved_buffer;
-			reserved_buffer = nullptr;
-		}
 	}
 
 private:
@@ -1092,23 +1091,23 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	}
 }
 
-Reference<IKeyValueStore> keyValueStoreLogSystem(class IDiskQueue* queue,
-                                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                                 UID logID,
-                                                 int64_t memoryLimit,
-                                                 bool disableSnapshot,
-                                                 bool replaceContent,
-                                                 bool exactRecovery,
-                                                 bool enableEncryption) {
+IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                       Reference<AsyncVar<ServerDBInfo> const> db,
+                                       UID logID,
+                                       int64_t memoryLimit,
+                                       bool disableSnapshot,
+                                       bool replaceContent,
+                                       bool exactRecovery,
+                                       bool enableEncryption) {
 	// ServerDBInfo is required if encryption is to be enabled, or the KV store instance have been encrypted.
 	ASSERT(!enableEncryption || db.isValid());
-	return makeReference<KeyValueStoreMemory<IKeyValueContainer>>(queue,
-	                                                              db,
-	                                                              logID,
-	                                                              memoryLimit,
-	                                                              KeyValueStoreType::MEMORY,
-	                                                              disableSnapshot,
-	                                                              replaceContent,
-	                                                              exactRecovery,
-	                                                              enableEncryption);
+	return new KeyValueStoreMemory<IKeyValueContainer>(queue,
+	                                                   db,
+	                                                   logID,
+	                                                   memoryLimit,
+	                                                   KeyValueStoreType::MEMORY,
+	                                                   disableSnapshot,
+	                                                   replaceContent,
+	                                                   exactRecovery,
+	                                                   enableEncryption);
 }

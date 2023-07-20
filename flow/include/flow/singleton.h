@@ -27,6 +27,11 @@
 #include <cstdlib>
 #include <cassert>
 
+#ifdef WIN32
+#include <system_error>
+#include <Windows.h>
+#endif
+
 namespace crossbow {
 
 /**
@@ -37,8 +42,37 @@ namespace crossbow {
  * holder.
  */
 
+#ifdef _WIN32
+class WinLockGuard {
+	HANDLE& mutex;
+
+public:
+	explicit WinLockGuard(HANDLE& mutex) : mutex(mutex) {
+		HANDLE result = CreateMutexA(NULL, FALSE, NULL);
+		if (result == NULL) {
+			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+		}
+		mutex = result;
+		if (WaitForSingleObject(mutex, INFINITE) != WAIT_OBJECT_0) {
+			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+		}
+	}
+
+	~WinLockGuard() noexcept {
+		if (!ReleaseMutex(mutex)) {
+			throw std::system_error(GetLastError(), std::system_category(), nullptr);
+		}
+	}
+
+	WinLockGuard(const WinLockGuard&) = delete;
+	WinLockGuard& operator=(const WinLockGuard&) = delete;
+};
+#define MUTEX_GUARD WinLockGuard
+#define MUTEX_TYPE HANDLE
+#else
 #define MUTEX_GUARD std::lock_guard<Mutex>
 #define MUTEX_TYPE std::mutex
+#endif
 
 struct no_locking {
 	void lock() {}

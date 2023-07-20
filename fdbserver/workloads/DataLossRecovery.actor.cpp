@@ -120,10 +120,10 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		loop {
 			try {
 				// add timeout to read so test fails faster if something goes wrong
-				state ValueReadResult res = wait(timeoutError(tr.get(key), 90.0));
+				state Optional<Value> res = wait(timeoutError(tr.get(key), 90.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
-					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res.contents()));
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
 				break;
 			} catch (Error& e) {

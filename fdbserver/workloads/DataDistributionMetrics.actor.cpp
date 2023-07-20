@@ -94,7 +94,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				// the range. If we didn't read through the end of the range, then the second last key
 				// in the result will be the last key less than endKey. (Condition #2)
 				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
-				RangeReadResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+				RangeResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 				// Condition #1 and #2 can be broken if multiple rpc calls happened in one getRange
 				if (result.size() > 1) {
 					if (result[0].key > begin.getKey() || result[1].key <= begin.getKey()) {
@@ -154,7 +154,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			tr->setOption(FDBTransactionOptions::TIMEOUT,
 			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
 			try {
-				state RangeReadResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!result.more);
 				self->numShards = result.size();
 				// There's no guarantee that #shards <= CLIENT_KNOBS->SHARD_COUNT_LIMIT all the time

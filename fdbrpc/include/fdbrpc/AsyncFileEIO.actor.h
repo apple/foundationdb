@@ -20,6 +20,8 @@
 
 #pragma once
 
+#if defined(__unixish__)
+
 #define Net2AsyncFile AsyncFileEIO
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
@@ -558,4 +560,5 @@ std::atomic<int32_t> AsyncFileEIO::want_poll = 0;
 #endif
 
 #include "flow/unactorcompiler.h"
+#endif
 #endif

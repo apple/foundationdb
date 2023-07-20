@@ -285,7 +285,7 @@ public class TenantManagement {
 			byte[] tenant = Arrays.copyOfRange(kv.getKey(), TENANT_MAP_PREFIX.length, kv.getKey().length);
 			byte[] value = kv.getValue();
 
-			KeyValue result = new FDBKeyValue(tenant, value, kv.getServerBusyness(), kv.getRangeBusyness());
+			KeyValue result = new KeyValue(tenant, value);
 			return result;
 		}
 

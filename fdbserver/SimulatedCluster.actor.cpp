@@ -46,7 +46,6 @@
 #include "fdbclient/versions.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
-#include "flow/ProcessEvents.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
@@ -67,7 +66,7 @@ extern const char* getSourceVersion();
 
 using namespace std::literals;
 
-bool isSimulatorProcessUnreliable() {
+bool isSimulatorProcessReliable() {
 	return g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable();
 }
 
@@ -1326,12 +1325,10 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		auto tenantMode = ini.GetValue("META", "tenantMode");
 		if (tenantMode != nullptr) {
-			CODE_PROBE(true, "Restarting test with tenant mode set");
 			testConfig->tenantModes.push_back(tenantMode);
 		}
 		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
 		if (!defaultTenant.empty()) {
-			CODE_PROBE(true, "Restarting test with default tenant set");
 			testConfig->defaultTenant = defaultTenant;
 		}
 		if (tssModeStr != nullptr) {
@@ -1458,32 +1455,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		g_simulator->processesPerMachine = processesPerMachine;
 
 		uniquify(dcIds);
-		if (!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
-			StatusObject primaryObj;
-			StatusObject primaryDcObj;
-			primaryDcObj["id"] = dcIds[0];
-			primaryDcObj["priority"] = 2;
-			StatusArray primaryDcArr;
-			primaryDcArr.push_back(primaryDcObj);
-
-			StatusObject remoteObj;
-			StatusObject remoteDcObj;
-			remoteDcObj["id"] = dcIds[1];
-			remoteDcObj["priority"] = 1;
-			StatusArray remoteDcArr;
-			remoteDcArr.push_back(remoteDcObj);
-
-			primaryObj["datacenters"] = primaryDcArr;
-			remoteObj["datacenters"] = remoteDcArr;
-
-			StatusArray regionArr;
-			regionArr.push_back(primaryObj);
-			regionArr.push_back(remoteObj);
-
-			*pStartingConfiguration =
-			    "single usable_regions=2 regions=" +
-			    json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
-		}
 
 		g_simulator->restarted = true;
 
@@ -1607,12 +1578,14 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
+	/*
 	generateFearless =
 	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	if (testConfig.generateFearless.present()) {
-		// overwrite whatever decision we made before
-		generateFearless = testConfig.generateFearless.get();
-	}
+	    // overwrite whatever decision we made before
+	    generateFearless = testConfig.generateFearless.get();
+	}*/
+	generateFearless = false;
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1
@@ -2754,7 +2727,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	CODE_PROBE(true, "Simulation start");
 
 	state Optional<TenantName> defaultTenant;
-	state Standalone<VectorRef<TenantNameRef>> extraTenants;
+	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
 	state Optional<TenantMode> tenantMode;
 
 	try {
@@ -2806,20 +2779,22 @@ ACTOR void setupAndRun(std::string dataFolder,
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 			}
 		}
-
-		if (!rebooting && allowCreatingTenants && tenantMode != TenantMode::DISABLED &&
-		    deterministicRandom()->coinflip()) {
-			int numTenants = deterministicRandom()->randomInt(1, 6);
-			for (int i = 0; i < numTenants; ++i) {
-				extraTenants.push_back_deep(extraTenants.arena(), TenantNameRef(format("SimulatedExtraTenant%04d", i)));
+		if (!rebooting) {
+			if (defaultTenant.present() && allowDefaultTenant) {
+				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+			}
+			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->coinflip()) {
+				int numTenants = deterministicRandom()->randomInt(1, 6);
+				for (int i = 0; i < numTenants; ++i) {
+					tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
+					                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
+				}
 			}
 		}
-
 		TraceEvent("SimulatedClusterTenantMode")
 		    .detail("UsingTenant", defaultTenant)
 		    .detail("TenantMode", tenantMode.get().toString())
-		    .detail("TotalTenants", extraTenants.size() + (defaultTenant.present() ? 1 : 0));
-
+		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
@@ -2850,7 +2825,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                                  LocalityData(),
 		                                  UnitTestParameters(),
 		                                  defaultTenant,
-		                                  extraTenants,
+		                                  tenantsToCreate,
 		                                  rebooting);
 		wait(testConfig.longRunningTest ? runTestsF
 		                                : timeoutError(runTestsF,
@@ -2858,10 +2833,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
 		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
-		auto timeoutVal = isBuggifyEnabled(BuggifyType::General) ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                                         : testConfig.simulationNormalRunTestsTimeoutSeconds;
-		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
-		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 

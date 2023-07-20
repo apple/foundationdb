@@ -122,17 +122,6 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<byte[]> get(byte[] key);
 
 	/**
-	 * Gets a value from the database and includes metrics about the read request. The call
-	 *  will return {@code null} if the key is not present in the database.
-	 *
-	 * @param key the key whose value to fetch from the database
-	 *
-	 * @return a {@code CompletableFuture} which will be set to the value corresponding to
-	 *  the key or to null if the key does not exist.
-	 */
-	CompletableFuture<ResultBytes> getExt(byte[] key);
-
-	/**
 	 * Returns the key referenced by the specified {@code KeySelector}.
 	 *  By default, the key is cached for the duration of the transaction, providing
 	 *  a potential performance benefit. However, the value of the key is also retrieved,
@@ -146,22 +135,6 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a {@code CompletableFuture} which will be set to an absolute database key
 	 */
 	CompletableFuture<byte[]> getKey(KeySelector selector);
-
-	/**
-	 * Returns the key referenced by the specified {@code KeySelector} and includes metrics
-	 *  about the read request. By default, the key is cached for the duration of the
-	 *  transaction, providing a potential performance benefit. However, the value of the
-	 *  key is also retrieved using network bandwidth. Invoking
-	 *  {@code setReadYourWritesDisable} will avoid both the caching and the increased
-	 *  network bandwidth.
-	 *
-	 * @see KeySelector
-	 *
-	 * @param selector the relative key location to resolve
-	 *
-	 * @return a {@code CompletableFuture} which will be set to an absolute database key
-	 */
-	CompletableFuture<ResultBytes> getKeyExt(KeySelector selector);
 
 	/**
 	 * Gets an ordered range of keys and values from the database. The begin

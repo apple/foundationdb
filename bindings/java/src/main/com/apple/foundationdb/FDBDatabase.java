@@ -212,7 +212,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureBytes(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
+			return new FutureKey(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -302,7 +302,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	public CompletableFuture<byte[]> getClientStatus(Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureBytes(Database_getClientStatus(getPtr()), e, eventKeeper);
+			return new FutureKey(Database_getClientStatus(getPtr()), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}

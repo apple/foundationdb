@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbclient/ThrottlingId.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 
@@ -40,7 +40,7 @@ class LatencyBandsMap {
 		explicit ExpirableBands(LatencyBands&&);
 	};
 
-	ThrottlingIdMap<ExpirableBands> map;
+	TransactionTagMap<ExpirableBands> map;
 	// Manually added thresholds (does not include "infinite" threshold automatically
 	// added by LatencyBands)
 	std::vector<double> thresholds;
@@ -49,12 +49,12 @@ class LatencyBandsMap {
 	// Updates the lastUpdated field corresponding to this LatencyBands object.
 	// Returns pointer to this object, or an empty optional if object
 	// cannot be created.
-	Optional<LatencyBands*> getLatencyBands(ThrottlingId tag);
+	Optional<LatencyBands*> getLatencyBands(TransactionTag tag);
 
 public:
 	LatencyBandsMap(std::string const& name, UID id, double loggingInterval, int maxSize);
 
-	void addMeasurement(ThrottlingId tag, double measurement, int count = 1);
+	void addMeasurement(TransactionTag tag, double measurement, int count = 1);
 	void addThreshold(double value);
 	int size() const { return map.size(); }
 };

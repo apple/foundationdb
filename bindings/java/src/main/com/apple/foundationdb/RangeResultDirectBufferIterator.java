@@ -30,8 +30,7 @@ import java.util.NoSuchElementException;
  * Holds the direct buffer that is shared with JNI wrapper. A typical usage is as follows:
  *
  * The serialization format of result is =>
- *     [int keyCount, boolean more, float serverBusyness, float rangeBusyness,
- *      ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
+ *     [int keyCount, boolean more, ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
  */
 class RangeResultDirectBufferIterator extends DirectBufferIterator implements Iterator<KeyValue> {
 
@@ -58,6 +57,6 @@ class RangeResultDirectBufferIterator extends DirectBufferIterator implements It
 		byteBuffer.get(value);
 
 		current += 1;
-		return new FDBKeyValue(key, value, serverBusyness, rangeBusyness);
+		return new KeyValue(key, value);
 	}
 }

@@ -20,23 +20,26 @@
 
 #include <cinttypes>
 #include <vector>
-#include <map>
+#include <type_traits>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
+#include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
-#include "flow/flow.h"
-#include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
@@ -155,8 +158,8 @@ ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
                                                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
-	ValueReadResult coordinators =
-	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+	Optional<Value> coordinators =
+	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		    return tr->get(coordinatorsKey);
@@ -243,7 +246,7 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			RangeReadResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!blobWorkersList.more && blobWorkersList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<BlobWorkerInterface> blobWorkers;
@@ -272,7 +275,7 @@ ACTOR Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database cx
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			RangeReadResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
 
 			std::vector<std::pair<UID, UID>> affinities;
 			affinities.reserve(blobWorkerAffinity.size());
@@ -299,7 +302,7 @@ ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx,
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<StorageServerInterface> servers;
@@ -322,8 +325,8 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	for (const auto& worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}
-	ValueReadResult regionsValue =
-	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+	Optional<Value> regionsValue =
+	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		    return tr->get("usable_regions"_sr.withPrefix(configKeysPrefix));
@@ -675,10 +678,9 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 		try {
 			TraceEvent("GetVersionOffset").detail("Stage", "ReadingVersionEpoch");
 
-			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Version rv = wait(tr.getReadVersion());
-			ValueReadResult versionEpochValue = wait(tr.get(versionEpochKey));
+			Optional<Standalone<StringRef>> versionEpochValue = wait(tr.get(versionEpochKey));
 			if (!versionEpochValue.present()) {
 				return 0;
 			}
@@ -805,35 +807,19 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 }
 
 struct QuietDatabaseChecker {
-	ProcessEvents::Callback timeoutCallback = [this](StringRef name, std::any const& msg, Error const& e) {
-		logFailure(name, std::any_cast<StringRef>(msg), e);
-	};
 	double start = now();
 	double maxDDRunTime;
-	ProcessEvents::Event timeoutEvent;
-	std::vector<std::string> lastFailReasons;
 
-	QuietDatabaseChecker(double maxDDRunTime)
-	  : maxDDRunTime(maxDDRunTime), timeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, timeoutCallback) {}
-
-	void logFailure(StringRef name, StringRef msg, Error const& e) {
-		std::string reasons = fmt::format("{}", fmt::join(lastFailReasons, ", "));
-		TraceEvent(SevError, "QuietDatabaseFailure")
-		    .error(e)
-		    .detail("EventName", name)
-		    .detail("EventMessage", msg)
-		    .detail("Reasons", lastFailReasons)
-		    .log();
-	};
+	QuietDatabaseChecker(double maxDDRunTime) : maxDDRunTime(maxDDRunTime) {}
 
 	struct Impl {
 		double start;
 		std::string const& phase;
 		double maxDDRunTime;
-		std::vector<std::string>& failReasons;
+		std::vector<std::string> failReasons;
 
-		Impl(double start, const std::string& phase, const double maxDDRunTime, std::vector<std::string>& failReasons)
-		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime), failReasons(failReasons) {}
+		Impl(double start, const std::string& phase, const double maxDDRunTime)
+		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime) {}
 
 		template <class T, class Comparison = std::less_equal<>>
 		Impl& add(BaseTraceEvent& evt,
@@ -872,9 +858,8 @@ struct QuietDatabaseChecker {
 		}
 	};
 
-	Impl startIteration(std::string const& phase) {
-		lastFailReasons.clear();
-		Impl res(start, phase, maxDDRunTime, lastFailReasons);
+	Impl startIteration(std::string const& phase) const {
+		Impl res(start, phase, maxDDRunTime);
 		return res;
 	}
 };
@@ -1038,7 +1023,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> versionOffset;
 	state Future<Version> dcLag;
 	state Version maxDcLag = 30e6;
-	state std::string traceMessage = "QuietDatabase" + phase + "Begin";
+	auto traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str()).log();
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations

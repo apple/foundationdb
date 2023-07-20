@@ -24,6 +24,13 @@
 #include "flow/FastRef.h"
 #pragma once
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
+// conversions like this suppresses)
+#pragma warning(disable : 4345)
+#pragma warning(error : 4239)
+#endif
+
 #include <vector>
 #include <queue>
 #include <functional>
@@ -955,8 +962,8 @@ public:
 			rhs.sav = nullptr;
 		}
 	}
-	bool operator==(const Future& rhs) const { return rhs.sav == sav; }
-	bool operator!=(const Future& rhs) const { return rhs.sav != sav; }
+	bool operator==(const Future& rhs) { return rhs.sav == sav; }
+	bool operator!=(const Future& rhs) { return rhs.sav != sav; }
 
 	void cancel() {
 		if (sav)

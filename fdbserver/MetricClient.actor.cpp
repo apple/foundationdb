@@ -28,17 +28,17 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include <cstddef>
+#ifndef WIN32
 #include <sys/socket.h>
+#endif
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
 #include "flow/actorcompiler.h"
 
 UDPMetricClient::UDPMetricClient()
-  : model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
-    socket_fd(-1), buf{ MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(1024),
-	                                   .data_size = 0,
-	                                   .buffer_size = 1024 } },
+  : socket_fd(-1), model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
+    buf{ MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(1024), .data_size = 0, .buffer_size = 1024 } },
     address((model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_ADDR : FLOW_KNOBS->OTEL_UDP_EMISSION_ADDR),
     port((model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT) {
 	NetworkAddress destAddress = NetworkAddress::parse(address + ":" + std::to_string(port));
@@ -46,8 +46,12 @@ UDPMetricClient::UDPMetricClient()
 	model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
 }
 
+// Since MSG_DONTWAIT isn't defined for Windows, we need to add a
+// ifndef guard here to avoid any compilation issues
 void UDPMetricClient::send_packet(int fd, const void* data, size_t len) {
+#ifndef WIN32
 	::send(fd, data, len, MSG_DONTWAIT);
+#endif
 }
 
 void UDPMetricClient::send(MetricCollection* metrics) {

@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "flow/Optional.h"
-#include "flow/IAsyncFile.h"
 
 namespace simulator {
 

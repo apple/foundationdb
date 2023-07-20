@@ -73,9 +73,6 @@ public:
 
 	// A continuation to be executed when all of the given futures get ready
 	virtual void continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont);
-
-	// Get description of the transaction status
-	virtual std::string getTransactionStatus() = 0;
 };
 
 // Type of the lambda functions implementing a database operation
@@ -126,11 +123,11 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
-	virtual std::shared_ptr<ITransactionContext> execute(TOpStartFct start,
-	                                                     TOpContFct cont,
-	                                                     std::optional<fdb::BytesRef> tenantName,
-	                                                     bool transactional,
-	                                                     bool restartOnTimeout) = 0;
+	virtual void execute(TOpStartFct start,
+	                     TOpContFct cont,
+	                     std::optional<fdb::BytesRef> tenantName,
+	                     bool transactional,
+	                     bool restartOnTimeout) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;

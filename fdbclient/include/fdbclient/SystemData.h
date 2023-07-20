@@ -35,7 +35,6 @@
 
 FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
-FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
 
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
 // and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
@@ -151,21 +150,16 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
-const UID newDataMoveId(const uint64_t physicalShardId,
-                        AssignEmptyRange assignEmptyRange,
-                        EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
-                        UnassignShard unassignShard = UnassignShard::False);
+const UID newShardId(const uint64_t physicalShardId,
+                     AssignEmptyRange assignEmptyRange,
+                     UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
-void decodeServerKeysValue(const ValueRef& value,
-                           bool& assigned,
-                           bool& emptyRange,
-                           EnablePhysicalShardMove& enablePSM,
-                           UID& id);
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;

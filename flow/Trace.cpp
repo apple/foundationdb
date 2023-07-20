@@ -25,7 +25,7 @@
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/ProcessEvents.h"
+#include "flow/UnitTest.h"
 #include <exception>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -42,7 +42,12 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
 #include "flow/network.h"
-#include "flow/SimBugInjector.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#undef max
+#undef min
+#endif
 
 // Allocations can only be logged when this value is 0.
 // Anybody that needs to disable tracing should increment this by 1 for the duration
@@ -55,7 +60,6 @@
 thread_local int g_allocation_tracing_disabled = 1;
 unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
-bool g_traceProcessEvents = false;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
 
@@ -1053,9 +1057,9 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 	return enabled;
 }
 
-BaseTraceEvent& BaseTraceEvent::errorUnsuppressed(class Error const& error) {
-	if (enabled) {
-		ASSERT(!logged);
+TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelled) {
+	ASSERT(!logged);
+	if (error.code() != error_code_actor_cancelled || includeCancelled) {
 		err = error;
 		if (initialized) {
 			if (error.isInjectedFault()) {
@@ -1067,31 +1071,19 @@ BaseTraceEvent& BaseTraceEvent::errorUnsuppressed(class Error const& error) {
 			detail("ErrorDescription", error.what());
 			detail("ErrorCode", error.code());
 		}
-		if (error.isDiskError()) {
+		if (err.isDiskError()) {
 			setErrorKind(ErrorKind::DiskIssue);
 		}
-	}
-
-	return *this;
-}
-
-BaseTraceEvent& TraceEvent::error(class Error const& error) {
-	if (enabled) {
-		if (error.code() != error_code_actor_cancelled) {
-			BaseTraceEvent::errorUnsuppressed(error);
+	} else {
+		if (initialized) {
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
+			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
+			    .suppressFor(5);
 		} else {
-			ASSERT(!logged);
-			if (initialized) {
-				TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
-				           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
-				    .suppressFor(5);
-			} else {
-				// even force-enabled events should respect suppression by error type
-				enabled = BaseTraceEvent::State::disabled();
-			}
+			// even force-enabled events should respect suppression by error type
+			enabled = BaseTraceEvent::State::disabled();
 		}
 	}
-
 	return *this;
 }
 
@@ -1280,7 +1272,11 @@ int BaseTraceEvent::getMaxEventLength() const {
 }
 
 BaseTraceEvent& BaseTraceEvent::GetLastError() {
+#ifdef _WIN32
+	return detailf("WinErrorCode", "%x", ::GetLastError());
+#elif defined(__unixish__)
 	return detailf("UnixErrorCode", "%x", errno).detail("UnixError", strerror(errno));
+#endif
 }
 
 unsigned long BaseTraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = { 0, 0, 0, 0, 0 };
@@ -1323,10 +1319,6 @@ void BaseTraceEvent::log() {
 				if (isNetworkThread()) {
 					TraceEvent::eventCounts[severity / 10]++;
 				}
-				if (g_traceProcessEvents) {
-					auto name = fmt::format("TraceEvent::{}", type);
-					ProcessEvents::trigger(StringRef(name), this, success());
-				}
 				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
 
 				if (g_traceLog.isOpen()) {
@@ -1358,8 +1350,6 @@ BaseTraceEvent::~BaseTraceEvent() {
 	log();
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
-		auto msg = fmt::format("Traced {} lines", tracedLines);
-		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), test_failed());
 		TraceEvent(SevError, "TracedTooManyLines").log();
 		crashAndDie();
 	}
@@ -1413,10 +1403,14 @@ std::string BaseTraceEvent::printRealTime(double time) {
 		ts = Clock::to_time_t(Clock::now());
 	}
 	std::stringstream ss;
+#ifdef _WIN32
+	// MSVC gmtime is threadsafe
+	ss << std::put_time(::gmtime(&ts), "%Y-%m-%dT%H:%M:%SZ");
+#else
 	// use threadsafe gmt
 	struct tm result;
 	ss << std::put_time(::gmtime_r(&ts, &result), "%Y-%m-%dT%H:%M:%SZ");
-
+#endif
 	return ss.str();
 }
 

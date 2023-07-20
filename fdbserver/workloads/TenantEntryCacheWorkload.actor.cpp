@@ -379,7 +379,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				RangeReadResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
 				break;

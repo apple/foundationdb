@@ -198,7 +198,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				state std::vector<Future<RangeReadResult>> results;
+				state std::vector<Future<RangeResult>> results;
 				for (auto& range : ranges) {
 					results.push_back(tr.getRange(range.removePrefix(removePrefix), 1000));
 				}
@@ -228,8 +228,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Transaction tr2(dest);
 				try {
 					loop {
-						state Future<RangeReadResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
-						state Future<RangeReadResult> bkpFuture =
+						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						state Future<RangeResult> bkpFuture =
 						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
 						wait(success(srcFuture) && success(bkpFuture));
 
@@ -499,7 +499,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					wait(store(taskCount, backupAgent->getTaskCount(tr)));
 				}
 
-				RangeReadResult agentValues =
+				RangeResult agentValues =
 				    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 				// Error if the system keyspace for the backup tag is not empty
@@ -524,7 +524,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("No left over backup agent configuration keys\n");
 				}
 
-				ValueReadResult latestVersion = wait(tr->get(backupLatestVersionsKey));
+				Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
 				if (latestVersion.present()) {
 					TraceEvent(SevError, "BackupCorrectnessLeftoverVersionKey", randomID)
 					    .detail("BackupTag", printable(tag))
@@ -534,10 +534,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("No left over backup version key\n");
 				}
 
-				RangeReadResult versions = wait(
+				RangeResult versions = wait(
 				    tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 				if (!shareLogRange || !versions.size()) {
-					RangeReadResult logValues =
+					RangeResult logValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 					// Error if the log/mutation keyspace for the backup tag is not empty

@@ -99,48 +99,6 @@ struct ConnectionStringCodec {
 	}
 };
 
-// This enum class can be used to track the state of the data movement
-// The state written to the cluster will be the last attempted
-// step of the movement
-enum class MovementState { START_LOCK, START_CREATE, SWITCH_HYBRID, SWITCH_METADATA, FINISH_UNLOCK };
-
-std::string moveStateToString(MovementState moveState);
-MovementState stringToMoveState(std::string stateStr);
-
-struct MovementRecord {
-	UID runId;
-	ClusterName srcCluster;
-	ClusterName dstCluster;
-	MovementState mState;
-	Version version = invalidVersion;
-	bool aborting = false;
-
-	bool operator==(const MovementRecord& mr) const {
-		return runId == mr.runId && srcCluster == mr.srcCluster && dstCluster == mr.dstCluster && mState == mr.mState &&
-		       version == mr.version && aborting == mr.aborting;
-	}
-
-	bool operator!=(const MovementRecord& mr) const { return !(*this == mr); }
-
-	Tuple pack() const {
-		return Tuple::makeTuple(
-		    runId.toString(), srcCluster, dstCluster, static_cast<int64_t>(mState), version, aborting);
-	}
-	static MovementRecord unpack(Tuple const& tuple) {
-		MovementRecord mr;
-		int i = 0;
-		auto sr = tuple.getString(i++);
-		mr.runId = UID::fromString(sr.toString());
-		mr.srcCluster = tuple.getString(i++);
-		mr.dstCluster = tuple.getString(i++);
-		auto state = tuple.getInt(i++);
-		mr.mState = MovementState(state);
-		mr.version = tuple.getInt(i++);
-		mr.aborting = tuple.getBool(i++);
-		return mr;
-	}
-};
-
 TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata();
 
 // A map from cluster name to the metadata associated with a cluster
@@ -162,22 +120,6 @@ KeyBackedSet<Tuple>& clusterTenantIndex();
 
 // A set of (cluster, tenant group name) tuples ordered by cluster
 KeyBackedSet<Tuple>& clusterTenantGroupIndex();
-
-namespace emergency_movement {
-// UID is not supported by Tuple.h
-// use UID::toString() and static UID::fromString instead
-
-// emergency_movement/move(tenantGroup) = (runId, sourceCluster, destinationCluster, moveStep, version, aborting)
-KeyBackedMap<TenantGroupName, MovementRecord>& emergencyMovements();
-
-// emergency_movement/queue(tenantGroup, runId) = (tenantName, startKey)
-KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>& movementQueue();
-
-// emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
-KeyBackedMap<Tuple, Key>& splitPointsMap();
-
-}; // namespace emergency_movement
-
 } // namespace management
 
 } // namespace metacluster::metadata

@@ -20,7 +20,9 @@
 
 #include <signal.h>
 #include <stdio.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <random>
 
 #ifdef __linux__
@@ -33,6 +35,11 @@
 #include <sys/inotify.h>
 #include <time.h>
 #include <linux/limits.h>
+#endif
+
+#ifdef __FreeBSD__
+#include <sys/event.h>
+#define O_EVTONLY O_RDONLY
 #endif
 
 #ifdef __APPLE__
@@ -78,7 +85,7 @@ constexpr double MEMORY_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 typedef int fdb_fd_set;
 #endif
 
@@ -89,7 +96,7 @@ void monitor_fd(fdb_fd_set list, int fd, int* maxfd, void* cmd) {
 	FD_SET(fd, list);
 	if (fd > *maxfd)
 		*maxfd = fd;
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	/* ignore maxfd */
 	struct kevent ev;
 	EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, cmd);
@@ -100,7 +107,7 @@ void monitor_fd(fdb_fd_set list, int fd, int* maxfd, void* cmd) {
 void unmonitor_fd(fdb_fd_set list, int fd) {
 #ifdef __linux__
 	FD_CLR(fd, list);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	struct kevent ev;
 	EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
 	kevent(list, &ev, 1, nullptr, 0, nullptr); // FIXME: check?
@@ -234,7 +241,7 @@ bool isParameterNameEqual(const char* str, const char* target) {
 }
 
 double timer() {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
@@ -590,8 +597,6 @@ public:
 
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
-		const std::string pid_s = std::to_string(getpid());
-
 		for (auto i : keys) {
 			// For "memory" option, despite they are handled by fdbmonitor, we still pass it to fdbserver.
 			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
@@ -607,12 +612,9 @@ public:
 			std::string opt = get_value_multi(ini, i.pItem, ssection.c_str(), section.c_str(), "general", nullptr);
 
 			std::size_t pos = 0;
+
 			while ((pos = opt.find("$ID", pos)) != opt.npos)
 				opt.replace(pos, 3, id_s, strlen(id_s));
-
-			pos = 0;
-			while ((pos = opt.find("$PID", pos)) != opt.npos)
-				opt.replace(pos, 4, pid_s);
 
 			const char* flagName = i.pItem + 5;
 			if ((strncmp("flag_", i.pItem, 5) == 0 || strncmp("flag-", i.pItem, 5) == 0) && strlen(flagName) > 0) {
@@ -1064,7 +1066,7 @@ void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds) {
 	}
 }
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__FreeBSD__)
 void watch_conf_dir(int kq, int* confd_fd, std::string confdir) {
 	struct kevent ev;
 	std::string original = confdir;
@@ -1338,7 +1340,11 @@ int main(int argc, char** argv) {
 	// testPathOps(); return -1;
 
 	std::string lockfile = "/var/run/fdbmonitor.pid";
+#ifdef __FreeBSD__
+	std::string _confpath = "/usr/local/etc/foundationdb/foundationdb.conf";
+#else
 	std::string _confpath = "/etc/foundationdb/foundationdb.conf";
+#endif
 
 	std::vector<const char*> additional_watch_paths;
 
@@ -1434,12 +1440,12 @@ int main(int argc, char** argv) {
 #endif
 
 	if (daemonize) {
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 		if (daemon(0, 0)) {
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #pragma GCC diagnostic pop
 #endif
 			log_err("daemon", errno, "Unable to daemonize");
@@ -1499,7 +1505,7 @@ int main(int argc, char** argv) {
 	signal(SIGHUP, signal_handler);
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	int kq = kqueue();
 	if (kq < 0) {
 		log_err("kqueue", errno, "Unable to create kqueue");
@@ -1544,11 +1550,11 @@ int main(int argc, char** argv) {
 	/* normal will be restored in our main loop in the call to
 	   pselect, but none blocks all signals while processing events */
 	sigprocmask(SIG_SETMASK, &full_mask, &normal_mask);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	sigprocmask(0, nullptr, &normal_mask);
 #endif
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__FreeBSD__)
 	struct stat st_buf;
 	struct timespec mtimespec;
 
@@ -1610,7 +1616,7 @@ int main(int argc, char** argv) {
 
 			load_conf(confpath.c_str(), uid, gid, &normal_mask, &rfds, &maxfd);
 			reload_additional_watches = false;
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 			load_conf(confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd);
 			watch_conf_file(kq, &conff_fd, confpath.c_str());
 			watch_conf_dir(kq, &confd_fd, confdir);
@@ -1666,7 +1672,7 @@ int main(int argc, char** argv) {
 				reload = true;
 			}
 		}
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 		int nev = 0;
 		if (timeout < 0) {
 			nev = kevent(kq, nullptr, 0, &ev, 1, nullptr);

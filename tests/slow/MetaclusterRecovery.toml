@@ -19,7 +19,7 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'MetaclusterRestore'
-	maxTenants = 100
+	maxTenants = 500
 	maxTenantGroups = 10
 
 [[test]]

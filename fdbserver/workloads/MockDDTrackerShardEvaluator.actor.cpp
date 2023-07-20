@@ -113,6 +113,7 @@ public:
 		                                        getTopKMetrics.getFuture(),
 		                                        getShardMetricsList.getFuture(),
 		                                        getAverageShardBytes.getFuture()));
+
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());

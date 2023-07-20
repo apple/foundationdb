@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/GrvTransactionRateInfo.h"
 #include "fdbserver/LatencyBandsMap.h"
 
@@ -44,7 +44,7 @@ class GrvProxyTagThrottler {
 		uint64_t sequenceNumber;
 
 		explicit DelayedRequest(GetReadVersionRequest const& req)
-		  : startTime(now()), req(req), sequenceNumber(++lastSequenceNumber) {}
+		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
 
 		void updateProxyTagThrottledDuration(LatencyBandsMap&);
 		bool isMaxThrottled(double maxThrottleDuration) const;
@@ -67,7 +67,7 @@ class GrvProxyTagThrottler {
 	};
 
 	// Track the budgets for each tag
-	ThrottlingIdMap<TagQueue> queues;
+	TransactionTagMap<TagQueue> queues;
 	double maxThrottleDuration;
 
 	// Track latency bands for each tag
@@ -77,7 +77,7 @@ public:
 	explicit GrvProxyTagThrottler(double maxThrottleDuration);
 
 	// Called with rates received from ratekeeper
-	void updateRates(ThrottlingIdMap<double> const& newRates);
+	void updateRates(TransactionTagMap<double> const& newRates);
 
 	// elapsed indicates the amount of time since the last epoch was run.
 	// If a request is ready to be executed, it is sent to the deque

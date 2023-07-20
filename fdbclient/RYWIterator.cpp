@@ -363,7 +363,7 @@ WriteMap* writes, GetRangeLimits limits ) {
             ucEnd.skipUncached(itEnd);
 
             state KeySelector read_end = ucEnd==itEnd ? end :
-firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef()); RangeReadResult snapshot_read = wait(tr->getRange( begin,
+firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef()); RangeResult snapshot_read = wait(tr->getRange( begin,
 read_end, limits, false, false ) ); cache->insert( getKnownKeyRange( snapshot_read, begin, read_end), snapshot_read );
 
             // TODO: Is there a more efficient way to deal with invalidation?

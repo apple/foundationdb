@@ -287,7 +287,7 @@ class PaxosConfigTransactionImpl {
 	Database cx;
 	Future<Void> watchClusterFileFuture;
 
-	ACTOR static Future<ValueReadResult> get(PaxosConfigTransactionImpl* self, Key key) {
+	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		loop {
 			try {
@@ -309,9 +309,9 @@ class PaxosConfigTransactionImpl {
 				                     ConfigTransactionGetRequest{ self->coordinatorsHash, generation, configKey }),
 				    CLIENT_KNOBS->GET_KNOB_TIMEOUT));
 				if (reply.value.present()) {
-					return ValueReadResult(reply.value.get().toValue());
+					return reply.value.get().toValue();
 				} else {
-					return ValueReadResult{};
+					return Optional<Value>{};
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise &&
@@ -323,7 +323,7 @@ class PaxosConfigTransactionImpl {
 		}
 	}
 
-	ACTOR static Future<RangeReadResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
+	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
 		loop {
 			try {
 				state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
@@ -342,7 +342,7 @@ class PaxosConfigTransactionImpl {
 				    basicLoadBalance(configNodes,
 				                     &ConfigTransactionInterface::getClasses,
 				                     ConfigTransactionGetConfigClassesRequest{ self->coordinatorsHash, generation }));
-				RangeReadResult result;
+				RangeResult result;
 				result.reserve(result.arena(), reply.configClasses.size());
 				for (const auto& configClass : reply.configClasses) {
 					result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
@@ -357,7 +357,7 @@ class PaxosConfigTransactionImpl {
 		}
 	}
 
-	ACTOR static Future<RangeReadResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
+	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		loop {
 			try {
 				state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
@@ -376,7 +376,7 @@ class PaxosConfigTransactionImpl {
 				    configNodes,
 				    &ConfigTransactionInterface::getKnobs,
 				    ConfigTransactionGetKnobsRequest{ self->coordinatorsHash, generation, configClass }));
-				RangeReadResult result;
+				RangeResult result;
 				result.reserve(result.arena(), reply.knobNames.size());
 				for (const auto& knobName : reply.knobNames) {
 					result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
@@ -459,9 +459,9 @@ public:
 
 	void clear(KeyRef key) { commitQuorum.clear(key); }
 
-	Future<ValueReadResult> get(Key const& key) { return get(this, key); }
+	Future<Optional<Value>> get(Key const& key) { return get(this, key); }
 
-	Future<RangeReadResult> getRange(KeyRangeRef keys) {
+	Future<RangeResult> getRange(KeyRangeRef keys) {
 		if (keys == configClassKeys) {
 			return getConfigClasses(this);
 		} else if (keys == globalConfigKnobKeys) {
@@ -532,26 +532,26 @@ Optional<Version> PaxosConfigTransaction::getCachedReadVersion() const {
 	return impl->getCachedReadVersion();
 }
 
-Future<ValueReadResult> PaxosConfigTransaction::get(Key const& key, Snapshot) {
+Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, Snapshot) {
 	return impl->get(key);
 }
 
-Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
-                                                         KeySelector const& end,
-                                                         int limit,
-                                                         Snapshot snapshot,
-                                                         Reverse reverse) {
+Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
+                                                     KeySelector const& end,
+                                                     int limit,
+                                                     Snapshot snapshot,
+                                                     Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}
 	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
-Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector begin,
-                                                         KeySelector end,
-                                                         GetRangeLimits limits,
-                                                         Snapshot snapshot,
-                                                         Reverse reverse) {
+Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
+                                                     KeySelector end,
+                                                     GetRangeLimits limits,
+                                                     Snapshot snapshot,
+                                                     Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

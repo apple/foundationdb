@@ -222,6 +222,7 @@ private:
 	}
 };
 
+#ifndef WIN32
 ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
 	state bool sendErrorReset = false;
 
@@ -317,6 +318,7 @@ private:
 	Future<Void> log_actor_;
 	Future<Void> udp_server_actor_;
 };
+#endif
 
 ITracer* g_tracer = new NoopTracer();
 
@@ -337,7 +339,9 @@ void openTracer(TracerType type) {
 		g_tracer = new LogfileTracer{};
 		break;
 	case TracerType::NETWORK_LOSSY:
+#ifndef WIN32
 		g_tracer = new FastUDPTracer{};
+#endif
 		break;
 	case TracerType::SIM_END:
 		ASSERT(false);
@@ -346,30 +350,6 @@ void openTracer(TracerType type) {
 }
 
 ITracer::~ITracer() {}
-
-std::string SpanContext::toString() const {
-	return format("00-%016llx%016llx-%016llx-%02x", traceID.first(), traceID.second(), spanID, m_Flags);
-}
-
-Optional<SpanContext> SpanContext::fromString(const std::string& s) {
-	if (s.size() != 2 + 1 + 32 + 1 + 16 + 1 + 2) {
-		return Optional<SpanContext>();
-	}
-	uint64_t traceID0 = 0, traceID1 = 0;
-	uint64_t spanID = 0;
-	TraceFlags flags = TraceFlags::unsampled;
-	int r = sscanf(
-	    s.c_str(), "00-%16" SCNx64 "%16" SCNx64 "-%16" SCNx64 "-%2" SCNx8, &traceID0, &traceID1, &spanID, &flags);
-	if (r != 4) {
-		return Optional<SpanContext>();
-	}
-	UID traceID = UID(traceID0, traceID1);
-	if (traceID == UID(0, 0) || spanID == 0) {
-		// both traceID and spanID have to be non-zero according to the spec
-		return Optional<SpanContext>();
-	}
-	return SpanContext(traceID, spanID, flags);
-}
 
 Span& Span::operator=(Span&& o) {
 	if (begin > 0.0 && context.isSampled()) {
@@ -405,30 +385,6 @@ Span::~Span() {
 		g_tracer->trace(*this);
 	}
 }
-
-TEST_CASE("/flow/Tracing/SpanContext/StringRoundtrip") {
-	TraceFlags flags = static_cast<TraceFlags>(deterministicRandom()->randomInt(0, 2));
-	SpanContext expectedContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), flags);
-	SpanContext parsedContext = SpanContext::fromString(expectedContext.toString()).get();
-	ASSERT_EQ(expectedContext.traceID, parsedContext.traceID);
-	ASSERT_EQ(expectedContext.spanID, parsedContext.spanID);
-	ASSERT_EQ(expectedContext.m_Flags, parsedContext.m_Flags);
-
-	return Void();
-};
-
-TEST_CASE("/flow/Tracing/SpanContext/StringParseError") {
-	ASSERT(SpanContext::fromString("00-00000000000000000000000000000001-0000000000000001-01").present());
-	ASSERT(
-	    !SpanContext::fromString("01-00000000000000000000000000000001-0000000000000001-01").present()); // wrong version
-	ASSERT(!SpanContext::fromString("00-00000000000000000000000000000000-0000000000000000-00").present()); // all zeros
-	ASSERT(!SpanContext::fromString("").present()); // empty string
-	ASSERT(!SpanContext::fromString("00-000000000-00000-00").present()); // too short
-	ASSERT(
-	    !SpanContext::fromString("00-0000000000000000000000000000000g-000000000000000g-00").present()); // non-hex chars
-
-	return Void();
-};
 
 TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// Sampling disabled, no parent.
@@ -608,6 +564,8 @@ std::string readMPString(uint8_t* index) {
 	return reinterpret_cast<char*>(data);
 }
 
+// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
+#ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	Span span1("encoded_span"_loc);
 	auto request = MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
@@ -727,19 +685,12 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	request.reset();
 
 	// Test message pack encoding for string >= 256 && <= 65535 chars
-	// pragma: allowlist nextline secret
 	const char* longString = "yGUtj42gSKfdqib3f0Ri4OVhD7eWyTbKsH/g9+x4UWyXry7NIBFIapPV9f1qdTRl"
-	                         // pragma: allowlist nextline secret
 	                         "2jXcZI8Ua/Gp8k9EBn7peaEN1uj4w9kf4FQ2Lalu0VrA4oquQoaKYr+wPsLBak9i"
-	                         // pragma: allowlist nextline secret
 	                         "uyZDF9sX/HW4pVvQhPQdXQWME5E7m58XFMpZ3H8HNXuytWInEuh97SRLlI0RhrvG"
-	                         // pragma: allowlist nextline secret
 	                         "ixNpYtYlvghsLCrEdZMMGnS2gXgGufIdg1xKJd30fUbZLHcYIC4DTnL5RBpkbQCR"
-	                         // pragma: allowlist nextline secret
 	                         "SGKKUrpIb/7zePhBDi+gzUzyAcbQ2zUbFWI1KNi3zQk58uUG6wWJZkw+GCs7Cc3V"
-	                         // pragma: allowlist nextline secret
 	                         "OUxOljwCJkC4QTgdsbbFhxUC+rtoHV5xAqoTQwR0FXnWigUjP7NtdL6huJUr3qRv"
-	                         // pragma: allowlist nextline secret
 	                         "40c4yUI1a4+P5vJa";
 	Span span4;
 	auto location = Location();
@@ -754,3 +705,4 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(readMPString(&data[37]) == longString);
 	return Void();
 };
+#endif

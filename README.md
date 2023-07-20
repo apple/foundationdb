@@ -106,6 +106,36 @@ cmake -G Xcode -DOPEN_FOR_IDE=ON <FDB_SOURCE_DIRECTORY>
 
 You should create a second build-directory which you will use for building and debugging.
 
+#### FreeBSD
+
+1. Check out this repo on your server.
+1. Install compile-time dependencies from ports.
+1. (Optional) Use tmpfs & ccache for significantly faster repeat builds
+1. (Optional) Install a [JDK](https://www.freshports.org/java/openjdk8/)
+   for Java Bindings. FoundationDB currently builds with Java 8.
+1. Navigate to the directory where you checked out the foundationdb
+   repo.
+1. Build from source.
+
+    ```shell
+    sudo pkg install -r FreeBSD \
+        shells/bash devel/cmake devel/ninja devel/ccache  \
+        lang/mono lang/python3 \
+        devel/boost-libs devel/libeio \
+        security/openssl
+    mkdir .build && cd .build
+    cmake -G Ninja \
+        -DUSE_CCACHE=on \
+        -DUSE_DTRACE=off \
+        ..
+    ninja -j 10
+    # run fast tests
+    ctest -L fast
+    # run all tests
+    ctest --output-on-failure -v
+    ```
+
+
 ### Linux
 
 There are no special requirements for Linux.  A docker image can be pulled from
@@ -134,3 +164,20 @@ To generate a installable package,
 ninja
 $SRCDIR/packaging/osx/buildpkg.sh . $SRCDIR
 ```
+
+### Windows
+
+Under Windows, only Visual Studio with ClangCl is supported
+
+1. Install Visual Studio 2019 (IDE or Build Tools), and enable llvm support
+1. Install  [CMake 3.15](https://cmake.org/) or higher
+1. Download [Boost 1.77.0](https://boostorg.jfrog.io/artifactory/main/release/1.77.0/source/boost_1_77_0.7z)
+1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
+1. Install [Python](https://www.python.org/downloads/) if is not already installed by Visual Studio
+1. (Optional) Install [OpenJDK 11](https://developers.redhat.com/products/openjdk/download) to build Java bindings
+1. (Optional) Install [OpenSSL 3.x](https://slproweb.com/products/Win32OpenSSL.html) to build with TLS support
+1. (Optional) Install [WIX Toolset](https://wixtoolset.org/) to build Windows installer
+1. `mkdir build && cd build`
+1. `cmake -G "Visual Studio 16 2019" -A x64 -T ClangCl <PATH_TO_FOUNDATIONDB_SOURCE>`
+1. `msbuild /p:Configuration=Release foundationdb.sln`
+1. To increase build performance, use `/p:UseMultiToolTask=true` and `/p:CL_MPCount=<NUMBER_OF_PARALLEL_JOBS>` 

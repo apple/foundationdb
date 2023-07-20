@@ -47,18 +47,16 @@ ACTOR template <class Transaction>
 Future<Void> managementClusterCheckEmpty(Transaction tr) {
 	state Future<KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>>> tenantsFuture =
 	    TenantMetadata::tenantMap().getRange(tr, {}, {}, 1);
-	state typename transaction_future_type<Transaction, RangeReadResult>::type dbContentsFuture =
+	state typename transaction_future_type<Transaction, RangeResult>::type dbContentsFuture =
 	    tr->getRange(normalKeys, 1);
 
 	KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants = wait(tenantsFuture);
 	if (!tenants.results.empty()) {
-		CODE_PROBE(true, "Metacluster emptiness check has tenants", probe::decoration::rare);
 		throw cluster_not_empty();
 	}
 
-	RangeReadResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
+	RangeResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
 	if (!dbContents.empty()) {
-		CODE_PROBE(true, "Metacluster emptiness check has data");
 		throw cluster_not_empty();
 	}
 
@@ -69,22 +67,8 @@ template <class Transaction>
 void updateClusterCapacityIndex(Transaction tr,
                                 ClusterName name,
                                 DataClusterEntry const& previousEntry,
-                                DataClusterEntry const& updatedEntry,
-                                UID debugId = UID()) {
-	CODE_PROBE(updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED,
-	           "Update tenant capacity with auto-assignment disabled");
-	CODE_PROBE(updatedEntry.autoTenantAssignment == AutoTenantAssignment::ENABLED,
-	           "Update tenant capacity with auto-assignment enabled");
-
+                                DataClusterEntry const& updatedEntry) {
 	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
-	TraceEvent("BreakpointUpdate", debugId)
-	    .detail("ClusterName", name)
-	    .detail("PrevEntryState", DataClusterEntry::clusterStateToString(previousEntry.clusterState))
-	    .detail("UpdatedEntryState", DataClusterEntry::clusterStateToString(updatedEntry.clusterState))
-	    .detail("PrevEntryAlloc", previousEntry.allocated.numTenantGroups)
-	    .detail("PrevEntryCapac", previousEntry.capacity.numTenantGroups)
-	    .detail("UpdatedEntryAlloc", updatedEntry.allocated.numTenantGroups)
-	    .detail("UpdatedEntryCapac", updatedEntry.capacity.numTenantGroups);
 	if (previousEntry.hasCapacity() || updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
 		metadata::management::clusterCapacityIndex().erase(
 		    tr, Tuple::makeTuple(previousEntry.allocated.numTenantGroups, name));

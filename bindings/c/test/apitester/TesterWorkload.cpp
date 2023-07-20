@@ -26,7 +26,6 @@
 #include <cstdlib>
 #include <memory>
 #include <fmt/format.h>
-#include <mutex>
 #include <vector>
 #include <iostream>
 #include <cstdio>
@@ -81,15 +80,12 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 }
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
-  : manager(nullptr), tasksScheduled(0), numErrors(0), lastTxCompleted(0), lastAction(Action::None),
-    clientId(config.clientId), numClients(config.numClients), failed(false), numTxCompleted(0), numTxStarted(0),
-    inProgress(false) {
+  : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
+    failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
 	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
-	enableTransactionTracing = config.getBoolOption("enableTransactionTracing", false);
 	workloadId = fmt::format("{}{}", config.name, clientId);
-	lastStatsTime = timeNow();
 }
 
 void WorkloadBase::init(WorkloadManager* manager) {
@@ -98,39 +94,7 @@ void WorkloadBase::init(WorkloadManager* manager) {
 }
 
 void WorkloadBase::printStats() {
-	int completed = numTxCompleted.load();
-	int started = numTxStarted.load();
-	TimePoint now = timeNow();
-	const char* actionStr;
-	switch (lastAction) {
-	case Action::None:
-		actionStr = "none";
-		break;
-	case Action::BeginTransaction:
-		actionStr = "begintx";
-		break;
-	case Action::ScheduleTask:
-		actionStr = "schedule";
-		break;
-	case Action::Continuation:
-		actionStr = "cont";
-		break;
-	}
-	info("Progress: {:>4} total, {:>3} in last {:.1f}s, pending tx {}, last action: {}",
-	     started,
-	     completed - lastTxCompleted,
-	     microsecToSec(timeElapsedInUs(lastStatsTime, now)),
-	     started - completed,
-	     actionStr);
-	// If there was no progress, print the status of the pending transaction
-	if (completed - lastTxCompleted == 0) {
-		std::lock_guard<std::mutex> lock(pendingTxMutex);
-		if (pendingTx) {
-			info("TX status: {}", pendingTx->getTransactionStatus());
-		}
-	}
-	lastStatsTime = now;
-	lastTxCompleted = completed;
+	info(fmt::format("{} transactions completed", numTxCompleted.load()));
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
@@ -139,7 +103,6 @@ void WorkloadBase::schedule(TTaskFct task) {
 		return;
 	}
 	tasksScheduled++;
-	lastAction = Action::ScheduleTask;
 	manager->scheduler->schedule([this, task]() {
 		task();
 		scheduledTaskDone();
@@ -172,37 +135,25 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	}
 	tasksScheduled++;
 	numTxStarted++;
-	lastAction = Action::BeginTransaction;
-	auto ctx = manager->txExecutor->execute( //
+	manager->txExecutor->execute( //
 	    [this, transactional, cont, startFct](auto ctx) {
 		    if (transactional && maxTxTimeoutMs > 0) {
 			    int timeoutMs = Random::get().randomInt(minTxTimeoutMs, maxTxTimeoutMs);
 			    ctx->tx().setOption(FDB_TR_OPTION_TIMEOUT, timeoutMs);
 		    }
-		    if (enableTransactionTracing) {
-			    auto traceId = Random::get().randomHexString<std::string>(32, 32);
-			    auto spanId = Random::get().randomHexString<std::string>(16, 16);
-			    ctx->tx().setOption(FDB_TR_OPTION_SERVER_REQUEST_TRACING);
-			    ctx->tx().setOption(FDB_TR_OPTION_TRACE_PARENT, fmt::format("00-{}-{}-01", traceId, spanId));
-		    }
 		    startFct(ctx);
 	    },
 	    [this, cont, failOnError](fdb::Error err) {
 		    numTxCompleted++;
-		    {
-			    std::lock_guard<std::mutex> lock(pendingTxMutex);
-			    pendingTx = {};
-		    }
 		    if (err.code() == error_code_success) {
-			    lastAction = Action::Continuation;
 			    cont();
 		    } else {
 			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
 			    if (failOnError) {
-				    error("{}", msg);
+				    error(msg);
 				    failed = true;
 			    } else {
-				    info("{}", msg);
+				    info(msg);
 				    cont();
 			    }
 		    }
@@ -211,16 +162,17 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	    tenant,
 	    transactional,
 	    maxTxTimeoutMs > 0);
-	{
-		std::lock_guard<std::mutex> lock(pendingTxMutex);
-		pendingTx = ctx;
-	}
 }
 
-void WorkloadBase::newErrorReported() {
+void WorkloadBase::info(const std::string& msg) {
+	fmt::print(stderr, "[{}] {}\n", workloadId, msg);
+}
+
+void WorkloadBase::error(const std::string& msg) {
+	fmt::print(stderr, "[{}] ERROR: {}\n", workloadId, msg);
 	numErrors++;
 	if (numErrors > maxErrors && !failed) {
-		log::error("{}: Stopping workload after {} errors", workloadId, numErrors);
+		fmt::print(stderr, "[{}] ERROR: Stopping workload after {} errors\n", workloadId, numErrors);
 		failed = true;
 	}
 }
@@ -228,9 +180,8 @@ void WorkloadBase::newErrorReported() {
 void WorkloadBase::scheduledTaskDone() {
 	if (--tasksScheduled == 0) {
 		inProgress = false;
-		lastAction = Action::None;
 		if (numErrors > 0) {
-			error("Workload failed with {} errors", numErrors.load());
+			error(fmt::format("Workload failed with {} errors", numErrors.load()));
 		} else {
 			info("Workload successfully completed");
 		}
@@ -247,7 +198,7 @@ void WorkloadBase::confirmProgress() {
 void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 	std::unique_lock<std::mutex> lock(mutex);
 	workloads[workload.get()] = WorkloadInfo{ workload, cont, workload->getControlIfc(), false };
-	log::info("Workload {} added", workload->getWorkloadId());
+	fmt::print(stderr, "Workload {} added\n", workload->getWorkloadId());
 }
 
 void WorkloadManager::run() {
@@ -265,17 +216,17 @@ void WorkloadManager::run() {
 		iter->start();
 	}
 	scheduler->join();
+	if (ctrlInputThread.joinable()) {
+		ctrlInputThread.join();
+	}
 	if (outputPipe.is_open()) {
 		outputPipe << "DONE" << std::endl;
 		outputPipe.close();
 	}
-	if (ctrlInputThread.joinable()) {
-		ctrlInputThread.join();
-	}
 	if (failed()) {
-		log::error("{} workloads failed", numWorkloadsFailed);
+		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
 	} else {
-		log::info("All workloads succesfully completed");
+		fprintf(stderr, "All workloads succesfully completed\n");
 	}
 }
 
@@ -305,13 +256,13 @@ void WorkloadManager::openControlPipes(const std::string& inputPipeName, const s
 		ctrlInputThread = std::thread(&WorkloadManager::readControlInput, this, inputPipeName);
 	}
 	if (!outputPipeName.empty()) {
-		log::info("Opening pipe {} for writing", outputPipeName);
+		fmt::print(stderr, "Opening pipe {} for writing\n", outputPipeName);
 		outputPipe.open(outputPipeName, std::ofstream::out);
 	}
 }
 
 void WorkloadManager::readControlInput(std::string pipeName) {
-	log::info("Opening pipe {} for reading", pipeName);
+	fmt::print(stderr, "Opening pipe {} for reading\n", pipeName);
 	// Open in binary mode and read char-by-char to avoid
 	// any kind of buffering
 	FILE* f = fopen(pipeName.c_str(), "rb");
@@ -329,7 +280,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 		if (line.empty()) {
 			continue;
 		}
-		log::info("Received {} command", line);
+		fmt::print(stderr, "Received {} command\n", line);
 		if (line == "STOP") {
 			handleStopCommand();
 		} else if (line == "CHECK") {

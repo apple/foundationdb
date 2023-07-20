@@ -9,7 +9,11 @@ define_property(TARGET PROPERTY COVERAGE_FILTERS
 expression in this list will be ignored when the coverage.target.xml file is \
 generated. This property is set through the add_flow_target function.")
 
-set(compilation_unit_macro_default ON)
+if(WIN32)
+  set(compilation_unit_macro_default OFF)
+else()
+  set(compilation_unit_macro_default ON)
+endif()
 
 set(PASS_COMPILATION_UNIT "${compilation_unit_macro_default}" CACHE BOOL
   "Pass path to compilation unit as macro to each compilation unit (useful for code probes)")
@@ -39,21 +43,35 @@ function(generate_coverage_xml)
   # - For executable we place the coverage file into the directory EXECUTABLE_OUTPUT_PATH
   # - For static libraries we place it into the directory LIBRARY_OUTPUT_PATH
   # - For dynamic libraries we place it into LIBRARY_OUTPUT_PATH on Linux and MACOS
+  #   and to EXECUTABLE_OUTPUT_PATH on Windows
   get_target_property(type ${target_name} TYPE)
   # STATIC_LIBRARY, MODULE_LIBRARY, SHARED_LIBRARY, OBJECT_LIBRARY, INTERFACE_LIBRARY, EXECUTABLE
   if(type STREQUAL "STATIC_LIBRARY")
     set(target_file ${LIBRARY_OUTPUT_PATH}/coverage.${target_name}.xml)
   elseif(type STREQUAL "SHARED_LIBRARY")
-    set(target_file ${LIBRARY_OUTPUT_PATH}/coverage.${target_name}.xml)
+    if(WIN32)
+      set(target_file ${EXECUTABLE_OUTPUT_PATH}/coverage.${target_name}.xml)
+    else()
+      set(target_file ${LIBRARY_OUTPUT_PATH}/coverage.${target_name}.xml)
+    endif()
   elseif(type STREQUAL "EXECUTABLE")
     set(target_file ${EXECUTABLE_OUTPUT_PATH}/coverage.${target_name}.xml)
   endif()
-  add_custom_command(
-    OUTPUT ${target_file}
-    COMMAND ${MONO_EXECUTABLE} ${coveragetool_exe} ${target_file} ${in_files}
-    DEPENDS ${in_files}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Generate coverage xml")
+  if(WIN32)
+    add_custom_command(
+      OUTPUT ${target_file}
+      COMMAND $<TARGET_FILE:coveragetool> ${target_file} ${in_files}
+      DEPENDS ${in_files}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMENT "Generate coverage xml")
+  else()
+    add_custom_command(
+      OUTPUT ${target_file}
+      COMMAND ${MONO_EXECUTABLE} ${coveragetool_exe} ${target_file} ${in_files}
+      DEPENDS ${in_files}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMENT "Generate coverage xml")
+  endif()
   add_custom_target(coverage_${target_name} ALL DEPENDS ${target_file})
   add_dependencies(coverage_${target_name} coveragetool)
 endfunction()
@@ -62,6 +80,9 @@ add_custom_target(strip_targets)
 add_dependencies(packages strip_targets)
 
 function(strip_debug_symbols target)
+  if(WIN32)
+    return()
+  endif()
   get_target_property(target_type ${target} TYPE)
   if(target_type STREQUAL "EXECUTABLE")
     set(path ${CMAKE_BINARY_DIR}/packages/bin)
@@ -206,10 +227,17 @@ function(add_flow_target)
         endforeach()
 
         list(APPEND generated_files ${out_file})
-        add_custom_command(OUTPUT "${out_file}"
-          COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${in_file}" "${out_file}" ${actor_compiler_flags} > /dev/null
-          DEPENDS "${in_file}" ${actor_exe}
-          COMMENT "Compile actor: ${src}")
+        if(WIN32)
+          add_custom_command(OUTPUT "${out_file}"
+            COMMAND $<TARGET_FILE:actorcompiler> "${in_file}" "${out_file}" ${actor_compiler_flags}
+            DEPENDS "${in_file}" ${actor_exe}
+            COMMENT "Compile actor: ${src}")
+        else()
+          add_custom_command(OUTPUT "${out_file}"
+            COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${in_file}" "${out_file}" ${actor_compiler_flags} > /dev/null
+            DEPENDS "${in_file}" ${actor_exe}
+            COMMENT "Compile actor: ${src}")
+        endif()
       endif()
     endforeach()
     if(PASS_COMPILATION_UNIT)

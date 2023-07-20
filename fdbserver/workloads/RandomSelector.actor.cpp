@@ -198,12 +198,12 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						state Optional<Value> getTest1;
 
-						ValueReadResult getTest = wait(trRYOW.get(StringRef(clientID + "b/" + myKeyA)));
+						Optional<Value> getTest = wait(trRYOW.get(StringRef(clientID + "b/" + myKeyA)));
 						getTest1 = getTest;
 
 						loop {
 							try {
-								ValueReadResult getTest2 = wait(tr.get(StringRef(clientID + "d/" + myKeyA)));
+								Optional<Value> getTest2 = wait(tr.get(StringRef(clientID + "d/" + myKeyA)));
 
 								if ((getTest1.present() && (!getTest2.present() || getTest1.get() != getTest2.get())) ||
 								    (!getTest1.present() && getTest2.present())) {
@@ -241,7 +241,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -265,7 +265,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -289,7 +289,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -313,7 +313,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -337,7 +337,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -361,7 +361,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -385,7 +385,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -409,7 +409,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -433,7 +433,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -455,8 +455,8 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("RandomByteLimit", randomByteLimit).detail("Reverse", reverse);
 
-						state RangeReadResult getRangeTest1;
-						RangeReadResult getRangeTest =
+						state RangeResult getRangeTest1;
+						RangeResult getRangeTest =
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
 						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
 						                         randomLimit,
@@ -466,7 +466,7 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						loop {
 							try {
-								RangeReadResult getRangeTest2 = wait(
+								RangeResult getRangeTest2 = wait(
 								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
 								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
 								                randomLimit,
@@ -537,9 +537,9 @@ struct RandomSelectorWorkload : TestWorkload {
 
 				loop {
 					try {
-						state RangeReadResult finalTest1 = wait(finalTransaction.getRange(
+						state RangeResult finalTest1 = wait(finalTransaction.getRange(
 						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")), self->maxKeySpace));
-						RangeReadResult finalTest2 = wait(finalTransaction.getRange(
+						RangeResult finalTest2 = wait(finalTransaction.getRange(
 						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")), self->maxKeySpace));
 
 						if (finalTest1.size() != finalTest2.size()) {

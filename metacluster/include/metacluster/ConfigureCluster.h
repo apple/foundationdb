@@ -40,34 +40,27 @@ void updateClusterMetadata(Transaction tr,
                            DataClusterMetadata const& previousMetadata,
                            Optional<ClusterConnectionString> const& updatedConnectionString,
                            Optional<DataClusterEntry> const& updatedEntry,
-                           IsRestoring isRestoring = IsRestoring::False,
-                           UID debugId = UID()) {
-	CODE_PROBE(updatedEntry.present() && updatedConnectionString.present(),
-	           "Update configuration and connection string simultaneously");
+                           IsRestoring isRestoring = IsRestoring::False) {
 
 	if (updatedEntry.present()) {
 		if (previousMetadata.entry.clusterState == DataClusterState::REGISTERING &&
 		    updatedEntry.get().clusterState != DataClusterState::READY &&
 		    updatedEntry.get().clusterState != DataClusterState::REMOVING) {
-			CODE_PROBE(true, "Updating cluster state from registering to unexpected state");
 			throw cluster_not_found();
 		} else if (previousMetadata.entry.clusterState == DataClusterState::REMOVING) {
-			CODE_PROBE(true, "Attempting to configure cluster that is being removed");
 			throw cluster_removed();
 		} else if (!isRestoring && previousMetadata.entry.clusterState == DataClusterState::RESTORING &&
 		           (updatedEntry.get().clusterState != DataClusterState::READY &&
 		            updatedEntry.get().clusterState != DataClusterState::REMOVING)) {
-			CODE_PROBE(true, "Attempting to configure cluster that is being restored");
 			throw cluster_restoring();
 		} else if (isRestoring) {
 			ASSERT(previousMetadata.entry.clusterState == DataClusterState::RESTORING &&
 			       updatedEntry.get().clusterState == DataClusterState::RESTORING);
 		}
 		metadata::management::dataClusters().set(tr, name, updatedEntry.get());
-		internal::updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get(), debugId);
+		internal::updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
 	}
 	if (updatedConnectionString.present()) {
-		CODE_PROBE(true, "Updating data cluster connection string");
 		metadata::management::dataClusterConnectionRecords().set(tr, name, updatedConnectionString.get());
 	}
 }

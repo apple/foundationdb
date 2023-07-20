@@ -754,87 +754,6 @@ struct GetRangeLimits {
 	}
 };
 
-class ReadMetrics {
-public:
-	using BusynessT = uint8_t;
-	constexpr static FileIdentifier file_identifier = 13999063;
-
-	ReadMetrics() {}
-	ReadMetrics(BusynessT serverBusyness, BusynessT rangeBusyness)
-	  : serverBusyness(serverBusyness), rangeBusyness(rangeBusyness) {}
-
-	float getServerBusyness() const { return (float)serverBusyness / scalingFactor; }
-	float getRangeBusyness() const { return (float)rangeBusyness / scalingFactor; }
-
-	void combine(ReadMetrics const& other) {
-		serverBusyness = std::max(serverBusyness, other.serverBusyness);
-		rangeBusyness = std::max(rangeBusyness, other.rangeBusyness);
-	}
-
-	static BusynessT busynessFloatToInt(float value) {
-		return std::clamp<BusynessT>(value * scalingFactor, 0, scalingFactor);
-	}
-
-	static ReadMetrics fromFloats(float serverBusyness, float rangeBusyness) {
-		return ReadMetrics(busynessFloatToInt(serverBusyness), busynessFloatToInt(rangeBusyness));
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, serverBusyness, rangeBusyness);
-	}
-
-private:
-	static constexpr BusynessT scalingFactor = std::numeric_limits<BusynessT>::max();
-
-	BusynessT serverBusyness = 0;
-	BusynessT rangeBusyness = 0;
-};
-
-class ReadResultBase {
-public:
-	constexpr static FileIdentifier file_identifier = 6066542;
-
-	ReadResultBase() {}
-	ReadResultBase(ReadMetrics const& metrics) : metrics(metrics) {}
-
-	ReadMetrics& getReadMetrics() { return metrics; }
-	ReadMetrics const& getReadMetrics() const { return metrics; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, metrics);
-	}
-
-private:
-	ReadMetrics metrics;
-};
-
-template <class T>
-class ReadResult : public T, public ReadResultBase {
-public:
-	constexpr static FileIdentifier file_identifier = 1683564;
-	using ResultType = T;
-
-	ReadResult() {}
-	ReadResult(T const& t) : T(t) {}
-	ReadResult(T&& t) : T(std::move(t)) {}
-	ReadResult(T&& t, ReadMetrics const& metrics) : T(std::move(t)), ReadResultBase(metrics) {}
-
-	T& contents() { return *(T*)this; }
-	T const& contents() const { return *(T const*)this; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, (ReadResultBase&)*this, (T&)*this);
-	}
-};
-
-template <class T>
-struct Traceable<ReadResult<T>> : std::true_type {
-	static std::string toString(ReadResult<T> const& rr) { return Traceable<T>::toString(rr); }
-};
-
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;
 
@@ -901,7 +820,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
 	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
-	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = {})
+	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
 	}
 	RangeResultRef(bool readToBegin, bool readThroughEnd)
@@ -909,7 +828,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, (VectorRef<KeyValueRef>&)*this, more, readThrough, readToBegin, readThroughEnd);
+		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
 	int logicalSize() const {
@@ -929,10 +848,6 @@ struct Traceable<RangeResultRef> : std::true_type {
 		return Traceable<VectorRef<KeyValueRef>>::toString(value);
 	}
 };
-
-using ValueReadResult = ReadResult<Optional<Value>>;
-using KeyReadResult = ReadResult<Key>;
-using RangeReadResult = ReadResult<RangeResult>;
 
 // Similar to KeyValueRef, but result can be empty.
 struct GetValueReqAndResultRef {
@@ -1028,7 +943,9 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	  : VectorRef<MappedKeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
 	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
-	MappedRangeResultRef(const VectorRef<MappedKeyValueRef>& value, bool more, Optional<KeyRef> readThrough = {})
+	MappedRangeResultRef(const VectorRef<MappedKeyValueRef>& value,
+	                     bool more,
+	                     Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<MappedKeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false),
 	    readThroughEnd(false) {}
 	MappedRangeResultRef(bool readToBegin, bool readThroughEnd)
@@ -1036,7 +953,7 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, (VectorRef<MappedKeyValueRef>&)*this, more, readThrough, readToBegin, readThroughEnd);
+		serializer(ar, ((VectorRef<MappedKeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
 	std::string toString() const {
@@ -1045,8 +962,6 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
-
-using MappedRangeReadResult = ReadResult<MappedRangeResult>;
 
 struct KeyValueStoreType {
 	constexpr static FileIdentifier file_identifier = 6560359;
@@ -1698,6 +1613,33 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
 	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
 }
+
+// matches what's in fdb_c.h
+struct ReadBlobGranuleContext {
+	// User context to pass along to functions
+	void* userContext;
+
+	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
+	int64_t (*start_load_f)(const char* filename,
+	                        int filenameLength,
+	                        int64_t offset,
+	                        int64_t length,
+	                        int64_t fullFileLength,
+	                        void* context);
+
+	// Returns data for the load. Pass the loadId returned by start_load_f
+	uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+	// Frees data from load. Pass the loadId returned by start_load_f
+	void (*free_load_f)(int64_t loadId, void* context);
+
+	// Set this to true for testing if you don't want to read the granule files,
+	// just do the request to the blob workers
+	bool debugNoMaterialize;
+
+	// number of granules to load in parallel (default 1)
+	int granuleParallelism = 1;
+};
 
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage
 // wiggle.

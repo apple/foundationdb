@@ -1477,10 +1477,16 @@ def check_error_code(code, func, arguments):
 
 if sys.maxsize <= 2**32:
     raise Exception("FoundationDB API requires a 64-bit python interpreter!")
-if platform.system() == "Linux":
+if platform.system() == "Windows":
+    capi_name = "fdb_c.dll"
+elif platform.system() == "Linux":
+    capi_name = "libfdb_c.so"
+elif platform.system() == "FreeBSD":
     capi_name = "libfdb_c.so"
 elif platform.system() == "Darwin":
     capi_name = "libfdb_c.dylib"
+elif sys.platform == "win32":
+    capi_name = "fdb_c.dll"
 elif sys.platform.startswith("cygwin"):
     capi_name = "fdb_c.dll"
 elif sys.platform.startswith("linux"):
@@ -1986,7 +1992,11 @@ def init(event_model=None):
                                 gevent.get_hub().wait(self.gevent_async)
 
                     else:
-                        # gevent 0.x doesn't have async, so use a pipe.
+                        # gevent 0.x doesn't have async, so use a pipe.  This doesn't work on Windows.
+                        if platform.system() == "Windows":
+                            raise Exception(
+                                "The 'gevent' event_model requires gevent 1.0 on Windows."
+                            )
 
                         import gevent.socket
 

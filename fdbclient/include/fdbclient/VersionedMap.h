@@ -38,6 +38,10 @@
 // PTree also supports efficient finger searches.
 namespace PTreeImpl {
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4800)
+#endif
+
 template <class T>
 struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCopyable {
 	uint32_t priority;
@@ -170,53 +174,40 @@ static Reference<PTree<T>> update(Reference<PTree<T>> const& node,
 
 template <class T, class X>
 bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
-	PTree<T>* n = p.getPtr();
-	[[maybe_unused]] int loopDepth = 0;
-	while (n) {
-		loopDepth++;
-		int cmp = compare(x, n->data);
-		bool less = cmp < 0;
-		if (cmp == 0)
-			return true;
-		n = n->child(!less, at).getPtr();
-	}
-	FDB_TRACE_PROBE(ptree_contains, loopDepth);
-	return false;
+	if (!p)
+		return false;
+	int cmp = compare(x, p->data);
+	bool less = cmp < 0;
+	if (cmp == 0)
+		return true;
+	return contains(p->child(!less, at), at, x);
 }
 
 // TODO: Remove the number of invocations of operator<, and replace with something closer to memcmp.
 // and same for upper_bound.
 template <class T, class X>
 void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
-	PTree<T>* n = p.getPtr();
-	[[maybe_unused]] int loopDepth = 0;
-	while (n) {
-		loopDepth++;
-		int cmp = compare(x, n->data);
-		bool less = cmp < 0;
-		f.push_for_bound(n, less);
-		if (cmp == 0)
-			return;
-		n = n->child(!less, at).getPtr();
+	if (!p) {
+		f.trim_to_bound();
+		return;
 	}
-	f.trim_to_bound();
-	FDB_TRACE_PROBE(ptree_lower_bound, loopDepth);
-	return;
+	int cmp = compare(x, p->data);
+	bool less = cmp < 0;
+	f.push_for_bound(p.getPtr(), less);
+	if (cmp == 0)
+		return;
+	lower_bound(p->child(!less, at), at, x, f);
 }
 
 template <class T, class X>
 void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
-	PTree<T>* n = p.getPtr();
-	[[maybe_unused]] int loopDepth = 0;
-	while (n) {
-		loopDepth++;
-		bool less = x < n->data;
-		f.push_for_bound(n, less);
-		n = n->child(!less, at).getPtr();
+	if (!p) {
+		f.trim_to_bound();
+		return;
 	}
-	FDB_TRACE_PROBE(ptree_upper_bound, loopDepth);
-	f.trim_to_bound();
-	return;
+	bool less = x < p->data;
+	f.push_for_bound(p.getPtr(), less);
+	upper_bound(p->child(!less, at), at, x, f);
 }
 
 template <class T, bool forward>

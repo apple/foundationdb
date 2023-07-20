@@ -191,7 +191,7 @@ public:
 	// levelKey is the prefix for the entire level, no timestamp at the end
 	ACTOR static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction* tr,
 	                                                                       Standalone<StringRef> levelKey) {
-		RangeReadResult results = wait(tr->getRange(normalKeys.withPrefix(levelKey), 1, Snapshot::True, Reverse::True));
+		RangeResult results = wait(tr->getRange(normalKeys.withPrefix(levelKey), 1, Snapshot::True, Reverse::True));
 		if (results.size() == 1)
 			return results[0].value;
 		return Optional<Standalone<StringRef>>();

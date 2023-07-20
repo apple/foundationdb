@@ -53,7 +53,6 @@ static thread_local JNIEnv* g_thread_jenv =
 static thread_local jmethodID g_IFutureCallback_call_methodID = JNI_NULL;
 static thread_local bool is_external = false;
 static jclass range_result_summary_class;
-static jclass result_bytes_class;
 static jclass range_result_class;
 static jclass mapped_range_result_class;
 static jclass mapped_key_value_class;
@@ -64,7 +63,6 @@ static jclass keyrange_array_result_class;
 static jmethodID key_array_result_init;
 static jmethodID keyrange_init;
 static jmethodID keyrange_array_result_init;
-static jmethodID result_bytes_init;
 static jmethodID range_result_init;
 static jmethodID mapped_range_result_init;
 static jmethodID mapped_key_value_from_bytes;
@@ -508,14 +506,6 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 		return JNI_NULL;
 	}
 
-	float serverBusyness = 0.0;
-	float rangeBusyness = 0.0;
-	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
-	if (err) {
-	    safeThrow(jenv, getThrowable(jenv, err));
-	    return JNI_NULL;
-	}*/
-
 	int totalKeyValueSize = 0;
 	for (int i = 0; i < count; i++) {
 		totalKeyValueSize += kvs[i].key_length + kvs[i].value_length;
@@ -565,13 +555,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 	jenv->ReleaseByteArrayElements(keyValueArray, (jbyte*)keyvalues_barr, 0);
 	jenv->ReleaseIntArrayElements(lengthArray, length_barr, 0);
 
-	jobject result = jenv->NewObject(range_result_class,
-	                                 range_result_init,
-	                                 keyValueArray,
-	                                 lengthArray,
-	                                 (jboolean)more,
-	                                 (jfloat)serverBusyness,
-	                                 (jfloat)rangeBusyness);
+	jobject result = jenv->NewObject(range_result_class, range_result_init, keyValueArray, lengthArray, (jboolean)more);
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
 
@@ -616,14 +600,6 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		safeThrow(jenv, getThrowable(jenv, err));
 		return JNI_NULL;
 	}
-
-	float serverBusyness = 0.0;
-	float rangeBusyness = 0.0;
-	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
-	if (err) {
-	    safeThrow(jenv, getThrowable(jenv, err));
-	    return JNI_NULL;
-	}*/
 
 	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, NULL);
 	if (!mrr_values) {
@@ -696,12 +672,8 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		}
 		// After native arrays are released
 		// call public static method MappedKeyValue::fromBytes()
-		jobject mkv = jenv->CallStaticObjectMethod(mapped_key_value_class,
-		                                           mapped_key_value_from_bytes,
-		                                           (jbyteArray)bytesArray,
-		                                           (jintArray)lengthArray,
-		                                           (jfloat)serverBusyness,
-		                                           (jfloat)rangeBusyness);
+		jobject mkv = jenv->CallStaticObjectMethod(
+		    mapped_key_value_class, mapped_key_value_from_bytes, (jbyteArray)bytesArray, (jintArray)lengthArray);
 		if (jenv->ExceptionOccurred())
 			return JNI_NULL;
 		jenv->SetObjectArrayElement(mrr_values, i, mkv);
@@ -717,9 +689,9 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 }
 
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResult_FutureResult_1get(JNIEnv* jenv,
-                                                                                     jobject,
-                                                                                     jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResult_1get(JNIEnv* jenv,
+                                                                                        jobject,
+                                                                                        jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -735,47 +707,8 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResult_FutureResult_
 		return JNI_NULL;
 	}
 
-	float serverBusyness;
-	float rangeBusyness;
-	err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
-	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
+	if (!present)
 		return JNI_NULL;
-	}
-
-	jbyteArray bytes = JNI_NULL;
-	if (present) {
-		bytes = jenv->NewByteArray(length);
-		if (!bytes) {
-			if (!jenv->ExceptionOccurred())
-				throwOutOfMem(jenv);
-			return JNI_NULL;
-		}
-
-		jenv->SetByteArrayRegion(bytes, 0, length, (const jbyte*)value);
-	}
-
-	jobject result =
-	    jenv->NewObject(result_bytes_class, result_bytes_init, bytes, (jfloat)serverBusyness, (jfloat)rangeBusyness);
-	return result;
-}
-
-JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureBytes_FutureBytes_1get(JNIEnv* jenv,
-                                                                                      jobject,
-                                                                                      jlong future) {
-	if (!future) {
-		throwParamNotNull(jenv);
-		return JNI_NULL;
-	}
-	FDBFuture* f = (FDBFuture*)future;
-
-	const uint8_t* value;
-	int length;
-	fdb_error_t err = fdb_future_get_bytes(f, &value, &length);
-	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return JNI_NULL;
-	}
 
 	jbyteArray result = jenv->NewByteArray(length);
 	if (!result) {
@@ -788,7 +721,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureBytes_FutureBytes
 	return result;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -803,25 +736,14 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(J
 		return JNI_NULL;
 	}
 
-	float serverBusyness = 0.0;
-	float rangeBusyness = 0.0;
-	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
-	if (err) {
-	    safeThrow(jenv, getThrowable(jenv, err));
-	    return JNI_NULL;
-	}*/
-
-	jbyteArray key = jenv->NewByteArray(length);
-	if (!key) {
+	jbyteArray result = jenv->NewByteArray(length);
+	if (!result) {
 		if (!jenv->ExceptionOccurred())
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
 
-	jenv->SetByteArrayRegion(key, 0, length, (const jbyte*)value);
-
-	jobject result =
-	    jenv->NewObject(result_bytes_class, result_bytes_init, key, (jfloat)serverBusyness, (jfloat)rangeBusyness);
+	jenv->SetByteArrayRegion(result, 0, length, (const jbyte*)value);
 	return result;
 }
 
@@ -1776,22 +1698,12 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 		return;
 	}
 
-	float serverBusyness = 0.0;
-	float rangeBusyness = 0.0;
-	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
-	if (err) {
-	    safeThrow(jenv, getThrowable(jenv, err));
-	    return;
-	}*/
-
 	// Capacity for Metadata+Keys+Values
 	//  => sizeof(jint) for total key/value pairs
 	//  => sizeof(jint) to store more flag
-	//  => sizeof(jfloat) to store server busyness
-	//  => sizeof(jfloat) to store range busyness
 	//  => sizeof(jint) to store key length per KV pair
 	//  => sizeof(jint) to store value length per KV pair
-	int totalCapacityNeeded = 2 * sizeof(jint) + 2 * sizeof(jfloat);
+	int totalCapacityNeeded = 2 * sizeof(jint);
 	for (int i = 0; i < count; i++) {
 		totalCapacityNeeded += kvs[i].key_length + kvs[i].value_length + 2 * sizeof(jint);
 		if (bufferCapacity < totalCapacityNeeded) {
@@ -1809,12 +1721,6 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 
 	memcpy(buffer + offset, &more, sizeof(jint));
 	offset += sizeof(jint);
-
-	memcpy(buffer + offset, &serverBusyness, sizeof(jfloat));
-	offset += sizeof(jfloat);
-
-	memcpy(buffer + offset, &rangeBusyness, sizeof(jfloat));
-	offset += sizeof(jfloat);
 
 	for (int i = 0; i < count; i++) {
 		memcpy(buffer + offset, &kvs[i].key_length, sizeof(jint));
@@ -1869,15 +1775,7 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 		return;
 	}
 
-	float serverBusyness = 0.0;
-	float rangeBusyness = 0.0;
-	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
-	if (err) {
-	    safeThrow(jenv, getThrowable(jenv, err));
-	    return;
-	}*/
-
-	int totalCapacityNeeded = 2 * sizeof(jint) + 2 * sizeof(jfloat);
+	int totalCapacityNeeded = 2 * sizeof(jint);
 	for (int i = 0; i < count; i++) {
 		const FDBMappedKeyValue& kvm = kvms[i];
 		totalCapacityNeeded += kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
@@ -1903,12 +1801,6 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 
 	memcpy(buffer + offset, &more, sizeof(jint));
 	offset += sizeof(jint);
-
-	memcpy(buffer + offset, &serverBusyness, sizeof(jint));
-	offset += sizeof(jfloat);
-
-	memcpy(buffer + offset, &rangeBusyness, sizeof(jint));
-	offset += sizeof(jfloat);
 
 	for (int i = 0; i < count; i++) {
 		const FDBMappedKeyValue& kvm = kvms[i];
@@ -2454,12 +2346,8 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 	if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
 		return JNI_ERR;
 	} else {
-		jclass local_result_bytes_class = env->FindClass("com/apple/foundationdb/FDBResultBytes");
-		result_bytes_init = env->GetMethodID(local_result_bytes_class, "<init>", "([BFF)V");
-		result_bytes_class = (jclass)(env)->NewGlobalRef(local_result_bytes_class);
-
 		jclass local_range_result_class = env->FindClass("com/apple/foundationdb/RangeResult");
-		range_result_init = env->GetMethodID(local_range_result_class, "<init>", "([B[IZFF)V");
+		range_result_init = env->GetMethodID(local_range_result_class, "<init>", "([B[IZ)V");
 		range_result_class = (jclass)(env)->NewGlobalRef(local_range_result_class);
 
 		jclass local_mapped_range_result_class = env->FindClass("com/apple/foundationdb/MappedRangeResult");
@@ -2467,9 +2355,9 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 		    env->GetMethodID(local_mapped_range_result_class, "<init>", "([Lcom/apple/foundationdb/MappedKeyValue;Z)V");
 		mapped_range_result_class = (jclass)(env)->NewGlobalRef(local_mapped_range_result_class);
 
-		jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/FDBMappedKeyValue");
+		jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/MappedKeyValue");
 		mapped_key_value_from_bytes = env->GetStaticMethodID(
-		    local_mapped_key_value_class, "fromBytes", "([B[IFF)Lcom/apple/foundationdb/MappedKeyValue;");
+		    local_mapped_key_value_class, "fromBytes", "([B[I)Lcom/apple/foundationdb/MappedKeyValue;");
 		mapped_key_value_class = (jclass)(env)->NewGlobalRef(local_mapped_key_value_class);
 
 		jclass local_key_array_result_class = env->FindClass("com/apple/foundationdb/KeyArrayResult");
@@ -2503,9 +2391,6 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
 		return;
 	} else {
 		// delete global references so the GC can collect them
-		if (result_bytes_class != JNI_NULL) {
-			env->DeleteGlobalRef(result_bytes_class);
-		}
 		if (range_result_summary_class != JNI_NULL) {
 			env->DeleteGlobalRef(range_result_summary_class);
 		}

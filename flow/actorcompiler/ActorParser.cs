@@ -322,10 +322,9 @@ namespace actorcompiler
 
         public void Write(System.IO.TextWriter writer, string destFileName)
         {
-            int outLine = 1;
             writer.NewLine = "\n";
             writer.WriteLine("#define POST_ACTOR_COMPILER 1");
-            outLine++;
+            int outLine = 1;
             if (LineNumbersEnabled)
             {
                 writer.WriteLine("#line {0} \"{1}\"", tokens[0].SourceLine, sourceFile);

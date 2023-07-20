@@ -150,7 +150,7 @@ struct Increment : TestWorkload {
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
-			// ok = false;
+			ok = false;
 		}
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
@@ -159,9 +159,9 @@ struct Increment : TestWorkload {
 			loop {
 				try {
 					state Version v = wait(tr.getReadVersion());
-					RangeReadResult data = wait(tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
-					                                        firstGreaterOrEqual(intToTestKey(self->nodeCount)),
-					                                        self->nodeCount + 1));
+					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
+					                                    firstGreaterOrEqual(intToTestKey(self->nodeCount)),
+					                                    self->nodeCount + 1));
 					ok = self->incrementCheckData(data, v, self) && ok;
 					break;
 				} catch (Error& e) {

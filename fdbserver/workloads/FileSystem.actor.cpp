@@ -120,7 +120,7 @@ struct FileSystemWorkload : TestWorkload {
 		state Transaction tr(cx);
 		while (true) {
 			try {
-				ValueReadResult f = wait(tr.get(self->keyForFileID(begin)));
+				Optional<Value> f = wait(tr.get(self->keyForFileID(begin)));
 				if (f.present())
 					break; // The transaction already completed!
 
@@ -241,9 +241,9 @@ struct FileSystemWorkload : TestWorkload {
 				try {
 					state double time = now();
 					if (isDeleting) {
-						state ValueReadResult deleted = wait(tr.get(StringRef(keyStr + "/deleted")));
+						state Optional<Value> deleted = wait(tr.get(StringRef(keyStr + "/deleted")));
 						ASSERT(deleted.present());
-						ValueReadResult serverStr = wait(tr.get(StringRef(keyStr + "/server")));
+						Optional<Value> serverStr = wait(tr.get(StringRef(keyStr + "/server")));
 						ASSERT(serverStr.present());
 						int serverID = testKeyToInt(serverStr.get());
 						if (deleted.get().toString() == "1") {
@@ -277,7 +277,7 @@ struct FileSystemWorkload : TestWorkload {
 		if (self->loggingQueries)
 			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
 		Key keyEnd(base + "/updated0");
-		RangeReadResult val = wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
+		RangeResult val = wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
 		Key keyBegin(base + "/updated/");
 		for (int i = val.size() - 1; i >= 0; i--) {
 			if (val[i].key.startsWith(keyBegin) && self->loggingQueries) {
@@ -304,7 +304,7 @@ struct FileSystemWorkload : TestWorkload {
 		state int transferSize = 1000;
 		state uint64_t deletedFiles = 0;
 		while (transfered == transferSize) {
-			RangeReadResult val = wait(tr->getRange(begin, end, transferSize));
+			RangeResult val = wait(tr->getRange(begin, end, transferSize));
 			transfered = val.size();
 			deletedFiles += transfered;
 			begin = begin + transfered;

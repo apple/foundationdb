@@ -1,6 +1,5 @@
 import glob
 import json
-import logging
 from pathlib import Path
 import random
 import string
@@ -13,15 +12,13 @@ import sys
 import xml.etree.ElementTree as ET
 import tempfile
 from authz_util import private_key_gen, public_keyset_from_keys
-from test_util import random_alphanum_string, get_logger
+from test_util import random_alphanum_string
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
 RETRY_INTERVAL_SEC = 0.5
 PORT_LOCK_DIR = Path(tempfile.gettempdir()).joinpath("fdb_local_cluster_port_locks")
 MAX_PORT_ACQUIRE_ATTEMPTS = 1000
-
-logger = get_logger()
 
 
 class PortProvider:
@@ -49,10 +46,11 @@ class PortProvider:
                 self._used_ports.add(port)
                 return port
             except OSError:
-                logger.error(
+                print(
                     "Failed to lock file {}. Trying to aquire another port".format(
                         lock_path
-                    )
+                    ),
+                    file=sys.stderr,
                 )
                 pass
 
@@ -124,7 +122,6 @@ logdir = {logdir}
 {custom_config}
 {use_future_protocol_version}
 knob_min_trace_severity=5
-tracer = log_file
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -376,9 +373,7 @@ tracer = log_file
             for server_id in self.active_servers:
                 port = self.server_ports[server_id]
                 if PortProvider.is_port_in_use(port):
-                    logger.info(
-                        "Port {} in use. Waiting for it to be released".format(port)
-                    )
+                    print("Port {} in use. Waiting for it to be released".format(port))
                     in_use = True
                     break
             if not in_use:
@@ -633,26 +628,26 @@ tracer = log_file
     def cluster_wiggle(self):
         old_servers = self.active_servers.copy()
         new_servers = set()
-        logger.info("Starting cluster wiggle")
-        logger.info(
+        print("Starting cluster wiggle")
+        print(
             "Old servers: {} on ports {}".format(
                 old_servers, [self.server_ports[server_id] for server_id in old_servers]
             )
         )
-        logger.info("Old coordinators: {}".format(self.coordinators))
+        print("Old coordinators: {}".format(self.coordinators))
 
         # Step 1: add new servers
         start_time = time.time()
         for _ in range(len(old_servers)):
             new_servers.add(self.add_server())
-        logger.info(
+        print(
             "New servers: {} on ports {}".format(
                 new_servers, [self.server_ports[server_id] for server_id in new_servers]
             )
         )
         self.save_config()
         self.wait_for_server_update()
-        logger.info(
+        print(
             "New servers successfully added to the cluster. Time: {}s".format(
                 time.time() - start_time
             )
@@ -661,11 +656,11 @@ tracer = log_file
         # Step 2: change coordinators
         start_time = time.time()
         new_coordinators = set(random.sample(new_servers, len(self.coordinators)))
-        logger.info("New coordinators: {}".format(new_coordinators))
+        print("New coordinators: {}".format(new_coordinators))
         self.coordinators = new_coordinators.copy()
         self.update_coordinators()
         self.wait_for_coordinator_update()
-        logger.info(
+        print(
             "Coordinators successfully changed. Time: {}s".format(
                 time.time() - start_time
             )
@@ -674,7 +669,7 @@ tracer = log_file
         # Step 3: exclude old servers from the cluster, i.e. move out their data
         start_time = time.time()
         self.exclude_servers(old_servers)
-        logger.info(
+        print(
             "Old servers successfully excluded from the cluster. Time: {}s".format(
                 time.time() - start_time
             )
@@ -686,7 +681,7 @@ tracer = log_file
             self.remove_server(server_id)
         self.save_config()
         self.wait_for_server_update()
-        logger.info(
+        print(
             "Old servers successfully removed from the cluster. Time: {}s".format(
                 time.time() - start_time
             )
@@ -712,17 +707,16 @@ tracer = log_file
             ):
                 continue
             if err_cnt < error_limit:
-                logger.error(line)
+                print(line)
             err_cnt += 1
 
         if err_cnt > 0:
-            logger.error(
-                ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails".format(
-                    err_cnt
-                )
+            print(
+                ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails",
+                err_cnt,
             )
         else:
-            logger.info("No errors found in logs")
+            print("No errors found in logs")
         return err_cnt == 0
 
     # Add trace check callback function to be called once the cluster terminates.

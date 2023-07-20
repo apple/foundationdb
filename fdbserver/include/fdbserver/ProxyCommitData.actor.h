@@ -62,15 +62,14 @@ struct ProxyStats {
 	Counter mutations;
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
-	Counter tenantLookupRequestIn;
-	Counter tenantLookupRequestOut;
-	Counter tenantLookupRequestErrors;
+	Counter tenantIdRequestIn;
+	Counter tenantIdRequestOut;
+	Counter tenantIdRequestErrors;
 	Counter blobGranuleLocationIn, blobGranuleLocationOut, blobGranuleLocationErrors;
 	Counter txnExpensiveClearCostEstCount;
 	Version lastCommitVersionAssigned;
 
 	LatencySample commitLatencySample;
-	LatencySample encryptionLatencySample;
 	LatencyBands commitLatencyBands;
 
 	// Ratio of tlogs receiving empty commit messages.
@@ -131,20 +130,15 @@ struct ProxyStats {
 	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
 	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
-	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantLookupRequestIn("TenantLookupRequestIn", cc),
-	    tenantLookupRequestOut("TenantLookupRequestOut", cc),
-	    tenantLookupRequestErrors("TenantLookupRequestErrors", cc), blobGranuleLocationIn("BlobGranuleLocationIn", cc),
-	    blobGranuleLocationOut("BlobGranuleLocationOut", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantIdRequestIn("TenantIdRequestIn", cc),
+	    tenantIdRequestOut("TenantIdRequestOut", cc), tenantIdRequestErrors("TenantIdRequestErrors", cc),
+	    blobGranuleLocationIn("BlobGranuleLocationIn", cc), blobGranuleLocationOut("BlobGranuleLocationOut", cc),
 	    blobGranuleLocationErrors("BlobGranuleLocationErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    encryptionLatencySample("CommitEncryptionLatencyMetrics",
-	                            id,
-	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
 	                                    id,
@@ -196,7 +190,7 @@ struct ExpectedIdempotencyIdCountForKey {
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
-	std::unordered_map<TenantName, TenantLookupInfo> tenantNameIndex;
+	std::unordered_map<TenantName, int64_t> tenantNameIndex;
 	std::map<int64_t, TenantName> tenantMap;
 	std::set<int64_t> lockedTenants;
 	std::unordered_set<int64_t> tenantsOverStorageQuota;
@@ -205,7 +199,7 @@ struct ProxyCommitData {
 	std::vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
-	Reference<IKeyValueStore> txnStateStore;
+	IKeyValueStore* txnStateStore;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)
 	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version
@@ -291,11 +285,7 @@ struct ProxyCommitData {
 		return false;
 	}
 
-	TenantMode getTenantMode() const {
-		CODE_PROBE(db->get().client.grvProxies.empty() || db->get().client.grvProxies[0].provisional,
-		           "Accessing tenant mode in provisional ClientDBInfo");
-		return db->get().client.tenantMode;
-	}
+	TenantMode getTenantMode() const { return db->get().client.tenantMode; }
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
@@ -313,13 +303,15 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
-	void updateSSTagCost(const UID& id, const TransactionTag& throttlingTag, MutationRef m, uint64_t cost) {
+	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, uint64_t cost) {
 		auto [it, _] = ssTrTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
 
-		auto& costItem = it->second[throttlingTag];
-		if (m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
-			costItem.opsSum++;
-			costItem.costSum += cost;
+		for (auto& tag : tagSet) {
+			auto& costItem = it->second[tag];
+			if (m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
+				costItem.opsSum++;
+				costItem.costSum += cost;
+			}
 		}
 	}
 
@@ -334,14 +326,15 @@ struct ProxyCommitData {
 	                bool provisional)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
-	    logAdapter(nullptr), committedVersion(recoveryTransactionVersion), minKnownCommittedVersion(0), version(0),
-	    lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0), firstProxy(firstProxy),
+	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
+	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
+	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), encryptMode(encryptMode), provisional(provisional),
 	    lastCoalesceTime(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-	    provisional(provisional), localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion),
-	    commit(commit), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
+	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()), encryptMode(encryptMode) {
+	    lastResolverReset(now()) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

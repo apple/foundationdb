@@ -58,6 +58,7 @@ struct IDispatched {
 		}                                                                                                              \
 	};                                                                                                                 \
 	Type##Instance _Type##Instance;
+#define REGISTER_COMMAND(Type, Instance, Key, Func) REGISTER_DISPATCHED(Type, Instance, Instance::Key, Instance::Func)
 
 /*
   REGISTER_COMMAND is used for dispatching from type to static
@@ -95,7 +96,9 @@ struct IDispatched {
 
     BinaryArithmeticOp::call( op, x, y );
 */
-#define REGISTER_COMMAND(Type, Instance, Key, Func) REGISTER_DISPATCHED(Type, Instance, Instance::Key, Instance::Func)
+
+#define REGISTER_FACTORY(Type, Instance, Key)                                                                          \
+	REGISTER_DISPATCHED(Type, Instance, Instance::Key, Type::Factory<Instance>::create)
 
 /*
   REGISTER_FACTORY is a formalized convention to simplify creating new
@@ -146,7 +149,5 @@ struct IDispatched {
 
     Reference<Message> msg = Message::create( msgtype, name );
 */
-#define REGISTER_FACTORY(Type, Instance, Key)                                                                          \
-	REGISTER_DISPATCHED(Type, Instance, Instance::Key, Type::Factory<Instance>::create)
 
 #endif /* _IDISPATCHED_H_ */

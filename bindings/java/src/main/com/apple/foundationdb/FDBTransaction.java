@@ -69,21 +69,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 		@Override
 		public CompletableFuture<byte[]> get(byte[] key) {
-			return get_internal(key, true).thenApply(result -> result.getBytes());
-		}
-
-		@Override
-		public CompletableFuture<ResultBytes> getExt(byte[] key) {
 			return get_internal(key, true);
 		}
 
 		@Override
 		public CompletableFuture<byte[]> getKey(KeySelector selector) {
-			return getKey_internal(selector, true).thenApply(result->result.getBytes());
-		}
-
-		@Override
-		public CompletableFuture<ResultBytes> getKeyExt(KeySelector selector) {
 			return getKey_internal(selector, true);
 		}
 
@@ -297,24 +287,16 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	 */
 	@Override
 	public CompletableFuture<byte[]> get(byte[] key) {
-		return get_internal(key, false).thenApply(result -> result.getBytes());
-	}
-
-	/**
-	 * {@inheritDoc}
-	 */
-	@Override
-	public CompletableFuture<ResultBytes> getExt(byte[] key) {
 		return get_internal(key, false);
 	}
 
-	private CompletableFuture<ResultBytes> get_internal(byte[] key, boolean isSnapshot) {
+	private CompletableFuture<byte[]> get_internal(byte[] key, boolean isSnapshot) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
 		pointerReadLock.lock();
 		try {
-			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor, eventKeeper);
+			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor,eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -325,18 +307,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	 */
 	@Override
 	public CompletableFuture<byte[]> getKey(KeySelector selector) {
-		return getKey_internal(selector, false).thenApply(result->result.getBytes());
-	}
-
-	/**
-	 * {@inheritDoc}
-	 */
-	@Override
-	public CompletableFuture<ResultBytes> getKeyExt(KeySelector selector) {
 		return getKey_internal(selector, false);
 	}
 
-	private CompletableFuture<ResultBytes> getKey_internal(KeySelector selector, boolean isSnapshot) {
+	private CompletableFuture<byte[]> getKey_internal(KeySelector selector, boolean isSnapshot) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
@@ -707,7 +681,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 		pointerReadLock.lock();
 		try {
-			return new FutureBytes(Transaction_getVersionstamp(getPtr()), executor, eventKeeper);
+			return new FutureKey(Transaction_getVersionstamp(getPtr()), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}

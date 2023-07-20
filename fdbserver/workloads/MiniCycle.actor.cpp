@@ -20,7 +20,6 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Tracing.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -176,25 +175,23 @@ struct MiniCycleWorkload : TestWorkload {
 				    deterministicRandom()->randomInt(self->beginKey(self->clientId), self->endKey(self->clientId) - 1);
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
-					state Span span(SpanContext(deterministicRandom()->randomUniqueID(),
-					                            deterministicRandom()->randomUInt64(),
-					                            TraceFlags::sampled),
-					                "MiniCycleClient"_loc);
+					state Span span("MiniCycleClient"_loc);
 					TraceEvent("MiniCycleTracingTransaction", span.context.traceID).log();
-					tr.setOption(FDBTransactionOptions::TRACE_PARENT, span.context.toString());
+					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
+					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
 				while (true) {
 					try {
 						// Reverse next and next^2 node
-						ValueReadResult v = wait(tr.get(self->key(r)));
+						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present())
 							self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
-						ValueReadResult v2 = wait(tr.get(self->key(r2)));
+						Optional<Value> v2 = wait(tr.get(self->key(r2)));
 						if (!v2.present())
 							self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
-						ValueReadResult v3 = wait(tr.get(self->key(r3)));
+						Optional<Value> v3 = wait(tr.get(self->key(r3)));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
@@ -317,7 +314,7 @@ struct MiniCycleWorkload : TestWorkload {
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
-			// ok = false;
+			ok = false;
 		}
 
 		// One client checks the validity of the cycle at a time
@@ -329,7 +326,7 @@ struct MiniCycleWorkload : TestWorkload {
 		loop {
 			try {
 				state Version v = wait(tr.getReadVersion());
-				RangeReadResult data = wait(
+				RangeResult data = wait(
 				    tr.getRange(firstGreaterOrEqual(doubleToTestKey(self->beginKey(self->clientId), self->keyPrefix)),
 				                firstGreaterOrEqual(doubleToTestKey(self->endKey(self->clientId), self->keyPrefix)),
 				                self->cycleSize(self->clientId) + 1));

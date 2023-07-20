@@ -335,6 +335,10 @@ inline void load(Archive& ar, std::variant<Variants...>& value) {
 	ASSERT(ar.protocolVersion().isValid());
 }
 
+#ifdef _MSC_VER
+#pragma intrinsic(memcpy)
+#endif
+
 #if VALGRIND
 static bool valgrindCheck(const void* data, int bytes, const char* context) {
 	auto first = VALGRIND_CHECK_MEM_IS_DEFINED(data, bytes);

@@ -83,7 +83,6 @@ public: // introduced features
     API_VERSION_FEATURE(@FDB_AV_GET_CLIENT_STATUS@, GetClientStatus);
     API_VERSION_FEATURE(@FDB_AV_INITIALIZE_TRACE_ON_SETUP@, InitializeTraceOnSetup);
     API_VERSION_FEATURE(@FDB_AV_TENANT_GET_ID@, TenantGetId);
-    API_VERSION_FEATURE(@FDB_AV_EVOLVABLE_API@, EvolvableApi);
 };
 
 #endif // FLOW_CODE_API_VERSION_H

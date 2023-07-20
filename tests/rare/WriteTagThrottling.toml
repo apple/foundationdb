@@ -1,0 +1,39 @@
+[[test]]
+testTitle = 'withoutWriteThrottling'
+
+    [[test.workload]]
+    testName = 'WriteTagThrottling'
+    populateData = true
+    trPerSecond=10000000
+    keyCount=100000
+    absentFrac=0.01
+    numWritePerTr=10
+    numReadPerTr=10
+    numClearPerTr=0
+    badOpRate = 0.9
+    hotRangeRate = 0.001
+    badActorPerClient = 1
+    goodActorPerClient = 1
+
+    [[test.workload]]
+    testName='HealthMetricsApi'
+
+[[test]]
+testTitle = 'withWriteThrottling'
+
+    [[test.workload]]
+    testName = 'WriteTagThrottling'
+    writeThrottle = true
+    trPerSecond=10000000
+    keyCount=100000
+    absentFrac=0.01
+    numWritePerTr=10
+    numReadPerTr=10
+    numClearPerTr=0
+    badOpRate = 0.9
+    hotRangeRate = 0.001
+    badActorPerClient = 1
+    goodActorPerClient = 1
+
+    [[test.workload]]
+    testName='HealthMetricsApi'

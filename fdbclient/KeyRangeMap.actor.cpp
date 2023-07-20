@@ -96,8 +96,7 @@ ACTOR Future<RangeResult> krmGetRanges(Transaction* tr, Key mapPrefix, KeyRange 
 
 	state GetRangeLimits limits(limit, limitBytes);
 	limits.minRows = 2;
-	RangeReadResult kv =
-	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
+	RangeResult kv = wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv);
 }
@@ -112,8 +111,7 @@ ACTOR Future<RangeResult> krmGetRanges(Reference<ReadYourWritesTransaction> tr,
 
 	state GetRangeLimits limits(limit, limitBytes);
 	limits.minRows = 2;
-	RangeReadResult kv =
-	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
+	RangeResult kv = wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv);
 }
@@ -131,7 +129,7 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Transaction* tr,
 	limits.minRows = 2;
 	// wait to include the next highest row >= keys.end in the result, so since end is exclusive, we need +2 and
 	// !orEqual
-	RangeReadResult kv =
+	RangeResult kv =
 	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), KeySelectorRef(withPrefix.end, false, +2), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv, false);
@@ -149,7 +147,7 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransact
 	limits.minRows = 2;
 	// wait to include the next highest row >= keys.end in the result, so since end is exclusive, we need +2 and
 	// !orEqual
-	RangeReadResult kv =
+	RangeResult kv =
 	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), KeySelectorRef(withPrefix.end, false, +2), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv, false);
@@ -181,7 +179,7 @@ void krmSetPreviouslyEmptyRange(CommitTransactionRef& tr,
 ACTOR Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, Value value) {
 	state KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
-	RangeReadResult old =
+	RangeResult old =
 	    wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::True));
 
 	Value oldValue;
@@ -203,7 +201,7 @@ ACTOR Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, V
 ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix, KeyRange range, Value value) {
 	state KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
-	RangeReadResult old =
+	RangeResult old =
 	    wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::True));
 
 	Value oldValue;
@@ -238,7 +236,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	state KeyRange maxWithPrefix =
 	    KeyRangeRef(mapPrefix.toString() + maxRange.begin.toString(), mapPrefix.toString() + maxRange.end.toString());
 
-	state std::vector<Future<RangeReadResult>> keys;
+	state std::vector<Future<RangeResult>> keys;
 	keys.push_back(
 	    tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, Snapshot::True));
 	keys.push_back(

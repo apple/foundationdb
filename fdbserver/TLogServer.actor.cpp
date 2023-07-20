@@ -1278,7 +1278,7 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 		TraceEvent("PlayIgnoredPop", logData->logId).detail("Tag", tag.toString()).detail("Version", version);
 		ignoredPops.push_back(tLogPopCore(self, tag, version, logData));
 		if (++ignoredPopsPlayed % SERVER_KNOBS->TLOG_POP_BATCH_SIZE == 0) {
-			CODE_PROBE(true, "Yielding while processing pop requests");
+			CODE_PROBE(true, "Yielding while processing pop requests", probe::decoration::rare);
 			wait(yield());
 		}
 	}

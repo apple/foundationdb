@@ -80,17 +80,17 @@ private:
 			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
 			    granuleContext.debugNoMaterialize = !doMaterialize;
 
-			    fdb::ReadRangeResult res =
+			    fdb::Result res =
 			        ctx->tx().readBlobGranules(begin, end, 0 /* beginVersion */, readVersion, granuleContext);
-			    auto out = fdb::ReadRangeResult::KeyValueRefArray{};
+			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 
 			    if (err.code() == error_code_success) {
-				    error("Operation succeeded in error test!");
+				    error(fmt::format("Operation succeeded in error test!"));
 			    }
 			    ASSERT(err.code() != error_code_success);
 			    if (err.code() != expectedError) {
-				    info("incorrect error. Expected {}, Got {}", expectedError, err.code());
+				    info(fmt::format("incorrect error. Expected {}, Got {}", expectedError, err.code()));
 				    if (err.code() == error_code_blob_granule_transaction_too_old) {
 					    ASSERT(!seenReadSuccess);
 					    ctx->done();
@@ -131,7 +131,7 @@ private:
 			    ctx->continueAfter(
 			        f,
 			        [this, ctx, f]() {
-				        info("unaligned purge got {}", f.error().code());
+				        info(fmt::format("unaligned purge got {}", f.error().code()));
 				        ASSERT(f.error().code() == error_code_unsupported_operation);
 				        ctx->done();
 			        },

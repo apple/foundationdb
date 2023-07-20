@@ -27,7 +27,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/Tracing.h"
-#include "fdbclient/ApiRequest.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -45,33 +44,33 @@ public:
 	// These functions that read data return Standalone<...> objects, but these objects are not required to manage their
 	// own memory. It is guaranteed, however, that the ThreadFuture will hold a reference to the memory. It will persist
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
-	virtual ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               int limit,
-	                                               bool snapshot = false,
-	                                               bool reverse = false) = 0;
-	virtual ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               GetRangeLimits limits,
-	                                               bool snapshot = false,
-	                                               bool reverse = false) = 0;
-	virtual ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
-	                                               int limit,
-	                                               bool snapshot = false,
-	                                               bool reverse = false) = 0;
-	virtual ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
-	                                               GetRangeLimits limits,
-	                                               bool snapshot = false,
-	                                               bool reverse = false) = 0;
-	virtual ThreadFuture<MappedRangeReadResult> getMappedRange(const KeySelectorRef& begin,
-	                                                           const KeySelectorRef& end,
-	                                                           const StringRef& mapper,
-	                                                           GetRangeLimits limits,
-	                                                           int matchIndex = MATCH_INDEX_ALL,
-	                                                           bool snapshot = false,
-	                                                           bool reverse = false) = 0;
+	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	                                           const KeySelectorRef& end,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           int limit,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	                                           GetRangeLimits limits,
+	                                           bool snapshot = false,
+	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
+	                                                       const KeySelectorRef& end,
+	                                                       const StringRef& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       int matchIndex = MATCH_INDEX_ALL,
+	                                                       bool snapshot = false,
+	                                                       bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -82,6 +81,24 @@ public:
 
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                              int rowLimit) = 0;
+
+	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                                   Version beginVersion,
+	                                                   Optional<Version> readVersion,
+	                                                   ReadBlobGranuleContext granuleContext) = 0;
+
+	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Optional<Version> readVersion,
+	    Version* readVersionOut) = 0;
+
+	virtual ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) = 0;
 
 	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
 	summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) = 0;
@@ -124,18 +141,6 @@ public:
 	virtual bool isValid() { return true; }
 
 	virtual Optional<TenantName> getTenant() = 0;
-
-	virtual void debugTrace(BaseTraceEvent&& event) = 0;
-	virtual void debugPrint(std::string const& message) = 0;
-
-	template <class... Args>
-	void debugFmtPrint(std::string const& message, Args&&... args) {
-		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
-	};
-
-	virtual ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) = 0;
-
-	virtual FDBAllocatorIfc* getAllocatorInterface() = 0;
 };
 
 class ITenant {
@@ -239,7 +244,6 @@ public:
 	virtual Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
-	virtual FDBAllocatorIfc* getAllocatorInterface() = 0;
 };
 
 #endif

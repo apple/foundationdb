@@ -134,7 +134,7 @@ const std::array<Operation, MAX_OP> opTable{
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            // key[0..args.key_length] := concat(key_prefix, random_string)
-	            randomString(key.data() + args.key_prefix.length(), args.key_length - args.key_prefix.length());
+	            randomString(key.data() + intSize(KEY_PREFIX), args.key_length - intSize(KEY_PREFIX));
 	            randomString(value.data(), args.value_length);
 	            tx.set(key, value);
 	            return Future();
@@ -150,8 +150,8 @@ const std::array<Operation, MAX_OP> opTable{
 	            const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
 	            assert(range > 0);
 	            const auto range_digits = digits(range);
-	            const auto random_len = args.key_length - args.key_prefix.length() - range_digits;
-	            randomString(&key[args.key_prefix.length()], random_len);
+	            const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
+	            randomString(&key[intSize(KEY_PREFIX)], random_len);
 	            for (auto i = 0; i < range; i++) {
 		            numericWithFill(&key[args.key_length - range_digits], range_digits, i);
 		            tx.set(key, value);
@@ -180,7 +180,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "SETCLEAR",
 	    { { StepKind::COMMIT,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            randomString(&key[args.key_prefix.length()], args.key_length - args.key_prefix.length());
+	            randomString(&key[KEY_PREFIX.size()], args.key_length - intSize(KEY_PREFIX));
 	            randomString(value.data(), args.value_length);
 	            tx.set(key, value);
 	            return tx.commit().eraseType();
@@ -209,8 +209,8 @@ const std::array<Operation, MAX_OP> opTable{
 	            const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
 	            assert(range > 0);
 	            const auto range_digits = digits(range);
-	            const auto random_len = args.key_length - args.key_prefix.length() - range_digits;
-	            randomString(&key[args.key_prefix.length()], random_len);
+	            const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
+	            randomString(&key[KEY_PREFIX.size()], random_len);
 	            for (auto i = 0; i < range; i++) {
 		            numericWithFill(&key[args.key_length - range_digits], range_digits, i);
 		            tx.set(key, value);
@@ -255,7 +255,7 @@ const std::array<Operation, MAX_OP> opTable{
 
 	            user_context.clear();
 
-	            auto out = ReadRangeResult::KeyValueRefArray{};
+	            auto out = Result::KeyValueRefArray{};
 	            err = r.getKeyValueArrayNothrow(out);
 	            if (!err || err.is(2037 /*blob_granule_not_materialized*/))
 		            return Future();

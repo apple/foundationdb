@@ -22,7 +22,6 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/TCInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <unordered_set>
 
 class TCServerInfoImpl {
 public:
@@ -352,14 +351,14 @@ std::string TCTeamInfo::getServerIDsStr() const {
 	return serversToString(this->serverIDs);
 }
 
-void TCTeamInfo::addDataInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) {
+void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
 	for (int i = 0; i < servers.size(); i++)
-		servers[i]->incrementDataInFlightToServer(src.count(servers[i]->getId()) ? 0 : delta);
+		servers[i]->incrementDataInFlightToServer(delta);
 }
 
-void TCTeamInfo::addReadInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) {
+void TCTeamInfo::addReadInFlightToTeam(int64_t delta) {
 	for (int i = 0; i < servers.size(); i++)
-		servers[i]->incrementReadInFlightToServer(src.count(servers[i]->getId()) ? 0 : delta);
+		servers[i]->incrementReadInFlightToServer(delta);
 }
 
 int64_t TCTeamInfo::getDataInFlightToTeam() const {
@@ -473,10 +472,6 @@ bool TCTeamInfo::allServersHaveHealthyAvailableSpace() const {
 bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
 	return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE &&
 	       allServersHaveHealthyAvailableSpace();
-}
-
-bool TCTeamInfo::hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const {
-	return getLoadBytes(true, inflightPenalty) <= thresholdBytes;
 }
 
 bool TCTeamInfo::isOptimal() const {

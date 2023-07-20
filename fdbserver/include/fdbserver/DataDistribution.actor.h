@@ -277,9 +277,9 @@ struct ShardTrackedData {
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
+	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
 	PhysicalShardCollection(Reference<IDDTxnProcessor> db)
-	  : txnProcessor(db), requireTransition(false), lastTransitionStartTime(now()) {}
+	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 

@@ -192,12 +192,12 @@ public:
 
 	//! @name relations
 	//@{
-	bool operator==(Iterator const& that) const { return ptr_ == that.ptr_; }
-	bool operator!=(Iterator const& that) const { return ptr_ != that.ptr_; }
-	bool operator<=(Iterator const& that) const { return ptr_ <= that.ptr_; }
-	bool operator>=(Iterator const& that) const { return ptr_ >= that.ptr_; }
-	bool operator<(Iterator const& that) const { return ptr_ < that.ptr_; }
-	bool operator>(Iterator const& that) const { return ptr_ > that.ptr_; }
+	bool operator==(ConstIterator that) const { return ptr_ == that.ptr_; }
+	bool operator!=(ConstIterator that) const { return ptr_ != that.ptr_; }
+	bool operator<=(ConstIterator that) const { return ptr_ <= that.ptr_; }
+	bool operator>=(ConstIterator that) const { return ptr_ >= that.ptr_; }
+	bool operator<(ConstIterator that) const { return ptr_ < that.ptr_; }
+	bool operator>(ConstIterator that) const { return ptr_ > that.ptr_; }
 	//@}
 
 	//! @name dereference

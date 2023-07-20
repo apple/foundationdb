@@ -243,7 +243,6 @@ public:
 
 private:
 	Reference<BlobCipherKey> generateCipherKey(const BlobCipherDetails& cipherDetails) {
-		// pragma: allowlist nextline secret
 		static unsigned char SHA_KEY[] = "3ab9570b44b8315fdb261da6b1b6c13b";
 		Arena arena;
 		uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];

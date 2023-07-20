@@ -87,9 +87,9 @@ ACTOR Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> d
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state ThreadFuture<RangeReadResult> resultFuture =
+			state ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeReadResult r = wait(safeThreadFutureToFuture(resultFuture));
+			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> exclusions;
@@ -109,9 +109,9 @@ ACTOR Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state ThreadFuture<RangeReadResult> resultFuture =
+			state ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeReadResult r = wait(safeThreadFutureToFuture(resultFuture));
+			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> excludedLocalities;
@@ -130,9 +130,9 @@ ACTOR Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db)
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state ThreadFuture<RangeReadResult> resultFuture =
+			state ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeReadResult r = wait(safeThreadFutureToFuture(resultFuture));
+			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> exclusions;
@@ -152,9 +152,9 @@ ACTOR Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> 
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state ThreadFuture<RangeReadResult> resultFuture =
+			state ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeReadResult r = wait(safeThreadFutureToFuture(resultFuture));
+			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> excludedLocalities;
@@ -178,9 +178,9 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
 	loop {
 		inProgressExclusion.clear();
 		try {
-			state ThreadFuture<RangeReadResult> resultFuture =
+			state ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeReadResult exclusionInProgress = wait(safeThreadFutureToFuture(resultFuture));
+			RangeResult exclusionInProgress = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(!exclusionInProgress.more && exclusionInProgress.size() < CLIENT_KNOBS->TOO_MANY);
 			if (exclusionInProgress.empty())
 				return inProgressExclusion;
@@ -228,8 +228,8 @@ ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::vector<Add
 	loop {
 		try {
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<ValueReadResult> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-			ValueReadResult coordinators = wait(safeThreadFutureToFuture(coordinatorsF));
+			state ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+			Optional<Value> coordinators = wait(safeThreadFutureToFuture(coordinatorsF));
 			ASSERT(coordinators.present());
 			coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
 			break;

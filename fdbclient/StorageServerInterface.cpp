@@ -469,8 +469,8 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	UID tssId;
 
 	GetValueReply gvReplyMissing;
-	GetValueReply gvReplyA(Optional<Value>(StringRef(s_a)), false, ReadMetrics());
-	GetValueReply gvReplyB(Optional<Value>(StringRef(s_b)), false, ReadMetrics());
+	GetValueReply gvReplyA(Optional<Value>(StringRef(s_a)), false);
+	GetValueReply gvReplyB(Optional<Value>(StringRef(s_b)), false);
 	ASSERT(TSS_doCompare(gvReplyMissing, gvReplyMissing));
 	ASSERT(TSS_doCompare(gvReplyA, gvReplyA));
 	ASSERT(TSS_doCompare(gvReplyB, gvReplyB));
@@ -496,11 +496,11 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	ASSERT(!TSS_doCompare(gkvReplyEmpty, gkvReplyOne));
 	ASSERT(!TSS_doCompare(gkvReplyOne, gkvReplyOneMore));
 
-	GetKeyReply gkReplyA(KeySelectorRef(StringRef(a, s_a), false, 20), false, ReadMetrics());
-	GetKeyReply gkReplyB(KeySelectorRef(StringRef(a, s_b), false, 10), false, ReadMetrics());
-	GetKeyReply gkReplyC(KeySelectorRef(StringRef(a, s_c), true, 0), false, ReadMetrics());
-	GetKeyReply gkReplyD(KeySelectorRef(StringRef(a, s_d), false, -10), false, ReadMetrics());
-	GetKeyReply gkReplyE(KeySelectorRef(StringRef(a, s_e), false, -20), false, ReadMetrics());
+	GetKeyReply gkReplyA(KeySelectorRef(StringRef(a, s_a), false, 20), false);
+	GetKeyReply gkReplyB(KeySelectorRef(StringRef(a, s_b), false, 10), false);
+	GetKeyReply gkReplyC(KeySelectorRef(StringRef(a, s_c), true, 0), false);
+	GetKeyReply gkReplyD(KeySelectorRef(StringRef(a, s_d), false, -10), false);
+	GetKeyReply gkReplyE(KeySelectorRef(StringRef(a, s_e), false, -20), false);
 
 	// identical cases
 	ASSERT(TSS_doCompare(gkReplyA, gkReplyA));
@@ -525,36 +525,36 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	ASSERT(TSS_doCompare(gkReplyE, gkReplyD));
 
 	// test same offset/orEqual wrong key
-	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false, ReadMetrics()),
-	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false, ReadMetrics())));
+	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false)));
 	// this could be from different shard boundaries, so don't say it's a mismatch
-	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 10), false, ReadMetrics()),
-	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 10), false, ReadMetrics())));
+	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 10), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 10), false)));
 
 	// test offsets and key difference don't match
-	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 0), false, ReadMetrics()),
-	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 10), false, ReadMetrics())));
-	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, -10), false, ReadMetrics()),
-	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 0), false, ReadMetrics())));
+	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 10), false)));
+	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, -10), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 0), false)));
 
 	// test key is next over in one shard, one found it and other didn't
 	// positive
 	// one that didn't find is +1
-	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false, ReadMetrics()),
-	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false, ReadMetrics())));
-	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false, ReadMetrics()),
-	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 1), false, ReadMetrics())));
+	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false)));
+	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 1), false)));
 
 	// negative will have zero offset but not equal set
-	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false, ReadMetrics()),
-	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 0), false, ReadMetrics())));
-	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 0), false, ReadMetrics()),
-	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false, ReadMetrics())));
+	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_b), false, 0), false)));
+	ASSERT(!TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 0), false),
+	                      GetKeyReply(KeySelectorRef(StringRef(a, s_b), true, 0), false)));
 
 	// test shard boundary key returned by incomplete query is the same as the key found by the other (only possible in
 	// positive direction)
-	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false, ReadMetrics()),
-	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false, ReadMetrics())));
+	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
+	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false)));
 
 	// explictly test checksum function
 	std::string s12 = "ABCDEFGHIJKL";

@@ -55,7 +55,6 @@ void managementClusterAddTenantToGroup(Transaction tr,
                                        IsRestoring isRestoring = IsRestoring::False) {
 	if (tenantEntry.tenantGroup.present()) {
 		if (tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
-			CODE_PROBE(true, "Invalid tenant group name");
 			throw invalid_tenant_group_name();
 		}
 
@@ -110,7 +109,6 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
 	// Update the tenant group count information for the assigned cluster if this tenant group was erased so we
 	// can use the freed capacity.
 	if (updateClusterCapacity) {
-		CODE_PROBE(true, "Remove tenant from group deleted group");
 		DataClusterEntry updatedEntry = clusterMetadata->entry;
 		--updatedEntry.allocated.numTenantGroups;
 		updateClusterMetadata(

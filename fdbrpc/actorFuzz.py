@@ -475,6 +475,7 @@ print(
     file=outputFile,
 )
 print('#include "fdbrpc/ActorFuzz.h"\n', file=outputFile)
+print("#ifndef WIN32\n", file=outputFile)
 
 actors = [randomActor(i) for i in range(testCaseCount)]
 
@@ -489,4 +490,5 @@ for actor in actors:
         file=outputFile,
     )
 print("\treturn std::make_pair(testsOK, %d);\n}" % len(actors), file=outputFile)
+print("#endif // WIN32\n", file=outputFile)
 outputFile.close()

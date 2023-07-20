@@ -69,8 +69,8 @@ Future<bool> checkRangeSimpleValueSize(Database cx,
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
 			state Standalone<KeyValueRef> lastKV = (*workload)(end - 1);
-			state Future<ValueReadResult> first = tr.get(firstKV.key);
-			state Future<ValueReadResult> last = tr.get(lastKV.key);
+			state Future<Optional<Value>> first = tr.get(firstKV.key);
+			state Future<Optional<Value>> last = tr.get(lastKV.key);
 			wait(success(first) && success(last));
 			return first.get().present() && last.get().present();
 		} catch (Error& e) {
@@ -100,7 +100,7 @@ Future<uint64_t> setupRange(Database cx,
 			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
 
 			state Standalone<KeyValueRef> sampleKV = (*workload)(begin);
-			ValueReadResult f = wait(tr.get(sampleKV.key));
+			Optional<Value> f = wait(tr.get(sampleKV.key));
 			if (f.present()) {
 				//				if( sampleKV.value.size() == f.get().size() ) {
 				//TraceEvent("BulkSetupRangeAlreadyPresent")

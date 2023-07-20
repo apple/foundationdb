@@ -137,7 +137,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						myKeyA = format("%010d", searchInt);
 
 						if (self->testReadYourWrites) {
-							ValueReadResult getTest = wait(trRYOW.get(StringRef(myKeyA)));
+							Optional<Value> getTest = wait(trRYOW.get(StringRef(myKeyA)));
 							if ((searchInt % 2 == 0 && !getTest.present()) ||
 							    (searchInt % 2 == 1 && getTest.present())) {
 								TraceEvent(SevError, "RanSelTestFailure")
@@ -145,7 +145,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 								    .detail("KeyA", myKeyA);
 							}
 						} else {
-							ValueReadResult getTest = wait(tr.get(StringRef(myKeyA)));
+							Optional<Value> getTest = wait(tr.get(StringRef(myKeyA)));
 							if ((searchInt % 2 == 0 && !getTest.present()) ||
 							    (searchInt % 2 == 1 && getTest.present())) {
 								TraceEvent(SevError, "RanSelTestFailure")
@@ -174,7 +174,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						    2;
 
 						if (self->testReadYourWrites) {
-							RangeReadResult getRangeTest =
+							RangeResult getRangeTest =
 							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                         2 * (self->maxKeySpace + self->maxOffset),
@@ -202,7 +202,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 								    .detail("DataSize", getRangeTest.size());
 							}
 						} else {
-							RangeReadResult getRangeTest =
+							RangeResult getRangeTest =
 							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                     2 * (self->maxKeySpace + self->maxOffset),

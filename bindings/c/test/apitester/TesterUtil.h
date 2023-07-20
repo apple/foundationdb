@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include <string_view>
 #ifndef APITESTER_UTIL_H
 #define APITESTER_UTIL_H
 
@@ -78,22 +77,6 @@ public:
 		return str;
 	}
 
-	template <class StringType>
-	StringType randomHexString(int minLength, int maxLength) {
-		int length = randomInt(minLength, maxLength);
-		StringType str;
-		str.reserve(length);
-		for (int i = 0; i < length; i++) {
-			int digit = randomInt(0, 15);
-			if (digit < 10) {
-				str += (char)('0' + digit);
-			} else {
-				str += (char)('a' + (digit - 10));
-			}
-		}
-		return str;
-	}
-
 	fdb::ByteString randomByteStringLowerCase(int minLength, int maxLength) {
 		return randomStringLowerCase<fdb::ByteString>(minLength, maxLength);
 	}
@@ -102,41 +85,6 @@ public:
 
 	std::mt19937 random;
 };
-
-namespace log {
-enum class Level { ERROR, WARN, INFO, DEBUG };
-
-class Logger {
-public:
-	static Logger& get();
-
-	void setLevel(log::Level lvl) { level = lvl; }
-	void logMessage(log::Level lvl, std::string_view msg);
-
-private:
-	Logger() : level(log::Level::INFO) {}
-	log::Level level;
-};
-
-template <typename... Args>
-static void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	Logger::get().logMessage(Level::ERROR, fmt::format(fmt_str, std::forward<Args>(args)...));
-}
-
-template <typename... Args>
-static void warn(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	Logger::get().logMessage(Level::WARN, fmt::format(fmt_str, std::forward<Args>(args)...));
-}
-template <typename... Args>
-static void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	Logger::get().logMessage(Level::INFO, fmt::format(fmt_str, std::forward<Args>(args)...));
-}
-template <typename... Args>
-static void debug(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	Logger::get().logMessage(Level::DEBUG, fmt::format(fmt_str, std::forward<Args>(args)...));
-}
-
-} // namespace log
 
 class TesterError : public std::runtime_error {
 public:
@@ -187,6 +135,12 @@ KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array);
 
 using GranuleSummaryArray = std::vector<fdb::GranuleSummary>;
 GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array);
+
+using GranuleDescriptionArray = std::vector<fdb::GranuleDescription>;
+GranuleDescriptionArray copyGranuleDescriptionArray(fdb::future_var::GranuleDescriptionRefArray::Type array);
+
+using GranuleMutationArray = std::vector<fdb::GranuleMutation>;
+GranuleMutationArray copyGranuleMutationArray(fdb::future_var::GranuleMutationRefArray::Type array);
 
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 

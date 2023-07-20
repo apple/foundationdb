@@ -161,6 +161,8 @@ struct WorkerDetails {
 struct ClusterControllerFullInterface {
 	constexpr static FileIdentifier file_identifier = ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
+	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;
+	RequestStream<struct RecruitRemoteFromConfigurationRequest> recruitRemoteFromConfiguration;
 	RequestStream<struct RecruitStorageRequest> recruitStorage;
 	RequestStream<struct RecruitBlobWorkerRequest> recruitBlobWorker;
 	RequestStream<struct RegisterWorkerRequest> registerWorker;
@@ -182,7 +184,8 @@ struct ClusterControllerFullInterface {
 	NetworkAddress address() const { return clientInterface.address(); }
 
 	bool hasMessage() const {
-		return clientInterface.hasMessage() || recruitStorage.getFuture().isReady() ||
+		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
+		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       recruitBlobWorker.getFuture().isReady() || registerWorker.getFuture().isReady() ||
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
@@ -192,6 +195,8 @@ struct ClusterControllerFullInterface {
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
+		recruitFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
+		recruitRemoteFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitStorage.getEndpoint(TaskPriority::ClusterController);
 		recruitBlobWorker.getEndpoint(TaskPriority::ClusterController);
 		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
@@ -212,6 +217,8 @@ struct ClusterControllerFullInterface {
 		}
 		serializer(ar,
 		           clientInterface,
+		           recruitFromConfiguration,
+		           recruitRemoteFromConfiguration,
 		           recruitStorage,
 		           recruitBlobWorker,
 		           registerWorker,
@@ -286,6 +293,93 @@ struct RegisterMasterRequest {
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<RegisterMasterRequest, false>;
 extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
+struct RecruitFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 2224085;
+	std::vector<WorkerInterface> backupWorkers;
+	std::vector<WorkerInterface> tLogs;
+	std::vector<WorkerInterface> satelliteTLogs;
+	std::vector<WorkerInterface> commitProxies;
+	std::vector<WorkerInterface> grvProxies;
+	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> storageServers;
+	std::vector<WorkerInterface> oldLogRouters; // During recovery, log routers for older generations will be recruited.
+	Optional<Key> dcId; // dcId is where master is recruited. It prefers to be in configuration.primaryDcId, but
+	                    // it can be recruited from configuration.secondaryDc: The dcId will be the secondaryDcId and
+	                    // this generation's primaryDC in memory is different from configuration.primaryDcId.
+	bool satelliteFallback;
+
+	RecruitFromConfigurationReply() : satelliteFallback(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           tLogs,
+		           satelliteTLogs,
+		           commitProxies,
+		           grvProxies,
+		           resolvers,
+		           storageServers,
+		           oldLogRouters,
+		           dcId,
+		           satelliteFallback,
+		           backupWorkers);
+	}
+};
+
+struct RecruitFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 2023046;
+	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
+	int maxOldLogRouters;
+	ReplyPromise<RecruitFromConfigurationReply> reply;
+
+	RecruitFromConfigurationRequest() {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration,
+	                                         bool recruitSeedServers,
+	                                         int maxOldLogRouters)
+	  : configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
+	}
+};
+
+struct RecruitRemoteFromConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 9091392;
+	std::vector<WorkerInterface> remoteTLogs;
+	std::vector<WorkerInterface> logRouters;
+	Optional<UID> dbgId;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, remoteTLogs, logRouters, dbgId);
+	}
+};
+
+struct RecruitRemoteFromConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 3235995;
+	DatabaseConfiguration configuration;
+	Optional<Key> dcId;
+	int logRouterCount;
+	std::vector<UID> exclusionWorkerIds;
+	Optional<UID> dbgId;
+	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
+
+	RecruitRemoteFromConfigurationRequest() {}
+	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
+	                                      Optional<Key> const& dcId,
+	                                      int logRouterCount,
+	                                      const std::vector<UID>& exclusionWorkerIds)
+	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
+	    exclusionWorkerIds(exclusionWorkerIds) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, dbgId, reply);
+	}
+};
 
 struct RecruitStorageReply {
 	constexpr static FileIdentifier file_identifier = 15877089;
@@ -432,14 +526,13 @@ struct UpdateWorkerHealthRequest {
 	NetworkAddress address;
 	std::vector<NetworkAddress> degradedPeers;
 	std::vector<NetworkAddress> disconnectedPeers;
-	std::vector<NetworkAddress> recoveredPeers;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, address, degradedPeers, disconnectedPeers, recoveredPeers);
+		serializer(ar, address, degradedPeers, disconnectedPeers);
 	}
 };
 
@@ -1231,7 +1324,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 typedef decltype(&tLog) TLogFn;
 
-extern bool isSimulatorProcessUnreliable();
+extern bool isSimulatorProcessReliable();
 
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
@@ -1247,7 +1340,7 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (isSimulatorProcessUnreliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
@@ -1296,7 +1389,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (isSimulatorProcessUnreliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");

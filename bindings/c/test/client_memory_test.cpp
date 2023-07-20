@@ -19,37 +19,46 @@
  */
 
 #define FDB_USE_LATEST_API_VERSION
+#include <foundationdb/fdb_c.h>
+
+#include "unit/fdb_api.hpp"
+
 #include <thread>
 #include <iostream>
 #include <vector>
 
-#include "test/fdb_api.hpp"
-
-void fdbCheck(const fdb::Error& err) {
-	if (err) {
-		std::cerr << err.what() << std::endl;
+void fdb_check(fdb_error_t e) {
+	if (e) {
+		std::cerr << fdb_get_error(e) << std::endl;
 		std::abort();
 	}
+}
+
+FDBDatabase* fdb_open_database(const char* clusterFile) {
+	FDBDatabase* db;
+	fdb_check(fdb_create_database(clusterFile, &db));
+	return db;
 }
 
 int main(int argc, char** argv) {
 	if (argc != 2) {
 		printf("Usage: %s <cluster_file>", argv[0]);
 	}
-	fdb::selectApiVersion(FDB_API_VERSION);
-	fdb::network::setup();
-	std::thread network_thread{ [] { fdbCheck(fdb::network::run()); } };
+	fdb_check(fdb_select_api_version(FDB_API_VERSION));
+	fdb_check(fdb_setup_network());
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
-	fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE);
-	std::string traceFormat("json");
-	fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, traceFormat);
+	fdb_check(
+	    fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, reinterpret_cast<const uint8_t*>(""), 0));
+	fdb_check(fdb_network_set_option(
+	    FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, reinterpret_cast<const uint8_t*>("json"), 4));
 
 	// Use a bunch of memory from different client threads
-	auto db = fdb::Database(argv[1]);
+	FDBDatabase* db = fdb_open_database(argv[1]);
 	auto thread_func = [&]() {
-		auto tr = db.createTransaction();
+		fdb::Transaction tr(db);
 		for (int i = 0; i < 10000; ++i) {
-			tr.set(fdb::toBytesRef(std::to_string(i)), fdb::toBytesRef(std::string(i, '\x00')));
+			tr.set(std::to_string(i), std::string(i, '\x00'));
 		}
 		tr.cancel();
 	};
@@ -61,14 +70,14 @@ int main(int argc, char** argv) {
 	for (auto& thread : threads) {
 		thread.join();
 	}
-	// Force the database reference to be destroyed
-	db = fdb::Database();
+	fdb_database_destroy(db);
+	db = nullptr;
 
 	// Memory usage should go down now if the allocator is returning memory to the OS. It's expected that something is
 	// externally monitoring the memory usage of this process during this sleep.
 	using namespace std::chrono_literals;
 	std::this_thread::sleep_for(10s);
 
-	fdbCheck(fdb::network::stop());
+	fdb_check(fdb_stop_network());
 	network_thread.join();
 }

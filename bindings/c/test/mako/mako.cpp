@@ -145,15 +145,16 @@ int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
 /* cleanup database (no tenant-awareness) */
 int cleanupNormalKeyspace(Database db, Arguments const& args) {
 	assert(args.total_tenants == 0 && args.active_tenants == 0);
-	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : args.key_prefix.length();
+	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
 	auto genprefix = [&args](ByteString& s) {
-		const auto padding_len = args.key_length - args.key_prefix.length() - args.row_digits;
+		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
 		auto pos = 0;
 		if (args.prefixpadding) {
 			memset(s.data(), 'x', padding_len);
 			pos += padding_len;
 		}
-		memcpy(&s[pos], args.key_prefix.data(), args.key_prefix.length());
+		const auto key_prefix_len = intSize(KEY_PREFIX);
+		memcpy(&s[pos], KEY_PREFIX.data(), key_prefix_len);
 	};
 	auto beginstr = ByteString(prefix_len + 1, '\0');
 	genprefix(beginstr);
@@ -218,7 +219,7 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, Workflo
 			}
 			--required_keys;
 			/* sequential keys */
-			genKey(keystr.data(), args.key_prefix, args, i);
+			genKey(keystr.data(), KEY_PREFIX, args, i);
 			/* random values */
 			randomString(valstr.data(), args.value_length);
 
@@ -499,7 +500,7 @@ int runWorkload(Database db,
 				tagstr.clear();
 				fmt::format_to(std::back_inserter(tagstr),
 				               "{}{}{:0>3d}",
-				               args.key_prefix,
+				               KEY_PREFIX,
 				               args.txntagging_prefix,
 				               urand(0, args.txntagging - 1));
 				auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
@@ -834,7 +835,6 @@ Arguments::Arguments() {
 	num_fdb_clusters = 0;
 	num_databases = 1;
 	api_version = maxApiVersion();
-	key_prefix = DEFAULT_KEY_PREFIX;
 	json = 0;
 	num_processes = 1;
 	num_threads = 1;
@@ -1136,7 +1136,6 @@ void usage() {
 	printf("%-24s %s\n", "    --version", "Print FDB version");
 	printf("%-24s %s\n", "-v, --verbose", "Specify verbosity");
 	printf("%-24s %s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
-	printf("%-24s %s\n", "    --key_prefix=PREFIX", "Specify mako key space prefix (Default: \"mako\"");
 	printf("%-24s %s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
 	printf("%-24s %s\n", "-d, --num_databases=NUM_DATABASES", "Specify number of databases");
 	printf("%-24s %s\n", "-p, --procs=PROCS", "Specify number of worker processes");
@@ -1218,7 +1217,6 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
 			/* options requiring an argument */
-			{ "key_prefix", required_argument, NULL, ARG_KEY_PREFIX },
 			{ "api_version", required_argument, NULL, 'a' },
 			{ "cluster", required_argument, NULL, 'c' },
 			{ "num_databases", required_argument, NULL, 'd' },
@@ -1300,9 +1298,6 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			return -1;
 		case 'a':
 			args.api_version = atoi(optarg);
-			break;
-		case ARG_KEY_PREFIX:
-			args.key_prefix = std::string(optarg);
 			break;
 		case 'c': {
 			const char delim[] = ",";

@@ -245,7 +245,6 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
-					++self()->metricsUpdates;
 					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.first.get().bytes)
@@ -548,8 +547,7 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				result.emplace_back(shardContainingTenantStart, faultLines);
 			} else {
 				CODE_PROBE(true,
-				           "Shard that contains complete tenant key range not split since shard stats are unavailable",
-				           probe::decoration::rare);
+				           "Shard that contains complete tenant key range not split since shard stats are unavailable");
 			}
 		}
 	} else {
@@ -1445,14 +1443,13 @@ DataDistributionTracker::~DataDistributionTracker() {
 }
 
 struct DataDistributionTrackerImpl {
-	ACTOR static Future<Void> run(Reference<DataDistributionTracker> self,
-	                              Reference<InitialDataDistribution> initData) {
+	ACTOR static Future<Void> run(DataDistributionTracker* self, Reference<InitialDataDistribution> initData) {
 		state Future<Void> loggingTrigger = Void();
-		state Future<Void> readHotDetect = readHotDetector(self.getPtr());
+		state Future<Void> readHotDetect = readHotDetector(self);
 		state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 
 		try {
-			wait(trackInitialShards(self.getPtr(), initData));
+			wait(trackInitialShards(self, initData));
 			initData.clear(); // Release reference count.
 
 			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
@@ -1466,10 +1463,8 @@ struct DataDistributionTrackerImpl {
 					req.send(self->getAverageShardBytes());
 				}
 				when(wait(loggingTrigger)) {
-					TraceEvent e("DDTrackerStats", self->distributorId);
-
-					self->counters.logToTraceEvent(e);
-					e.detail("Shards", self->shards->size())
+					TraceEvent("DDTrackerStats", self->distributorId)
+					    .detail("Shards", self->shards->size())
 					    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
 					    .detail("SystemSizeBytes", self->systemSizeEstimate)
 					    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
@@ -1477,20 +1472,20 @@ struct DataDistributionTrackerImpl {
 					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 				}
 				when(GetMetricsRequest req = waitNext(self->getShardMetrics)) {
-					self->actors.add(fetchShardMetrics(self.getPtr(), req));
+					self->actors.add(fetchShardMetrics(self, req));
 				}
 				when(GetTopKMetricsRequest req = waitNext(self->getTopKMetrics)) {
-					self->actors.add(fetchTopKShardMetrics(self.getPtr(), req));
+					self->actors.add(fetchTopKShardMetrics(self, req));
 				}
 				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
-					self->actors.add(fetchShardMetricsList(self.getPtr(), req));
+					self->actors.add(fetchShardMetricsList(self, req));
 				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
-					self->actors.add(tenantCreationHandling(self.getPtr(), newTenant));
+					self->actors.add(tenantCreationHandling(self, newTenant));
 				}
 				when(KeyRange req = waitNext(self->shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
-					restartShardTrackers(self.getPtr(), req);
+					restartShardTrackers(self, req);
 				}
 			}
 		} catch (Error& e) {
@@ -1511,9 +1506,7 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
 	self->userRangeConfig = initData->userRangeConfig;
-	// There's a rare race inside DataDistributionTrackerImpl::run where it lives longer than this holdWhile
-	// At present, we just pass in the Reference to avoid DDTracker destroyed when the run actor is still alive
-	return holdWhile(self, DataDistributionTrackerImpl::run(self, initData));
+	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 
 // Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning

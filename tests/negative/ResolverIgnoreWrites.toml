@@ -1,6 +1,0 @@
-[[test]]
-testTitle = "ResolverIgnoreReads"
-
-[[test.workload]]
-testName = "ResolverBug"
-ignoreWriteSetProbability = 0.01

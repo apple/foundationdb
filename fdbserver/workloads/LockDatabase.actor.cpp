@@ -51,13 +51,13 @@ struct LockDatabaseWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<RangeReadResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
+	ACTOR static Future<RangeResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				wait(lockDatabase(&tr, lockID));
-				state RangeReadResult data = wait(tr.getRange(normalKeys, 50000));
+				state RangeResult data = wait(tr.getRange(normalKeys, 50000));
 				ASSERT(!data.more);
 				wait(tr.commit());
 				return data;
@@ -67,21 +67,18 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> unlockAndCheck(Database cx,
-	                                         LockDatabaseWorkload* self,
-	                                         UID lockID,
-	                                         RangeReadResult data) {
+	ACTOR static Future<Void> unlockAndCheck(Database cx, LockDatabaseWorkload* self, UID lockID, RangeResult data) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				ValueReadResult val = wait(tr.get(databaseLockedKey));
+				Optional<Value> val = wait(tr.get(databaseLockedKey));
 				if (!val.present())
 					return Void();
 
 				wait(unlockDatabase(&tr, lockID));
-				state RangeReadResult data2 = wait(tr.getRange(normalKeys, 50000));
+				state RangeResult data2 = wait(tr.getRange(normalKeys, 50000));
 				if (data.size() != data2.size()) {
 					TraceEvent(SevError, "DataChangedWhileLocked")
 					    .detail("BeforeSize", data.size())
@@ -125,7 +122,7 @@ struct LockDatabaseWorkload : TestWorkload {
 	ACTOR static Future<Void> lockWorker(Database cx, LockDatabaseWorkload* self) {
 		state UID lockID = deterministicRandom()->randomUniqueID();
 		wait(delay(self->lockAfter));
-		state RangeReadResult data = wait(lockAndSave(cx, self, lockID));
+		state RangeResult data = wait(lockAndSave(cx, self, lockID));
 		state Future<Void> checker = checkLocked(cx, self);
 		wait(delay(self->unlockAfter - self->lockAfter));
 		checker.cancel();

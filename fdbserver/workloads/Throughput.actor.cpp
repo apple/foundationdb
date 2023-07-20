@@ -83,8 +83,8 @@ struct RWTransactor : ITransactor {
 		return rwTransaction(db, Reference<RWTransactor>::addRef(this), stats);
 	}
 
-	ACTOR static Future<ValueReadResult> getLatency(Future<ValueReadResult> f, double* t) {
-		ValueReadResult v = wait(f);
+	ACTOR static Future<Optional<Value>> getLatency(Future<Optional<Value>> f, double* t) {
+		Optional<Value> v = wait(f);
 		*t += now();
 		return v;
 	}
@@ -107,7 +107,7 @@ struct RWTransactor : ITransactor {
 				state double t_rv = now();
 				state double rrLatency = -t_rv * self->reads;
 
-				state std::vector<Future<ValueReadResult>> reads;
+				state std::vector<Future<Optional<Value>>> reads;
 				reads.reserve(self->reads);
 				for (int i = 0; i < self->reads; i++)
 					reads.push_back(getLatency(tr.get(keys[i]), &rrLatency));

@@ -197,8 +197,8 @@ ProtocolVersion currentProtocolVersion();
 // Assume the next future protocol version as the current one. Used for testing purposes only
 void useFutureProtocolVersion();
 
-// This assert is intended to help prevent incrementing the leftmost digits accidentally.
-// This will have to be updated when we reach version 20.
+// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
+// change when we reach version 10.
 static_assert(defaultProtocolVersion.version() < @FDB_PV_LEFT_MOST_CHECK@, "Unexpected protocol version");
 
 // The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,

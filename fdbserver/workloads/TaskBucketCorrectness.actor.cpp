@@ -224,7 +224,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	                                bool chained,
 	                                int subtaskCount) {
 		state Key addedInitKey("addedInitTasks"_sr);
-		ValueReadResult res = wait(tr->get(addedInitKey));
+		Optional<Standalone<StringRef>> res = wait(tr->get(addedInitKey));
 		if (res.present())
 			return Void();
 		tr->set(addedInitKey, "true"_sr);
@@ -314,8 +314,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			data.insert(format("task_%d", i));
 		}
 
-		RangeReadResult values =
-		    wait(tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values = wait(tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()) {
 			TraceEvent(SevError, "CheckSayHello")
 			    .detail("CountNotMatchIs", values.size())

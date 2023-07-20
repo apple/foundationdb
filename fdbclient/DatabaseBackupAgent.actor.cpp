@@ -26,9 +26,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include <ctime>
 #include <climits>
-#include "fdbrpc/simulator.h"
 #include "flow/IAsyncFile.h"
-#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
@@ -166,7 +164,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Standalone<VectorRef<KeyRef>> results;
-		RangeReadResult values = wait(tr->getRange(
+		RangeResult values = wait(tr->getRange(
 		    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 		for (auto& s : values) {
@@ -326,22 +324,20 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    applyMutationsKeyVersionCountRange.begin);
 					state Future<RangeResult> backupVersions =
 					    krmGetRanges(tr, prefix, KeyRangeRef(rangeBegin, rangeEnd), BUGGIFY ? 2 : 2000, 1e5);
-					state Future<ValueReadResult> logVersionValue =
+					state Future<Optional<Value>> logVersionValue =
 					    tr->get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
 					            Snapshot::True);
-					state Future<ValueReadResult> rangeCountValue = tr->get(rangeCountKey, Snapshot::True);
-					state Future<RangeReadResult> prevRange =
-					    tr->getRange(firstGreaterOrEqual(prefix),
-					                 lastLessOrEqual(rangeBegin.withPrefix(prefix)),
-					                 1,
-					                 Snapshot::True,
-					                 Reverse::True);
-					state Future<RangeReadResult> nextRange =
-					    tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
-					                 firstGreaterOrEqual(strinc(prefix)),
-					                 1,
-					                 Snapshot::True,
-					                 Reverse::False);
+					state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, Snapshot::True);
+					state Future<RangeResult> prevRange = tr->getRange(firstGreaterOrEqual(prefix),
+					                                                   lastLessOrEqual(rangeBegin.withPrefix(prefix)),
+					                                                   1,
+					                                                   Snapshot::True,
+					                                                   Reverse::True);
+					state Future<RangeResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
+					                                                   firstGreaterOrEqual(strinc(prefix)),
+					                                                   1,
+					                                                   Snapshot::True,
+					                                                   Reverse::False);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 					wait(checkDatabaseLock(tr,
@@ -365,10 +361,8 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 
 					if ((!prevAdjacent || !nextAdjacent) &&
 					    rangeCount > ((prevAdjacent || nextAdjacent) ? CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT
-					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT) &&
-					    (!g_network->isSimulated() ||
-					     (isBuggifyEnabled(BuggifyType::General) && !g_simulator->speedUpSimulation))) {
-						CODE_PROBE(true, "range insert delayed because versionMap is too large");
+					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT)) {
+						CODE_PROBE(true, "range insert delayed because too versionMap is too large");
 
 						if (rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)
 							TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge").log();
@@ -1018,8 +1012,8 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 		    BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 		state Version prevBeginVersion =
 		    BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyPrevBeginVersion], Unversioned());
-		state Future<ValueReadResult> fStopValue = tr->get(states.pack(DatabaseBackupAgent::keyCopyStop));
-		state Future<ValueReadResult> fAppliedValue =
+		state Future<Optional<Value>> fStopValue = tr->get(states.pack(DatabaseBackupAgent::keyCopyStop));
+		state Future<Optional<Value>> fAppliedValue =
 		    tr->get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsBeginRange.begin));
 
 		Transaction srcTr(taskBucket->src);
@@ -1036,7 +1030,7 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 			return Void();
 		}
 
-		ValueReadResult appliedValue = wait(fAppliedValue);
+		Optional<Value> appliedValue = wait(fAppliedValue);
 		state Version appliedVersion =
 		    appliedValue.present() ? BinaryReader::fromStringRef<Version>(appliedValue.get(), Unversioned()) : 100;
 
@@ -1049,7 +1043,7 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 		tr->set(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
 		        BinaryWriter::toValue(applyVersion, Unversioned()));
 
-		ValueReadResult stopValue = wait(fStopValue);
+		Optional<Value> stopValue = wait(fStopValue);
 		state Version stopVersionData =
 		    stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
 
@@ -1172,11 +1166,11 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		loop {
 			try {
 				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-				ValueReadResult beginValue = wait(
+				Optional<Value> beginValue = wait(
 				    tr2.get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsBeginRange.begin)));
 				state Version appliedVersion =
 				    beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned()) : -1;
-				ValueReadResult endValue = wait(
+				Optional<Value> endValue = wait(
 				    tr2.get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin)));
 				Version endVersion =
 				    endValue.present() ? BinaryReader::fromStringRef<Version>(endValue.get(), Unversioned()) : -1;
@@ -1203,7 +1197,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				ValueReadResult v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
+				Optional<Value> v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
 				if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >
 				                       BinaryReader::fromStringRef<Version>(
 				                           task->params[DatabaseBackupAgent::keyFolderId], Unversioned()))
@@ -1312,7 +1306,7 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		    BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 		state Version prevBeginVersion =
 		    BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyPrevBeginVersion], Unversioned());
-		state Future<ValueReadResult> fStopWhenDone = tr->get(conf.pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey));
+		state Future<Optional<Value>> fStopWhenDone = tr->get(conf.pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey));
 
 		Transaction srcTr(taskBucket->src);
 		srcTr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1330,7 +1324,7 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 
 		tr->set(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
 		        BinaryWriter::toValue(beginVersion, Unversioned()));
-		ValueReadResult stopWhenDone = wait(fStopWhenDone);
+		Optional<Value> stopWhenDone = wait(fStopWhenDone);
 
 		if (endVersion - beginVersion > deterministicRandom()->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
 			TraceEvent("DBA_CopyDiffLogs")
@@ -1710,7 +1704,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				Key tagPath = srcDrAgent.states.get(task->params[DatabaseBackupAgent::keyConfigLogUid])
 				                  .pack(BackupAgentBase::keyConfigBackupTag);
-				ValueReadResult tagName = wait(tr->get(tagPath));
+				Optional<Key> tagName = wait(tr->get(tagPath));
 				if (!tagName.present()) {
 					return Void();
 				}
@@ -1811,7 +1805,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 				Future<Void> verified = taskBucket->keepRunning(tr, task);
 				wait(verified);
 
-				ValueReadResult backupKeysPacked = wait(tr->get(config.pack(BackupAgentBase::keyConfigBackupRanges)));
+				Optional<Key> backupKeysPacked = wait(tr->get(config.pack(BackupAgentBase::keyConfigBackupRanges)));
 				if (!backupKeysPacked.present()) {
 					return Void();
 				}
@@ -1832,7 +1826,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state ValueReadResult v = wait(srcTr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
+				state Optional<Value> v = wait(srcTr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
 				if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >
 				                       BinaryReader::fromStringRef<Version>(
 				                           task->params[DatabaseBackupAgent::keyFolderId], Unversioned())) {
@@ -1840,7 +1834,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 				}
 
 				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
-					RangeReadResult existingDestUidValues = wait(srcTr->getRange(
+					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
 					KeyRangeRef targetRange =
@@ -1892,7 +1886,6 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 		if (task->params[BackupAgentBase::destUid].size() == 0) {
-			// pragma: allowlist nextline secret
 			TraceEvent("DBA_CopyDiffLogsUpgradeTaskFuncAbortInUpgrade").log();
 			wait(success(AbortOldBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone))));
 		} else {
@@ -1953,7 +1946,7 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 				Key versionKey = task->params[DatabaseBackupAgent::keyConfigLogUid]
 				                     .withPrefix(task->params[BackupAgentBase::destUid])
 				                     .withPrefix(backupLatestVersionsPrefix);
-				ValueReadResult prevBeginVersion = wait(tr.get(versionKey));
+				Optional<Key> prevBeginVersion = wait(tr.get(versionKey));
 				if (!prevBeginVersion.present()) {
 					return Void();
 				}
@@ -1982,11 +1975,11 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 
 		state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-		state ValueReadResult stopValue = wait(tr->get(states.pack(DatabaseBackupAgent::keyStateStop)));
+		state Optional<Value> stopValue = wait(tr->get(states.pack(DatabaseBackupAgent::keyStateStop)));
 		state Version restoreVersion =
 		    stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
 
-		state ValueReadResult stopWhenDone = wait(tr->get(conf.pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey)));
+		state Optional<Value> stopWhenDone = wait(tr->get(conf.pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey)));
 		state Reference<TaskFuture> allPartsDone;
 
 		TraceEvent("DBA_Complete")
@@ -2088,7 +2081,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 
 				// Initialize destUid
 				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
-					RangeReadResult existingDestUidValues = wait(srcTr->getRange(
+					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					KeyRangeRef targetRange =
 					    (backupRanges.size() == 1) ? backupRanges[0] : getDefaultBackupSharedRange();
@@ -2117,7 +2110,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				beginVersionKey = BinaryWriter::toValue(bVersion, Unversioned());
 
 				state Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
-				ValueReadResult versionRecord = wait(srcTr->get(versionKey));
+				Optional<Key> versionRecord = wait(srcTr->get(versionKey));
 				if (!versionRecord.present()) {
 					srcTr->set(versionKey, beginVersionKey);
 				}
@@ -2145,7 +2138,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				tr->set(config.pack(BackupAgentBase::destUid), task->params[BackupAgentBase::destUid]);
 
 				// Use existing beginVersion if we already have one
-				ValueReadResult backupStartVersion = wait(tr->get(config.pack(BackupAgentBase::backupStartVersion)));
+				Optional<Key> backupStartVersion = wait(tr->get(config.pack(BackupAgentBase::backupStartVersion)));
 				if (backupStartVersion.present()) {
 					beginVersionKey = backupStartVersion.get();
 				} else {
@@ -2168,7 +2161,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				srcTr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 				srcTr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state ValueReadResult v = wait(srcTr2->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
+				state Optional<Value> v = wait(srcTr2->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
 
 				if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >=
 				                       BinaryReader::fromStringRef<Version>(
@@ -2422,7 +2415,6 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 			throw backup_error();
 		}
 	} catch (std::runtime_error& e) {
-		// pragma: allowlist nextline secret
 		TraceEvent(SevWarn, "DBA_UnableToCheckAtomicSwitchOverConfig").detail("RunTimeError", e.what());
 		throw backup_error();
 	}
@@ -2449,7 +2441,7 @@ public:
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					ValueReadResult drVersion = wait(tr->get(drVersionKey));
+					Optional<Value> drVersion = wait(tr->get(drVersionKey));
 
 					TraceEvent("DRU_VersionCheck")
 					    .detail("Current",
@@ -2570,7 +2562,7 @@ public:
 			logUidValue = BinaryWriter::toValue(logUid, Unversioned());
 		}
 
-		ValueReadResult v = wait(tr->get(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)));
+		Optional<Key> v = wait(tr->get(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)));
 		Version uidVersion = 0;
 		if (v.present())
 			uidVersion = BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) + 1;
@@ -2592,7 +2584,7 @@ public:
 
 		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
-			state std::vector<Future<RangeReadResult>> backupIntoResults;
+			state std::vector<Future<RangeResult>> backupIntoResults;
 			for (auto& backupRange : backupRanges) {
 				backupIntoResults.push_back(
 				    tr->getRange(backupRange.removePrefix(removePrefix).withPrefix(addPrefix), 1));
@@ -2747,7 +2739,7 @@ public:
 			try {
 				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state ValueReadResult backupUid =
+				state Optional<Value> backupUid =
 				    wait(tr2.get(backupAgent->states.get(BinaryWriter::toValue(destlogUid, Unversioned()))
 				                     .pack(DatabaseBackupAgent::keyFolderId)));
 				TraceEvent("DBA_SwitchoverBackupUID")
@@ -2757,7 +2749,7 @@ public:
 				                .pack(DatabaseBackupAgent::keyFolderId));
 				if (!backupUid.present())
 					throw backup_duplicate();
-				ValueReadResult v = wait(tr2.get(
+				Optional<Value> v = wait(tr2.get(
 				    BinaryWriter::toValue(destlogUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));
 				TraceEvent("DBA_SwitchoverVersion")
 				    .detail("Version", v.present() ? BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) : 0);
@@ -2847,7 +2839,7 @@ public:
 			throw backup_unneeded();
 		}
 
-		state ValueReadResult stopWhenDoneValue =
+		state Optional<Value> stopWhenDoneValue =
 		    wait(tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
 		                     .pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey)));
 
@@ -2904,7 +2896,7 @@ public:
 					throw not_committed();
 				}
 
-				ValueReadResult _backupUid =
+				Optional<Value> _backupUid =
 				    wait(tr->get(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)));
 				backupUid = _backupUid.get();
 
@@ -2942,7 +2934,7 @@ public:
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			try {
 				// Ensure that we're at a version higher than the data that we've written.
-				ValueReadResult lastApplied = wait(tr->get(logUidValue.withPrefix(applyMutationsBeginRange.begin)));
+				Optional<Value> lastApplied = wait(tr->get(logUidValue.withPrefix(applyMutationsBeginRange.begin)));
 				if (lastApplied.present()) {
 					Version current = tr->getReadVersion().get();
 					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
@@ -2980,7 +2972,7 @@ public:
 				try {
 					srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					state Future<ValueReadResult> backupVersionF =
+					state Future<Optional<Value>> backupVersionF =
 					    srcTr->get(backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId));
 					wait(success(backupVersionF) || partialTimeout);
 					if (partialTimeout.isReady()) {
@@ -3005,7 +2997,7 @@ public:
 
 					Key latestVersionKey = logUidValue.withPrefix(destUidValue.withPrefix(backupLatestVersionsPrefix));
 
-					state Future<ValueReadResult> bVersionF = srcTr->get(latestVersionKey);
+					state Future<Optional<Key>> bVersionF = srcTr->get(latestVersionKey);
 					wait(success(bVersionF) || partialTimeout);
 					if (partialTimeout.isReady()) {
 						return Void();
@@ -3047,7 +3039,7 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				ValueReadResult v = wait(
+				Optional<Value> v = wait(
 				    tr->get(StringRef(backupAgent->config.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId))));
 				if (v.present()) {
 					return Void();
@@ -3090,29 +3082,29 @@ public:
 
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
 
-				state Future<ValueReadResult> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
-				state Future<RangeReadResult> fErrorValues =
+				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
+				state Future<RangeResult> fErrorValues =
 				    errorLimit > 0
 				        ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(),
 				                       errorLimit,
 				                       Snapshot::False,
 				                       Reverse::True)
-				        : Future<RangeReadResult>();
-				state Future<ValueReadResult> fBackupUid =
+				        : Future<RangeResult>();
+				state Future<Optional<Value>> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(DatabaseBackupAgent::keyFolderId));
-				state Future<ValueReadResult> fBackupVerison =
+				state Future<Optional<Value>> fBackupVerison =
 				    tr->get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
-				state Future<ValueReadResult> fTagName =
+				state Future<Optional<Key>> fTagName =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyConfigBackupTag));
-				state Future<ValueReadResult> fStopVersionKey =
+				state Future<Optional<Value>> fStopVersionKey =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyStateStop));
-				state Future<ValueReadResult> fBackupKeysPacked =
+				state Future<Optional<Key>> fBackupKeysPacked =
 				    tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyConfigBackupRanges));
-				state Future<ValueReadResult> flogVersionKey =
+				state Future<Optional<Value>> flogVersionKey =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyStateLogBeginVersion));
 
@@ -3122,21 +3114,21 @@ public:
 					statusText += "No previous backups found.\n";
 				} else {
 					state std::string tagNameDisplay;
-					ValueReadResult tagName = wait(fTagName);
+					Optional<Key> tagName = wait(fTagName);
 
 					// Define the display tag name
 					if (tagName.present()) {
 						tagNameDisplay = tagName.get().toString();
 					}
 
-					state ValueReadResult stopVersionKey = wait(fStopVersionKey);
-					ValueReadResult logVersionKey = wait(flogVersionKey);
+					state Optional<Value> stopVersionKey = wait(fStopVersionKey);
+					Optional<Value> logVersionKey = wait(flogVersionKey);
 					state std::string logVersionText =
 					    ". Last log version is " +
 					    (logVersionKey.present()
 					         ? format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned()))
 					         : "unset");
-					ValueReadResult backupKeysPacked = wait(fBackupKeysPacked);
+					Optional<Key> backupKeysPacked = wait(fBackupKeysPacked);
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 					if (backupKeysPacked.present()) {
@@ -3180,7 +3172,7 @@ public:
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
-					RangeReadResult values = wait(fErrorValues);
+					RangeResult values = wait(fErrorValues);
 
 					// Display the errors, if any
 					if (values.size() > 0) {
@@ -3197,9 +3189,9 @@ public:
 				}
 
 				// calculate time differential
-				ValueReadResult backupUid = wait(fBackupUid);
+				Optional<Value> backupUid = wait(fBackupUid);
 				if (backupUid.present()) {
-					ValueReadResult v = wait(fBackupVerison);
+					Optional<Value> v = wait(fBackupVerison);
 					if (v.present()) {
 						state Version destApplyBegin = BinaryReader::fromStringRef<Version>(v.get(), Unversioned());
 						Version sourceVersion = wait(srcReadVersion);
@@ -3209,7 +3201,7 @@ public:
 					}
 				}
 
-				ValueReadResult paused = wait(fPaused);
+				Optional<Value> paused = wait(fPaused);
 				if (paused.present()) {
 					statusText += format("\nAll DR agents have been paused.\n");
 				}
@@ -3236,7 +3228,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 		                          .pack(DatabaseBackupAgent::keyStateStatus);
-		ValueReadResult status = wait(tr->get(statusKey, snapshot));
+		Optional<Value> status = wait(tr->get(statusKey, snapshot));
 
 		return (!status.present()) ? EBackupState::STATE_NEVERRAN : BackupAgentBase::getState(status.get().toString());
 	}
@@ -3249,7 +3241,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key destUidKey =
 		    backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::destUid);
-		ValueReadResult destUid = wait(tr->get(destUidKey, snapshot));
+		Optional<Value> destUid = wait(tr->get(destUidKey, snapshot));
 
 		return (destUid.present()) ? BinaryReader::fromStringRef<UID>(destUid.get(), Unversioned()) : UID();
 	}
@@ -3260,7 +3252,7 @@ public:
 	                                   Snapshot snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state ValueReadResult logUid = wait(tr->get(backupAgent->tagNames.pack(tagName), snapshot));
+		state Optional<Value> logUid = wait(tr->get(backupAgent->tagNames.pack(tagName), snapshot));
 
 		return (logUid.present()) ? BinaryReader::fromStringRef<UID>(logUid.get(), Unversioned()) : UID();
 	}

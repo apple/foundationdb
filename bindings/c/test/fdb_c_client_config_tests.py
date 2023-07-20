@@ -19,6 +19,7 @@ from test_util import random_alphanum_string
 
 args = None
 downloader = None
+test_prev_versions = False
 
 
 def version_from_str(ver_str):
@@ -31,8 +32,6 @@ def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
     if ver_tuple[0] > 70:
         return ver_tuple[0] * 10000 + ver_tuple[1] * 100
-    if ver_tuple[0] >= 8:
-        return ver_tuple[0] * 100000 + ver_tuple[1] * 100
     return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
 
@@ -420,6 +419,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_multiple_external_clients(self):
         # Multiple external clients, normal case
         test = ClientConfigTest(self)
@@ -436,6 +436,7 @@ class ClientConfigTests(unittest.TestCase):
         )
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
         test = ClientConfigTest(self)
@@ -445,6 +446,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2204  # API function missing
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_no_external_client_support_api_version_ignore(self):
         # Multiple external clients; API version supported by none of them; Ignore failures
         test = ClientConfigTest(self)
@@ -455,6 +457,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2124  # All external clients failed
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_one_external_client_wrong_api_version(self):
         # Multiple external clients, API version unsupported by one of othem
         test = ClientConfigTest(self)
@@ -466,6 +469,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2204  # API function missing
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_one_external_client_wrong_api_version_ignore(self):
         # Multiple external clients;  API version unsupported by one of them; Ignore failures
         test = ClientConfigTest(self)
@@ -481,6 +485,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_external_client_not_matching_cluster_version(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version
@@ -497,6 +502,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([PREV_RELEASE_VERSION])
         test.check_current_client(None)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_external_client_not_matching_cluster_version_ignore(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version;
@@ -554,6 +560,7 @@ class ClientConfigTests(unittest.TestCase):
 
 
 # Client configuration tests using a cluster of previous release version
+@unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
 class ClientConfigPrevVersionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -572,7 +579,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
         test.check_initialization_state("created")
-        test.check_healthy_status(True)
+        test.check_healthy_status(False)
         test.check_available_clients([PREV_RELEASE_VERSION, CURRENT_VERSION])
         test.check_current_client(PREV_RELEASE_VERSION)
 
@@ -600,6 +607,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
 
 # Client configuration tests using a separate cluster for each test
 class ClientConfigSeparateCluster(unittest.TestCase):
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_wait_cluster_to_upgrade(self):
         # Test starting a client incompatible to a cluster and connecting
         # successfuly after cluster upgrade
@@ -710,6 +718,7 @@ class ClientTracingTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.cluster.tear_down()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_default_config_normal_case(self):
         # Test trace files created with a default trace configuration
         # in a normal case
@@ -726,15 +735,17 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
+        prev_ver_trace = self.find_trace_file(
+            with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        )
+        self.assertIsNotNone(prev_ver_trace)
         # disable because older version does not guarantee trace flush before network::stop() returns
         # prev_ver_trace = self.find_trace_file(
-        #   with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        #     with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
         # )
-        # there have been sporadic check failures in the trace check below, so we comment this out for the time being
-        # previous release version was likely not flushing trace correctly when network::stop() is called
-        # TODO: re-enable this check when we bump up PREV_RELEASE_VERSION to one where there is such a guarantee
         # self.find_and_check_event(prev_ver_trace, "ClientStart", ["Machine"], [])
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_default_config_error_case(self):
         # Test that no trace files are created with a default configuration
         # when an a client fails to initialize
@@ -770,6 +781,7 @@ class ClientTracingTests(unittest.TestCase):
             cur_ver_trace, "ClientStart", ["Machine"], [], seqno=1
         )
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_init_on_setup_trace_error_case(self):
         # Test trace files created with trace_initialize_on_setup option
         # when an a client fails to initialize
@@ -911,7 +923,9 @@ if __name__ == "__main__":
     sys.argv[1:] = args.unittest_args
 
     downloader = FdbBinaryDownloader(args.build_dir)
-    downloader.download_old_binaries(PREV_RELEASE_VERSION)
-    downloader.download_old_binaries(PREV2_RELEASE_VERSION)
+    test_prev_versions = downloader.old_binaries_available
+    if test_prev_versions:
+        downloader.download_old_binaries(PREV_RELEASE_VERSION)
+        downloader.download_old_binaries(PREV2_RELEASE_VERSION)
 
     unittest.main(verbosity=2)

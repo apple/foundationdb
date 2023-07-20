@@ -433,14 +433,14 @@ ACTOR Future<Void> fdbClientStream() {
 	state int64_t bytes = 0;
 	state Future<Void> logFuture = logThroughput(&bytes, &next);
 	loop {
-		state PromiseStream<RangeReadResult> results;
+		state PromiseStream<Standalone<RangeResultRef>> results;
 		try {
 			state Future<Void> stream = tx.getRangeStream(results,
 			                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
 			                                              KeySelector(firstGreaterOrEqual(normalKeys.end)),
 			                                              GetRangeLimits());
 			loop {
-				RangeReadResult range = waitNext(results.getFuture());
+				Standalone<RangeResultRef> range = waitNext(results.getFuture());
 				if (range.size()) {
 					bytes += range.expectedSize();
 					next = keyAfter(range.back().key);
@@ -464,7 +464,7 @@ ACTOR Future<Void> fdbClientGetRange() {
 	state Future<Void> logFuture = logThroughput(&bytes, &next);
 	loop {
 		try {
-			RangeReadResult range =
+			Standalone<RangeResultRef> range =
 			    wait(tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
 			                     KeySelector(firstGreaterOrEqual(normalKeys.end)),
 			                     GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
@@ -499,7 +499,7 @@ ACTOR Future<Void> fdbClient() {
 			// 3. write 10 values in [k, k+100]
 			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
 			startKey = keyPrefix + std::to_string(beginIdx);
-			RangeReadResult range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
+			RangeResult range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
 			for (int i = 0; i < 10; ++i) {
 				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
 				tx.set(k, "foo"_sr);
@@ -520,7 +520,7 @@ ACTOR Future<Void> fdbStatusStresser() {
 	loop {
 		try {
 			tx.reset();
-			wait(success(tx.get(statusJson)));
+			Optional<Value> _ = wait(tx.get(statusJson));
 		} catch (Error& e) {
 			wait(tx.onError(e));
 		}

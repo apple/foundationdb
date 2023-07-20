@@ -32,18 +32,35 @@
 #include <cstdint>
 #include <unordered_map>
 
+#ifdef WIN32
+#include <windows.h>
+#undef min
+#undef max
+#endif
+
 #ifdef __linux__
 #include <sys/mman.h>
 #include <linux/mman.h>
 #endif
 
+#ifdef __FreeBSD__
+#include <sys/mman.h>
+#endif
+
 #define FAST_ALLOCATOR_DEBUG 0
 
-#if defined(__INTEL_COMPILER)
+#ifdef _MSC_VER
+// warning 4073 warns about "initializers put in library initialization area", which is our intent
+#pragma warning(disable : 4073)
+#pragma init_seg(lib)
+#define INIT_SEG
+#elif defined(__INTEL_COMPILER)
 // intel compiler ignored INIT_SEG for thread local variables
 #define INIT_SEG
 #elif defined(__GNUG__)
 #ifdef __linux__
+#define INIT_SEG __attribute__((init_priority(1000)))
+#elif defined(__FreeBSD__)
 #define INIT_SEG __attribute__((init_priority(1000)))
 #elif defined(__APPLE__)
 #pragma message "init_priority is not supported on this platform; will this be a problem?"
@@ -151,6 +168,10 @@ void recordAllocation(void* ptr, size_t size) {
 		void* buffer[100];
 #if defined(__linux__)
 		int nptrs = backtrace(buffer, 100);
+#elif defined(_WIN32)
+		// We could be using fourth parameter to get a hash, but we'll do this
+		//  in a unified way between platforms
+		int nptrs = CaptureStackBackTrace(1, 100, buffer, nullptr);
 #else
 #error Instrumentation not supported on this platform
 #endif
@@ -538,12 +559,22 @@ void FastAllocator<Size>::getMagazine() {
 
 	void** block = nullptr;
 #if FAST_ALLOCATOR_DEBUG
+#ifdef WIN32
+	static int alt = 0;
+	alt++;
+	block = (void**)VirtualAllocEx(GetCurrentProcess(),
+	                               (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size),
+	                               magazine_size * Size,
+	                               MEM_COMMIT | MEM_RESERVE,
+	                               PAGE_READWRITE);
+#else
 	static int alt = 0;
 	alt++;
 	void* desiredBlock = (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size);
 	block =
 	    (void**)mmap(desiredBlock, magazine_size * Size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	ASSERT(block == desiredBlock);
+#endif
 #else
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages

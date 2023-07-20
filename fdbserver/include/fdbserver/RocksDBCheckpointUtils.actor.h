@@ -31,26 +31,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-class ICheckpointByteSampleReader {
-public:
-	virtual ~ICheckpointByteSampleReader() {}
-
-	virtual KeyValue next() = 0;
-
-	virtual bool hasNext() const = 0;
-};
-
-class IRocksDBSstFileWriter {
-public:
-	virtual void open(const std::string localFile) = 0;
-
-	virtual void write(const KeyRef key, const ValueRef value) = 0;
-
-	virtual bool finish() = 0;
-
-	virtual ~IRocksDBSstFileWriter() {}
-};
-
 struct CheckpointFile {
 	constexpr static FileIdentifier file_identifier = 13804348;
 	std::string path;
@@ -304,10 +284,6 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
                                               const CheckpointAsKeyValues checkpointAsKeyValues,
                                               UID logID);
-
-std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
-
-std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 

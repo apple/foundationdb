@@ -40,8 +40,8 @@ ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
 		// hold the returned standalone object's memory
-		state ThreadFuture<ValueReadResult> suspendedF = tr->get(consistencyCheckSpecialKey);
-		ValueReadResult suspended = wait(safeThreadFutureToFuture(suspendedF));
+		state ThreadFuture<Optional<Value>> suspendedF = tr->get(consistencyCheckSpecialKey);
+		Optional<Value> suspended = wait(safeThreadFutureToFuture(suspendedF));
 		printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
 		tr->set(consistencyCheckSpecialKey, Value());

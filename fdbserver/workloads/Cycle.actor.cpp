@@ -28,7 +28,6 @@
 #include "fdbrpc/TenantInfo.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Tracing.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -156,26 +155,24 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() <= self->traceParentProbability) {
-					state Span span(SpanContext(deterministicRandom()->randomUniqueID(),
-					                            deterministicRandom()->randomUInt64(),
-					                            TraceFlags::sampled),
-					                "CycleClient"_loc);
+					state Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
-					tr.setOption(FDBTransactionOptions::TRACE_PARENT, span.context.toString());
+					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
+					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
 					try {
 						self->setAuthToken(tr);
 						// Reverse next and next^2 node
-						ValueReadResult v = wait(tr.get(self->key(r)));
+						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present())
 							self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
-						ValueReadResult v2 = wait(tr.get(self->key(r2)));
+						Optional<Value> v2 = wait(tr.get(self->key(r2)));
 						if (!v2.present())
 							self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
-						ValueReadResult v3 = wait(tr.get(self->key(r3)));
+						Optional<Value> v3 = wait(tr.get(self->key(r3)));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
@@ -298,7 +295,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
-			// ok = false;
+			ok = false;
 		}
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
@@ -308,9 +305,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				try {
 					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
-					RangeReadResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
-					                                        firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
-					                                        self->nodeCount + 1));
+					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                                    self->nodeCount + 1));
 					ok = self->cycleCheckData(data, v) && ok;
 					break;
 				} catch (Error& e) {
@@ -331,8 +328,8 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 
 ACTOR Future<Void> prepareToken(Database cx, CycleWorkload<true>* self) {
 	cx->defaultTenant = self->tenant;
-	TenantLookupInfo tenantLookupInfo = wait(cx->lookupTenant(self->tenant));
-	self->tenantId = tenantLookupInfo.id;
+	int64_t tenantId = wait(cx->lookupTenant(self->tenant));
+	self->tenantId = tenantId;
 	ASSERT_NE(self->tenantId, TenantInfo::INVALID_TENANT);
 	// make the lifetime comfortably longer than the timeout of the workload
 	self->signedToken = g_simulator->makeToken(self->tenantId,

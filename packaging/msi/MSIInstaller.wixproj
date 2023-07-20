@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(SolutionDir)versions.target" />
+  <PropertyGroup Condition="'$(Release)' != 'true' ">
+    <SuppressValidation>true</SuppressValidation>
+    <PreReleaseDecoration>-PRERELEASE</PreReleaseDecoration>
+    <PreReleaseVersion>.0</PreReleaseVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Release)' == 'true' ">
+    <SuppressValidation>true</SuppressValidation>
+    <PreReleaseDecoration>
+    </PreReleaseDecoration>
+    <PreReleaseVersion>.1</PreReleaseVersion>
+  </PropertyGroup>
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <ProductVersion>3.7</ProductVersion>
+    <ProjectGuid>{c797e922-c07d-489f-b3cf-5ac35b709f4c}</ProjectGuid>
+    <SchemaVersion>2.0</SchemaVersion>
+    <OutputName>foundationdb-$(Version)$(PreReleaseDecoration)-$(Platform)</OutputName>
+    <OutputType>Package</OutputType>
+    <SuppressIces>ICE09;ICE32;ICE61;ICE99</SuppressIces>
+    <OutputPath>$(SolutionDir)bin\$(Configuration)\</OutputPath>
+    <LinkerAdditionalOptions>-ext WixUIExtension</LinkerAdditionalOptions>
+    <IntermediateOutputPath>$(SystemDrive)\temp\msvcfdb\$(Platform)$(Configuration)\$(MSBuildProjectName)\</IntermediateOutputPath>
+    <WixTargetsPath Condition=" '$(WixTargetsPath)' == '' AND '$(MSBuildExtensionsPath32)' != '' ">$(MSBuildExtensionsPath32)\Microsoft\WiX\v3.x\Wix.targets</WixTargetsPath>
+    <WixTargetsPath Condition=" '$(WixTargetsPath)' == '' ">$(MSBuildExtensionsPath)\Microsoft\WiX\v3.x\Wix.targets</WixTargetsPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
+    <DefineConstants>Debug;Version=$(Version)$(PreReleaseVersion);VersionName=$(PackageName);bindir=$(SolutionDir)bin\$(Configuration)\;SolutionRoot=$(SolutionDir);ProjectRoot=$(MSBuildProjectDirectory)</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
+    <DefineConstants>Version=$(Version)$(PreReleaseVersion);VersionName=$(PackageName);bindir=$(SolutionDir)bin\$(Configuration)\;SolutionRoot=$(SolutionDir);ProjectRoot=$(MSBuildProjectDirectory)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="FDBInstaller.wxs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Inputs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\bindings\c\foundationdb\fdb_c.h">
+      <Link>Inputs\fdb_c.h</Link>
+    </Content>
+    <Content Include="..\..\bindings\python\fdb\fdboptions.py">
+      <Link>Inputs\fdboptions.py</Link>
+    </Content>
+    <Content Include="..\..\bindings\python\fdb\impl.py">
+      <Link>Inputs\impl.py</Link>
+    </Content>
+    <Content Include="..\..\bindings\python\fdb\six.py">
+      <Link>Inputs\six.py</Link>
+    </Content>
+    <Content Include="..\..\bindings\python\fdb\tuple.py">
+      <Link>Inputs\tuple.py</Link>
+    </Content>
+    <Content Include="..\..\bindings\python\fdb\locality.py">
+      <Link>Inputs\locality.py</Link>
+    </Content>
+    <Content Include="..\..\bindings\python\fdb\__init__.py">
+      <Link>Inputs\__init__.py</Link>
+    </Content>
+    <Content Include="..\..\README.md">
+      <Link>Inputs\README.md</Link>
+    </Content>
+    <Content Include="..\foundationdb.ico">
+      <Link>Inputs\foundationdb.ico</Link>
+    </Content>
+    <Content Include="art\banner.jpg">
+      <Link>Inputs\banner.jpg</Link>
+    </Content>
+    <Content Include="art\dialog.jpg">
+      <Link>Inputs\dialog.jpg</Link>
+    </Content>
+    <Content Include="skeleton.conf">
+      <Link>Inputs\skeleton.conf</Link>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(WixTargetsPath)" />
+</Project>

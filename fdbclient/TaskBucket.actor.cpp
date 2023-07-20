@@ -168,7 +168,7 @@ public:
 		state Subspace space = taskBucket->getAvailableSpace(priority);
 		{
 			// Get a task key that is <= a random UID task key, if successful then return it
-			RangeReadResult value =
+			RangeResult value =
 			    wait(tr->getRange(KeyRangeRef(space.key(), space.pack(uid)), 1, Snapshot::True, Reverse::True));
 			if (!value.empty()) {
 				return Optional<Key>(value[0].key);
@@ -177,7 +177,7 @@ public:
 
 		{
 			// Get a task key that is <= the maximum possible UID, if successful return it.
-			RangeReadResult value =
+			RangeResult value =
 			    wait(tr->getRange(KeyRangeRef(space.key(), space.pack(maxUIDKey)), 1, Snapshot::True, Reverse::True));
 			if (!value.empty()) {
 				return Optional<Key>(value[0].key);
@@ -247,7 +247,7 @@ public:
 		state Reference<Task> task(new Task());
 		task->key = taskUID;
 
-		state RangeReadResult values = wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
+		state RangeResult values = wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
 		Version version = wait(tr->getReadVersion());
 		task->timeoutVersion =
 		    version + (uint64_t)(taskBucket->timeout *
@@ -291,7 +291,7 @@ public:
 
 		tb->setOptions(tr);
 
-		ValueReadResult keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
+		Optional<Value> keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
 
 		if (!keyValue.present()) {
 			TraceEvent("TaskBucketTaskVerifyInvalidTask")
@@ -560,7 +560,7 @@ public:
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
 				taskBucket->setOptions(tr);
-				ValueReadResult pausedVal = wait(tr->get(taskBucket->pauseKey));
+				Optional<Value> pausedVal = wait(tr->get(taskBucket->pauseKey));
 				paused->set(pausedVal.present());
 				state Future<Void> watchPausedFuture = tr->watch(taskBucket->pauseKey);
 				wait(tr->commit());
@@ -606,19 +606,19 @@ public:
 		taskBucket->setOptions(tr);
 
 		// Check all available priorities for keys
-		state std::vector<Future<RangeReadResult>> resultFutures;
+		state std::vector<Future<RangeResult>> resultFutures;
 		for (int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then the taskbucket is not empty so return false
 		state int i;
 		for (i = 0; i < resultFutures.size(); ++i) {
-			RangeReadResult results = wait(resultFutures[i]);
+			RangeResult results = wait(resultFutures[i]);
 			if (results.size() > 0)
 				return false;
 		}
 
-		RangeReadResult values = wait(tr->getRange(taskBucket->timeouts.range(), 1));
+		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(), 1));
 		if (values.size() > 0)
 			return false;
 
@@ -629,14 +629,14 @@ public:
 		taskBucket->setOptions(tr);
 
 		// Check all available priorities for emptiness
-		state std::vector<Future<RangeReadResult>> resultFutures;
+		state std::vector<Future<RangeResult>> resultFutures;
 		for (int pri = 0; pri <= CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; ++pri)
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then return true as the level is 'busy'
 		state int i;
 		for (i = 0; i < resultFutures.size(); ++i) {
-			RangeReadResult results = wait(resultFutures[i]);
+			RangeResult results = wait(resultFutures[i]);
 			if (results.size() > 0)
 				return true;
 		}
@@ -651,7 +651,7 @@ public:
 		taskBucket->setOptions(tr);
 
 		Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
-		RangeReadResult values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
+		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
 		if (values.size() > 0)
 			return false;
 
@@ -663,7 +663,7 @@ public:
 	                                       Optional<Value> startingValue) {
 		taskBucket->setOptions(tr);
 
-		ValueReadResult new_value = wait(tr->get(taskBucket->active.key()));
+		Optional<Value> new_value = wait(tr->get(taskBucket->active.key()));
 		if (new_value != startingValue) {
 			return true;
 		}
@@ -683,7 +683,7 @@ public:
 					wait(success(addIdle(tr, taskBucket)));
 				}
 
-				ValueReadResult val = wait(tr->get(taskBucket->active.key()));
+				Optional<Value> val = wait(tr->get(taskBucket->active.key()));
 				startingValue = val;
 
 				wait(tr->commit());
@@ -721,7 +721,7 @@ public:
 	                                          Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
-		ValueReadResult val = wait(tr->get(taskBucket->prefix.pack("task_count"_sr)));
+		Optional<Value> val = wait(tr->get(taskBucket->prefix.pack("task_count"_sr)));
 
 		if (!val.present())
 			return 0;
@@ -743,7 +743,7 @@ public:
 		state KeyRange range(
 		    KeyRangeRef(taskBucket->timeouts.get(0).range().begin, taskBucket->timeouts.get(end).range().end));
 
-		RangeReadResult values = wait(tr->getRange(range, CLIENT_KNOBS->TASKBUCKET_MAX_TASK_KEYS));
+		RangeResult values = wait(tr->getRange(range, CLIENT_KNOBS->TASKBUCKET_MAX_TASK_KEYS));
 
 		// Keys will be tuples of (taskUID, param) -> paramValue
 		// Unfortunately we need to know the priority parameter for a taskUID before we can know which available-tasks
@@ -794,7 +794,7 @@ public:
 	ACTOR static Future<Void> debugPrintRange(Reference<ReadYourWritesTransaction> tr, Subspace subspace, Key msg) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		RangeReadResult values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
 		TraceEvent("TaskBucketDebugPrintRange")
 		    .detail("Key", subspace.key())
 		    .detail("Count", values.size())
@@ -852,7 +852,7 @@ public:
 		} else {
 			CODE_PROBE(true, "Extended a task without updating parameters");
 			// Otherwise, read and transplant the params from the old to new timeout spaces
-			RangeReadResult params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
+			RangeResult params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
 			for (auto& kv : params) {
 				Tuple paramKey = oldTimeoutSpace.unpack(kv.key);
 				tr->set(newTimeoutSpace.pack(paramKey), kv.value);
@@ -934,7 +934,7 @@ ACTOR static Future<Key> actorAddTask(TaskBucket* tb,
                                       KeyRef validationKey) {
 	tb->setOptions(tr);
 
-	ValueReadResult validationValue = wait(tr->get(validationKey));
+	Optional<Value> validationValue = wait(tr->get(validationKey));
 
 	if (!validationValue.present()) {
 		TraceEvent(SevError, "TaskBucketAddTaskInvalidKey")
@@ -1035,7 +1035,7 @@ public:
 	ACTOR static Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr, Reference<FutureBucket> futureBucket) {
 		futureBucket->setOptions(tr);
 
-		KeyReadResult lastKey = wait(tr->getKey(lastLessOrEqual(futureBucket->prefix.pack(maxUIDKey))));
+		Key lastKey = wait(tr->getKey(lastLessOrEqual(futureBucket->prefix.pack(maxUIDKey))));
 		return !futureBucket->prefix.contains(lastKey);
 	}
 };
@@ -1112,7 +1112,7 @@ public:
 	ACTOR static Future<bool> isSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
-		RangeReadResult values = wait(tr->getRange(taskFuture->blocks.range(), 1));
+		RangeResult values = wait(tr->getRange(taskFuture->blocks.range(), 1));
 		if (values.size() > 0)
 			return false;
 
@@ -1175,7 +1175,7 @@ public:
 	                                            Reference<TaskFuture> taskFuture) {
 		taskFuture->futureBucket->setOptions(tr);
 
-		RangeReadResult values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
 		tr->clear(taskFuture->callbacks.range());
 
 		std::vector<Future<Void>> actions;
@@ -1225,7 +1225,7 @@ public:
 	                                       KeyRef validationKey) {
 		taskFuture->futureBucket->setOptions(tr);
 
-		ValueReadResult validationValue = wait(tr->get(validationKey));
+		Optional<Value> validationValue = wait(tr->get(validationKey));
 
 		if (!validationValue.present()) {
 			TraceEvent(SevError, "TaskBucketOnSetAddTaskInvalidKey")

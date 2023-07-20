@@ -2,7 +2,11 @@
 
 # Support preference of static libs by adjusting CMAKE_FIND_LIBRARY_SUFFIXES
 if(WOLFSSL_USE_STATIC_LIBS)
-  set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+  if(WIN32)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  else()
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+  endif()
 endif()
 
 find_path(WOLFSSL_ROOT_DIR

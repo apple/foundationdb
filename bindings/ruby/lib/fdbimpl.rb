@@ -36,8 +36,8 @@ module FDB
   module FDBC
     require 'rbconfig'
 
-    unless ["x86_64", "arm64"].include? RbConfig::CONFIG['host_cpu']
-      raise LoadError, "FoundationDB API only supported on x86_64 and arm64 (not #{RbConfig::CONFIG['host_cpu']})"
+    if RbConfig::CONFIG['host_cpu'] != "x86_64"
+      raise LoadError, "FoundationDB API only supported on x86_64 (not #{RbConfig::CONFIG['host_cpu']})"
     end
 
     case RbConfig::CONFIG['host_os']

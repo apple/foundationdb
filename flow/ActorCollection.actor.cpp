@@ -161,8 +161,8 @@ TEST_CASE("/flow/actorCollection/testCancel") {
 	return Void();
 }
 
-Future<Void> failedActor() {
-	return operation_failed();
+ACTOR Future<Void> failedActor() {
+	throw operation_failed();
 }
 
 // test contract that even if the actor collection has stopped and new actors are added to the promise stream, they are
