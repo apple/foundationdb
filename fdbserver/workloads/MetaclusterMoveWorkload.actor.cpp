@@ -237,7 +237,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    wait(metacluster::getTenant(self->managementDb, tenantName));
 				TraceEvent(SevDebug, "MetaclusterMoveWorkloadCreatedTenant")
 				    .detail("Tenant", tenantName)
-				    .detail("TenantId", createdEntry.id);
+				    .detail("TenantId", createdEntry.id)
+				    .detail("Cluster", createdEntry.assignedCluster)
+				    .detail("TenantGroup", createdEntry.tenantGroup.get());
 				self->createdTenants[createdEntry.id] =
 				    TestTenantData(tenantName, createdEntry.assignedCluster, createdEntry.tenantGroup);
 				self->tenantNameIndex[tenantName] = createdEntry.id;
@@ -927,7 +929,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("Src", srcCluster)
 				    .detail("Dst", dstCluster)
 				    .detail("TenantGroup", tenantGroup)
-				    .detail("TenantsInGroup", self->tenantGroups[srcCluster].tenants.size())
+				    .detail("TenantsInGroup", self->tenantGroups[tenantGroup].tenants.size())
 				    .detail("GroupsOnSrc", self->dataDbs[srcCluster].tenantGroups.size())
 				    .detail("GroupsOnDst", self->dataDbs[dstCluster].tenantGroups.size());
 				cmdChoice = deterministicRandom()->randomChoice(initFailCmds);
