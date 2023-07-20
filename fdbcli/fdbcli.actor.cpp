@@ -1618,9 +1618,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "getlocation")) {
-					Version _v = wait(makeInterruptable(
-					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
-					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens, _v)));
+					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
