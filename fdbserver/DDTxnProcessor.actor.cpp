@@ -517,7 +517,7 @@ class DDTxnProcessorImpl {
 					TraceEvent(SevDebug, "WaitForDDEnabled")
 					    .detail("Mode", m)
 					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-					if (m != 0 && ddEnabledState->isEnabled()) {
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
 						return Void();
 					}
@@ -545,7 +545,7 @@ class DDTxnProcessorImpl {
 					BinaryReader rd(mode.get(), Unversioned());
 					int m;
 					rd >> m;
-					if (m != 0 && ddEnabledState->isEnabled()) {
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 						    .detail("Mode", m)
 						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
@@ -577,7 +577,6 @@ class DDTxnProcessorImpl {
 	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
 		loop {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
-			TraceEvent("PollMoveKeysLock");
 			state Transaction tr(cx);
 			loop {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -587,7 +586,6 @@ class DDTxnProcessorImpl {
 					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
 					break;
 				} catch (Error& e) {
-					TraceEvent("PollMoveKeysLockError").errorUnsuppressed(e);
 					wait(tr.onError(e));
 				}
 			}
