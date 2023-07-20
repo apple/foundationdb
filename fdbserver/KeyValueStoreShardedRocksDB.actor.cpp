@@ -119,6 +119,35 @@ ACTOR Future<Void> forwardError(Future<int> input) {
 	throw Error::fromCode(errorCode);
 }
 
+int getWriteStallState(const rocksdb::WriteStallCondition& condition) {
+	if (condition == rocksdb::WriteStallCondition::kDelayed)
+		return 0;
+	if (condition == rocksdb::WriteStallCondition::kStopped)
+		return 1;
+	if (condition == rocksdb::WriteStallCondition::kNormal)
+		return 2;
+
+	// unexpected.
+	return 3;
+}
+
+class RocksDBEventListener : public rocksdb::EventListener {
+public:
+	RocksDBEventListener(UID id) : logId(id) {}
+	void OnStallConditionsChanged(const rocksdb::WriteStallInfo& info) override {
+		auto curState = getWriteStallState(info.condition.cur);
+		auto prevState = getWriteStallState(info.condition.prev);
+		auto severity = curState == 1 ? SevWarnAlways : SevInfo;
+		TraceEvent(severity, "WriteStallInfo", logId)
+		    .detail("CF", info.cf_name)
+		    .detail("CurrentState", curState)
+		    .detail("PrevState", prevState);
+	}
+
+private:
+	UID logId;
+};
+
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
 // inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
@@ -871,7 +900,7 @@ struct Counters {
 	Counter convertedRangeDeletions;
 
 	Counters()
-	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc),
+	  : cc("RocksDBCounters"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
 	    convertedRangeDeletions("ConvertedRangeDeletions", cc) {}
 };
 
@@ -885,7 +914,12 @@ public:
 	             Counters* cc)
 	  : path(path), logId(logId), dbOptions(options), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end),
 	    counters(cc) {
-		dbOptions.listeners.push_back(errorListener);
+		if (!g_network->isSimulated()) {
+			// Generating trace events in non-FDB thread will cause errors. The event listener is tested with local FDB
+			// cluster.
+			dbOptions.listeners.push_back(errorListener);
+			dbOptions.listeners.push_back(std::make_shared<RocksDBEventListener>(logId));
+		}
 	}
 
 	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
@@ -1953,6 +1987,10 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 		ASSERT(db->GetAggregatedIntProperty(property, &stat));
 		e.detail(name, stat);
 	}
+
+	std::string propValue = "";
+	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
+	TraceEvent(SevInfo, "DBWriteStallStats", debugID).detail("Stats", propValue);
 }
 
 void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
@@ -3255,6 +3293,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->metrics.reset();
 		self->refreshHolder.cancel();
 		self->cleanUpJob.cancel();
+		self->counterLogger.cancel();
 
 		try {
 			wait(self->readThreads->stop());
@@ -3313,6 +3352,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
 			writeThread->post(a.release());
+			counterLogger = counters.cc.traceCounters("RocksDBCounters", id, SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
 			return openFuture;
 		}
 	}
@@ -3608,6 +3648,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Counters counters;
 	Future<Void> refreshHolder;
 	Future<Void> cleanUpJob;
+	Future<Void> counterLogger;
 };
 
 ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
