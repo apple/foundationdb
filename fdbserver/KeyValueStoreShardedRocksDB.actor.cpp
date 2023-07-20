@@ -900,7 +900,7 @@ struct Counters {
 	Counter convertedRangeDeletions;
 
 	Counters()
-	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc),
+	  : cc("RocksDBCounters"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
 	    convertedRangeDeletions("ConvertedRangeDeletions", cc) {}
 };
 
@@ -3293,6 +3293,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->metrics.reset();
 		self->refreshHolder.cancel();
 		self->cleanUpJob.cancel();
+		self->counterLogger.cancel();
 
 		try {
 			wait(self->readThreads->stop());
@@ -3351,6 +3352,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
 			writeThread->post(a.release());
+			counterLogger = counters.cc.traceCounters("RocksDBCounters", id, SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
 			return openFuture;
 		}
 	}
@@ -3646,6 +3648,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Counters counters;
 	Future<Void> refreshHolder;
 	Future<Void> cleanUpJob;
+	Future<Void> counterLogger;
 };
 
 ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
