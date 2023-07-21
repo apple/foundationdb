@@ -34,6 +34,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/DeterministicRandom.h"
 #include "flow/network.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -223,6 +224,8 @@ Key getApplyKey(Version version, Key backupUid) {
 	return k2.withPrefix(applyLogKeys.begin);
 }
 
+// It's important to keep the hash value consistent with the one used in getLogRanges.
+// Otherwise, the same version will result in different keys.
 Key getLogKey(Version version, Key backupUid, int blockSize) {
 	int64_t vblock = version / blockSize;
 	vblock = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -241,9 +244,10 @@ TEST_CASE("/backup/logversion") {
 		versions.push_back(deterministicRandom()->randomInt64(0, std::numeric_limits<int32_t>::max()));
 	}
 	Key backupUid = "backupUid0"_sr;
+	int blockSize = deterministicRandom()->coinflip() ? CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE : 100'000;
 	for (const auto v : versions) {
-		Key k = getLogKey(v, backupUid);
-		Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, backupUid);
+		Key k = getLogKey(v, backupUid, blockSize);
+		Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, backupUid, blockSize);
 		ASSERT(ranges[0].contains(k));
 	}
 	return Void();
