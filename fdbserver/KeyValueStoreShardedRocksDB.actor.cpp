@@ -522,6 +522,7 @@ rocksdb::Options getOptions() {
 	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
+	options.max_write_buffer_number = SERVER_KNOBS->ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
 	return options;
 }
 
