@@ -848,7 +848,7 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				throw e;
 			}
 			if (retryCount > 50) {
-				TraceEvent(SevWarnAlways, "initAuditMetadataFailed", dataDistributorId).errorUnsuppressed(e);
+				TraceEvent(SevWarnAlways, "InitAuditMetadataFailed", dataDistributorId).errorUnsuppressed(e);
 				break;
 			}
 			wait(tr.onError(e));

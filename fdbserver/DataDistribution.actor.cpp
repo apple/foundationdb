@@ -380,6 +380,7 @@ public:
 	FlowLock auditStorageReplicaLaunchingLock;
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
+	Promise<Void> auditStorageInitialized;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
@@ -467,6 +468,7 @@ public:
 		                           self->ddId,
 		                           SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT));
 		self->resumeAuditStorage(self, auditStatesToResume);
+		self->auditStorageInitialized.send(Void());
 		return Void();
 	}
 
@@ -2011,6 +2013,10 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 
 	state UID auditID;
 	try {
+		TraceEvent(SevInfo, "DDAuditStorageLaunchStarts", self->ddId)
+		    .detail("AuditType", auditType)
+		    .detail("RequestedRange", auditRange);
+		wait(self->auditStorageInitialized.getFuture());
 		// Start an audit if no audit exists
 		// If existing an audit for a different purpose, send error to client
 		// aka, we only allow one audit at a time for all purposes
