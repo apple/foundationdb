@@ -808,13 +808,14 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				throw e;
 			}
 			if (retryCount > 50) {
-				TraceEvent(
-				    g_network->isSimulated() ? SevError : SevWarnAlways, "InitAuditMetadataFailed", dataDistributorId)
-				    .errorUnsuppressed(e);
+				TraceEvent(SevWarnAlways, "InitAuditMetadataExceedRetryMax", dataDistributorId).errorUnsuppressed(e);
 				break;
 			}
-			wait(tr.onError(e));
-			retryCount++;
+			try {
+				wait(tr.onError(e));
+			} catch (Error& e) {
+				retryCount++;
+			}
 		}
 	}
 	return auditStatesToResume;

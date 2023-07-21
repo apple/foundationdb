@@ -1885,7 +1885,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		if (e.code() == error_code_movekeys_conflict) {
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit
-			throw e; // throw to DD and DD will restart
+			// Silently exit
 		} else if (e.code() == error_code_audit_storage_cancelled) {
 			// If this audit is cancelled, the place where cancelling
 			// this audit does removeAuditFromAuditMap
