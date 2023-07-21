@@ -750,17 +750,22 @@ ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, 
 	return true;
 }
 
-ACTOR Future<std::vector<AuditStorageState>> loadAndUpdateAuditMetadataWithNewDDId(Database cx,
-                                                                                   MoveKeyLockInfo lock,
-                                                                                   bool ddEnabled,
-                                                                                   UID dataDistributorId) {
-	// Load and update audit metadata
-	state std::vector<AuditStorageState> auditStates;
+// Load RUNNING audit states to resume, clean up COMPLETE and FAILED audit states
+// Update ddId for RUNNING audit states
+ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
+                                                               MoveKeyLockInfo lock,
+                                                               bool ddEnabled,
+                                                               UID dataDistributorId,
+                                                               int persistFinishAuditCount) {
+	state std::unordered_map<AuditType, std::vector<AuditStorageState>> existingAuditStates;
+	state std::vector<AuditStorageState> auditStatesToResume;
 	state Transaction tr(cx);
 	state int retryCount = 0;
 	loop {
 		try {
-			auditStates.clear();
+			// Load existing audit states and update ddId in audit states
+			existingAuditStates.clear();
+			auditStatesToResume.clear();
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -786,7 +791,55 @@ ACTOR Future<std::vector<AuditStorageState>> loadAndUpdateAuditMetadataWithNewDD
 					toUpdate.ddId = dataDistributorId;
 					tr.set(auditKey(toUpdate.getType(), toUpdate.id), auditStorageStateValue(toUpdate));
 				}
-				auditStates.push_back(auditState);
+				existingAuditStates[auditState.getType()].push_back(auditState);
+			}
+			// Cleanup Complete/Failed audit metadata for each type separately
+			for (const auto& [auditType, _] : existingAuditStates) {
+				int numFinishAudit = 0; // "finish" audits include Complete/Failed audits
+				for (const auto& auditState : existingAuditStates[auditType]) {
+					if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed) {
+						numFinishAudit++;
+					}
+				}
+				const int numFinishAuditsToClear = numFinishAudit - persistFinishAuditCount;
+				int numFinishAuditsCleared = 0;
+				std::sort(existingAuditStates[auditType].begin(),
+				          existingAuditStates[auditType].end(),
+				          [](AuditStorageState a, AuditStorageState b) {
+					          return a.id < b.id; // Inplacement sort in ascending order
+				          });
+				for (const auto& auditState : existingAuditStates[auditType]) {
+					if (auditState.getPhase() == AuditPhase::Failed) {
+						if (numFinishAuditsCleared < numFinishAuditsToClear) {
+							// Clear both audit metadata and corresponding progress metadata
+							tr.clear(auditKey(auditState.getType(), auditState.id));
+							clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
+							numFinishAuditsCleared++;
+							TraceEvent(SevInfo, "AuditUtilMetadataCleared", dataDistributorId)
+							    .detail("AuditID", auditState.id)
+							    .detail("AuditType", auditState.getType())
+							    .detail("AuditRange", auditState.range);
+						}
+					} else if (auditState.getPhase() == AuditPhase::Complete) {
+						if (numFinishAuditsCleared < numFinishAuditsToClear) {
+							// Clear audit metadata only
+							// No need to clear the corresponding progress metadata
+							// since it has been cleared for Complete audits
+							tr.clear(auditKey(auditState.getType(), auditState.id));
+							numFinishAuditsCleared++;
+							TraceEvent(SevInfo, "AuditUtilMetadataCleared", dataDistributorId)
+							    .detail("AuditID", auditState.id)
+							    .detail("AuditType", auditState.getType())
+							    .detail("AuditRange", auditState.range);
+						}
+					} else if (auditState.getPhase() == AuditPhase::Running) {
+						auditStatesToResume.push_back(auditState);
+						TraceEvent(SevInfo, "AuditUtilMetadataAddedToResume", dataDistributorId)
+						    .detail("AuditID", auditState.id)
+						    .detail("AuditType", auditState.getType())
+						    .detail("AuditRange", auditState.range);
+					}
+				}
 			}
 			wait(tr.commit());
 			break;
@@ -795,13 +848,12 @@ ACTOR Future<std::vector<AuditStorageState>> loadAndUpdateAuditMetadataWithNewDD
 				throw e;
 			}
 			if (retryCount > 50) {
-				TraceEvent(SevWarnAlways, "AuditUtilLoadMetadataFailed", dataDistributorId).errorUnsuppressed(e);
-				return auditStates;
+				TraceEvent(SevWarnAlways, "initAuditMetadataFailed", dataDistributorId).errorUnsuppressed(e);
+				break;
 			}
 			wait(tr.onError(e));
 			retryCount++;
 		}
 	}
-	TraceEvent(SevVerbose, "AuditUtilLoadMetadataDone", dataDistributorId);
-	return auditStates;
+	return auditStatesToResume;
 }

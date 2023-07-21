@@ -184,7 +184,6 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> checkAuditStorageInternalState(Database cx, AuditType type, UID auditId, std::string context) {
-		// Check no audit is in Running or Error phase
 		// Check the number of existing persisted audits is no more than PERSIST_FINISH_AUDIT_COUNT
 		state Transaction tr(cx);
 		loop {
@@ -217,7 +216,11 @@ struct ValidateStorage : TestWorkload {
 						}
 					}
 				}
-				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
+				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 5) {
+					// Note that 5 is the sum of 4 + 1
+					// In the test, we issue at most 4 concurrent audits at the same time
+					// The 4 concurrent audits may not be complete in time
+					// So, the cleanup does not precisely guarantee PERSIST_FINISH_AUDIT_COUNT
 					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
 					    .detail("ExistCount", res.size())
 					    .detail("Context", context)
