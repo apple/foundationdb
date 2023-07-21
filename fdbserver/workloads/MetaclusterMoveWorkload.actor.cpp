@@ -27,7 +27,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/TenantName.h"
