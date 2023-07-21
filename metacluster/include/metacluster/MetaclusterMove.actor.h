@@ -570,19 +570,21 @@ struct StartTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getTenantSplitPointsFromSource(
-	    StartTenantMovementImpl* self,
-	    TenantName tenantName,
-	    ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture) {
+	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getTenantSplitPointsFromSource(StartTenantMovementImpl* self,
+	                                                                                  TenantName tenantName) {
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tenantName);
 		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
 		// chunkSize = 100MB, use smaller size for simulation to avoid making every range '' - \xff
+		// state int64_t chunkSize = (!g_network->isSimulated()) ? 1e8 : 1e3;
 		state int64_t chunkSize = (!g_network->isSimulated()) ? 1e8 : 1e2;
 		loop {
 			try {
-				resultFuture = srcTr->getRangeSplitPoints(normalKeys, chunkSize);
+				state ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture =
+				    srcTr->getRangeSplitPoints(normalKeys, chunkSize);
+
 				Standalone<VectorRef<KeyRef>> splitPoints = wait(safeThreadFutureToFuture(resultFuture));
-				return splitPoints;
+				Standalone<VectorRef<KeyRef>> copy = VectorRef<KeyRef>(splitPoints);
+				return copy;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(srcTr->onError(e)));
 			}
@@ -590,17 +592,12 @@ struct StartTenantMovementImpl {
 	}
 
 	ACTOR static Future<std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>>>
-	getAllTenantSplitPointsFromSource(StartTenantMovementImpl* self,
-	                                  std::vector<ThreadFuture<Standalone<VectorRef<KeyRef>>>> resultFutures) {
-		ASSERT(self->tenantsInGroup.size());
-		ASSERT(resultFutures.size() == self->tenantsInGroup.size());
+	getAllTenantSplitPointsFromSource(StartTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
 		state std::vector<Future<Standalone<VectorRef<KeyRef>>>> getSplitPointFutures;
-		int i = 0;
+		ASSERT(self->tenantsInGroup.size());
 		for (auto& tenantPair : self->tenantsInGroup) {
 			TenantName tenantName = tenantPair.first;
-			TraceEvent("BreakpointTenantInfo").detail("TenantName", tenantName).detail("TenantId", tenantPair.second);
-			getSplitPointFutures.push_back(getTenantSplitPointsFromSource(self, tenantName, resultFutures[i]));
-			++i;
+			getSplitPointFutures.push_back(getTenantSplitPointsFromSource(self, tenantName));
 		}
 
 		wait(waitForAll(getSplitPointFutures));
@@ -657,9 +654,8 @@ struct StartTenantMovementImpl {
 	ACTOR static Future<Void> writeMovementMetadata(StartTenantMovementImpl* self,
 	                                                Reference<ITransaction> tr,
 	                                                Optional<metadata::management::MovementRecord> movementRecord) {
-		state std::vector<ThreadFuture<Standalone<VectorRef<KeyRef>>>> resultFutures(self->tenantsInGroup.size());
 		state Future<std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>>> splitPointsFuture =
-		    getAllTenantSplitPointsFromSource(self, resultFutures);
+		    getAllTenantSplitPointsFromSource(self, tr);
 
 		ASSERT(movementRecord.present());
 		if (movementRecord.get().mState == metadata::management::MovementState::START_LOCK) {
@@ -725,7 +721,7 @@ struct StartTenantMovementImpl {
 			                                  return initializeMove(self, tr, movementRecord);
 		                                  }));
 
-		TraceEvent("BreakpointStart2").detail("TenantsInGroup", self->tenantsInGroup.size());
+		TraceEvent("BreakpointStart2");
 		if (self->moveRecord.mState < metadata::management::MovementState::START_CREATE) {
 			TraceEvent("BreakpointStart2.1");
 			wait(lockSourceTenants(self));
