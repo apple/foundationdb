@@ -8924,6 +8924,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					}
 					this_block = RangeResult();
 
+					data->fetchKeysTotalCommitBytes += expectedBlockSize;
 					data->fetchKeysBytesBudget -= expectedBlockSize;
 					data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 				}
