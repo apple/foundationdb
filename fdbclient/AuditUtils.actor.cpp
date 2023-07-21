@@ -815,6 +815,7 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				wait(tr.onError(e));
 			} catch (Error& e) {
 				retryCount++;
+				tr.reset();
 			}
 		}
 	}
