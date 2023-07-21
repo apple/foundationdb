@@ -1799,16 +1799,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	lockInfo.prevWrite = self->lock.prevWrite;
 
 	try {
-		if (!self->auditStorageInitialized.getFuture().isReady()) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DDAuditStorageCoreRunError", self->ddId)
-			    .detail("Context", audit->getDDAuditContext())
-			    .detail("AuditID", auditID)
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount)
-			    .detail("AuditType", auditType)
-			    .detail("Range", audit->coreState.range);
-			throw audit_storage_cancelled();
-		}
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
 		loadAndDispatchAudit(self, audit, audit->coreState.range);
