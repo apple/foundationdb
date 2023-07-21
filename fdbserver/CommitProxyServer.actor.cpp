@@ -430,6 +430,18 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			// logRangeMutation.first) 					.detail("PartIndex", part).detail("PartIndexEndian",
 			// bigEndian32(part)).detail("PartData", backupMutation.param1);
 			//			}
+			if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS) {
+				MutationRef m(backupMutation);
+				// replace \xff\x02/blog/... with \xff\x02/dlog/...
+				// replace value with commit version
+				auto param1 = backupMutation.param1.substr(4).withPrefix("\xff\x02/d"_sr);
+				m.param1 = param1;
+				// maybe add toCommit->getMutationCount(), i.e., subversion?
+				m.param2 = StringRef((uint8_t*)&commitVersion, sizeof(commitVersion));
+				auto& tags = self->tagsForKey(m.param1);
+				toCommit->addTags(tags);
+				toCommit->writeTypedMessage(m);
+			}
 		}
 	}
 	return Void();
