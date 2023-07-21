@@ -381,6 +381,7 @@ public:
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
 	Promise<Void> auditStorageInitialized;
+	bool auditStorageInitStarted;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
@@ -395,7 +396,8 @@ public:
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
 	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
-	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1) {}
+	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1),
+	    auditStorageInitStarted(false) {}
 
 	// bootstrap steps
 
@@ -448,7 +450,7 @@ public:
 				continue;
 			}
 			runAuditStorage(self, auditState, 0, DDAuditContext::Resume);
-			TraceEvent(SevInfo, "AuditStorageResume", self->ddId)
+			TraceEvent(SevInfo, "AuditStorageResumed", self->ddId)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
 			    .detail("AuditState", auditState.toString());
@@ -457,6 +459,7 @@ public:
 	}
 
 	ACTOR static Future<Void> initAuditStorage(Reference<DataDistributor> self) {
+		self->auditStorageInitStarted = true;
 		MoveKeyLockInfo lockInfo;
 		lockInfo.myOwner = self->lock.myOwner;
 		lockInfo.prevOwner = self->lock.prevOwner;
@@ -512,7 +515,10 @@ public:
 
 			// AuditStorage does not rely on DatabaseConfiguration
 			// AuditStorage read neccessary info purely from system key space
-			self->addActor.send(self->initAuditStorage(self));
+			if (!self->auditStorageInitStarted) {
+				// Avoid multiple initAuditStorages
+				self->addActor.send(self->initAuditStorage(self));
+			}
 			// It is possible that an audit request arrives and then DDMode
 			// is set to 2 at this point
 			// No polling MoveKeyLock is running
@@ -1793,31 +1799,15 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	lockInfo.prevWrite = self->lock.prevWrite;
 
 	try {
-		if (audit->getDDAuditContext() == DDAuditContext::Resume) {
-			// Since loading metadata when DD init is async with
-			// auditStorageCore, it is possible that the current audit has been completed.
-			// So, we must re-check the current audit state before we really resume it.
-			// If this is the case, there was an alive audit which changed the audit state
-			// metadata from RUNNING to COMPLETE/FAILED/ERROR, and this audit must have
-			// been removed from the audit map. So, re-checking auditState here is sufficient.
-			try {
-				AuditStorageState res = wait(getAuditState(self->txnProcessor->context(), auditType, auditID));
-				if (res.getPhase() != AuditPhase::Running) {
-					TraceEvent(SevInfo, "DDAuditStorageAuditAlreadyFinish", self->ddId)
-					    .detail("AuditState", res.toString());
-					removeAuditFromAuditMap(self, auditType, auditID); // remove audit
-					return Void();
-				}
-			} catch (Error& e) {
-				if (e.code() == error_code_key_not_found) {
-					TraceEvent(SevInfo, "DDAuditStorageAuditAlreadyFinishAndCleaned", self->ddId)
-					    .detail("AuditType", auditType)
-					    .detail("AuditID", auditID);
-					removeAuditFromAuditMap(self, auditType, auditID); // remove audit
-					return Void();
-				}
-				throw e;
-			}
+		if (!self->auditStorageInitialized.getFuture().isReady()) {
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DDAuditStorageCoreRunError", self->ddId)
+			    .detail("Context", audit->getDDAuditContext())
+			    .detail("AuditID", auditID)
+			    .detail("AuditStorageCoreGeneration", currentRetryCount)
+			    .detail("RetryCount", audit->retryCount)
+			    .detail("AuditType", auditType)
+			    .detail("Range", audit->coreState.range);
+			throw audit_storage_cancelled();
 		}
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);

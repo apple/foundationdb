@@ -78,46 +78,6 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 	return res;
 }
 
-ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
-	try {
-		state Transaction tr(cx);
-		TraceEvent(SevDebug, "AuditUtilClearAuditMetadataStart", auditId)
-		    .detail("AuditKey", auditKey(auditType, auditId));
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> res_ = wait(tr.get(auditKey(auditType, auditId)));
-				if (!res_.present()) { // has been cleared
-					break; // Nothing to clear
-				}
-				state AuditStorageState toClearState = decodeAuditStorageState(res_.get());
-				ASSERT(toClearState.id == auditId && toClearState.getType() == auditType);
-				// For a zombie audit, it is in running state
-				// Clear audit metadata
-				tr.clear(auditKey(auditType, auditId));
-				// clear progress metadata
-				if (clearProgressMetadata) {
-					clearAuditProgressMetadata(&tr, auditType, auditId);
-				}
-				wait(tr.commit());
-				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataEnd", auditId)
-				    .detail("AuditKey", auditKey(auditType, auditId));
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataError", auditId)
-				    .detail("AuditKey", auditKey(auditType, auditId));
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		// We do not want audit cleanup effects DD
-		// pass
-	}
-	return Void();
-}
-
 ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId) {
 	try {
 		state Transaction tr(cx);
@@ -848,7 +808,9 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				throw e;
 			}
 			if (retryCount > 50) {
-				TraceEvent(SevWarnAlways, "InitAuditMetadataFailed", dataDistributorId).errorUnsuppressed(e);
+				TraceEvent(
+				    g_network->isSimulated() ? SevError : SevWarnAlways, "InitAuditMetadataFailed", dataDistributorId)
+				    .errorUnsuppressed(e);
 				break;
 			}
 			wait(tr.onError(e));
