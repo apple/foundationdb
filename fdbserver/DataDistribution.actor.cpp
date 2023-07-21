@@ -586,7 +586,7 @@ public:
 					    g_network->isSimulated() ? SevError : SevWarnAlways, "AuditStorageInitStateError", self->ddId);
 				}
 			} else {
-				TraceEvent(SevVerbose, "DDInitTookMoveKeysLock", self->ddId).log();
+				TraceEvent(SevVerbose, "DDInitAuditStorageStarted", self->ddId).log();
 			}
 			// It is possible that an audit request arrives and then DDMode
 			// is set to 2 at this point
@@ -1068,6 +1068,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 		self->auditInitialized = Promise<Void>();
+		self->auditStorageInitStarted = false;
 
 		// Stored outside of data distribution tracker to avoid slow tasks
 		// when tracker is cancelled
