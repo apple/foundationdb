@@ -465,6 +465,8 @@ struct StartTenantMovementImpl {
 	// Parameters filled in during the run
 	std::vector<std::pair<TenantName, int64_t>> tenantsInGroup;
 	Version lockedVersion;
+	Optional<ThreadFuture<Standalone<StringRef>>> vsFuture;
+	Versionstamp mgmtStartVersion;
 	Optional<ThrottleApi::TagQuotaValue> tagQuota;
 	Optional<int64_t> storageQuota;
 
@@ -528,8 +530,13 @@ struct StartTenantMovementImpl {
 			// clusterTenantCount to accommodate for capacity calculations
 			int numTenants = self->tenantsInGroup.size();
 			metadata::management::clusterTenantCount().atomicOp(tr, dstName, numTenants, MutationRef::AddValue);
+			self->vsFuture = tr->getVersionstamp();
 		} else {
 			self->moveRecord = movementRecord.get();
+			state ThreadFuture<Version> threadFuture = tr->getReadVersion();
+			state Version result = wait(safeThreadFutureToFuture(threadFuture));
+			state Versionstamp vs(result, 0);
+			self->mgmtStartVersion = vs;
 		}
 
 		return Void();
@@ -686,15 +693,26 @@ struct StartTenantMovementImpl {
 	                                                         Reference<ITransaction> tr) {
 		state std::vector<Future<std::pair<Optional<TenantMapEntry>, bool>>> createFutures;
 
-		Optional<int64_t> optionalMaxId = wait(TenantMetadata::lastTenantId().get(tr));
+		state Optional<int64_t> optionalMaxId = wait(TenantMetadata::lastTenantId().get(tr));
 		state int64_t maxId = optionalMaxId.present() ? optionalMaxId.get() : 0;
+		// Check "move" tombstones instead of tenant tombstones
+		if (self->vsFuture.present()) {
+			state Standalone<StringRef> result = wait(safeThreadFutureToFuture(self->vsFuture.get()));
+			Versionstamp vs(result);
+			self->mgmtStartVersion = vs;
+		}
+		state Versionstamp lastAbortVersion = wait(lastTenantMoveAbort().getD(tr, Snapshot::False, Versionstamp()));
+		if (self->mgmtStartVersion <= lastAbortVersion) {
+			// Prevent creating new tenants when our version is not caught up
+			throw tenant_move_failed();
+		}
 
 		for (auto& tenantPair : self->tenantsInGroup) {
 			maxId = std::max(tenantPair.second, maxId);
 			TenantMapEntry entry(tenantPair.second, tenantPair.first, self->tenantGroup);
 			entry.tenantLockState = TenantAPI::TenantLockState::LOCKED;
 			entry.tenantLockId = self->moveRecord.runId;
-			createFutures.push_back(TenantAPI::createTenantTransaction(tr, entry, ClusterType::METACLUSTER_DATA));
+			createFutures.push_back(TenantAPI::createTenantTransaction(tr, entry, ClusterType::METACLUSTER_DATA, true));
 		}
 
 		wait(waitForAll(createFutures));
@@ -809,17 +827,16 @@ struct SwitchTenantMovementImpl {
 		return false;
 	}
 
-	ACTOR static Future<RangeResult> readTenantData(Reference<ITenant> tenant,
+	ACTOR static Future<RangeResult> readTenantData(Reference<ITransaction> tr,
 	                                                KeyRef begin,
 	                                                KeyRef end,
 	                                                int64_t limit,
-	                                                ThreadFuture<RangeResult> resultFuture) {
-		state Reference<ITransaction> tr = tenant->createTransaction();
+	                                                ThreadFuture<RangeResult>* resultFuture) {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
-				resultFuture = tr->getRange(KeyRangeRef(begin, end), limit);
-				RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
+				*resultFuture = tr->getRange(KeyRangeRef(begin, end), limit);
+				RangeResult result = wait(safeThreadFutureToFuture(*resultFuture));
 				return result;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -827,9 +844,12 @@ struct SwitchTenantMovementImpl {
 		}
 	}
 
-	ACTOR static Future<Void> checkTenantData(SwitchTenantMovementImpl* self, TenantName tName) {
+	ACTOR static Future<Void> checkTenantData(SwitchTenantMovementImpl* self, TenantName tenantName) {
+		state TenantName tName = tenantName;
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
 		state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
+		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
+		state Reference<ITransaction> dstTr = dstTenant->createTransaction();
 
 		state KeyRef begin = ""_sr;
 		state KeyRef end = "\xff"_sr;
@@ -842,9 +862,11 @@ struct SwitchTenantMovementImpl {
 		state RangeResult dstRange;
 
 		loop {
-			wait(store(srcRange, readTenantData(srcTenant, begin, end, limit, resultFutureSrc)) &&
-			     store(dstRange, readTenantData(dstTenant, begin, end, limit, resultFutureDst)));
-			if (srcRange != dstRange) {
+			srcTr->reset();
+			dstTr->reset();
+			wait(store(srcRange, readTenantData(srcTr, begin, end, limit, &resultFutureSrc)) &&
+			     store(dstRange, readTenantData(dstTr, begin, end, limit, &resultFutureDst)));
+			if (srcRange.contents() != dstRange.contents()) {
 				TraceEvent("TenantMoveSwitchDataMismatch")
 				    .detail("TenantName", tName)
 				    .detail("Begin", begin)
@@ -867,8 +889,12 @@ struct SwitchTenantMovementImpl {
 
 	ACTOR static Future<Void> checkAllTenantData(SwitchTenantMovementImpl* self) {
 		std::vector<Future<Void>> checkFutures;
-		for (const auto& tenantPair : self->tenantsInGroup) {
-			checkFutures.push_back(checkTenantData(self, tenantPair.first));
+		std::vector<TenantName> tNames(self->tenantsInGroup.size());
+		int index = 0;
+		int len = self->tenantsInGroup.size();
+		for (; index < len; index++) {
+			tNames[index] = self->tenantsInGroup[index].first;
+			checkFutures.push_back(checkTenantData(self, tNames[index]));
 		}
 		wait(waitForAll(checkFutures));
 		return Void();
@@ -1346,6 +1372,8 @@ struct AbortTenantMovementImpl {
 
 	// Parameters filled in during the run
 	std::vector<std::pair<TenantName, int64_t>> tenantsInGroup;
+	Optional<ThreadFuture<Standalone<StringRef>>> vsFuture;
+	Versionstamp abortVersion;
 
 	AbortTenantMovementImpl(Reference<DB> managementDb,
 	                        TenantGroupName tenantGroup,
@@ -1361,6 +1389,7 @@ struct AbortTenantMovementImpl {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		wait(findTenantsInGroup(tr, self->tenantGroup, &self->tenantsInGroup));
+		self->vsFuture = tr->getVersionstamp();
 		if (!movementRecord.present()) {
 			// Rare scenario where abort is called immediately after "start"
 			// See no move record while the start tr is still committing
@@ -1553,6 +1582,15 @@ struct AbortTenantMovementImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> writeDataAbortVersion(AbortTenantMovementImpl* self, Reference<ITransaction> tr) {
+		ASSERT(self->vsFuture.present());
+		state Standalone<StringRef> result = wait(safeThreadFutureToFuture(self->vsFuture.get()));
+		Versionstamp vs(result);
+		self->abortVersion = vs;
+		lastTenantMoveAbort().setVersionstamp(tr, self->abortVersion, 0);
+		return Void();
+	}
+
 	ACTOR static Future<Void> abortStartCreate(AbortTenantMovementImpl* self) {
 		TraceEvent("BreakpointAbort3")
 		    .detail("TenantGroup", self->tenantGroup)
@@ -1732,16 +1770,20 @@ struct AbortTenantMovementImpl {
 		wait(self->dstCtx.initializeContext());
 		loop {
 			try {
-				bool exitSignal = wait(runMoveManagementTransaction(
-				    self->tenantGroup,
-				    self->srcCtx,
-				    self->dstCtx,
-				    Aborting::True,
-				    {},
-				    [self = self](Reference<typename DB::TransactionT> tr,
-				                  Optional<metadata::management::MovementRecord> movementRecord) {
-					    return initAbort(self, tr, movementRecord);
-				    }));
+				state bool exitSignal;
+				wait(store(exitSignal,
+				           runMoveManagementTransaction(
+				               self->tenantGroup,
+				               self->srcCtx,
+				               self->dstCtx,
+				               Aborting::True,
+				               {},
+				               [self = self](Reference<typename DB::TransactionT> tr,
+				                             Optional<metadata::management::MovementRecord> movementRecord) {
+					               return initAbort(self, tr, movementRecord);
+				               })));
+				wait(self->dstCtx.runDataClusterTransaction(
+				    [self = self](Reference<ITransaction> tr) { return writeDataAbortVersion(self, tr); }));
 				if (exitSignal) {
 					return Void();
 				}
@@ -1773,6 +1815,29 @@ struct AbortTenantMovementImpl {
 			throw invalid_tenant_move();
 		}
 		wait(abortFuture);
+		return Void();
+	}
+
+	Future<Void> run() { return run(this); }
+};
+
+template <class DB>
+struct StatusImpl {
+	MetaclusterOperationContext<DB> ctx;
+
+	// Initialization parameters
+	TenantGroupName tenantGroup;
+
+	// Parameters filled in during the run
+	metadata::management::MovementRecord moveRecord;
+
+	StatusImpl(Reference<DB> managementDb, TenantGroupName tenantGroup) : ctx(managementDb), tenantGroup(tenantGroup) {}
+
+	ACTOR static Future<Void> run(StatusImpl* self) {
+		wait(store(self->moveRecord,
+		           self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			           return internal::getMovementRecordNoValidation<DB>(tr, self->tenantGroup);
+		           })));
 		return Void();
 	}
 
@@ -1847,12 +1912,9 @@ Future<Void> abortTenantMovement(Reference<DB> db,
 
 ACTOR template <class DB>
 Future<metadata::management::MovementRecord> moveStatus(Reference<DB> db, TenantGroupName tenantGroup) {
-	MetaclusterOperationContext<DB> ctx(db);
-	metadata::management::MovementRecord mr =
-	    wait(ctx.runManagementTransaction([tenantGroup = tenantGroup](Reference<typename DB::TransactionT> tr) {
-		    return internal::getMovementRecordNoValidation<DB>(tr, tenantGroup);
-	    }));
-	return mr;
+	state internal::StatusImpl<DB> impl(db, tenantGroup);
+	wait(impl.run());
+	return impl.moveRecord;
 }
 
 } // namespace metacluster

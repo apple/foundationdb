@@ -151,8 +151,11 @@ Future<bool> checkTombstone(Transaction tr, int64_t id) {
 // Creates a tenant. If the tenant already exists, the boolean return parameter will be false
 // and the existing entry will be returned. If the tenant cannot be created, then the optional will be empty.
 ACTOR template <class Transaction>
-Future<std::pair<Optional<TenantMapEntry>, bool>>
-createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType clusterType = ClusterType::STANDALONE) {
+Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
+    Transaction tr,
+    TenantMapEntry tenantEntry,
+    ClusterType clusterType = ClusterType::STANDALONE,
+    bool movement = false) {
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
@@ -168,7 +171,7 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, tenantEntry.tenantName);
 	state Future<Void> tenantModeCheck = checkTenantMode(tr, clusterType);
 	state Future<bool> tombstoneFuture =
-	    (clusterType == ClusterType::STANDALONE) ? false : checkTombstone(tr, tenantEntry.id);
+	    (clusterType == ClusterType::STANDALONE || movement) ? false : checkTombstone(tr, tenantEntry.id);
 	state Future<Optional<TenantGroupEntry>> existingTenantGroupEntryFuture;
 	if (tenantEntry.tenantGroup.present()) {
 		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap().get(tr, tenantEntry.tenantGroup.get());

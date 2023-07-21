@@ -449,6 +449,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					wait(increaseMetaclusterCapacity(self));
 					continue;
 				}
+				if (err.code() == error_code_tenant_not_found || err.code() == error_code_tenant_move_failed) {
+					// Timing issue with versions or tenant creation
+					wait(delay(5.0));
+					continue;
+				}
 				throw err;
 			}
 		}
@@ -897,7 +902,128 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> noTimeoutMovement(Database cx,
+	                                            MetaclusterMoveWorkload* self,
+	                                            ClusterName srcCluster,
+	                                            ClusterName dstCluster,
+	                                            TenantGroupName tenantGroup) {
+		state std::vector<std::string> messages;
+		// start
+		loop {
+			try {
+				TraceEvent("BreakpointNoTimeout1");
+				wait(metacluster::startTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+				break;
+			} catch (Error& e) {
+				state Error err(e);
+				TraceEvent("MetaclusterMoveWorkloadNoTimeoutStartFailed")
+				    .error(err)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				if (err.code() == error_code_cluster_no_capacity) {
+					CODE_PROBE(true, "Tenant move prevented by lack of cluster capacity");
+					wait(increaseMetaclusterCapacity(self));
+					continue;
+				}
+				throw err;
+			}
+		}
+		// copy
+		TraceEvent("BreakpointNoTimeout2");
+		// If start completes successfully, the move identifier should be written
+		wait(store(self->moveRecord, self->getMoveRecord(tenantGroup)));
+		wait(processQueue(self, tenantGroup, srcCluster, dstCluster));
+		TraceEvent("BreakpointNoTimeout3");
+		// switch
+		loop {
+			try {
+				TraceEvent("BreakpointNoTimeout4");
+				wait(metacluster::switchTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+				updateTestData(self, tenantGroup, dstCluster, srcCluster);
+				break;
+			} catch (Error& e) {
+				TraceEvent("MetaclusterMoveWorkloadNoTimeoutSwitchFailed")
+				    .error(e)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				if (e.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					continue;
+				}
+				throw;
+			}
+		}
+		// finish
+		try {
+			TraceEvent("BreakpointNoTimeout5");
+			wait(metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+		} catch (Error& e) {
+			TraceEvent("MetaclusterMoveWorkloadNoTimeoutFinishFailed")
+			    .error(e)
+			    .detail("TenantGroup", tenantGroup)
+			    .detail("SourceCluster", srcCluster)
+			    .detail("DestinationCluster", dstCluster);
+			throw;
+		}
+		TraceEvent("BreakpointNoTimeout6");
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> roundTripMovement(Database cx, MetaclusterMoveWorkload* self) {
+		state ClusterName srcCluster = self->chooseClusterName();
+		state ClusterName dstCluster = self->chooseClusterName();
+		state int tries = 0;
+		state int tryLimit = 10;
+		auto& existingGroups = self->dataDbs[srcCluster].tenantGroups;
+		// Pick a cluster that has tenant groups
+		while (existingGroups.empty()) {
+			if (++tries >= tryLimit) {
+				return Void();
+			}
+			srcCluster = self->chooseClusterName();
+			existingGroups = self->dataDbs[srcCluster].tenantGroups;
+		}
+		state TenantGroupName tenantGroup = self->chooseTenantGroup(srcCluster);
+
+		tries = 0;
+		while (srcCluster == dstCluster) {
+			if (++tries >= tryLimit) {
+				return Void();
+			}
+			dstCluster = self->chooseClusterName();
+		}
+
+		// Forward: move src -> dst
+		TraceEvent("BreakpointRoundTrip1");
+		wait(noTimeoutMovement(cx, self, srcCluster, dstCluster, tenantGroup));
+		TraceEvent("BreakpointRoundTrip2");
+		// Backward: move dst-> src
+		wait(noTimeoutMovement(cx, self, dstCluster, srcCluster, tenantGroup));
+		TraceEvent("BreakpointRoundTrip3");
+
+		bool success = wait(finishVerification(self, tenantGroup, srcCluster));
+		if (!success) {
+			TraceEvent("MetaclusterMoveRoundTripFinalVerificationFailed")
+			    .detail("TenantGroup", tenantGroup)
+			    .detail("DestinationCluster", dstCluster)
+			    .detail("SourceCluster", srcCluster);
+			throw operation_failed();
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) {
+		if (deterministicRandom()->random01() < 0.1) {
+			self->badCopy = false;
+			wait(roundTripMovement(cx, self));
+			return Void();
+		}
 		// Expect an error if the same cluster is picked
 		state ClusterName srcCluster = self->chooseClusterName();
 		state ClusterName dstCluster = self->chooseClusterName();
