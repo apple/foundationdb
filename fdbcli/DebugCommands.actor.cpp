@@ -40,9 +40,9 @@ ACTOR Future<Version> getVersion(Database cx) {
 	}
 }
 
-// Get a list of storage servers(persisting keys within range "kr") from the master and compares them with the
-// TLogs. If this is a quiescent check, then each commit proxy needs to respond, otherwise only one needs to
-// respond. Returns false if there is a failure (in this case, keyServersPromise will never be set)
+// Get a list of storage servers that persist keys within range "kr" from the
+// first commit proxy. Returns false if there is a failure (in this case,
+// keyServersPromise will never be set).
 ACTOR Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
@@ -83,11 +83,11 @@ ACTOR Future<bool> getKeyServers(
 				}
 			}
 			when(wait(cx->onProxiesChanged())) {}
-		} // End of choose
+		}
 
 		if (!keyServersInsertedForThisIteration) // Retry the entire workflow
 			wait(delay(1.0));
-	} // End of while
+	}
 
 	keyServersPromise.send(keyServers);
 	return true;
