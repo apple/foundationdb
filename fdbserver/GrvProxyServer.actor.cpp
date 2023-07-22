@@ -920,7 +920,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
-		grvProxyData->stats.update(grvProxyData->tagThrottler.releaseTransactions(elapsed, defaultQueue, batchQueue));
+		grvProxyData->stats.update(grvProxyData->tagThrottler.releaseTransactions(elapsed, batchQueue, defaultQueue));
 
 		normalRateInfo.startReleaseWindow();
 		batchRateInfo.startReleaseWindow();
