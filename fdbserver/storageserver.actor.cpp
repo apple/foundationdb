@@ -5684,6 +5684,10 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
 	    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum);
 
+	// Make sure the history collection is not open due to this audit
+	data->stopTrackShardAssignment();
+	TraceEvent(SevVerbose, "SSShardAssignmentHistoryRecordStopWhenExit", data->thisServerID).detail("AuditID", req.id);
+
 	return Void();
 }
 
