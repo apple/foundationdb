@@ -189,6 +189,48 @@ public:
 		}
 	}
 
+	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure SS is boundedrak
+	ACTOR static Future<Void> monitorStorageServerQueueSizeInSimulation(ActorWeakSelfRef<Ratekeeper> self) {
+		if (!g_network->isSimulated()) {
+			return Void();
+		}
+		state int threshold = SERVER_KNOBS->RATEKEEPER_MONITOR_SS_THRESHOLD;
+		state int cnt = 0;
+		state int maxCount = 5;
+		state Transaction tr(self->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
+				state int serverListSize = results.size();
+				state int interfaceSize = self->storageServerInterfaces.size();
+				state int metricSize = self->healthMetrics.storageStats.size();
+				if (interfaceSize - serverListSize > threshold || metricSize - serverListSize > threshold) {
+					cnt++;
+				} else {
+					cnt = 0;
+				}
+				if (cnt > maxCount) {
+					TraceEvent(SevError, "TooManySSInRK")
+					    .detail("Threshold", threshold)
+					    .detail("ServerListSize", serverListSize)
+					    .detail("InterfaceSize", interfaceSize)
+					    .detail("MetricSize", metricSize)
+					    .log();
+				}
+				// wait for monitorServerListChange to remove the interface
+				wait(delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY));
+				tr = Transaction(self->db);
+			} catch (Error& e) {
+				TraceEvent("RateKeeperFailedToReadSSList").log();
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
 		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
@@ -381,6 +423,7 @@ public:
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
 		self.addActor.send(self.monitorServerListChange(serverChanges));
 		self.addActor.send(RatekeeperImpl::trackEachStorageServer(pSelf, serverChanges.getFuture()));
+		self.addActor.send(monitorStorageServerQueueSizeInSimulation(pSelf));
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
