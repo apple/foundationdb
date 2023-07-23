@@ -242,6 +242,12 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 	state int i = 0;
 	state Version version;
 	state KeySelectorRef begin, end;
+	state bool checkAll = false;
+
+	if (tokens.size() == 2 && tokens[1] == "all"_sr) {
+		printf("Checking all keys...\n");
+		checkAll = true;
+	}
 
 	loop {
 		try {
@@ -258,13 +264,13 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 			    keyServerPromise.getFuture().get();
 			for (i = 0; i < keyServers.size(); i++) { // for each key range
 				const auto& range = keyServers[i].first;
-				const auto& servers = keyServers[i].second;
+				// const auto& servers = keyServers[i].second;
 				begin = firstGreaterOrEqual(range.begin);
 				end = firstGreaterOrEqual(range.end);
-				printf("Key range: %s\n", printable(range).c_str());
+				/* printf("Key range: %s\n", printable(range).c_str());
 				for (const auto& server : servers) {
-					printf("  %s\n", server.address().toString().c_str());
-				}
+				    printf("  %s\n", server.address().toString().c_str());
+				}*/
 				wait(store(version, getVersion(cx)));
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
 				for (const auto& s : keyServers[i].second) { // for each storage server
@@ -278,9 +284,9 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 
 					replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 				}
-				printf("waiting for %lu replies at version: %ld\n", keyServers[i].second.size(), version);
+				// printf("waiting for %lu replies at version: %ld\n", keyServers[i].second.size(), version);
 				wait(waitForAll(replies));
-				if (!checkResults(version, keyServers[i].second, replies, begin, end)) {
+				if (!checkResults(version, keyServers[i].second, replies, begin, end) && !checkAll) {
 					return false;
 				}
 				// TODO: if there are more results, continue checking in the same shard
