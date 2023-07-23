@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'ExcludeIncludeStorageServers'
+runConsistencyCheck = false
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'ExcludeIncludeStorageServers'
