@@ -479,7 +479,7 @@ public:
 				if (ddMode != 2) {
 					return Void();
 				}
-				wait(checkMoveKeysLockReadOnly(&tr, self->context->lock, self->context->ddEnabledState.get()));
+				wait(checkMoveKeysLockReadOnly(&tr, self->lock, self->context->ddEnabledState.get()));
 				tr.reset();
 			} catch (Error& e) {
 				wait(tr.onError(e));
