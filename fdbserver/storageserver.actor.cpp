@@ -6234,6 +6234,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// Wait for the transferred version (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(feedTransferredVersion));
+		if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.intersects(backupLogKeys)) {
+			TraceEvent("FetchKeyBackupKeysTransferred")
+			    .detail("Range", keys)
+			    .detail("Version", shard->transferredVersion);
+		}
 
 		ASSERT(data->shards[shard->keys.begin]->assigned() &&
 		       data->shards[shard->keys.begin]->keys ==
@@ -6257,6 +6262,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			data->changeFeedRemovals.erase(fetchKeysID);
 		}
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
+			if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.intersects(backupLogKeys)) {
+				TraceEvent("FetchKeyBackupKeysCancelled")
+				    .detail("Range", keys)
+				    .detail("FetchVersion", fetchVersion)
+				    .detail("LatestVersion", data->data().getLatestVersion());
+			}
 			if (shard->phase < AddingShard::FetchingCF) {
 				if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
 					TraceEvent("SSBackupKeyClearRange")
@@ -6346,7 +6357,7 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 }
 
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
-const char* changeServerKeysContextName[] = { "Update", "Restore" };
+const char* changeServerKeysContextName[] = { "Update", "Restore", "AssignEmpty" };
 
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
@@ -6355,12 +6366,6 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	// TraceEvent("ChangeServerKeys", data->thisServerID)
-	//     .detail("KeyBegin", keys.begin)
-	//     .detail("KeyEnd", keys.end)
-	//     .detail("NowAssigned", nowAssigned)
-	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -6369,6 +6374,16 @@ void changeServerKeys(StorageServer* data,
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
 	for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
+		if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.intersects(backupLogKeys)) {
+			TraceEvent("ChangeServerKeys", data->thisServerID)
+			    .detail("Range", keys)
+			    .detail("NowAssigned", nowAssigned)
+			    .detail("Version", version)
+			    .detail("Context", changeServerKeysContextName[(int)context])
+			    .detail("ExistingRange", KeyRangeRef(it->range()))
+			    .detail("Assigned", it->value()->assigned())
+			    .detail("Readable", it->value()->isReadable());
+		}
 		if (nowAssigned != it->value()->assigned()) {
 			isDifferent = true;
 			TraceEvent("CSKRangeDifferent", data->thisServerID)
