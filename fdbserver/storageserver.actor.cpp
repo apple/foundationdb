@@ -6269,14 +6269,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("LatestVersion", data->data().getLatestVersion());
 			}
 			if (shard->phase < AddingShard::FetchingCF) {
-				if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
-					TraceEvent("SSBackupKeyClearRange")
-					    .detail("RangeBegin", keys.begin)
-					    .detail("RangeEnd", keys.end)
-					    .detail("HexRangeBegin", keys.begin.toHex())
-					    .detail("HexRangeEnd", keys.end.toHex())
-					    .detail("FetchVersion", fetchVersion);
-				}
 				data->storage.clearRange(keys);
 				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(keys, invalidVersion);
@@ -7934,6 +7926,14 @@ void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
+	}
+	if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
+		TraceEvent("SSBackupKeyClearRange")
+		    .detail("RangeBegin", keys.begin)
+		    .detail("RangeEnd", keys.end)
+		    .detail("HexRangeBegin", keys.begin.toHex())
+		    .detail("HexRangeEnd", keys.end.toHex())
+		    .backtrace();
 	}
 }
 
