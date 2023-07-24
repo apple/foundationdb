@@ -602,6 +602,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				if (e.code() == error_code_tenant_move_record_missing) {
 					return false;
 				}
+				if (e.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					continue;
+				}
 				throw;
 			}
 		}
@@ -927,6 +931,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					wait(increaseMetaclusterCapacity(self));
 					continue;
 				}
+				if (err.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					continue;
+				}
 				throw err;
 			}
 		}
@@ -958,17 +966,31 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			}
 		}
 		// finish
-		try {
-			TraceEvent("BreakpointNoTimeout5");
-			wait(metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
-		} catch (Error& e) {
-			TraceEvent("MetaclusterMoveWorkloadNoTimeoutFinishFailed")
-			    .error(e)
-			    .detail("TenantGroup", tenantGroup)
-			    .detail("SourceCluster", srcCluster)
-			    .detail("DestinationCluster", dstCluster);
-			throw;
+		loop {
+			try {
+				TraceEvent("BreakpointNoTimeout5");
+				wait(metacluster::finishTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+				break;
+			} catch (Error& e) {
+				TraceEvent("MetaclusterMoveWorkloadNoTimeoutFinishFailed")
+				    .error(e)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				// If the move record is missing, the operation likely completed
+				// and this is a retry
+				if (e.code() == error_code_tenant_move_record_missing) {
+					break;
+				}
+				if (e.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					continue;
+				}
+				throw;
+			}
 		}
+
 		TraceEvent("BreakpointNoTimeout6");
 
 		return Void();
