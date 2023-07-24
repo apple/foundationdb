@@ -278,6 +278,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BEST_TEAM_OPTION_COUNT,                                  4 );
 	init( BEST_OF_AMT,                                             4 );
 	init( SERVER_LIST_DELAY,                                     1.0 );
+	init( RATEKEEPER_MONITOR_SS_DELAY,                          10.0 );
+	init( RATEKEEPER_MONITOR_SS_THRESHOLD,                         5 );
 	init( RECRUITMENT_IDLE_DELAY,                                1.0 );
 	init( STORAGE_RECRUITMENT_DELAY,                            10.0 );
 	init( TSS_HACK_IDENTITY_MAPPING,                           false ); // THIS SHOULD NEVER BE SET IN PROD. Only for performance testing
