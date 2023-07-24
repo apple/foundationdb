@@ -2233,9 +2233,6 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 					    .detail("AuditType", auditType);
 					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
-					// Since remaining part is always successcive
-					// We always issue exactly one audit task (for the remaining part) when schedule
-					ASSERT(issueDoAuditCount == 0);
 					issueDoAuditCount++;
 					req.ddId = self->ddId; // send this ddid to SS
 					wait(doAuditOnStorageServer(self, audit, ssi, req)); // do audit one by one
