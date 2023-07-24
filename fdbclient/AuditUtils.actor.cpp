@@ -137,6 +137,7 @@ ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID aud
 				ASSERT(toCancelState.id == auditId && toCancelState.getType() == auditType);
 				toCancelState.setPhase(AuditPhase::Failed);
 				tr.set(auditKey(toCancelState.getType(), toCancelState.id), auditStorageStateValue(toCancelState));
+				clearAuditProgressMetadata(&tr, toCancelState.getType(), toCancelState.id);
 				wait(tr.commit());
 				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataEnd", auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
@@ -458,7 +459,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
+		TraceEvent(SevWarn, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 		ASSERT_WE_THINK(e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict);
@@ -584,10 +585,6 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 				break;
 			}
 			// If this is the same dd, the phase must be following
-			TraceEvent("PersistAuditStateByRange")
-			    .detail("AuditID", auditState.id)
-			    .detail("AuditType", auditState.getType())
-			    .detail("AuditPhase", auditState.getPhase());
 			ASSERT(ddAuditState.getPhase() == AuditPhase::Running || ddAuditState.getPhase() == AuditPhase::Failed);
 			if (ddAuditState.getPhase() == AuditPhase::Failed) {
 				throw audit_storage_cancelled();
@@ -596,12 +593,13 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
 			                 auditStorageStateValue(auditState)));
+			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			TraceEvent("PersistAuditStateByRangeError")
+			TraceEvent(SevDebug, "AuditUtilPersistAuditStateByRangeError")
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", auditState.id)
-			    .detail("AuditType", auditState.getPhase())
+			    .detail("AuditType", auditState.getType())
 			    .detail("AuditPhase", auditState.getPhase());
 			wait(tr.onError(e));
 		}
@@ -687,8 +685,15 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),
 			    auditState.range,
 			    auditStorageStateValue(auditState)));
+			wait(tr.commit());
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditUtilPersistAuditStateByRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase())
+			    .detail("AuditServerID", auditState.auditServerId);
 			wait(tr.onError(e));
 		}
 	}
@@ -717,7 +722,11 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 			auditStates = res_;
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
+			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", type)
+			    .detail("AuditServerID", auditServerId);
 			wait(tr.onError(e));
 		}
 	}
@@ -741,46 +750,46 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 	return res;
 }
 
-ACTOR Future<std::string> checkMigrationProgress(Database cx) {
-	state Key begin = allKeys.begin;
-	state int numShards = 0;
-	state int numPhysicalShards = 0;
-
-	while (begin < allKeys.end) {
-		// RYW to optimize re-reading the same key ranges
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-
+ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	       auditType == AuditType::ValidateLocationMetadata);
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-				KeyRangeRef currentKeys(begin, allKeys.end);
-				RangeResult shards = wait(
-				    krmGetRanges(tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
-
-				for (int i = 0; i < shards.size() - 1; ++i) {
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId;
-					UID destId;
-					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-					if (srcId != anonymousShardId) {
-						++numPhysicalShards;
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByRange(cx, auditType, auditId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						TraceEvent(SevWarn, "AuditUtilCheckAuditProgressNotFinished")
+						    .detail("AuditID", auditId)
+						    .detail("AuditRange", auditRange)
+						    .detail("AuditType", auditType)
+						    .detail("UnfinishedRange", auditStates[i].range);
+						return false;
 					}
 				}
-
-				begin = shards.back().key;
-				numShards += shards.size() - 1;
+				rangeToReadBegin = auditStates.back().range.end;
 				break;
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryCount > 30) {
+					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressIncomplete")
+					    .detail("AuditID", auditId)
+					    .detail("AuditRange", auditRange)
+					    .detail("AuditType", auditType);
+					throw audit_storage_failed();
+				}
+				wait(delay(0.5));
+				retryCount++;
 			}
 		}
 	}
-
-	return fmt::format("Total number of shards: {}, number of physical shards: {}", numShards, numPhysicalShards);
+	return true;
 }
