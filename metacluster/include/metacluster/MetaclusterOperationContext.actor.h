@@ -52,6 +52,8 @@ template <class DB>
 struct MetaclusterOperationContext {
 	Reference<DB> managementDb;
 	Reference<IDatabase> dataClusterDb;
+	// TODO: remove debugId in general
+	UID debugId = nondeterministicRandom()->randomUniqueID();
 
 	Optional<ClusterName> clusterName;
 
@@ -162,8 +164,10 @@ struct MetaclusterOperationContext {
 				    wait(func(tr));
 
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+				TraceEvent("BreakpointManagementCommit", self->debugId).detail("ClusterName", self->clusterName);
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointManagementError", self->debugId).error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
@@ -173,6 +177,11 @@ struct MetaclusterOperationContext {
 	Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue())>
 	runManagementTransaction(Function func) {
 		return runManagementTransaction(this, func);
+	}
+
+	Future<Void> initializeContext() {
+		// Use an empty lambda
+		return runManagementTransaction([](Reference<typename DB::TransactionT>) { return Future<Void>(Void()); });
 	}
 
 	// Runs a transaction on the data cluster. This requires that a cluster name be set and that a transaction has
@@ -232,8 +241,10 @@ struct MetaclusterOperationContext {
 				    wait(func(tr));
 
 				wait(safeThreadFutureToFuture(tr->commit()));
+				TraceEvent("BreakpointDataClusterCommit").detail("ClusterName", self->clusterName);
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointDataClusterError").error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
