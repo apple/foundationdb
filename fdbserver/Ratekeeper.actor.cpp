@@ -189,7 +189,7 @@ public:
 		}
 	}
 
-	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure SS is boundedrak
+	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
 	ACTOR static Future<Void> monitorStorageServerQueueSizeInSimulation(ActorWeakSelfRef<Ratekeeper> self) {
 		if (!g_network->isSimulated()) {
 			return Void();

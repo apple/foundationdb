@@ -102,13 +102,10 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 				for (auto& [ssi, p] : results) {
-					servers.insert(AddressExclusion(ssi.address().ip, ssi.address().port));
+					if (g_simulator->protectedAddresses.count(ssi.address()) == 0) {
+						servers.insert(AddressExclusion(ssi.address().ip, ssi.address().port));
+					}
 				}
-
-				tr = Transaction(cx);
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// get all TLogs
 				Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
