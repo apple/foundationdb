@@ -30,9 +30,13 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 
 set(FDB_PROTOCOL_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersions.cmake" CACHE STRING "Protocol version cmake file." FORCE)
 set(FDB_PROTOCOL_VERSION_HEADER_FILE "${CMAKE_CURRENT_BINARY_DIR}/include/flow/ProtocolVersion.h")
+set(FDB_PROTOCOL_VERSION_JAVA_FILE "${CMAKE_CURRENT_BINARY_DIR}/include/flow/ProtocolVersion.java")
+set(FDB_PROTOCOL_VERSION_PYTHON_FILE "${CMAKE_CURRENT_BINARY_DIR}/include/flow/protocol_version.py")
 add_custom_command(
 	OUTPUT ${FDB_PROTOCOL_VERSION_HEADER_FILE}
 	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator cpp --output ${FDB_PROTOCOL_VERSION_HEADER_FILE}
+	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator java --output ${FDB_PROTOCOL_VERSION_JAVA_FILE}
+	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator python --output ${FDB_PROTOCOL_VERSION_PYTHON_FILE}
 	DEPENDS
 		${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py
 		${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/ProtocolVersion.h.template
