@@ -2192,19 +2192,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> canCommit() override { return checkRocksdbState(this); }
 
-	Future<Void> commit(bool) override {
+	ACTOR Future<Void> commitInRocksDB(RocksDBKeyValueStore* self) {
 		// If there is nothing to write, don't write.
-		if (writeBatch == nullptr) {
+		if (self->writeBatch == nullptr) {
 			return Void();
 		}
 		auto a = new Writer::CommitAction();
-		a->batchToCommit = std::move(writeBatch);
-		previousCommitKeysSet = std::move(keysSet);
-		maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
-		auto res = a->done.getFuture();
-		writeThread->post(a);
-		return res;
+		a->batchToCommit = std::move(self->writeBatch);
+		self->previousCommitKeysSet = std::move(self->keysSet);
+		self->maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
+		state Future<Void> fut = a->done.getFuture();
+		self->writeThread->post(a);
+		wait(fut);
+		self->previousCommitKeysSet.clear();
+		return Void();
 	}
+
+	Future<Void> commit(bool) override { return commitInRocksDB(this); }
 
 	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
 		if (semaphore.waiters() > maxWaiters) {
