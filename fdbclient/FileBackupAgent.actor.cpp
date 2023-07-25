@@ -2298,9 +2298,6 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		if (CLIENT_KNOBS->BACKUP_AGENT_VERBOSE_LOGGING) {
-			tr->debugTransaction(deterministicRandom()->randomUniqueID());
-		}
 
 		state Reference<TaskFuture> onDone = task->getDoneFuture(futureBucket);
 		state Version prevBeginVersion = Params.prevBeginVersion().get(task);

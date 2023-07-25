@@ -197,7 +197,6 @@ public:
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
-	bool BACKUP_AGENT_VERBOSE_LOGGING;
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;

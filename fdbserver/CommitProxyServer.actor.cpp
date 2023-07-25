@@ -347,16 +347,6 @@ bool isWhitelisted(const std::vector<Standalone<StringRef>>& binPathVec, StringR
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-std::string tagsToString(std::vector<Tag> tags) {
-	std::string result;
-	std::string space;
-	for (auto& tag : tags) {
-		result += space + tag.toString();
-		space = " ";
-	}
-	return result;
-}
-
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
                                       const std::map<Key, MutationListRef>* logRangeMutations,
                                       LogPushData* toCommit,
@@ -440,21 +430,6 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			// logRangeMutation.first) 					.detail("PartIndex", part).detail("PartIndexEndian",
 			// bigEndian32(part)).detail("PartData", backupMutation.param1);
 			//			}
-			if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS) {
-				MutationRef m(backupMutation);
-				// replace \xff\x02/blog/... with \xff\x02/dlog/...
-				// replace value with commit version
-				auto param1 = backupMutation.param1.substr(4).withPrefix("\xff\x02/d"_sr);
-				auto param2 = StringRef((uint8_t*)&commitVersion, sizeof(commitVersion))
-				                  .withSuffix(StringRef(tagsToString(tags)));
-				m.param1 = param1;
-				// maybe add toCommit->getMutationCount(), i.e., subversion?
-				m.param2 = param2;
-
-				auto& newTags = self->tagsForKey(m.param1);
-				toCommit->addTags(newTags);
-				toCommit->writeTypedMessage(m);
-			}
 		}
 	}
 	return Void();

@@ -5988,14 +5988,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// Write this_block to storage
 					state KeyValueRef* kvItr = this_block.begin();
-					if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && kvItr != this_block.end() &&
-					    kvItr->key.startsWith(backupLogKeys.begin)) {
-						TraceEvent("SSBackupKeyWriteKeyValue")
-						    .detail("Key", kvItr->key)
-						    .detail("ChecksumValue", kvItr->value.getChecksum())
-						    .detail("HexKey", kvItr->key.toHex())
-						    .detail("Version", fetchVersion);
-					}
 					for (; kvItr != this_block.end(); ++kvItr) {
 						data->storage.writeKeyValue(*kvItr);
 						wait(yield());
@@ -6234,11 +6226,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// Wait for the transferred version (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(feedTransferredVersion));
-		if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.intersects(backupLogKeys)) {
-			TraceEvent("FetchKeyBackupKeysTransferred")
-			    .detail("Range", keys)
-			    .detail("Version", shard->transferredVersion);
-		}
 
 		ASSERT(data->shards[shard->keys.begin]->assigned() &&
 		       data->shards[shard->keys.begin]->keys ==
@@ -6262,12 +6249,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			data->changeFeedRemovals.erase(fetchKeysID);
 		}
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
-			if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.intersects(backupLogKeys)) {
-				TraceEvent("FetchKeyBackupKeysCancelled")
-				    .detail("Range", keys)
-				    .detail("FetchVersion", fetchVersion)
-				    .detail("LatestVersion", data->data().getLatestVersion());
-			}
 			if (shard->phase < AddingShard::FetchingCF) {
 				data->storage.clearRange(keys);
 				++data->counters.kvSystemClearRanges;
@@ -6358,6 +6339,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
+	// TraceEvent("ChangeServerKeys", data->thisServerID)
+	//     .detail("KeyBegin", keys.begin)
+	//     .detail("KeyEnd", keys.end)
+	//     .detail("NowAssigned", nowAssigned)
+	//     .detail("Version", version)
+	//     .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -6366,16 +6353,6 @@ void changeServerKeys(StorageServer* data,
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
 	for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
-		if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.intersects(backupLogKeys)) {
-			TraceEvent("ChangeServerKeys", data->thisServerID)
-			    .detail("Range", keys)
-			    .detail("NowAssigned", nowAssigned)
-			    .detail("Version", version)
-			    .detail("Context", changeServerKeysContextName[(int)context])
-			    .detail("ExistingRange", KeyRangeRef(it->range()))
-			    .detail("Assigned", it->value()->assigned())
-			    .detail("Readable", it->value()->isReadable());
-		}
 		if (nowAssigned != it->value()->assigned()) {
 			isDifferent = true;
 			TraceEvent("CSKRangeDifferent", data->thisServerID)
@@ -6647,22 +6624,6 @@ public:
 				DEBUG_MUTATION("SSUpdateMutation", ver, m, data->thisServerID).detail("FromFetch", fromFetch);
 			}
 
-			if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS) {
-				if (m.type == MutationRef::SetValue && m.param1.startsWith(backupLogKeys.begin) &&
-				    m.param1.endsWith(LiteralStringRef("\x00\x00\x00\x00"))) {
-					TraceEvent("SSBackupKeyApplyMutationSet")
-					    .detail("Key", m.param1)
-					    .detail("HexKey", m.param1.toHex())
-					    .detail("Version", ver);
-				} else if (m.type == MutationRef::ClearRange && m.param1.startsWith(backupLogKeys.begin)) {
-					TraceEvent("SSBackupKeyApplyMutationClear")
-					    .detail("RangeBegin", m.param1)
-					    .detail("RangeEnd", m.param2)
-					    .detail("HexRangeBegin", m.param1.toHex())
-					    .detail("HexRangeEnd", m.param2.toHex())
-					    .detail("Version", ver);
-				}
-			}
 			splitMutation(data, data->shards, m, ver, fromFetch);
 		}
 
@@ -7926,14 +7887,6 @@ void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
-	}
-	if (SERVER_KNOBS->SS_BACKUP_KEYS_OP_LOGS && keys.begin.startsWith(backupLogKeys.begin)) {
-		TraceEvent("SSBackupKeyClearRange")
-		    .detail("RangeBegin", keys.begin)
-		    .detail("RangeEnd", keys.end)
-		    .detail("HexRangeBegin", keys.begin.toHex())
-		    .detail("HexRangeEnd", keys.end.toHex())
-		    .backtrace();
 	}
 }
 
