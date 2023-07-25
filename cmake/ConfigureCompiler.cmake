@@ -482,6 +482,7 @@ else()
       $<${is_cxx_compile}:-DNO_WARN_X86_INTRINSICS>
     )
   endif()
+
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
@@ -489,6 +490,7 @@ else()
   message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
   if((SUPPORT_DTRACE) AND (USE_DTRACE))
     set(DTRACE_PROBES 1)
+	message(STATUS "DTrace probes installed")
   endif()
 
   set(USE_LTO OFF CACHE BOOL "Do link time optimization")
