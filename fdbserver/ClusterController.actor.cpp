@@ -1392,6 +1392,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 
 			for (auto& it : self->id_worker) {
 				workers.push_back(it.second.details);
+				TraceEvent("HfuCC").detail("Addr", it.second.details.interf.address()).log();
 				if (it.second.issues.size()) {
 					workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
 				}

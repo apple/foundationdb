@@ -215,6 +215,7 @@ set(FDBSERVER_SRCS
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
   workloads/DifferentClustersSameRV.actor.cpp
+  workloads/DisconnectCCToSS.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DiskFailureInjection.actor.cpp

@@ -876,6 +876,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::map<NetworkAddress, double> ssLag;
 	state double lagSeconds;
 	for (ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
+		TraceEvent("Hfu5AddStorageRole").detail("Addr", ss->first.address()).log();
 		roles.addRole("storage", ss->first, ss->second, maxTLogVersion, &lagSeconds);
 		if (lagSeconds != -1.0) {
 			ssLag[ss->first.address()] = lagSeconds;
@@ -896,7 +897,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			wait(yield());
 		}
 	}
-
+	TraceEvent("Hfu5ProcessStatusFetcher").log();
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
 		wait(yield());
 		state JsonBuilderObject statusObj;
@@ -906,6 +907,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			NetworkAddress address = workerItr->interf.address();
 			const TraceEventFields& processMetrics = pMetrics[workerItr->interf.address()];
 			statusObj["address"] = address.toString();
+			if (address.toString() == "2.0.1.1:1") {
+				TraceEvent("Hfu5FoundSS").log();
+			}
 			JsonBuilderObject memoryObj;
 
 			if (processMetrics.size() > 0) {
@@ -1865,6 +1869,9 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
     std::vector<std::string> eventNames) {
 	state std::vector<Future<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
+		if (address_workers.count(s.address()) == 0) {
+			TraceEvent("Hfu5ServerMetricNotConsistent").detail("Address", s.address()).log();
+		}
 		for (auto name : eventNames) {
 			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
 		}
@@ -1879,6 +1886,9 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 		EventMap serverResults;
 		for (auto name : eventNames) {
 			ASSERT(futureItr != futures.end());
+			if (!futureItr->get().present()) {
+				TraceEvent("Hfu6ServerMetricsHaveEmptyField").detail("FieldName", name).detail("Address", servers[i].address()).log();
+			}
 			serverResults[name] = futureItr->get().present() ? futureItr->get().get() : TraceEventFields();
 			++futureItr;
 		}
