@@ -3232,6 +3232,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				break;
 			}
 
+			// subtract size BEFORE filter, to avoid huge cpu loop and processing if very selective filter applied
+			remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it->expectedSize();
+
 			MutationsAndVersionRef m;
 			if (doFilterMutations) {
 				m = filterMutations(memoryReply.arena, *it, req.range, req.encrypted, commonFeedPrefixLength);
@@ -8698,7 +8701,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
 	// knob
 	state ReadOptions readOptions = ReadOptions(
-	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
+	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
 	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
@@ -13726,7 +13729,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
 				TraceEvent("BusiestWriteTag", self->thisServerID)
 				    .detail("Elapsed", req.elapsed)
-				    .detail("Tag", printable(req.busiestTag))
+				    .detail("Tag", req.busiestTag)
 				    .detail("TagOps", req.opsSum)
 				    .detail("TagCost", req.costSum)
 				    .detail("TotalCost", req.totalWriteCosts)

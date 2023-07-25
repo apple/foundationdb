@@ -112,7 +112,7 @@ void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
 		TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
 		    .suppressFor(60.0)
 		    .detail("NumTags", req.tags.size())
-		    .detail("UsingTag", printable(tag));
+		    .detail("UsingTag", tag);
 	}
 	queues[tag].requests.emplace_back(req);
 }

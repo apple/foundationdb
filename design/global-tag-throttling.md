@@ -80,7 +80,7 @@ The ratekeeper must also track the rate of transactions performed with each tag.
 ### Average Cost Calculation
 Quotas are expressed in terms of cost, but because throttling is enforced at the beginning of transactions, budgets need to be calculated in terms of transactions per second. To make this conversion, it is necessary to track the average cost of transactions (per-tag, and per-tag on a particular storage server).
 
-Both cost and transaction counters are smoothed using the `Smoother` class to provide stability over time. The "smoothing interval" can be modified through `SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME`.
+Both cost and transaction counters are exponentially smoothed over time, with knob-configurable smoothing intervals.
 
 ### Reserved Rate Calculation
 The global tag throttler periodically reads reserved quotas from the system keyspace. Using these reserved quotas and the average cost of transactions with the given tag, a reserved TPS rate is computed. Read and write rates are aggregated as follows:

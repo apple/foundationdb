@@ -3781,12 +3781,13 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		// First and last key are the range for this file
-		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
+		state KeyRange fileRange;
 		state std::vector<KeyRange> originalFileRanges;
 		// If fileRange doesn't intersect restore range then we're done.
 		state int index;
 		for (index = 0; index < restoreRanges.get().size(); index++) {
 			auto& restoreRange = restoreRanges.get()[index];
+			fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
 			if (!fileRange.intersects(restoreRange))
 				continue;
 

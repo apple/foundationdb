@@ -1502,6 +1502,11 @@ ACTOR Future<UID> getClusterId(Database db) {
 	return db->clientInfo->get().clusterId;
 }
 
+void DatabaseContext::initializeSpecialCounters() {
+	specialCounter(cc, "OutstandingWatches", [this] { return outstandingWatches; });
+	specialCounter(cc, "WatchMapSize", [this] { return watchMap.size(); });
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
@@ -1816,6 +1821,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	if (BUGGIFY) {
 		DatabaseContext::debugUseTags = true;
 	}
+
+	initializeSpecialCounters();
 }
 
 DatabaseContext::DatabaseContext(const Error& err)
@@ -1863,7 +1870,9 @@ DatabaseContext::DatabaseContext(const Error& err)
     feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
     mutationsPerCommit(), bytesPerCommit(), sharedStatePtr(nullptr), transactionTracingSample(false),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())), outstandingWatches(0) {
+	initializeSpecialCounters();
+}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -2298,7 +2307,8 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 		              "trace",
 		              networkOptions.traceLogGroup,
 		              identifier,
-		              networkOptions.tracePartialFileSuffix);
+		              networkOptions.tracePartialFileSuffix,
+		              InitializeTraceMetrics::True);
 
 		TraceEvent("ClientStart")
 		    .detail("SourceVersion", getSourceVersion())
@@ -2313,7 +2323,6 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 		g_network->initMetrics();
 		FlowTransport::transport().initMetrics();
-		initTraceEventMetrics();
 	}
 
 	// Initialize system monitoring once the local IP is available

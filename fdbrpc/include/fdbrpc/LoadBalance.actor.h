@@ -686,18 +686,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
-			if (distance == LBDistance::DISTANT) {
-				TraceEvent("LBDistant")
-				    .suppressFor(0.1)
-				    .detail("Distance", (int)distance)
-				    .detail("BackOff", backoff)
-				    .detail("TriedAllOptions", triedAllOptions)
-				    .detail("Alternatives", alternatives->description())
-				    .detail("Token", stream->getEndpoint().token)
-				    .detail("Total", alternatives->size())
-				    .detail("Best", alternatives->countBest())
-				    .detail("Attempts", numAttempts);
-			}
 			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
