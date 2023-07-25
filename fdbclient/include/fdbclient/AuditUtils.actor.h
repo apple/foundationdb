@@ -36,7 +36,6 @@ struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
 };
 
-ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
 ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
 ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 ACTOR Future<Void> persistAuditState(Database cx,
@@ -61,13 +60,17 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
                                                                    UID auditId,
                                                                    UID auditServerId,
                                                                    KeyRange range);
-ACTOR Future<std::string> checkMigrationProgress(Database cx);
 ACTOR Future<Void> clearAuditMetadataForType(Database cx,
                                              AuditType auditType,
                                              UID maxAuditIdToClear,
                                              int numFinishAuditToKeep);
 ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
-ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 AuditPhase stringToAuditPhase(std::string auditPhaseStr);
+ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, UID auditId, KeyRange auditRange);
+ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
+                                                               MoveKeyLockInfo lock,
+                                                               bool ddEnabled,
+                                                               UID dataDistributorId,
+                                                               int persistFinishAuditCount);
 #include "flow/unactorcompiler.h"
 #endif

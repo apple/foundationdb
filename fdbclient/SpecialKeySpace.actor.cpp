@@ -2620,7 +2620,7 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 				try {
 					int mode = boost::lexical_cast<int>(iter->value().second.get().toString());
 					Value modeVal = BinaryWriter::toValue(mode, Unversioned());
-					if (mode == 0 || mode == 1) {
+					if (mode == 0 || mode == 1 || mode == 2) {
 						// Whenever configuration changes or DD related system keyspace is changed,
 						// actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey.
 						// This prevents concurrent write to the same system keyspace.

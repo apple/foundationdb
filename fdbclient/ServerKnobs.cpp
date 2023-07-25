@@ -423,7 +423,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          2 );
-	init( ROCKSDB_READ_PARALLELISM,                                4 );
+	init( ROCKSDB_READ_PARALLELISM,                isSimulated? 2: 4 );
 	init( ROCKSDB_CHECKPOINT_READER_PARALLELISM,                   4 );
 	// If true, do not process and store RocksDB logs
 	init( ROCKSDB_MUTE_LOGS,                                    true );
@@ -492,7 +492,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE,            false );
 	// ROCKSDB_STATS_LEVEL=1 indicates rocksdb::StatsLevel::kExceptHistogramOrTimers
 	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
-	init( ROCKSDB_STATS_LEVEL,                                     1 ); if( randomize && BUGGIFY ) ROCKSDB_STATS_LEVEL = deterministicRandom()->randomInt(0, 6);
+	init( ROCKSDB_STATS_LEVEL,                                     1 );
 	init( ROCKSDB_ENABLE_COMPACT_ON_DELETION,                  false );
 	// CDCF: CompactOnDeletionCollectorFactory. The below 3 are parameters of the CompactOnDeletionCollectorFactory
 	// which controls the compaction on deleted data.
@@ -507,15 +507,15 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
 	init( ENABLE_SHARDED_ROCKSDB,                              false );
-	init( ROCKSDB_WRITE_BUFFER_SIZE,                         1 << 30 ); // 1G
-	init( ROCKSDB_CF_WRITE_BUFFER_SIZE,                     64 << 20 ); // 64M, RocksDB default.
+	init( ROCKSDB_WRITE_BUFFER_SIZE,                 isSimulated? 128 << 20 : 1 << 30 ); // 1G
+	init( ROCKSDB_CF_WRITE_BUFFER_SIZE,              isSimulated? 16 << 20 : 64 << 20 ); // 64M, RocksDB default.
 	init( ROCKSDB_MAX_TOTAL_WAL_SIZE,                              0 ); // RocksDB default.
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 10.0 : 300.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
 	init( ROCKSDB_EMPTY_RANGE_CHECK,       isSimulated ? true : false);
 	init( ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX,             50 );
-	init( ROCKSDB_ATOMIC_FLUSH,                                false ); if( randomize && BUGGIFY )  ROCKSDB_ATOMIC_FLUSH = deterministicRandom()->coinflip();
+	init( ROCKSDB_ATOMIC_FLUSH,                                false );
  	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
  	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
  	init( ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE,               true );
@@ -527,8 +527,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MAX_OPEN_FILES,                              50000 ); // Should be smaller than OS's fd limit.
 	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); if (isSimulated) ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS = deterministicRandom()->coinflip();
 	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                      1000 );
-	init (ROCKSDB_WAIT_ON_CF_FLUSH,                             true ); if (isSimulated) ROCKSDB_WAIT_ON_CF_FLUSH = deterministicRandom()->coinflip();
-	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                   true ); if (isSimulated) ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH = deterministicRandom()->coinflip();
+	init (ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
+	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
 	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 	init (ROCKSDB_MAX_LOG_FILE_SIZE,                         10485760 ); // 10MB.
 	init (ROCKSDB_KEEP_LOG_FILE_NUM,                             200 ); // Keeps 2GB log per storage server.
@@ -537,6 +537,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
 	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
 	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); // 100MB
+	init (ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                           6 ); // RocksDB default.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -880,7 +881,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
 	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = deterministicRandom()->randomInt(1, PERSIST_FINISH_AUDIT_COUNT+1);
-	init( AUDIT_RETRY_COUNT_MAX,                                1000 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
+	init( AUDIT_RETRY_COUNT_MAX,                               10000 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
 	init( CONCURRENT_AUDIT_TASK_COUNT_MAX,                        10 ); if ( isSimulated ) CONCURRENT_AUDIT_TASK_COUNT_MAX = deterministicRandom()->randomInt(1, CONCURRENT_AUDIT_TASK_COUNT_MAX+1);
 	init( AUDIT_DATAMOVE_PRE_CHECK,                            false ); if ( isSimulated ) AUDIT_DATAMOVE_PRE_CHECK = true;
 	init( AUDIT_DATAMOVE_POST_CHECK,                           false ); if ( isSimulated ) AUDIT_DATAMOVE_POST_CHECK = true;
