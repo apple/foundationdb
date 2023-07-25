@@ -2110,6 +2110,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						--maxDeletes;
 						it++;
 					}
+					it = previousCommitKeysSet.lower_bound(keyRange.begin);
+					while (it != previousCommitKeysSet.end() && *it < keyRange.end) {
+						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						++counters.convertedDeleteKeyReqs;
+						--maxDeletes;
+						it++;
+					}
 				}
 			} else {
 				writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
@@ -2145,7 +2152,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
-		keysSet.clear();
+		previousCommitKeysSet = std::move(keysSet);
 		maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		auto res = a->done.getFuture();
 		writeThread->post(a);
@@ -2345,6 +2352,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::set<Key> keysSet;
+	std::set<Key> previousCommitKeysSet;
 	// maximum number of single key deletes in a commit, if ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled.
 	int maxDeletes;
 	Optional<Future<Void>> metrics;
