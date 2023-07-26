@@ -206,7 +206,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
 
-	RecruitFromConfigurationReply recruitment;
+	RecruitFromConfigurationReply primaryRecruitment;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;

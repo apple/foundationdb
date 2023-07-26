@@ -104,6 +104,9 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 			if (dbi.master.addresses().contains(server)) {
 				return true;
 			}
+
+			// Getting the current log system config to check if any TLogs are degraded. recoveryData->logSystem has the
+			// most up to date log system and we should use it whenever available.
 			auto logSystemConfig =
 			    recoveryData->logSystem.isValid() ? recoveryData->logSystem->getLogSystemConfig() : dbi.logSystemConfig;
 			for (const auto& logSet : logSystemConfig.tLogs) {
@@ -132,14 +135,20 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 			}
 
 			if (recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				for (const auto& tlog : recoveryData->recruitment.tLogs) {
+				// During recovery, TLogs may not be able to pull data from previous generation TLogs due to gray
+				// failures. In this case, we rely on the latest recruitment information and see if any newly recruited
+				// TLogs are degraded.
+				for (const auto& tlog : recoveryData->primaryRecruitment.tLogs) {
 					if (tlog.addresses().contains(server)) {
 						return true;
 					}
 				}
-				for (const auto& satelliteLog : recoveryData->recruitment.satelliteTLogs) {
-					if (satelliteLog.addresses().contains(server)) {
-						return true;
+
+				if (!skipSatellite) {
+					for (const auto& satelliteLog : recoveryData->primaryRecruitment.satelliteTLogs) {
+						if (satelliteLog.addresses().contains(server)) {
+							return true;
+						}
 					}
 				}
 			}
@@ -172,6 +181,26 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	       transactionWorkerInList(degradationInfo.disconnectedServers,
 	                               /*skipSatellite=*/false,
 	                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
+}
+
+bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
+	if (db.config.usableRegions <= 1) {
+		return false;
+	}
+
+	for (const auto& excludedServer : degradationInfo.degradedServers) {
+		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+			return true;
+		}
+	}
+
+	for (const auto& excludedServer : degradationInfo.disconnectedServers) {
+		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
@@ -2912,6 +2941,8 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			}
 
 			if (hasRecoveredServer) {
+				// The best transaction system might have changed after a server is recovered. Check outstanding request
+				// and check if a better transaction system exists.
 				checkOutstandingRequests(self);
 			}
 
