@@ -105,6 +105,7 @@ struct DDAudit {
 	int64_t overallCompleteDoAuditCount;
 	AsyncVar<int> remainingBudgetForAuditTasks;
 	uint8_t context;
+	std::unordered_map<UID, bool> serverProgressFinishMap; // dedicated to ssshard
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -1832,15 +1833,43 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			if (audit->coreState.getType() == AuditType::ValidateHA ||
 			    audit->coreState.getType() == AuditType::ValidateReplica ||
 			    audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-				bool allFinish = wait(checkAuditProgressComplete(self->txnProcessor->context(),
-				                                                 audit->coreState.getType(),
-				                                                 audit->coreState.id,
-				                                                 audit->coreState.range));
+				bool allFinish = wait(checkAuditProgressCompleteByRange(self->txnProcessor->context(),
+				                                                        audit->coreState.getType(),
+				                                                        audit->coreState.id,
+				                                                        audit->coreState.range));
+				if (!allFinish) {
+					throw retry();
+				}
+			} else {
+				state std::vector<Future<Void>> checkServerProgressFs;
+				state std::unordered_map<UID, bool> checkServerProgressRes;
+				state std::vector<StorageServerInterface> ssInterfs =
+				    wait(getStorageServers(self->txnProcessor->context()));
+				for (const auto& ssInterf : ssInterfs) {
+					UID serverId = ssInterf.uniqueID;
+					if (audit->serverProgressFinishMap.contains(serverId) && audit->serverProgressFinishMap[serverId]) {
+						continue; // skip if already complete
+					}
+					checkServerProgressFs.push_back(
+					    store(checkServerProgressRes[serverId],
+					          checkAuditProgressCompleteByServer(self->txnProcessor->context(),
+					                                             audit->coreState.getType(),
+					                                             audit->coreState.id,
+					                                             allKeys,
+					                                             serverId)));
+				}
+				wait(waitForAll(checkServerProgressFs));
+				bool allFinish = true;
+				for (const auto& [serverId, finish] : checkServerProgressRes) {
+					audit->serverProgressFinishMap[serverId] = finish;
+					if (!finish) {
+						allFinish = false;
+					}
+				}
 				if (!allFinish) {
 					throw retry();
 				}
 			}
-			// TODO: check audit persist progress for ssshard type
 			audit->coreState.setPhase(AuditPhase::Complete);
 		}
 		TraceEvent(SevVerbose, "DDAuditStorageCoreCompleteAudit", self->ddId)
@@ -2240,10 +2269,10 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", auditType);
 	try {
-		state ServerWorkerInfos serverWorkers = wait(self->txnProcessor->getServerListAndProcessClasses());
+		state std::vector<StorageServerInterface> interfs = wait(getStorageServers(self->txnProcessor->context()));
 		state int i = 0;
-		for (; i < serverWorkers.servers.size(); ++i) {
-			state StorageServerInterface targetServer = serverWorkers.servers[i].first;
+		for (; i < interfs.size(); ++i) {
+			state StorageServerInterface targetServer = interfs[i];
 			// Currently, Tss server may not follow the auit consistency rule
 			// Thus, skip if the server is tss
 			if (targetServer.isTss()) {
@@ -2332,9 +2361,6 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 					    .detail("AuditType", auditType);
 					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
-					// Since remaining part is always successcive
-					// We always issue exactly one audit task (for the remaining part) when schedule
-					ASSERT(issueDoAuditCount == 0);
 					issueDoAuditCount++;
 					req.ddId = self->ddId; // send this ddid to SS
 					wait(doAuditOnStorageServer(self, audit, ssi, req)); // do audit one by one

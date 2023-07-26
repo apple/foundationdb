@@ -5355,7 +5355,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	state int64_t cumulatedValidatedLocalShardsNum = 0;
 	state int64_t cumulatedValidatedServerKeysNum = 0;
 	state Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 	state int64_t remoteReadBytes = 0;
 
 	try {
@@ -5727,7 +5727,7 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 	state int64_t cumulatedValidatedServerKeysNum = 0;
 	state int64_t cumulatedValidatedKeyServersNum = 0;
 	state Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 	state int64_t remoteReadBytes = 0;
 
 	try {
@@ -5996,10 +5996,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int64_t readBytes = 0;
 	state int64_t numValidatedKeys = 0;
+	state int64_t validatedBytes = 0;
 	state bool complete = false;
 	state int64_t checkTimes = 0;
 	state Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 
 	try {
 		loop {
@@ -6090,6 +6091,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						throw reps[i].get().error.get();
 					}
 					readBytes = readBytes + reps[i].get().data.expectedSize();
+					validatedBytes = validatedBytes + reps[i].get().data.expectedSize();
 					// If any of reps finishes read, we think we complete
 					// Even some rep does not finish read, this unfinished rep has more key than
 					// the complete rep, which will lead to missKey inconsistency in
@@ -6326,7 +6328,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	    .detail("AuditServer", data->thisServerID)
 	    .detail("CompleteRange", res.range)
 	    .detail("CheckTimes", checkTimes)
-	    .detail("NumValidatedKeys", numValidatedKeys);
+	    .detail("NumValidatedKeys", numValidatedKeys)
+	    .detail("ValidatedBytes", validatedBytes);
 
 	return Void();
 }

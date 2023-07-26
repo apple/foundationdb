@@ -67,7 +67,15 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
                                              int numFinishAuditToKeep);
 ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
 AuditPhase stringToAuditPhase(std::string auditPhaseStr);
-ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, UID auditId, KeyRange auditRange);
+ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
+                                                     AuditType auditType,
+                                                     UID auditId,
+                                                     KeyRange auditRange);
+ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
+                                                      AuditType auditType,
+                                                      UID auditId,
+                                                      KeyRange auditRange,
+                                                      UID serverId);
 ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
                                                                MoveKeyLockInfo lock,
                                                                bool ddEnabled,
