@@ -55,22 +55,16 @@ ACTOR Future<bool> getKeyServers(
 	state Key begin = kr.begin;
 	state Key end = kr.end;
 	state int limitKeyServers = 100;
-	state Span span(deterministicRandom()->randomUniqueID(), "CLI:Check"_loc);
 
 	while (begin < end) {
 		state Reference<CommitProxyInfo> commitProxyInfo =
 		    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
-		keyServerLocationFuture = commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
-		                              .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
-		                                                                                    Optional<TenantNameRef>(),
-		                                                                                    begin,
-		                                                                                    end,
-		                                                                                    limitKeyServers,
-		                                                                                    false,
-		                                                                                    latestVersion,
-		                                                                                    Arena()),
-		                                                       2,
-		                                                       0);
+		keyServerLocationFuture =
+		    commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
+		        .getReplyUnlessFailedFor(
+		            GetKeyServerLocationsRequest({}, {}, begin, end, limitKeyServers, false, latestVersion, Arena()),
+		            2,
+		            0);
 
 		state bool keyServersInsertedForThisIteration = false;
 		choose {
@@ -103,12 +97,12 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 		return false;
 	}
 
-	KeyRange kr = KeyRangeRef(tokens[1], tokens.size() == 3 ? tokens[2] : keyAfter(tokens[1]));
+	state KeyRange kr = KeyRangeRef(tokens[1], tokens.size() == 3 ? tokens[2] : keyAfter(tokens[1]));
 	// find key range locations without GRV
 	state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
 	bool found = wait(getKeyServers(cx, keyServersPromise, kr));
 	if (!found) {
-		printf("[%s, %s]locations not found\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+		printf("%s locations not found\n", printable(kr).c_str());
 		return false;
 	}
 	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
