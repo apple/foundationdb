@@ -962,6 +962,13 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			}
 		}
 	} catch (Error& e) {
+		TraceEvent("BlobManagerErrorDoRangeAssignment", bmData->id)
+		    .errorUnsuppressed(e)
+		    .suppressFor(10.0)
+		    .detail("Epoch", bmData->epoch)
+		    .detail("Range", assignment.keyRange)
+		    .detail("IsAssign", assignment.isAssign)
+		    .detail("IsBlocked", assignment.previousFailure.present());
 		if (assignment.previousFailure.present()) {
 			// previous assign failed, consider it unblocked if it's not a retriable error
 			--bmData->stats.blockedAssignments;
@@ -2819,6 +2826,10 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 
 ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	TraceEvent("BMDeregisteringWorker", bmData->id)
+	    .detail("Epoch", bmData->epoch)
+	    .detail("WorkerId", interf.id())
+	    .detail("WorkerAddr", interf.address());
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2831,6 +2842,11 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 			tr->clear(blobWorkerListKey);
 
 			wait(tr->commit());
+
+			TraceEvent("BMDeregisteredWorker", bmData->id)
+			    .detail("Epoch", bmData->epoch)
+			    .detail("WorkerId", interf.id())
+			    .detail("WorkerAddr", interf.address());
 
 			if (BM_DEBUG) {
 				fmt::print("Deregistered blob worker {0}\n", interf.id().toString());
@@ -2876,7 +2892,10 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	// Remove it from workersById also since otherwise that worker addr will remain excluded
 	// when we try to recruit new blob workers.
 
-	TraceEvent("KillBlobWorker", bmData->id).detail("Epoch", bmData->epoch).detail("WorkerId", bwId);
+	TraceEvent("KillBlobWorker", bmData->id)
+	    .detail("Epoch", bmData->epoch)
+	    .detail("WorkerId", bwId)
+	    .detail("Registered", registered);
 
 	if (registered) {
 		bmData->deadWorkers.insert(bwId);
@@ -2945,6 +2964,11 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	if (registered) {
 		bmData->deadWorkers.erase(bwInterf.id());
 	}
+
+	TraceEvent("KillBlobWorkerComplete", bmData->id)
+	    .detail("Epoch", bmData->epoch)
+	    .detail("WorkerId", bwId)
+	    .detail("Registered", registered);
 
 	return Void();
 }
@@ -3322,9 +3346,13 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			}
 			// add all blob workers to this new blob manager's records and start monitoring it
 			bool foundAnyNew = false;
+			int failedOrExcludedCount = 0;
 			for (auto& worker : blobWorkers) {
 				if (!bmData->deadWorkers.count(worker.id())) {
 					bool isFailedOrExcluded = bmData->exclusionTracker.isFailedOrExcluded(worker.stableAddress());
+					if (isFailedOrExcluded) {
+						failedOrExcludedCount++;
+					}
 					if (!bmData->workerAddresses.count(worker.stableAddress()) &&
 					    worker.locality.dcId() == bmData->dcId && !isFailedOrExcluded) {
 						bmData->workerAddresses.insert(worker.stableAddress());
@@ -3332,6 +3360,10 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 						bmData->workerStats[worker.id()] = BlobWorkerInfo();
 						bmData->addActor.send(monitorBlobWorker(bmData, worker));
 						foundAnyNew = true;
+						TraceEvent("BMFoundNewWorker", bmData->id)
+						    .detail("Epoch", bmData->epoch)
+						    .detail("WorkerId", worker.id())
+						    .detail("WorkerAddr", worker.address());
 					} else if (!bmData->workersById.count(worker.id())) {
 						TraceEvent("KillingExtraneousBlobWorker", bmData->id)
 						    .detail("WorkerId", worker.id())
@@ -3349,6 +3381,13 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 				Promise<Void> hold = bmData->foundBlobWorkers;
 				bmData->foundBlobWorkers = Promise<Void>();
 				hold.send(Void());
+			} else if (bmData->workersById.empty()) {
+				CODE_PROBE(true, "blob manager found no workers");
+				TraceEvent(SevWarn, "BlobManagerFoundNoWorkers", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("InDBCount", blobWorkers.size())
+				    .detail("DeadCount", bmData->deadWorkers.size())
+				    .detail("FailedOrExcludedCount", failedOrExcludedCount);
 			}
 			wait(delay(SERVER_KNOBS->BLOB_WORKERLIST_FETCH_INTERVAL));
 		}
@@ -4146,7 +4185,11 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self,
 			CODE_PROBE(true, "BM got error recruiting BW");
 			TraceEvent(SevWarn, "BMRecruitmentError", self->id)
 			    .error(newBlobWorker.getError())
-			    .detail("Epoch", self->epoch);
+			    .detail("Epoch", self->epoch)
+			    .detail("WorkerID", candidateWorker.worker.id())
+			    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
+			    .detail("Interf", interfaceId)
+			    .detail("Addr", candidateWorker.worker.address());
 			if (!newBlobWorker.isError(error_code_recruitment_failed) &&
 			    !newBlobWorker.isError(error_code_request_maybe_delivered)) {
 				throw newBlobWorker.getError();
@@ -4211,16 +4254,21 @@ ACTOR Future<Void> blobWorkerRecruiter(
 		try {
 			state RecruitBlobWorkerRequest recruitReq;
 
+			// SevDebug normally but SevInfo if we have no active workers
+			Severity excludeSeverity = self->workersById.empty() ? SevInfo : SevDebug;
+
 			// workers that are used by existing blob workers should be excluded
 			for (auto const& [bwId, bwInterf] : self->workersById) {
 				auto addr = bwInterf.stableAddress();
 				AddressExclusion addrExcl(addr.ip, addr.port);
 				recruitReq.excludeAddresses.emplace_back(addrExcl);
+				TraceEvent(excludeSeverity, "BMRecruitExcl1").detail("Excluding", addr);
 			}
 
 			// workers that are used by blob workers that are currently being recruited should be excluded
 			for (auto addr : self->recruitingLocalities) {
 				recruitReq.excludeAddresses.emplace_back(AddressExclusion(addr.ip, addr.port));
+				TraceEvent(excludeSeverity, "BMRecruitExcl2").detail("Excluding", addr);
 			}
 
 			// don't recruit on excluded or failed addresses
@@ -4238,6 +4286,10 @@ ACTOR Future<Void> blobWorkerRecruiter(
 			TraceEvent("BMRecruiting", self->id)
 			    .detail("Epoch", self->epoch)
 			    .detail("ExcludedCount", recruitReq.excludeAddresses.size())
+			    .detail("ExistingCount", self->workersById.size())
+			    .detail("InProgressCount", self->recruitingLocalities.size())
+			    .detail("ExternalCount", self->exclusionTracker.excluded.size() + self->exclusionTracker.failed.size())
+			    .detail("DeadCount", self->deadWorkers.size())
 			    .detail("State", "Sending request to CC");
 
 			if (!fCandidateWorker.isValid() || fCandidateWorker.isReady() ||
@@ -5825,6 +5877,9 @@ static std::map<std::pair<UID, int64_t>, UID> managerEpochsSeen;
 ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
 	loop {
 		if (dbInfo->get().blobManager.present() && dbInfo->get().blobManager.get().epoch > epoch) {
+			TraceEvent("BMRemovedFromDBInfo", dbgid)
+			    .detail("Epoch", epoch)
+			    .detail("NewEpoch", dbInfo->get().blobManager.get().epoch);
 			throw worker_removed();
 		}
 		wait(dbInfo->onChange());
