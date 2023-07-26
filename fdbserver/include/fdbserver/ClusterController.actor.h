@@ -3198,25 +3198,7 @@ public:
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
-	bool remoteTransactionSystemContainsDegradedServers() {
-		if (db.config.usableRegions <= 1) {
-			return false;
-		}
-
-		for (const auto& excludedServer : degradationInfo.degradedServers) {
-			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
-				return true;
-			}
-		}
-
-		for (const auto& excludedServer : degradationInfo.disconnectedServers) {
-			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
+	bool remoteTransactionSystemContainsDegradedServers();
 
 	// Returns true if remote DC is healthy and can failover to.
 	bool remoteDCIsHealthy() {

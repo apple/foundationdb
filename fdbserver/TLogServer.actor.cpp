@@ -375,6 +375,7 @@ struct TLogData : NonCopyable {
 	// and ends when the data is flushed and durable.
 	Reference<Histogram> timeUntilDurableDist;
 
+	// Controls whether the health monitoring running in this TLog force checking any other processes are degraded.
 	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck;
 
 	TLogData(UID dbgid,
@@ -3616,12 +3617,16 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					logData->logRouterPopToVersion = recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
+
+					// Force gray failure monitoring during recovery.
 					self->enablePrimaryTxnSystemHealthCheck->set(true);
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, recoverAt, true) ||
 					     logData->removed || logData->stopCommit.onTrigger());
 					self->enablePrimaryTxnSystemHealthCheck->set(false);
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
+
+					// Force gray failure monitoring during recovery.
 					self->enablePrimaryTxnSystemHealthCheck->set(true);
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, recoverAt, false) ||

@@ -176,11 +176,13 @@ struct ClogTlogWorkload : TestWorkload {
 
 		state bool useGrayFailureToRecover = false;
 		if (deterministicRandom()->coinflip() && self->useDisconnection) {
+			// Use gray failure instead of exclusion to recover the cluster.
 			TraceEvent("ClogTlogUseGrayFailreToRecover").log();
 			useGrayFailureToRecover = true;
 		}
 
-		// start exclusion and wait for fully recovery
+		// start exclusion and wait for fully recovery. When using gray failure, the cluster should recover by itself
+		// eventually.
 		state Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(self, cx);
 		state Future<Void> onChange = self->dbInfo->onChange();
 		loop choose {

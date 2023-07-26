@@ -1266,6 +1266,8 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 			}
 		} else if (enablePrimaryTxnSystemHealthCheck->get() &&
 		           (addressInDbAndPrimaryDc(address, dbInfo) || addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+			// For force checking, we only detect connection timeout. Currently this should only be used during recovery
+			// and only used in TLogs.
 			if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
 				TraceEvent("HealthMonitorDetectDegradedPeer")
 				    .detail("WorkerLocation", workerLocation)
@@ -2121,6 +2123,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	state Future<Void> updateClusterIdFuture;
+
+	// When set to true, the health monitor running in this worker starts monitor other transaction process in this
+	// cluster.
 	state Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
