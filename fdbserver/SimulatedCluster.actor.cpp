@@ -23,7 +23,10 @@
 #include <ostream>
 #include <sstream>
 #include <string_view>
+#include <unordered_map>
+
 #include <toml.hpp>
+
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
@@ -1691,72 +1694,130 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
 }
 
-// Sets storage engine based on testConfig details
-void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	// Using [0, 4) to disable the RocksDB storage engine.
-	// TODO: Figure out what is broken with the RocksDB engine in simulation.
-	int storage_engine_type = deterministicRandom()->randomInt(0, 6);
-	if (db.encryptionAtRestMode.isEncryptionEnabled()) {
+namespace {
+
+enum class SimulationStorageEngine : uint8_t {
+	SSD = 0,
+	MEMORY = 1,
+	RADIX_TREE = 2,
+	REDWOOD = 3,
+	ROCKSDB = 4,
+	SHARDED_ROCKSDB = 5,
+	SIMULATION_STORAGE_ENGINE_INVALID_VALUE
+};
+
+using StorageEngineConfigFunc = void (*)(SimulationConfig*);
+
+void ssdStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using ssd storage engine");
+	simCfg->set_config("ssd");
+}
+void memoryStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using default memory storage engine");
+	simCfg->set_config("memory");
+}
+
+void radixTreeStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using radix-tree storage engine");
+	simCfg->set_config("memory-radixtree-beta");
+}
+
+void redwoodStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using redwood storage engine");
+	// The experimental suffix is still supported so test it randomly
+	simCfg->set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
+}
+
+void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::hasRocksDB);
+	simCfg->set_config("ssd-rocksdb-v1");
+	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+	// background threads.
+	TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
+	    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
+	noUnseed = true;
+}
+
+void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
+	simCfg->set_config("encryption_at_rest_mode=disabled");
+	simCfg->set_config("ssd-sharded-rocksdb");
+	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+	// background threads.
+	TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
+	    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
+	noUnseed = true;
+}
+
+const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORAGE_ENGINE_CONFIG_MAPPER = {
+	{ SimulationStorageEngine::SSD, ssdStorageEngineConfig },
+	{ SimulationStorageEngine::MEMORY, memoryStorageEngineConfig },
+	{ SimulationStorageEngine::RADIX_TREE, radixTreeStorageEngineConfig },
+	{ SimulationStorageEngine::REDWOOD, redwoodStorageEngineConfig },
+	{ SimulationStorageEngine::ROCKSDB, rocksdbStorageEngineConfig },
+	{ SimulationStorageEngine::SHARDED_ROCKSDB, shardedRocksDBStorageEngineConfig }
+};
+
+#ifdef SIMULATION_ROCKSDB_ENABLED
+
+// TODO: Figure out what is broken with the RocksDB engine in simulation.
+const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
+	SimulationStorageEngine::SSD,     SimulationStorageEngine::MEMORY,  SimulationStorageEngine::RADIX_TREE,
+	SimulationStorageEngine::REDWOOD, SimulationStorageEngine::ROCKSDB, SimulationStorageEngine::SHARDED_ROCKSDB
+};
+
+#else // SIMULATION_ROCKSDB_ENABLED
+
+const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = { SimulationStorageEngine::SSD,
+	                                                                     SimulationStorageEngine::MEMORY,
+	                                                                     SimulationStorageEngine::RADIX_TREE,
+	                                                                     SimulationStorageEngine::REDWOOD };
+
+#endif // SIMULATION_ROCKSDB_ENABLED
+
+SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig, const bool isEncryptionEnabled) {
+	StringRef reason;
+	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
+	if (isEncryptionEnabled) {
 		// Only storage engine supporting encryption is Redwood.
-		storage_engine_type = 3;
+		reason = "EncryptionEnabled"_sr;
+		result = SimulationStorageEngine::REDWOOD;
 	} else if (testConfig.storageEngineType.present()) {
-		storage_engine_type = testConfig.storageEngineType.get();
+		const uint8_t storageEngineType = testConfig.storageEngineType.get();
+		ASSERT(storageEngineType <
+		       static_cast<uint8_t>(SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE));
+		reason = "ConfigureSpecified"_sr;
+		result = static_cast<SimulationStorageEngine>(storageEngineType);
 	} else {
-		// Continuously re-pick the storage engine type if it's the one we want to exclude
-		while (testConfig.excludedStorageEngineType(storage_engine_type)) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 6);
+		constexpr auto NUM_RETRIES = 1000;
+		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
+			result = deterministicRandom()->randomChoice(SIMULATION_STORAGE_ENGINE);
+			if (!testConfig.excludedStorageEngineType(static_cast<uint8_t>(result))) {
+				break;
+			}
+		}
+		if (result == SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE) {
+			UNREACHABLE();
 		}
 	}
+	TraceEvent(SevInfo, "SimulationStorageEngine")
+	    .detail("StorageEngine", static_cast<uint8_t>(result))
+		.detail("Reason", reason)
+#ifdef SIMULATION_ROCKSDB_ENABLED
+	    .detail("RocksDBEngineChoosable", true)
+#else
+	    .detail("RocksDBEngineChoosable", false)
+#endif
+	    ;
+	return result;
+}
 
-	if (storage_engine_type == 5) {
-		set_config("encryption_at_rest_mode=disabled");
-	}
+} // anonymous namespace
 
-	switch (storage_engine_type) {
-	case 0: {
-		CODE_PROBE(true, "Simulated cluster using ssd storage engine");
-		set_config("ssd");
-		break;
-	}
-	case 1: {
-		CODE_PROBE(true, "Simulated cluster using default memory storage engine");
-		set_config("memory");
-		break;
-	}
-	case 2: {
-		CODE_PROBE(true, "Simulated cluster using radix-tree storage engine");
-		set_config("memory-radixtree-beta");
-		break;
-	}
-	case 3: {
-		CODE_PROBE(true, "Simulated cluster using redwood storage engine");
-		// The experimental suffix is still supported so test it randomly
-		set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
-		break;
-	}
-	case 4: {
-		CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::hasRocksDB);
-		set_config("ssd-rocksdb-v1");
-		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-		// background threads.
-		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
-		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
-		noUnseed = true;
-		break;
-	}
-	case 5: {
-		CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
-		set_config("ssd-sharded-rocksdb");
-		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-		// background threads.
-		TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
-		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
-		noUnseed = true;
-		break;
-	}
-	default:
-		ASSERT(false); // Programmer forgot to adjust cases.
-	}
+// Sets storage engine based on testConfig details
+void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
+	auto storageEngineType = chooseSimulationStorageEngine(testConfig, db.encryptionAtRestMode.isEncryptionEnabled());
+	STORAGE_ENGINE_CONFIG_MAPPER.at(storageEngineType)(this);
 }
 
 // Sets replication type and TLogSpillType and Version

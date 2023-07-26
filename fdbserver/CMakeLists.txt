@@ -6,7 +6,9 @@ else()
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
 endif()
 
+
 if(WITH_ROCKSDB_EXPERIMENTAL)
+  set(ENABLE_ROCKSDB_IN_SIMULATION ON CACHE BOOL "Enable RocksDB engine in simulation tests")
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
@@ -15,6 +17,8 @@ if(WITH_ROCKSDB_EXPERIMENTAL)
   if(WITH_LIBURING)
     find_package(uring)
   endif()
+else()
+  set(ENABLE_ROCKSDB_IN_SIMULATION OFF CACHE BOOL "Enable RocksDB engine in simulation tests")
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
@@ -139,6 +143,9 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/include)
 if (WITH_ROCKSDB_EXPERIMENTAL)
+  if (ENABLE_ROCKSDB_IN_SIMULATION)
+	  target_compile_definitions(fdbserver PRIVATE SIMULATION_ROCKSDB_ENABLED=1)
+  endif()
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
@@ -147,9 +154,11 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   else()
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
     target_link_libraries(fdbserver PRIVATE fdbclient metacluster sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
-    target_compile_definitions(fdbserver PRIVATE)
   endif()
 else()
+  if (ENABLE_ROCKSDB_IN_SIMULATION)
+    message(FATAL_ERROR "ENABLE_ROCKSDB_IN_SIMULATION cannot be ON if WITH_ROCKSDB_EXPERIMENTAL is OFF")
+  endif()
   target_link_libraries(fdbserver PRIVATE fdbclient metacluster sqlite)
 endif()
 
