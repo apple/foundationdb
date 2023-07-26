@@ -1443,13 +1443,14 @@ DataDistributionTracker::~DataDistributionTracker() {
 }
 
 struct DataDistributionTrackerImpl {
-	ACTOR static Future<Void> run(DataDistributionTracker* self, Reference<InitialDataDistribution> initData) {
+	ACTOR static Future<Void> run(Reference<DataDistributionTracker> self,
+	                              Reference<InitialDataDistribution> initData) {
 		state Future<Void> loggingTrigger = Void();
-		state Future<Void> readHotDetect = readHotDetector(self);
+		state Future<Void> readHotDetect = readHotDetector(self.getPtr());
 		state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 
 		try {
-			wait(trackInitialShards(self, initData));
+			wait(trackInitialShards(self.getPtr(), initData));
 			initData.clear(); // Release reference count.
 
 			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
@@ -1472,20 +1473,20 @@ struct DataDistributionTrackerImpl {
 					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 				}
 				when(GetMetricsRequest req = waitNext(self->getShardMetrics)) {
-					self->actors.add(fetchShardMetrics(self, req));
+					self->actors.add(fetchShardMetrics(self.getPtr(), req));
 				}
 				when(GetTopKMetricsRequest req = waitNext(self->getTopKMetrics)) {
-					self->actors.add(fetchTopKShardMetrics(self, req));
+					self->actors.add(fetchTopKShardMetrics(self.getPtr(), req));
 				}
 				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
-					self->actors.add(fetchShardMetricsList(self, req));
+					self->actors.add(fetchShardMetricsList(self.getPtr(), req));
 				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
-					self->actors.add(tenantCreationHandling(self, newTenant));
+					self->actors.add(tenantCreationHandling(self.getPtr(), newTenant));
 				}
 				when(KeyRange req = waitNext(self->shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
-					restartShardTrackers(self, req);
+					restartShardTrackers(self.getPtr(), req);
 				}
 			}
 		} catch (Error& e) {
@@ -1506,7 +1507,9 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
 	self->userRangeConfig = initData->userRangeConfig;
-	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
+	// There's a rare race inside DataDistributionTrackerImpl::run where it lives longer than this holdWhile
+	// At present, we just pass in the Reference to avoid DDTracker destroyed when the run actor is still alive
+	return holdWhile(self, DataDistributionTrackerImpl::run(self, initData));
 }
 
 // Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning
