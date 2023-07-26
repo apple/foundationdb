@@ -160,11 +160,6 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				}
 			}
 		}
-
-		TraceEvent("ZZZZShouldTriggerButNot")
-		    .detail("Reason", "AllHealthy")
-		    .detail("SkipSatellite", skipSatellite)
-		    .detail("SkipRemote", skipRemote);
 		return false;
 	};
 
@@ -181,7 +176,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators) {
 	state MasterInterface iMaster;
-	// state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
 
@@ -760,7 +754,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
-	TraceEvent("ZZZZZdoCheckOutstandingRequestsCall").log();
 	try {
 		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
 		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
@@ -791,7 +784,6 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			TraceEvent(SevError, "CheckOutstandingError").error(e);
 		}
 	}
-	TraceEvent("ZZZZZdoCheckOutstandingRequestsReturn").log();
 	return Void();
 }
 
@@ -812,7 +804,6 @@ ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self)
 }
 
 void checkOutstandingRequests(ClusterControllerData* self) {
-	TraceEvent("ZZZZZCallCheckOutstandingRequests").log();
 	if (self->outstandingRemoteRequestChecker.isReady()) {
 		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
 	}
@@ -3098,8 +3089,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    (self.db.config.isExcludedServer(worker.details.interf.addresses()) ||
-				     self.isExcludedDegradedServer(worker.details.interf.addresses()))) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
 					continue;
 				}
 
@@ -3135,9 +3125,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			clusterRegisterMaster(&self, req);
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
-			TraceEvent("ZZZZReceiveUpdateWorkerHealthRequest")
-			    .detail("From", req.address)
-			    .detail("Disconnected", describe(req.disconnectedPeers));
 			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 				self.updateWorkerHealth(req);
 			}

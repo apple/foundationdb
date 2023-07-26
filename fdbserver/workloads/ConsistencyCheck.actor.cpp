@@ -1349,9 +1349,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::map<NetworkAddress, WorkerDetails> nonExcludedWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToNonExcludedClassTypes;
 		for (const auto& worker : nonExcludedWorkers) {
-			TraceEvent("ZZZZZZNonExcludedWorkerClass")
-			    .detail("Worker", worker.interf.address())
-			    .detail("Class", worker.processClass.classType());
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToNonExcludedClassTypes.count(dc))

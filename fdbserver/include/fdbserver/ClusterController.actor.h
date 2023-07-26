@@ -1496,11 +1496,6 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (role == ProcessClass::ClusterRole::Master) {
-				TraceEvent("ZZZZZZGetMasterRoleFitness")
-				    .detail("Worker", it.second.details.interf.address())
-				    .detail("Fitness", fitness);
-			}
 			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
 			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
@@ -2393,7 +2388,6 @@ public:
 	// This function returns true when the cluster controller determines it is worth forcing
 	// a cluster recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
-		TraceEvent("ZZZZZCallingBetterMasterExist").log();
 		const ServerDBInfo dbi = db.serverInfo->get();
 
 		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -2583,7 +2577,6 @@ public:
 			;
 			return false;
 		}
-		TraceEvent("ZZZZZZMasterFit").detail("Old", oldMasterFit).detail("New", newMasterFit);
 		if (oldMasterFit > newMasterFit || (dbi.master.locality.processId() == clusterControllerProcessId &&
 		                                    mworker.worker.interf.locality.processId() != clusterControllerProcessId)) {
 			TraceEvent("BetterMasterExists", id)
@@ -3202,71 +3195,6 @@ public:
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers();
-	// bool transactionSystemContainsDegradedServers() {
-	// 	const ServerDBInfo& dbi = db.serverInfo->get();
-	// 	auto transactionWorkerInList =
-	// 	    [&dbi](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
-	// 		for (const auto& server : serverList) {
-	// 			if (dbi.master.addresses().contains(server)) {
-	// 				return true;
-	// 			}
-
-	// 			for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-	// 				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
-	// 					continue;
-	// 				}
-
-	// 				if (skipRemote && !logSet.isLocal) {
-	// 					continue;
-	// 				}
-
-	// 				if (!logSet.isLocal) {
-	// 					// Only check log routers in the remote region.
-	// 					for (const auto& logRouter : logSet.logRouters) {
-	// 						if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
-	// 							return true;
-	// 						}
-	// 					}
-	// 				} else {
-	// 					for (const auto& tlog : logSet.tLogs) {
-	// 						if (tlog.present() && tlog.interf().addresses().contains(server)) {
-	// 							return true;
-	// 						}
-	// 					}
-	// 				}
-	// 			}
-
-	// 			for (const auto& proxy : dbi.client.grvProxies) {
-	// 				if (proxy.addresses().contains(server)) {
-	// 					return true;
-	// 				}
-	// 			}
-
-	// 			for (const auto& proxy : dbi.client.commitProxies) {
-	// 				if (proxy.addresses().contains(server)) {
-	// 					return true;
-	// 				}
-	// 			}
-
-	// 			for (const auto& resolver : dbi.resolvers) {
-	// 				if (resolver.addresses().contains(server)) {
-	// 					return true;
-	// 				}
-	// 			}
-	// 		}
-
-	// 		TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "AllHealthy").detail("SkipSatellite",
-	// skipSatellite).detail("SkipRemote", skipRemote); 		return false;
-	// 	};
-
-	// 	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
-	// 	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
-	// 	// stable.
-	// 	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
-	// 	       transactionWorkerInList(degradationInfo.disconnectedServers,
-	// 	                               /*skipSatellite=*/false,
-	// 	                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
-	// }
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
@@ -3321,20 +3249,12 @@ public:
 	bool shouldTriggerRecoveryDueToDegradedServers() {
 		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
 		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
-			TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "MaxExceeded");
 			return false;
 		}
-
-		/*
-		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		    TraceEvent("ZZZNoNono").log();
-		    return false;
-		}*/
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
 		// anyways once the cluster controller is moved
 		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
-			TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "CCExcluded");
 			return false;
 		}
 
