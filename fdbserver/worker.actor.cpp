@@ -1168,7 +1168,10 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 	for (const auto& [address, peer] : allPeers) {
 		if (!shouldCheckPeer(peer)) {
-			TraceEvent("ZZZZSkipPeerHealthCheck").detail("Address", address).detail("ConnectionFailure", peer->connectFailedCount).detail("Population", peer->pingLatencies.getPopulationSize());
+			TraceEvent("ZZZZSkipPeerHealthCheck")
+			    .detail("Address", address)
+			    .detail("ConnectionFailure", peer->connectFailedCount)
+			    .detail("Population", peer->pingLatencies.getPopulationSize());
 			continue;
 		}
 
@@ -1177,10 +1180,10 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
-		
+
 		TraceEvent("ZZZZZLogPeerHealth")
 		    .detail("Peer", address)
-			.detail("Force", enablePrimaryTxnSystemHealthCheck->get())
+		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
 		    .detail("Elapsed", now() - lastLoggedTime)
 		    .detail("Disconnected", disconnectedPeer)
 		    .detail("MinLatency", peer->pingLatencies.min())

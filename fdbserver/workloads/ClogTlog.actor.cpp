@@ -178,7 +178,7 @@ struct ClogTlogWorkload : TestWorkload {
 		if (deterministicRandom()->coinflip() && self->useDisconnection) {
 			TraceEvent("ClogTlogUseGrayFailreToRecover").log();
 			useGrayFailureToRecover = true;
-		}	
+		}
 
 		// start exclusion and wait for fully recovery
 		state Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(self, cx);

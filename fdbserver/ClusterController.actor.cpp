@@ -93,17 +93,19 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 		}
 	}
 }
- 
+
 bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	const ServerDBInfo& dbi = db.serverInfo->get();
 	const Reference<ClusterRecoveryData> recoveryData = db.recoveryData;
-	auto transactionWorkerInList =
-	    [&dbi, &recoveryData](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
+	auto transactionWorkerInList = [&dbi, &recoveryData](const std::unordered_set<NetworkAddress>& serverList,
+	                                                     bool skipSatellite,
+	                                                     bool skipRemote) -> bool {
 		for (const auto& server : serverList) {
 			if (dbi.master.addresses().contains(server)) {
 				return true;
 			}
-			auto logSystemConfig = recoveryData->logSystem.isValid() ? recoveryData->logSystem->getLogSystemConfig() : dbi.logSystemConfig;
+			auto logSystemConfig =
+			    recoveryData->logSystem.isValid() ? recoveryData->logSystem->getLogSystemConfig() : dbi.logSystemConfig;
 			for (const auto& logSet : logSystemConfig.tLogs) {
 				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 					continue;
@@ -135,7 +137,7 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 						return true;
 					}
 				}
-			    for (const auto& satelliteLog : recoveryData->recruitment.satelliteTLogs) {
+				for (const auto& satelliteLog : recoveryData->recruitment.satelliteTLogs) {
 					if (satelliteLog.addresses().contains(server)) {
 						return true;
 					}
@@ -161,7 +163,10 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 			}
 		}
 
-		TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "AllHealthy").detail("SkipSatellite", skipSatellite).detail("SkipRemote", skipRemote);
+		TraceEvent("ZZZZShouldTriggerButNot")
+		    .detail("Reason", "AllHealthy")
+		    .detail("SkipSatellite", skipSatellite)
+		    .detail("SkipRemote", skipRemote);
 		return false;
 	};
 
@@ -234,14 +239,14 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
 			db->recoveryData = makeReference<ClusterRecoveryData>(cluster,
-			                                                  db->serverInfo,
-			                                                  db->serverInfo->get().master,
-			                                                  db->serverInfo->get().masterLifetime,
-			                                                  coordinators,
-			                                                  db->serverInfo->get().clusterInterface,
-			                                                  ""_sr,
-			                                                  addActor,
-			                                                  db->forceRecovery);
+			                                                      db->serverInfo,
+			                                                      db->serverInfo->get().master,
+			                                                      db->serverInfo->get().masterLifetime,
+			                                                      coordinators,
+			                                                      db->serverInfo->get().clusterInterface,
+			                                                      ""_sr,
+			                                                      addActor,
+			                                                      db->forceRecovery);
 
 			collection = actorCollection(db->recoveryData->addActor.getFuture());
 			recoveryCore = clusterRecoveryCore(db->recoveryData);
@@ -2917,7 +2922,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 			if (hasRecoveredServer) {
 				checkOutstandingRequests(self);
-			}	
+			}
 
 			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 		} catch (Error& e) {
@@ -3105,7 +3110,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    (self.db.config.isExcludedServer(worker.details.interf.addresses()) || self.isExcludedDegradedServer(worker.details.interf.addresses()))) {
+				    (self.db.config.isExcludedServer(worker.details.interf.addresses()) ||
+				     self.isExcludedDegradedServer(worker.details.interf.addresses()))) {
 					continue;
 				}
 
@@ -3141,7 +3147,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			clusterRegisterMaster(&self, req);
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
-			TraceEvent("ZZZZReceiveUpdateWorkerHealthRequest").detail("From", req.address).detail("Disconnected", describe(req.disconnectedPeers));
+			TraceEvent("ZZZZReceiveUpdateWorkerHealthRequest")
+			    .detail("From", req.address)
+			    .detail("Disconnected", describe(req.disconnectedPeers));
 			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 				self.updateWorkerHealth(req);
 			}
