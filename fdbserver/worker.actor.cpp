@@ -1144,7 +1144,6 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const UpdateWorkerHealthRequest& lastReq,
                                             Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
-	TraceEvent("ZZZZZDoPeerHealthCheck").log();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
 	bool checkRemoteLogRouterConnectivity = dbInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
@@ -1168,10 +1167,6 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 	for (const auto& [address, peer] : allPeers) {
 		if (!shouldCheckPeer(peer)) {
-			TraceEvent("ZZZZSkipPeerHealthCheck")
-			    .detail("Address", address)
-			    .detail("ConnectionFailure", peer->connectFailedCount)
-			    .detail("Population", peer->pingLatencies.getPopulationSize());
 			continue;
 		}
 
@@ -1181,7 +1176,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 
-		TraceEvent("ZZZZZLogPeerHealth")
+		TraceEvent(SevDebug, "PeerHealthMonitor")
 		    .detail("Peer", address)
 		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
 		    .detail("Elapsed", now() - lastLoggedTime)
