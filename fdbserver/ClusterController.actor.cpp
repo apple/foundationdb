@@ -129,7 +129,6 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				}
 			}
 
-			/*
 			if (recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				for (const auto& tlog : recoveryData->recruitment.tLogs) {
 					if (tlog.addresses().contains(server)) {
@@ -141,7 +140,7 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 						return true;
 					}
 				}
-			}*/
+			}
 
 			for (const auto& proxy : dbi.client.grvProxies) {
 				if (proxy.addresses().contains(server)) {
@@ -758,6 +757,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
+	TraceEvent("ZZZZZdoCheckOutstandingRequestsCall").log();
 	try {
 		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
 		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
@@ -788,6 +788,7 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			TraceEvent(SevError, "CheckOutstandingError").error(e);
 		}
 	}
+	TraceEvent("ZZZZZdoCheckOutstandingRequestsReturn").log();
 	return Void();
 }
 
@@ -808,6 +809,7 @@ ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self)
 }
 
 void checkOutstandingRequests(ClusterControllerData* self) {
+	TraceEvent("ZZZZZCallCheckOutstandingRequests").log();
 	if (self->outstandingRemoteRequestChecker.isReady()) {
 		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
 	}
@@ -2848,11 +2850,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 			// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
 			// recovered.
+			bool hasRecoveredServer = false;
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
 				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
 				    self->degradationInfo.disconnectedServers.find(*it) ==
 				        self->degradationInfo.disconnectedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
+					hasRecoveredServer = true;
 				} else {
 					++it;
 				}
@@ -2910,6 +2914,10 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 					}
 				}
 			}
+
+			if (hasRecoveredServer) {
+				checkOutstandingRequests(self);
+			}	
 
 			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 		} catch (Error& e) {
@@ -3097,7 +3105,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
+				    (self.db.config.isExcludedServer(worker.details.interf.addresses()) || self.isExcludedDegradedServer(worker.details.interf.addresses()))) {
 					continue;
 				}
 

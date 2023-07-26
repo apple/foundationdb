@@ -1496,6 +1496,9 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
+			if (role == ProcessClass::ClusterRole::Master) {
+				TraceEvent("ZZZZZZGetMasterRoleFitness").detail("Worker", it.second.details.interf.address()).detail("Fitness", fitness);
+			}
 			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
 			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
@@ -2388,6 +2391,7 @@ public:
 	// This function returns true when the cluster controller determines it is worth forcing
 	// a cluster recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
+		TraceEvent("ZZZZZCallingBetterMasterExist").log();
 		const ServerDBInfo dbi = db.serverInfo->get();
 
 		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -2577,6 +2581,7 @@ public:
 			;
 			return false;
 		}
+		TraceEvent("ZZZZZZMasterFit").detail("Old", oldMasterFit).detail("New", newMasterFit);
 		if (oldMasterFit > newMasterFit || (dbi.master.locality.processId() == clusterControllerProcessId &&
 		                                    mworker.worker.interf.locality.processId() != clusterControllerProcessId)) {
 			TraceEvent("BetterMasterExists", id)
