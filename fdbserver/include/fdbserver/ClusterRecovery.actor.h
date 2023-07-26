@@ -49,7 +49,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-
 class ClusterControllerData;
 
 typedef enum {
@@ -174,7 +173,6 @@ private:
 		return Void();
 	}
 };
-
 
 struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> {
 	ClusterControllerData* controllerData;

@@ -1497,7 +1497,9 @@ public:
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
 			if (role == ProcessClass::ClusterRole::Master) {
-				TraceEvent("ZZZZZZGetMasterRoleFitness").detail("Worker", it.second.details.interf.address()).detail("Fitness", fitness);
+				TraceEvent("ZZZZZZGetMasterRoleFitness")
+				    .detail("Worker", it.second.details.interf.address())
+				    .detail("Fitness", fitness);
 			}
 			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
 			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
@@ -3253,8 +3255,8 @@ public:
 	// 			}
 	// 		}
 
-	// 		TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "AllHealthy").detail("SkipSatellite", skipSatellite).detail("SkipRemote", skipRemote);
-	// 		return false;
+	// 		TraceEvent("ZZZZShouldTriggerButNot").detail("Reason", "AllHealthy").detail("SkipSatellite",
+	// skipSatellite).detail("SkipRemote", skipRemote); 		return false;
 	// 	};
 
 	// 	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
@@ -3325,8 +3327,8 @@ public:
 
 		/*
 		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-			TraceEvent("ZZZNoNono").log();
-			return false;
+		    TraceEvent("ZZZNoNono").log();
+		    return false;
 		}*/
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
