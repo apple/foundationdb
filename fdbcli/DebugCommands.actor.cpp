@@ -20,6 +20,7 @@
 
 #include "fdbcli/fdbcli.actor.h"
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -235,27 +236,41 @@ bool checkResults(Version version,
 	return true;
 }
 
-// The command is used to check the \xff\x02/blog/ keyspace
+// The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
 ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
 	// ignore tokens for now
 	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 	state int i = 0;
 	state Version version;
 	state KeySelectorRef begin, end;
-	state bool checkAll = false;
+	state bool checkAll = false; // do not return on first error, continue checking all keys
+	state KeyRange toCheck = backupLogKeys;
 
-	if (tokens.size() == 2 && tokens[1] == "all"_sr) {
-		printf("Checking all keys...\n");
+	if (tokens.size() == 2 && tokens[1] == "ALL"_sr) {
+		printf("Checking all keys for corruption...\n");
 		checkAll = true;
+	}
+	if (tokens.size() == 2 && tokens[1] == "help"_sr) {
+		printf("checkall [ALL]|[<KEY> <KEY2>]\n"
+		       "Check inconsistency in a keyspace by comparing all replicas and print any corruptions.\n"
+		       "The default behavior is to stop on the first shard where corruption is found and the\n"
+		       "default keyspace is \\xff\\x02/blog/.\n"
+		       "The default keyspace can be changed by specifying a range. Note this is intended to check\n"
+		       "a small range of keys, not the entire database (consider consistencycheck for that purpose).\n");
+		return false;
+	}
+	if (tokens.size() == 3) {
+		toCheck = KeyRangeRef(tokens[1], tokens[2]);
 	}
 
 	loop {
+		printf("Start checking range: %s\n", printable(toCheck).c_str());
 		try {
 			state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, backupLogKeys));
+			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, toCheck));
 
 			if (!foundKeyServers) {
-				printf("backup key server locations not found, retrying in 1s...\n");
+				printf("key server locations for %s not found, retrying in 1s...\n", printable(toCheck).c_str());
 				wait(delay(1.0));
 				continue;
 			}
@@ -263,14 +278,18 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();
 			for (i = 0; i < keyServers.size(); i++) { // for each key range
-				const auto& range = keyServers[i].first;
-				// const auto& servers = keyServers[i].second;
+				state KeyRange range = keyServers[i].first;
+				range = range & toCheck;
+				if (range.empty()) {
+					continue;
+				}
+				const auto& servers = keyServers[i].second;
 				begin = firstGreaterOrEqual(range.begin);
 				end = firstGreaterOrEqual(range.end);
-				/* printf("Key range: %s\n", printable(range).c_str());
+				printf("Key range: %s\n", printable(range).c_str());
 				for (const auto& server : servers) {
 				    printf("  %s\n", server.address().toString().c_str());
-				}*/
+				}
 				wait(store(version, getVersion(cx)));
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
 				for (const auto& s : keyServers[i].second) { // for each storage server
@@ -289,12 +308,19 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 				if (!checkResults(version, keyServers[i].second, replies, begin, end) && !checkAll) {
 					return false;
 				}
+				if (begin == end) {
+					toCheck = KeyRangeRef(range.end, toCheck.end);
+				}
 				// TODO: if there are more results, continue checking in the same shard
 			}
 		} catch (Error& e) {
 			printf("Retrying for error: %s\n", e.what());
 			wait(onErrorTr.onError(e));
 		}
+		if (toCheck.begin == toCheck.end) {
+			return true;
+		}
+		wait(delay(1.0));
 	}
 }
 
