@@ -1803,7 +1803,7 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	}
 	TraceEvent(SevInfo, "SimulationStorageEngine")
 	    .detail("StorageEngine", static_cast<uint8_t>(result))
-		.detail("Reason", reason)
+	    .detail("Reason", reason)
 #ifdef SIMULATION_ROCKSDB_ENABLED
 	    .detail("RocksDBEngineChoosable", true)
 #else
