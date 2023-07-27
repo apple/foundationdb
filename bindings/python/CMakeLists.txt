@@ -1,6 +1,7 @@
 set(SRCS
   fdb/__init__.py
   fdb/directory_impl.py
+  fdb/fdb_move_orchestrator.py
   fdb/impl.py
   fdb/locality.py
   fdb/six.py
