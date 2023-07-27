@@ -12035,11 +12035,32 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	return Void();
 }
 
+struct CommitStats {
+	double beforeStorageUpdates;
+	double beforeStorageCommit;
+	double whenCommit;
+	double duration;
+	double commitDuration;
+	double incompleteCommitDuration;
+	uint64_t mutationBytes;
+	uint64_t fetchKeyBytes;
+	int64_t seqId;
+
+	CommitStats()
+	  : seqId(0), whenCommit(0), beforeStorageUpdates(0), beforeStorageCommit(0), duration(0), commitDuration(0),
+	    incompleteCommitDuration(0), mutationBytes(0), fetchKeyBytes(0) {}
+};
+
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	state UnlimitedCommitBytes unlimitedCommitBytes = UnlimitedCommitBytes::False;
 	state Future<Void> durableDelay = Void();
+	state std::deque<CommitStats> recentCommitStats;
 
 	loop {
+		while (recentCommitStats.size() > SERVER_KNOBS->LOGGING_RECENT_STORAGE_COMMIT_SIZE) {
+			recentCommitStats.pop_front();
+		}
+		recentCommitStats.push_back(CommitStats());
 		unlimitedCommitBytes = UnlimitedCommitBytes::False;
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
@@ -12166,6 +12187,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				break;
 		}
 
+		recentCommitStats.back().mutationBytes = SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft;
+		recentCommitStats.back().beforeStorageUpdates = beforeStorageUpdates;
+
 		// Allow data fetch to use an additional bytesLeft but don't penalize fetch budget if bytesLeft is negative
 		if (bytesLeft > 0) {
 			data->fetchKeysBytesBudget += bytesLeft;
@@ -12271,19 +12295,65 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->storage.makeVersionDurable(newOldestVersion);
 		data->storageUpdatesDurableLatencyHistogram->sampleSeconds(now() - beforeStorageUpdates);
 		data->fetchKeysHistograms.bytesPerCommit->sample(data->fetchKeysTotalCommitBytes);
+		recentCommitStats.back().fetchKeyBytes = data->fetchKeysTotalCommitBytes;
 		data->fetchKeysTotalCommitBytes = 0;
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
+		recentCommitStats.back().beforeStorageCommit = beforeStorageCommit;
 		wait(data->storage.canCommit());
 		state Future<Void> durable = data->storage.commit();
 		++data->counters.kvCommits;
+		recentCommitStats.back().seqId = data->counters.kvCommits.getValue();
 
 		// If the mutation bytes budget was not fully used then wait some time before the next commit
 		durableDelay =
 		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
 
-		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+		recentCommitStats.back().whenCommit = now();
+		if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {
+			try {
+				wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+			} catch (Error& err) {
+				if (err.code() == error_code_io_timeout) {
+					recentCommitStats.back().incompleteCommitDuration = now() - recentCommitStats.back().whenCommit;
+					for (const auto& commitStats : recentCommitStats) {
+						TraceEvent(SevInfo, "CommitStats", data->thisServerID)
+						    .detail("Reason", "I/O timeout error")
+						    .detail("SequenceID", commitStats.seqId)
+						    .detail("IncompleteCommitDuration", commitStats.incompleteCommitDuration)
+						    .detail("CommitDuration", commitStats.incompleteCommitDuration)
+						    .detail("Duration", commitStats.duration)
+						    .detail("BeforeStorageUpdates", commitStats.beforeStorageUpdates)
+						    .detail("BeforeStorageCommit", commitStats.beforeStorageCommit)
+						    .detail("WhenCommit", commitStats.whenCommit)
+						    .detail("MutationBytes", commitStats.mutationBytes)
+						    .detail("FetchKeyBytes", commitStats.fetchKeyBytes);
+					}
+				}
+				throw err;
+			}
+		} else {
+			wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+		}
+		recentCommitStats.back().commitDuration = now() - recentCommitStats.back().whenCommit;
+		recentCommitStats.back().duration = now() - beforeStorageCommit;
+
+		if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT &&
+		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY) {
+			TraceEvent(SevInfo, "CommitStats", data->thisServerID)
+			    .detail("Reason", "Random Normal")
+			    .detail("SequenceID", recentCommitStats.back().seqId)
+			    .detail("IncompleteCommitDuration", recentCommitStats.back().incompleteCommitDuration)
+			    .detail("CommitDuration", recentCommitStats.back().incompleteCommitDuration)
+			    .detail("Duration", recentCommitStats.back().duration)
+			    .detail("BeforeStorageUpdates", recentCommitStats.back().beforeStorageUpdates)
+			    .detail("BeforeStorageCommit", recentCommitStats.back().beforeStorageCommit)
+			    .detail("WhenCommit", recentCommitStats.back().whenCommit)
+			    .detail("MutationBytes", recentCommitStats.back().mutationBytes)
+			    .detail("FetchKeyBytes", recentCommitStats.back().fetchKeyBytes);
+		}
+
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
