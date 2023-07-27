@@ -1783,6 +1783,56 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
+ACTOR Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared_ptr<DDAudit> audit) {
+	ASSERT(audit->coreState.getType() == AuditType::ValidateStorageServerShard);
+	state ActorCollection actors(true);
+	state std::unordered_map<UID, bool> res;
+	state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+	state std::shared_ptr<AsyncVar<int>> remainingBudget =
+	    std::make_shared<AsyncVar<int>>(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+	state UID serverId;
+	state bool allFinish = true;
+	state int i = 0;
+	TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardStart")
+	    .detail("TotalSS", interfs.size())
+	    .detail("InitBudget", remainingBudget->get());
+	for (; i < interfs.size(); i++) {
+		serverId = interfs[i].uniqueID;
+		if (audit->serverProgressFinishMap.contains(serverId) && audit->serverProgressFinishMap[serverId]) {
+			TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardSkipCheck").detail("ServerId", serverId);
+			continue; // skip if already complete
+		}
+		ASSERT(remainingBudget->get() >= 0);
+		while (remainingBudget->get() == 0) {
+			wait(remainingBudget->onChange());
+			ASSERT(remainingBudget->get() >= 0);
+		}
+		remainingBudget->set(remainingBudget->get() - 1);
+		TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardBudget")
+		    .detail("RemainingBudget", remainingBudget->get())
+		    .detail("ServerId", serverId);
+		ASSERT(remainingBudget->get() >= 0);
+		if (actors.getResult().isReady()) {
+			actors.clear(true);
+		}
+		actors.add(store(res[serverId],
+		                 checkAuditProgressCompleteByServer(
+		                     cx, audit->coreState.getType(), audit->coreState.id, allKeys, serverId, remainingBudget)));
+	}
+	wait(actors.getResult());
+	for (const auto& [serverId, finish] : res) {
+		audit->serverProgressFinishMap[serverId] = finish;
+		TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardRes")
+		    .detail("AuditState", audit->coreState.toString())
+		    .detail("ServerId", serverId)
+		    .detail("Finish", finish);
+		if (!finish) {
+			allFinish = false;
+		}
+	}
+	return allFinish;
+}
+
 // Maintain an alive state of an audit until the audit completes
 // Automatically retry until if errors of the auditing process happen
 // Return if (1) audit completes; (2) retry times exceed the maximum retry times
@@ -1831,8 +1881,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		} else {
 			// Check audit persist progress to double check if any range omitted to be check
 			if (audit->coreState.getType() == AuditType::ValidateHA ||
-			    audit->coreState.getType() == AuditType::ValidateReplica ||
-			    audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
+			    audit->coreState.getType() == AuditType::ValidateReplica) {
 				bool allFinish = wait(checkAuditProgressCompleteByRange(self->txnProcessor->context(),
 				                                                        audit->coreState.getType(),
 				                                                        audit->coreState.id,
@@ -1840,32 +1889,14 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				if (!allFinish) {
 					throw retry();
 				}
+			} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
+				bool allFinish = wait(checkAuditProgressCompleteByRange(
+				    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, allKeys));
+				if (!allFinish) {
+					throw retry();
+				}
 			} else {
-				state std::vector<Future<Void>> checkServerProgressFs;
-				state std::unordered_map<UID, bool> checkServerProgressRes;
-				state std::vector<StorageServerInterface> ssInterfs =
-				    wait(getStorageServers(self->txnProcessor->context()));
-				for (const auto& ssInterf : ssInterfs) {
-					UID serverId = ssInterf.uniqueID;
-					if (audit->serverProgressFinishMap.contains(serverId) && audit->serverProgressFinishMap[serverId]) {
-						continue; // skip if already complete
-					}
-					checkServerProgressFs.push_back(
-					    store(checkServerProgressRes[serverId],
-					          checkAuditProgressCompleteByServer(self->txnProcessor->context(),
-					                                             audit->coreState.getType(),
-					                                             audit->coreState.id,
-					                                             allKeys,
-					                                             serverId)));
-				}
-				wait(waitForAll(checkServerProgressFs));
-				bool allFinish = true;
-				for (const auto& [serverId, finish] : checkServerProgressRes) {
-					audit->serverProgressFinishMap[serverId] = finish;
-					if (!finish) {
-						allFinish = false;
-					}
-				}
+				bool allFinish = wait(checkAuditProgressCompleteForSSShard(self->txnProcessor->context(), audit));
 				if (!allFinish) {
 					throw retry();
 				}
