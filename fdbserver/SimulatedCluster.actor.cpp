@@ -1832,7 +1832,7 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		constexpr auto NUM_RETRIES = 1000;
 		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
 			result = deterministicRandom()->randomChoice(SIMULATION_STORAGE_ENGINE);
-			if (!testConfig.excludedStorageEngineType(static_cast<uint8_t>(result))) {
+			if (!testConfig.excludedStorageEngineType(result)) {
 				reason = "RandomlyChosen"_sr;
 				break;
 			}
