@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <fstream>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
@@ -74,19 +75,25 @@ bool isSimulatorProcessUnreliable() {
 	return g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable();
 }
 
+namespace {
+
+constexpr bool hasRocksDB =
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+    true
+#else
+    false
+#endif
+    ;
+
+} // anonymous namespace
+
 namespace probe {
 
 namespace assert {
 
 struct HasRocksDB {
 	constexpr static AnnotationType type = AnnotationType::Assertion;
-	bool operator()(ICodeProbe const* self) const {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-		return true;
-#else
-		return false;
-#endif
-	}
+	constexpr bool operator()(ICodeProbe const* self) const { return ::hasRocksDB; }
 };
 
 constexpr HasRocksDB hasRocksDB;
@@ -106,13 +113,23 @@ std::string describe(int const& val) {
 	return format("%d", val);
 }
 
+template <>
+std::string describe(const SimulationStorageEngine& val) {
+	return std::to_string(static_cast<uint32_t>(val));
+}
+
 namespace {
 
-const int MACHINE_REBOOT_TIME = 10;
+bool isValidSimulationStorageEngineValue(const std::underlying_type_t<SimulationStorageEngine>& value) {
+	return value < static_cast<std::underlying_type_t<SimulationStorageEngine>>(
+	                   SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE);
+}
+
+constexpr int MACHINE_REBOOT_TIME = 10;
 
 // The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
 // Note that this is in addition to the two we always have.
-const int NUM_EXTRA_BW_MACHINES = 5;
+constexpr int NUM_EXTRA_BW_MACHINES = 5;
 
 bool destructed = false;
 
@@ -121,8 +138,16 @@ bool destructed = false;
 class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::
-		    variant<int, float, double, bool, std::string, std::vector<int>, std::vector<std::string>, ConfigDBType>;
+		using base_variant = std::variant<int,
+		                                  float,
+		                                  double,
+		                                  bool,
+		                                  std::string,
+		                                  std::vector<int>,
+		                                  std::vector<std::string>,
+		                                  ConfigDBType,
+		                                  SimulationStorageEngine,
+		                                  std::set<SimulationStorageEngine>>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -173,6 +198,29 @@ class TestConfig : public BasicTestConfig {
 				std::vector<std::string> res;
 				(*this)(&res);
 				*val = std::move(res);
+			}
+			void operator()(std::set<SimulationStorageEngine>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					const auto intVal = static_cast<uint8_t>(i.as_integer());
+					ASSERT(isValidSimulationStorageEngineValue(intVal));
+					val->insert(static_cast<SimulationStorageEngine>(intVal));
+				}
+			}
+			void operator()(Optional<std::set<SimulationStorageEngine>>* val) const {
+				std::set<SimulationStorageEngine> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+			void operator()(SimulationStorageEngine* val) const {
+				uint8_t intVal = static_cast<uint8_t>(value.as_integer());
+				ASSERT(isValidSimulationStorageEngineValue(intVal));
+				*val = static_cast<SimulationStorageEngine>(intVal);
+			}
+			void operator()(Optional<SimulationStorageEngine>* val) const {
+				SimulationStorageEngine v;
+				(*this)(&v);
+				*val = v;
 			}
 		};
 
@@ -321,7 +369,9 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "storageEngineExcludeTypes") {
 				std::stringstream ss(value);
 				for (int i; ss >> i;) {
-					storageEngineExcludeTypes.push_back(i);
+					ASSERT(static_cast<uint8_t>(i) <
+					       static_cast<uint8_t>(SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE));
+					storageEngineExcludeTypes.insert(static_cast<SimulationStorageEngine>(i));
 					if (ss.peek() == ',') {
 						ss.ignore();
 					}
@@ -428,7 +478,8 @@ public:
 	//	4 = "ssd-rocksdb-v1"
 	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
-	std::vector<int> storageEngineExcludeTypes;
+	// See SimulationStorageEngine for more details
+	std::set<SimulationStorageEngine> storageEngineExcludeTypes;
 	Optional<int> datacenters, stderrSeverity, processesPerMachine;
 	// Set the maximum TLog version that can be selected for a test
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
@@ -568,9 +619,8 @@ public:
 		}
 	}
 
-	bool excludedStorageEngineType(int storageEngineType) const {
-		return std::find(storageEngineExcludeTypes.begin(), storageEngineExcludeTypes.end(), storageEngineType) !=
-		       storageEngineExcludeTypes.end();
+	bool excludedStorageEngineType(SimulationStorageEngine storageEngineType) const {
+		return storageEngineExcludeTypes.contains(storageEngineType);
 	}
 
 	TestConfig() = default;
@@ -1659,8 +1709,9 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		available = std::vector<bool>(EncryptionAtRestMode::END, true);
 		probability = { 0.25, 0.5, 0.25 };
 		// Only Redwood support encryption. Disable encryption if Redwood is not available.
-		if ((testConfig.storageEngineType.present() && testConfig.storageEngineType != 3) ||
-		    testConfig.excludedStorageEngineType(3)) {
+		if ((testConfig.storageEngineType.present() &&
+		     testConfig.storageEngineType != SimulationStorageEngine::REDWOOD) ||
+		    testConfig.excludedStorageEngineType(SimulationStorageEngine::REDWOOD)) {
 			available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
 			available[(int)EncryptionAtRestMode::CLUSTER_AWARE] = false;
 		}
@@ -1695,16 +1746,6 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 }
 
 namespace {
-
-enum class SimulationStorageEngine : uint8_t {
-	SSD = 0,
-	MEMORY = 1,
-	RADIX_TREE = 2,
-	REDWOOD = 3,
-	ROCKSDB = 4,
-	SHARDED_ROCKSDB = 5,
-	SIMULATION_STORAGE_ENGINE_INVALID_VALUE
-};
 
 using StorageEngineConfigFunc = void (*)(SimulationConfig*);
 
@@ -1758,22 +1799,24 @@ const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORA
 	{ SimulationStorageEngine::SHARDED_ROCKSDB, shardedRocksDBStorageEngineConfig }
 };
 
-#ifdef SIMULATION_ROCKSDB_ENABLED
-
 // TODO: Figure out what is broken with the RocksDB engine in simulation.
 const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
-	SimulationStorageEngine::SSD,     SimulationStorageEngine::MEMORY,  SimulationStorageEngine::RADIX_TREE,
-	SimulationStorageEngine::REDWOOD, SimulationStorageEngine::ROCKSDB, SimulationStorageEngine::SHARDED_ROCKSDB
+	SimulationStorageEngine::SSD,        SimulationStorageEngine::MEMORY,
+	SimulationStorageEngine::RADIX_TREE, SimulationStorageEngine::REDWOOD,
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+	SimulationStorageEngine::ROCKSDB,    SimulationStorageEngine::SHARDED_ROCKSDB,
+#endif
 };
 
-#else // SIMULATION_ROCKSDB_ENABLED
-
-const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = { SimulationStorageEngine::SSD,
-	                                                                     SimulationStorageEngine::MEMORY,
-	                                                                     SimulationStorageEngine::RADIX_TREE,
-	                                                                     SimulationStorageEngine::REDWOOD };
-
-#endif // SIMULATION_ROCKSDB_ENABLED
+std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStorageEngine>& excluded) {
+	std::string str;
+	for (const auto& e : excluded) {
+		str += std::to_string(static_cast<uint32_t>(e));
+		str += ',';
+	}
+	str.pop_back();
+	return str;
+}
 
 SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig, const bool isEncryptionEnabled) {
 	StringRef reason;
@@ -1783,11 +1826,8 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		reason = "EncryptionEnabled"_sr;
 		result = SimulationStorageEngine::REDWOOD;
 	} else if (testConfig.storageEngineType.present()) {
-		const uint8_t storageEngineType = testConfig.storageEngineType.get();
-		ASSERT(storageEngineType <
-		       static_cast<uint8_t>(SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE));
 		reason = "ConfigureSpecified"_sr;
-		result = static_cast<SimulationStorageEngine>(storageEngineType);
+		result = testConfig.storageEngineType.get();
 	} else {
 		constexpr auto NUM_RETRIES = 1000;
 		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
@@ -1804,7 +1844,8 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	TraceEvent(SevInfo, "SimulationStorageEngine")
 	    .detail("StorageEngine", static_cast<uint8_t>(result))
 	    .detail("Reason", reason)
-#ifdef SIMULATION_ROCKSDB_ENABLED
+	    .detail("Excluded", getExcludedStorageEngineTypesInString(testConfig.storageEngineExcludeTypes))
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 	    .detail("RocksDBEngineChoosable", true)
 #else
 	    .detail("RocksDBEngineChoosable", false)
@@ -2737,12 +2778,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
-#if defined(SSD_ROCKSDB_EXPERIMENTAL)
-bool rocksDBEnabled = true;
-#else
-bool rocksDBEnabled = false;
-#endif
-
 // Populates the TestConfig fields according to what is found in the test file.
 [[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
@@ -2785,26 +2820,19 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
-	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
-	// in the build.
-	if (!rocksDBEnabled) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
 	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(5);
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
 	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(5);
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
 	if (std::string_view(testFile).find("ChangeFeed") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(5);
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion();
@@ -2965,9 +2993,5 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
 	TestConfig config(testConfig);
-	if (!rocksDBEnabled) {
-		config.storageEngineExcludeTypes.push_back(4);
-		config.storageEngineExcludeTypes.push_back(5);
-	}
 	return SimulationConfig(config);
 }
