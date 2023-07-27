@@ -369,8 +369,7 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "storageEngineExcludeTypes") {
 				std::stringstream ss(value);
 				for (int i; ss >> i;) {
-					ASSERT(static_cast<uint8_t>(i) <
-					       static_cast<uint8_t>(SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE));
+					ASSERT(isValidSimulationStorageEngineValue(i));
 					storageEngineExcludeTypes.insert(static_cast<SimulationStorageEngine>(i));
 					if (ss.peek() == ',') {
 						ss.ignore();
@@ -1821,6 +1820,7 @@ std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStora
 SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig, const bool isEncryptionEnabled) {
 	StringRef reason;
 	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
+
 	if (isEncryptionEnabled) {
 		// Only storage engine supporting encryption is Redwood.
 		reason = "EncryptionEnabled"_sr;
@@ -1841,16 +1841,13 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 			UNREACHABLE();
 		}
 	}
+
 	TraceEvent(SevInfo, "SimulationStorageEngine")
 	    .detail("StorageEngine", static_cast<uint8_t>(result))
 	    .detail("Reason", reason)
 	    .detail("Excluded", getExcludedStorageEngineTypesInString(testConfig.storageEngineExcludeTypes))
-#ifdef WITH_ROCKSDB
-	    .detail("RocksDBEngineChoosable", true)
-#else
-	    .detail("RocksDBEngineChoosable", false)
-#endif
-	    ;
+	    .detail("RocksDBEngineChoosable", hasRocksDB);
+
 	return result;
 }
 
