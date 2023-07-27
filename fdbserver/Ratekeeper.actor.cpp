@@ -175,6 +175,7 @@ public:
 		} catch (...) {
 			// including cancellation
 			self->storageQueueInfo.erase(myQueueInfo);
+			self->healthMetrics.storageStats.erase(ssi.id());
 			throw;
 		}
 	}
@@ -221,8 +222,10 @@ public:
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 					}
-				} else
+				} else {
 					actors.erase(change.first);
+					self->healthMetrics.storageStats.erase(change.first);
+				}
 			}
 			when(wait(err.getFuture())) {}
 		}
