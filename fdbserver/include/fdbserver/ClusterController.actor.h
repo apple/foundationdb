@@ -3108,7 +3108,6 @@ public:
 					// This degraded link is not long enough to be considered as degraded.
 					continue;
 				}
-				disconnectedLinkDst2Src[server].insert(disconnectedPeer);
 				disconnectedLinkDst2Src[disconnectedPeer].insert(server);
 			}
 		}

@@ -105,8 +105,9 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 
 			// Getting the current log system config to check if any TLogs are degraded. recoveryData->logSystem has the
 			// most up to date log system and we should use it whenever available.
-			auto logSystemConfig =
-			    recoveryData->logSystem.isValid() ? recoveryData->logSystem->getLogSystemConfig() : dbi.logSystemConfig;
+			auto logSystemConfig = (recoveryData.isValid() && recoveryData->logSystem.isValid())
+			                           ? recoveryData->logSystem->getLogSystemConfig()
+			                           : dbi.logSystemConfig;
 			for (const auto& logSet : logSystemConfig.tLogs) {
 				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 					continue;
@@ -132,7 +133,7 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				}
 			}
 
-			if (recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			if (recoveryData.isValid() && recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				// During recovery, TLogs may not be able to pull data from previous generation TLogs due to gray
 				// failures. In this case, we rely on the latest recruitment information and see if any newly recruited
 				// TLogs are degraded.
