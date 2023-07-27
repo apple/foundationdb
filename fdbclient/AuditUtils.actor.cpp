@@ -699,7 +699,7 @@ ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
 					throw e;
 				}
 				if (retryCount > 30) {
-					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressIncomplete")
+					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressFailed")
 					    .detail("AuditID", auditId)
 					    .detail("AuditRange", auditRange)
 					    .detail("AuditType", auditType);
@@ -710,6 +710,10 @@ ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
 			}
 		}
 	}
+	TraceEvent(SevInfo, "AuditUtilCheckAuditProgressFinish")
+	    .detail("AuditID", auditId)
+	    .detail("AuditRange", auditRange)
+	    .detail("AuditType", auditType);
 	return true;
 }
 
@@ -717,7 +721,8 @@ ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
                                                       AuditType auditType,
                                                       UID auditId,
                                                       KeyRange auditRange,
-                                                      UID serverId) {
+                                                      UID serverId,
+                                                      std::shared_ptr<AsyncVar<int>> checkProgressBudget) {
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
 	state KeyRange rangeToRead = auditRange;
 	state Key rangeToReadBegin = auditRange.begin;
@@ -737,6 +742,7 @@ ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
 						    .detail("AuditRange", auditRange)
 						    .detail("AuditType", auditType)
 						    .detail("UnfinishedRange", auditStates[i].range);
+						checkProgressBudget->set(checkProgressBudget->get() + 1);
 						return false;
 					}
 				}
@@ -747,11 +753,12 @@ ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
 					throw e;
 				}
 				if (retryCount > 30) {
-					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressIncomplete")
+					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressFailed")
 					    .detail("ServerID", serverId)
 					    .detail("AuditID", auditId)
 					    .detail("AuditRange", auditRange)
 					    .detail("AuditType", auditType);
+					checkProgressBudget->set(checkProgressBudget->get() + 1);
 					throw audit_storage_failed();
 				}
 				wait(delay(0.5));
@@ -759,6 +766,12 @@ ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
 			}
 		}
 	}
+	checkProgressBudget->set(checkProgressBudget->get() + 1);
+	TraceEvent(SevInfo, "AuditUtilCheckAuditProgressFinish")
+	    .detail("ServerID", serverId)
+	    .detail("AuditID", auditId)
+	    .detail("AuditRange", auditRange)
+	    .detail("AuditType", auditType);
 	return true;
 }
 

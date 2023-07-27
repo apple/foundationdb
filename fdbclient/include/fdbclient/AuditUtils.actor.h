@@ -75,7 +75,8 @@ ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
                                                       AuditType auditType,
                                                       UID auditId,
                                                       KeyRange auditRange,
-                                                      UID serverId);
+                                                      UID serverId,
+                                                      std::shared_ptr<AsyncVar<int>> checkProgressBudget);
 ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
                                                                MoveKeyLockInfo lock,
                                                                bool ddEnabled,
