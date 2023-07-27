@@ -95,9 +95,6 @@ ACTOR Future<Void> getAuditProgressByServer(Database cx,
                                             UID auditId,
                                             KeyRange auditRange,
                                             UID serverId) {
-	if (auditType == AuditType::ValidateStorageServerShard) {
-		printf("ssshard not supported yet\n");
-	}
 	state KeyRange rangeToRead = auditRange;
 	state Key rangeToReadBegin = auditRange.begin;
 	state int retryCount = 0;
