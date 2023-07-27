@@ -1664,9 +1664,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "getlocation")) {
-					Version _v = wait(makeInterruptable(
-					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
-					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens, _v)));
+					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1676,6 +1674,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					Version _v = wait(makeInterruptable(
 					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
 					bool _result = wait(makeInterruptable(getallCommandActor(localDb, tokens, _v)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "checkall")) {
+					bool _result = wait(makeInterruptable(checkallCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
