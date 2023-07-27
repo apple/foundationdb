@@ -227,7 +227,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
 
-  if(SSD_ROCKSDB_EXPERIMENTAL)
+  if(WITH_ROCKSDB)
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)

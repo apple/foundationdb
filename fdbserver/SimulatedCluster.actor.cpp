@@ -78,7 +78,7 @@ bool isSimulatorProcessUnreliable() {
 namespace {
 
 constexpr bool hasRocksDB =
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
     true
 #else
     false
@@ -1803,7 +1803,7 @@ const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORA
 const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
 	SimulationStorageEngine::SSD,        SimulationStorageEngine::MEMORY,
 	SimulationStorageEngine::RADIX_TREE, SimulationStorageEngine::REDWOOD,
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 	SimulationStorageEngine::ROCKSDB,    SimulationStorageEngine::SHARDED_ROCKSDB,
 #endif
 };
@@ -1845,7 +1845,7 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	    .detail("StorageEngine", static_cast<uint8_t>(result))
 	    .detail("Reason", reason)
 	    .detail("Excluded", getExcludedStorageEngineTypesInString(testConfig.storageEngineExcludeTypes))
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 	    .detail("RocksDBEngineChoosable", true)
 #else
 	    .detail("RocksDBEngineChoosable", false)

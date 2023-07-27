@@ -165,7 +165,7 @@ endif()
 # RocksDB
 ################################################################################
 
-set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
+set(WITH_ROCKSDB ON CACHE BOOL "Build with experimental RocksDB support")
 set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
 set(ROCKSDB_SSE42 OFF CACHE BOOL "Compile RocksDB with SSE42 enabled")
 set(ROCKSDB_AVX ${USE_AVX} CACHE BOOL "Compile RocksDB with AVX enabled")
@@ -245,7 +245,7 @@ function(print_components)
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
-  message(STATUS "Build with RocksDB:                   ${SSD_ROCKSDB_EXPERIMENTAL}")
+  message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB}")
   message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
   message(STATUS "=========================================")
 endfunction()

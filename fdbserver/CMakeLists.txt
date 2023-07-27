@@ -7,7 +7,7 @@ else()
 endif()
 
 
-if(SSD_ROCKSDB_EXPERIMENTAL)
+if(WITH_ROCKSDB)
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
@@ -139,7 +139,7 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/include)
-if (SSD_ROCKSDB_EXPERIMENTAL)
+if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
@@ -159,8 +159,8 @@ if(USE_JEMALLOC)
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target rapidjson)
-if(SSD_ROCKSDB_EXPERIMENTAL)
-  target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
+if(WITH_ROCKSDB)
+  target_compile_definitions(fdbserver PRIVATE WITH_ROCKSDB)
 endif()
 
 if (WITH_SWIFT)
