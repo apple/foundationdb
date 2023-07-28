@@ -565,7 +565,9 @@ struct StorageServerDisk {
 	Future<Void> canCommit() { return storage->canCommit(); }
 	Future<Void> commit() { return storage->commit(); }
 
-	void logRecentRocksDBBackgroundWorkStats() { return storage->logRecentRocksDBBackgroundWorkStats(); }
+	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) {
+		return storage->logRecentRocksDBBackgroundWorkStats(ssId, logReason);
+	}
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	// Read the key that is equal or greater then 'key' from the storage engine.
@@ -12339,7 +12341,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				}
 				if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
-					data->storage.logRecentRocksDBBackgroundWorkStats();
+					data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "I/O timeout error");
 				}
 			}
 			throw e;
@@ -12354,7 +12356,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0 &&
 		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY) {
-			data->storage.logRecentRocksDBBackgroundWorkStats();
+			data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "normal");
 		}
 
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);

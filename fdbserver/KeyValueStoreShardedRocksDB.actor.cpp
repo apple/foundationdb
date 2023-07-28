@@ -279,10 +279,13 @@ public:
 		return;
 	}
 
-	void logRecentRocksDBBackgroundWorkStats() {
+	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) {
 		TraceEvent e(SevInfo, "RecentRocksDBBackgroundWorkStats", logId);
 		int flushCount = flushTotal.load(std::memory_order_relaxed);
 		int compactionCount = compactionTotal.load(std::memory_order_relaxed);
+		e.setMaxEventLength(20000);
+		e.detail("LogReason", logReason);
+		e.detail("StorageServerID", ssId);
 		e.detail("DurationSeconds", now() - lastResetTime);
 		e.detail("FlushCountTotal", flushCount);
 		e.detail("CompactionTotal", compactionCount);
@@ -3925,7 +3928,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
 
-	void logRecentRocksDBBackgroundWorkStats() override { return eventListener->logRecentRocksDBBackgroundWorkStats(); }
+	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) override {
+		return eventListener->logRecentRocksDBBackgroundWorkStats(ssId, logReason);
+	}
 
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;
