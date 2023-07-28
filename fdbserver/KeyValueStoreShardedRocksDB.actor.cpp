@@ -241,6 +241,7 @@ public:
 			    .suppressFor(5.0)
 			    .detail("Reason", static_cast<int>(info.compaction_reason));
 		}
+		return;
 	}
 
 	void logRecentRocksDBBackgroundWorkStats() {
@@ -294,6 +295,7 @@ public:
 			e.detail("CompactionNumOfReasons", compactionNumOfReasons.load(std::memory_order_relaxed));
 			e.detail("CompactionTotal", compactionTotal.load(std::memory_order_relaxed));
 		}
+		return;
 	}
 
 	void resetCounters() {
