@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -592,21 +593,23 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 				}
 			} catch (Error& e) {
+				state Error err(e);
 				TraceEvent("MetaclusterMoveWorkloadFinishFailed")
-				    .error(e)
+				    .error(err)
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
 				// If the move record is missing, the operation likely completed
 				// and this is a retry
-				if (e.code() == error_code_tenant_move_record_missing) {
+				if (err.code() == error_code_tenant_move_record_missing) {
 					return false;
 				}
-				if (e.code() == error_code_tenant_move_failed) {
+				if (err.code() == error_code_tenant_move_failed) {
 					// Retryable error
+					wait(advanceVersion(self->dataDbs[dstCluster].db, self->moveRecord.version));
 					continue;
 				}
-				throw;
+				throw err;
 			}
 		}
 		return false;
@@ -973,21 +976,23 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
 				break;
 			} catch (Error& e) {
+				state Error err2(e);
 				TraceEvent("MetaclusterMoveWorkloadNoTimeoutFinishFailed")
-				    .error(e)
+				    .error(err2)
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
 				// If the move record is missing, the operation likely completed
 				// and this is a retry
-				if (e.code() == error_code_tenant_move_record_missing) {
+				if (err2.code() == error_code_tenant_move_record_missing) {
 					break;
 				}
-				if (e.code() == error_code_tenant_move_failed) {
+				if (err2.code() == error_code_tenant_move_failed) {
 					// Retryable error
+					wait(advanceVersion(self->dataDbs[dstCluster].db, self->moveRecord.version));
 					continue;
 				}
-				throw;
+				throw err2;
 			}
 		}
 
