@@ -565,9 +565,7 @@ struct StorageServerDisk {
 	Future<Void> canCommit() { return storage->canCommit(); }
 	Future<Void> commit() { return storage->commit(); }
 
-	void logRecentRocksDBFlushStats() { return storage->logRecentRocksDBFlushStats(); }
-
-	void logRecentRocksDBCompactionStats() { return storage->logRecentRocksDBCompactionStats(); }
+	void logRecentRocksDBBackgroundWorkStats() { return storage->logRecentRocksDBBackgroundWorkStats(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	// Read the key that is equal or greater then 'key' from the storage engine.
@@ -12341,8 +12339,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				}
 				if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
-					data->storage.logRecentRocksDBFlushStats();
-					data->storage.logRecentRocksDBCompactionStats();
+					data->storage.logRecentRocksDBBackgroundWorkStats();
 				}
 			}
 			throw e;
@@ -12357,8 +12354,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT &&
 		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY) {
-			data->storage.logRecentRocksDBFlushStats();
-			data->storage.logRecentRocksDBCompactionStats();
+			data->storage.logRecentRocksDBBackgroundWorkStats();
 		}
 
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
