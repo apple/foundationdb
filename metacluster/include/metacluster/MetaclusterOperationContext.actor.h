@@ -63,6 +63,7 @@ struct MetaclusterOperationContext {
 
 	std::set<DataClusterState> extraSupportedDataClusterStates;
 
+	MetaclusterOperationContext() {}
 	MetaclusterOperationContext(Reference<DB> managementDb,
 	                            Optional<ClusterName> clusterName = {},
 	                            std::set<DataClusterState> extraSupportedDataClusterStates = {})

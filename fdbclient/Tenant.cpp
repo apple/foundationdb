@@ -206,11 +206,6 @@ KeyBackedProperty<int64_t>& TenantMetadata::tenantIdPrefix() {
 	return instance;
 }
 
-KeyBackedBinaryValue<Versionstamp>& lastTenantMoveAbort() {
-	static KeyBackedBinaryValue<Versionstamp> instance("\xff/emergency_movement/lastTenantMoveAbort/"_sr);
-	return instance;
-}
-
 TEST_CASE("/fdbclient/libb64/base64decoder") {
 	Standalone<StringRef> buf = makeString(100);
 	for (int i = 0; i < 1000; ++i) {

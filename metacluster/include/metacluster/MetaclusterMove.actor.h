@@ -452,6 +452,15 @@ static Future<Void> checkValidDelete(Reference<typename DB::TransactionT> tr,
 	return Void();
 }
 
+ACTOR template <class DB>
+static Future<Void> storeReadVersion(Versionstamp* version, Reference<typename DB::TransactionT> tr) {
+	state ThreadFuture<Version> threadFuture = tr->getReadVersion();
+	state Version result = wait(safeThreadFutureToFuture(threadFuture));
+	state Versionstamp vs(result, 0);
+	*version = vs;
+	return Void();
+}
+
 template <class DB>
 struct StartTenantMovementImpl {
 	MetaclusterOperationContext<DB> srcCtx;
@@ -516,7 +525,6 @@ struct StartTenantMovementImpl {
 				    fmt::format("Tenant move start: destination cluster {} has no more capacity.\n", dstName));
 				throw cluster_no_capacity();
 			}
-			updatedEntry.clusterState = DataClusterState::READY;
 			updatedEntry.allocated.numTenantGroups++;
 			TraceEvent("BreakpointUpdateAllocated1", self->srcCtx.debugId).detail("DstName", dstName);
 			updateClusterMetadata(tr,
@@ -533,10 +541,7 @@ struct StartTenantMovementImpl {
 			self->vsFuture = tr->getVersionstamp();
 		} else {
 			self->moveRecord = movementRecord.get();
-			state ThreadFuture<Version> threadFuture = tr->getReadVersion();
-			state Version result = wait(safeThreadFutureToFuture(threadFuture));
-			state Versionstamp vs(result, 0);
-			self->mgmtStartVersion = vs;
+			wait(storeReadVersion<DB>(&self->mgmtStartVersion, tr));
 		}
 
 		return Void();
@@ -695,9 +700,13 @@ struct StartTenantMovementImpl {
 
 		state Optional<int64_t> optionalMaxId = wait(TenantMetadata::lastTenantId().get(tr));
 		state int64_t maxId = optionalMaxId.present() ? optionalMaxId.get() : 0;
-		state Versionstamp lastAbortVersion = wait(lastTenantMoveAbort().getD(tr, Snapshot::False, Versionstamp()));
+		state Versionstamp lastAbortVersion =
+		    wait(metadata::data::emergency_movement::lastTenantMoveAbort().getD(tr, Snapshot::False, Versionstamp()));
 		if (self->mgmtStartVersion <= lastAbortVersion) {
-			// Prevent creating new tenants when our version is not caught up
+			// If create happened before the abort, fail with an error
+			TraceEvent("TenantMoveStartAbortSerialization")
+			    .detail("StartVersion", self->mgmtStartVersion)
+			    .detail("AbortVersion", lastAbortVersion);
 			throw tenant_move_failed();
 		}
 
@@ -706,7 +715,8 @@ struct StartTenantMovementImpl {
 			TenantMapEntry entry(tenantPair.second, tenantPair.first, self->tenantGroup);
 			entry.tenantLockState = TenantAPI::TenantLockState::LOCKED;
 			entry.tenantLockId = self->moveRecord.runId;
-			createFutures.push_back(TenantAPI::createTenantTransaction(tr, entry, ClusterType::METACLUSTER_DATA, true));
+			createFutures.push_back(TenantAPI::createTenantTransaction(
+			    tr, entry, ClusterType::METACLUSTER_DATA, TenantAPI::CheckTenantTombstone::False));
 		}
 
 		wait(waitForAll(createFutures));
@@ -741,11 +751,14 @@ struct StartTenantMovementImpl {
 				Versionstamp vs(result);
 				self->mgmtStartVersion = vs;
 			} catch (Error& e) {
-				// This can happen because of commit_unknown_result. Throw a retryable error
+				// This can happen because of commit_unknown_result. Use the read version instead
 				if (e.code() == error_code_transaction_invalid_version) {
-					throw tenant_move_failed();
+					wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+						return storeReadVersion<DB>(&self->mgmtStartVersion, tr);
+					}));
+				} else {
+					throw;
 				}
-				throw;
 			}
 		}
 		TraceEvent("BreakpointStart2");
@@ -1122,16 +1135,15 @@ struct FinishTenantMovementImpl {
 
 		return Void();
 	}
-
-	ACTOR static Future<bool> checkDestinationVersion(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
+	// If positive, version has caught up.
+	// If negative, continue waiting.
+	// If VERY negative (lagging behind drastically) throw error in outer function
+	ACTOR static Future<int64_t> checkDestinationVersion(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
 		loop {
 			try {
 				state ThreadFuture<Version> resultFuture = tr->getReadVersion();
 				Version version = wait(safeThreadFutureToFuture(resultFuture));
-				if (version > self->moveRecord.version) {
-					return true;
-				}
-				return false;
+				return (version - self->moveRecord.version);
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
@@ -1187,7 +1199,6 @@ struct FinishTenantMovementImpl {
 		// clusterCapacityIndex() reduce allocated capacity of source
 		DataClusterMetadata clusterMetadata = srcCtx.dataClusterMetadata.get();
 		DataClusterEntry updatedEntry = clusterMetadata.entry;
-		updatedEntry.clusterState = DataClusterState::READY;
 		updatedEntry.allocated.numTenantGroups--;
 		updateClusterMetadata(tr, srcName, clusterMetadata, Optional<ClusterConnectionString>(), updatedEntry);
 
@@ -1265,17 +1276,16 @@ struct FinishTenantMovementImpl {
 			state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
 			TraceEvent("Breakpoint3");
-			state int tries = 0;
-			state int retryLimit = 25;
 			loop {
-				bool versionReady = wait(self->dstCtx.runDataClusterTransaction(
+				int64_t versionDiff = wait(self->dstCtx.runDataClusterTransaction(
 				    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
-				if (versionReady) {
+				if (versionDiff >= 0) {
 					break;
 				}
-				if (++tries >= retryLimit) {
+				if (versionDiff <= -1e8) {
 					TraceEvent("MetaclusterMoveFinishVersionsTooFar")
-					    .detail("DstCluster", self->dstCtx.clusterName.get());
+					    .detail("DstCluster", self->dstCtx.clusterName.get())
+					    .detail("VersionDiff", versionDiff);
 					self->messages.push_back(
 					    fmt::format("Tenant move finish: destination cluster {} has a version that is too far behind\n"
 					                "	Use `versionepoch commit` to advance the version.\n",
@@ -1461,7 +1471,6 @@ struct AbortTenantMovementImpl {
 
 		DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, self->dstCtx.clusterName.get()));
 		DataClusterEntry updatedEntry = clusterMetadata.entry;
-		updatedEntry.clusterState = DataClusterState::READY;
 		updatedEntry.allocated.numTenantGroups--;
 		TraceEvent("BreakpointUpdateAllocated2", self->srcCtx.debugId).detail("DstName", dstName);
 		updateClusterMetadata(tr,
@@ -1609,13 +1618,16 @@ struct AbortTenantMovementImpl {
 			Versionstamp vs(result);
 			self->abortVersion = vs;
 		} catch (Error& e) {
-			// This can happen because of commit_unknown_result. Throw a retryable error
+			// This can happen because of commit_unknown_result. Use the read version instead
 			if (e.code() == error_code_transaction_invalid_version) {
-				throw tenant_move_failed();
+				wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+					return storeReadVersion<DB>(&self->abortVersion, tr);
+				}));
+			} else {
+				throw;
 			}
-			throw;
 		}
-		lastTenantMoveAbort().setVersionstamp(tr, self->abortVersion, 0);
+		metadata::data::emergency_movement::lastTenantMoveAbort().setVersionstamp(tr, self->abortVersion, 0);
 		return Void();
 	}
 
@@ -1799,18 +1811,16 @@ struct AbortTenantMovementImpl {
 		wait(self->dstCtx.initializeContext());
 		loop {
 			try {
-				state bool exitSignal;
-				wait(store(exitSignal,
-				           runMoveManagementTransaction(
-				               self->tenantGroup,
-				               self->srcCtx,
-				               self->dstCtx,
-				               Aborting::True,
-				               {},
-				               [self = self](Reference<typename DB::TransactionT> tr,
-				                             Optional<metadata::management::MovementRecord> movementRecord) {
-					               return initAbort(self, tr, movementRecord);
-				               })));
+				state bool exitSignal = wait(runMoveManagementTransaction(
+				    self->tenantGroup,
+				    self->srcCtx,
+				    self->dstCtx,
+				    Aborting::True,
+				    {},
+				    [self = self](Reference<typename DB::TransactionT> tr,
+				                  Optional<metadata::management::MovementRecord> movementRecord) {
+					    return initAbort(self, tr, movementRecord);
+				    }));
 				wait(self->dstCtx.runDataClusterTransaction(
 				    [self = self](Reference<ITransaction> tr) { return writeDataAbortVersion(self, tr); }));
 				if (exitSignal) {
@@ -1844,29 +1854,6 @@ struct AbortTenantMovementImpl {
 			throw invalid_tenant_move();
 		}
 		wait(abortFuture);
-		return Void();
-	}
-
-	Future<Void> run() { return run(this); }
-};
-
-template <class DB>
-struct StatusImpl {
-	MetaclusterOperationContext<DB> ctx;
-
-	// Initialization parameters
-	TenantGroupName tenantGroup;
-
-	// Parameters filled in during the run
-	metadata::management::MovementRecord moveRecord;
-
-	StatusImpl(Reference<DB> managementDb, TenantGroupName tenantGroup) : ctx(managementDb), tenantGroup(tenantGroup) {}
-
-	ACTOR static Future<Void> run(StatusImpl* self) {
-		wait(store(self->moveRecord,
-		           self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			           return internal::getMovementRecordNoValidation<DB>(tr, self->tenantGroup);
-		           })));
 		return Void();
 	}
 
@@ -1941,9 +1928,12 @@ Future<Void> abortTenantMovement(Reference<DB> db,
 
 ACTOR template <class DB>
 Future<metadata::management::MovementRecord> moveStatus(Reference<DB> db, TenantGroupName tenantGroup) {
-	state internal::StatusImpl<DB> impl(db, tenantGroup);
-	wait(impl.run());
-	return impl.moveRecord;
+	state MetaclusterOperationContext<DB> ctx(db);
+	metadata::management::MovementRecord mr =
+	    wait(ctx.runManagementTransaction([tenantGroup = tenantGroup](Reference<typename DB::TransactionT> tr) {
+		    return internal::getMovementRecordNoValidation<DB>(tr, tenantGroup);
+	    }));
+	return mr;
 }
 
 } // namespace metacluster

@@ -180,6 +180,11 @@ KeyBackedMap<Tuple, Key>& splitPointsMap();
 
 } // namespace management
 
+namespace data::emergency_movement {
+
+KeyBackedBinaryValue<Versionstamp>& lastTenantMoveAbort();
+
+} // namespace data::emergency_movement
 } // namespace metacluster::metadata
 
 template <>

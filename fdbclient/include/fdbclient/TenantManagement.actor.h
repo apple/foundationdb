@@ -40,6 +40,8 @@
 
 namespace TenantAPI {
 
+FDB_BOOLEAN_PARAM(CheckTenantTombstone);
+
 static const int TENANT_ID_PREFIX_MIN_VALUE = 0;
 static const int TENANT_ID_PREFIX_MAX_VALUE = 32767;
 
@@ -155,7 +157,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
     Transaction tr,
     TenantMapEntry tenantEntry,
     ClusterType clusterType = ClusterType::STANDALONE,
-    bool movement = false) {
+    CheckTenantTombstone checkTenantTombstone = CheckTenantTombstone::True) {
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
@@ -171,7 +173,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, tenantEntry.tenantName);
 	state Future<Void> tenantModeCheck = checkTenantMode(tr, clusterType);
 	state Future<bool> tombstoneFuture =
-	    (clusterType == ClusterType::STANDALONE || movement) ? false : checkTombstone(tr, tenantEntry.id);
+	    (clusterType == ClusterType::STANDALONE || !checkTenantTombstone) ? false : checkTombstone(tr, tenantEntry.id);
 	state Future<Optional<TenantGroupEntry>> existingTenantGroupEntryFuture;
 	if (tenantEntry.tenantGroup.present()) {
 		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap().get(tr, tenantEntry.tenantGroup.get());
