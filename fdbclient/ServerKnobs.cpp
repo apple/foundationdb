@@ -897,7 +897,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY,         0.001 );
 	init( LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT,              true );
 	init( LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC,         10 );
-	init( LOGGING_ROCKSDB_BG_WORK_PROBABILITY,                  0.01 );
+	init( LOGGING_ROCKSDB_BG_WORK_PROBABILITY,                 0.001 );
 	init( LOGGING_ROCKSDB_BG_WORK_COUNT_MAX,                    1000 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
