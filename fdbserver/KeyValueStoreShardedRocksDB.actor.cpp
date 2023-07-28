@@ -192,18 +192,10 @@ std::string getFlushReason(const FlushReason& reason) {
 struct FlushStats {
 	std::string cfName;
 	uint64_t threadId;
-	bool triggeredWritesSlowdown;
-	bool triggeredWritesStop;
 	FlushReason reason;
-	double when;
-	FlushStats(std::string cfName,
-	           uint64_t threadId,
-	           bool triggeredWritesSlowdown,
-	           bool triggeredWritesStop,
-	           FlushReason reason,
-	           double when)
-	  : cfName(cfName), threadId(threadId), triggeredWritesSlowdown(triggeredWritesSlowdown),
-	    triggeredWritesStop(triggeredWritesStop), reason(reason), when(when) {}
+	double whenStart;
+	FlushStats(std::string cfName, uint64_t threadId, FlushReason reason, double whenStart)
+	  : cfName(cfName), threadId(threadId), reason(reason), whenStart(whenStart) {}
 };
 
 class RocksDBFlushListener : public rocksdb::EventListener {
@@ -211,19 +203,14 @@ public:
 	RocksDBFlushListener(UID id) : logId(id) {}
 	void OnFlushBegin(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
 		std::lock_guard<std::mutex> lock(mutex);
-		while ((recentFlushStats.size() > 0) &&
-		       (now() - recentFlushStats.front().when > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC)) {
+		while ((recentFlushStats.size() > 0) && (now() - recentFlushStats.front().whenStart >
+		                                         SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC)) {
 			recentFlushStats.pop_front();
 		}
 		while (recentFlushStats.size() > SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_COUNT_MAX) {
 			recentFlushStats.pop_front();
 		}
-		recentFlushStats.push_back(FlushStats(info.cf_name,
-		                                      info.thread_id,
-		                                      info.triggered_writes_slowdown,
-		                                      info.triggered_writes_stop,
-		                                      info.flush_reason,
-		                                      now()));
+		recentFlushStats.push_back(FlushStats(info.cf_name, info.thread_id, info.flush_reason, now()));
 	}
 
 	void logRecentRocksDBFlushStats() {
@@ -231,7 +218,7 @@ public:
 		std::unordered_map<FlushReason, int64_t> flushReasonStats;
 		std::set<std::string> cfNames;
 		for (const auto& flushStats : recentFlushStats) {
-			if (now() - flushStats.when > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC) {
+			if (now() - flushStats.whenStart > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC) {
 				continue;
 			}
 			flushReasonStats[flushStats.reason]++;
@@ -310,9 +297,9 @@ struct CompactionStats {
 	std::string cfName;
 	uint64_t threadId;
 	CompactionReason reason;
-	double when;
-	CompactionStats(std::string cfName, uint64_t threadId, CompactionReason reason, double when)
-	  : cfName(cfName), threadId(threadId), reason(reason), when(when) {}
+	double whenStart;
+	CompactionStats(std::string cfName, uint64_t threadId, CompactionReason reason, double whenStart)
+	  : cfName(cfName), threadId(threadId), reason(reason), whenStart(whenStart) {}
 };
 
 class RocksDBCompactionListener : public rocksdb::EventListener {
@@ -320,7 +307,7 @@ public:
 	RocksDBCompactionListener(UID id) : logId(id) {}
 	void OnCompactionBegin(rocksdb::DB* db, const rocksdb::CompactionJobInfo& info) override {
 		std::lock_guard<std::mutex> lock(mutex);
-		while ((recentCompactionStats.size() > 0) && (now() - recentCompactionStats.front().when >
+		while ((recentCompactionStats.size() > 0) && (now() - recentCompactionStats.front().whenStart >
 		                                              SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC)) {
 			recentCompactionStats.pop_front();
 		}
@@ -335,7 +322,7 @@ public:
 		std::unordered_map<CompactionReason, int64_t> compactionReasonStats;
 		std::set<std::string> cfNames;
 		for (const auto& compactionStats : recentCompactionStats) {
-			if (now() - compactionStats.when > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC) {
+			if (now() - compactionStats.whenStart > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC) {
 				continue;
 			}
 			compactionReasonStats[compactionStats.reason]++;
