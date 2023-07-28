@@ -12037,7 +12037,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	return Void();
 }
 
-struct CommitStats {
+struct UpdateStorageCommitStats {
 	double beforeStorageUpdates;
 	double beforeStorageCommit;
 	double whenCommit;
@@ -12048,12 +12048,12 @@ struct CommitStats {
 	uint64_t fetchKeyBytes;
 	int64_t seqId;
 
-	CommitStats()
+	UpdateStorageCommitStats()
 	  : seqId(0), whenCommit(0), beforeStorageUpdates(0), beforeStorageCommit(0), duration(0), commitDuration(0),
 	    incompleteCommitDuration(0), mutationBytes(0), fetchKeyBytes(0) {}
 
 	void log(UID ssid, std::string reason) const {
-		TraceEvent(SevInfo, "CommitStats", ssid)
+		TraceEvent(SevInfo, "UpdateStorageCommitStats", ssid)
 		    .detail("LogReason", reason)
 		    .detail("SequenceID", seqId)
 		    .detail("IncompleteCommitDuration", incompleteCommitDuration)
@@ -12070,13 +12070,13 @@ struct CommitStats {
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	state UnlimitedCommitBytes unlimitedCommitBytes = UnlimitedCommitBytes::False;
 	state Future<Void> durableDelay = Void();
-	state std::deque<CommitStats> recentCommitStats;
+	state std::deque<UpdateStorageCommitStats> recentCommitStats;
 
 	loop {
 		while (recentCommitStats.size() > SERVER_KNOBS->LOGGING_RECENT_STORAGE_COMMIT_SIZE) {
 			recentCommitStats.pop_front();
 		}
-		recentCommitStats.push_back(CommitStats());
+		recentCommitStats.push_back(UpdateStorageCommitStats());
 		unlimitedCommitBytes = UnlimitedCommitBytes::False;
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
@@ -12347,12 +12347,12 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		recentCommitStats.back().commitDuration = now() - recentCommitStats.back().whenCommit;
 		recentCommitStats.back().duration = now() - beforeStorageCommit;
 
-		if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT &&
+		if (SERVER_KNOBS->LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY > 0 &&
 		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY) {
 			recentCommitStats.back().log(data->thisServerID, "normal");
 		}
 		if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT &&
+		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0 &&
 		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY) {
 			data->storage.logRecentRocksDBBackgroundWorkStats();
 		}

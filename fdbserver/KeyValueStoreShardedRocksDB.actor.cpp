@@ -150,36 +150,50 @@ public:
 	// https://github.com/facebook/rocksdb/blob/63a5125a5220d953bf504daf33694f038403cc7c/include/rocksdb/listener.h#L164-L181
 	// This function needs to be updated when flush code changes.
 	void OnFlushBegin(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
+		flushTotal++;
 		switch (info.flush_reason) {
-			flushTotal++;
 		case FlushReason::kOthers:
 			flushOthers++;
+			return;
 		case FlushReason::kGetLiveFiles:
 			flushGetLiveFiles++;
+			return;
 		case FlushReason::kShutDown:
 			flushShutDown++;
+			return;
 		case FlushReason::kExternalFileIngestion:
 			flushExternalFileIngestion++;
+			return;
 		case FlushReason::kManualCompaction:
 			flushManualCompaction++;
+			return;
 		case FlushReason::kWriteBufferManager:
 			flushWriteBufferManager++;
+			return;
 		case FlushReason::kWriteBufferFull:
 			flushWriteBufferFull++;
+			return;
 		case FlushReason::kTest:
 			flushTest++;
+			return;
 		case FlushReason::kDeleteFiles:
 			flushDeleteFiles++;
+			return;
 		case FlushReason::kAutoCompaction:
 			flushAutoCompaction++;
+			return;
 		case FlushReason::kManualFlush:
 			flushManualFlush++;
+			return;
 		case FlushReason::kErrorRecovery:
 			flushErrorRecovery++;
+			return;
 		case FlushReason::kErrorRecoveryRetryFlush:
 			flushErrorRecoveryRetryFlush++;
+			return;
 		case FlushReason::kWalFull:
 			flushWalFull++;
+			return;
 		default:
 			TraceEvent(SevWarn, "UnknownRocksDBFlushReason", logId)
 			    .suppressFor(5.0)
@@ -196,46 +210,67 @@ public:
 		switch (info.compaction_reason) {
 		case CompactionReason::kUnknown:
 			compactionUnknown++;
+			return;
 		case CompactionReason::kLevelL0FilesNum:
 			compactionLevelL0FilesNum++;
+			return;
 		case CompactionReason::kLevelMaxLevelSize:
 			compactionLevelMaxLevelSize++;
+			return;
 		case CompactionReason::kUniversalSizeAmplification:
 			compactionUniversalSizeAmplification++;
+			return;
 		case CompactionReason::kUniversalSizeRatio:
 			compactionUniversalSizeRatio++;
+			return;
 		case CompactionReason::kUniversalSortedRunNum:
 			compactionUniversalSortedRunNum++;
+			return;
 		case CompactionReason::kFIFOMaxSize:
 			compactionFIFOMaxSize++;
+			return;
 		case CompactionReason::kFIFOReduceNumFiles:
 			compactionFIFOReduceNumFiles++;
+			return;
 		case CompactionReason::kFIFOTtl:
 			compactionFIFOTtl++;
+			return;
 		case CompactionReason::kManualCompaction:
 			compactionManualCompaction++;
+			return;
 		case CompactionReason::kFilesMarkedForCompaction:
 			compactionFilesMarkedForCompaction++;
+			return;
 		case CompactionReason::kBottommostFiles:
 			compactionBottommostFiles++;
+			return;
 		case CompactionReason::kTtl:
 			compactionTtl++;
+			return;
 		case CompactionReason::kFlush:
 			compactionFlush++;
+			return;
 		case CompactionReason::kExternalSstIngestion:
 			compactionExternalSstIngestion++;
+			return;
 		case CompactionReason::kPeriodicCompaction:
 			compactionPeriodicCompaction++;
+			return;
 		case CompactionReason::kChangeTemperature:
 			compactionChangeTemperature++;
+			return;
 		case CompactionReason::kForcedBlobGC:
 			compactionForcedBlobGC++;
+			return;
 		case CompactionReason::kRoundRobinTtl:
 			compactionRoundRobinTtl++;
+			return;
 		case CompactionReason::kRefitLevel:
 			compactionRefitLevel++;
+			return;
 		case CompactionReason::kNumOfReasons:
 			compactionNumOfReasons++;
+			return;
 		default:
 			TraceEvent(SevWarn, "UnknownRocksDBCompactionReason", logId)
 			    .suppressFor(5.0)
@@ -248,7 +283,7 @@ public:
 		TraceEvent e(SevInfo, "RecentRocksDBBackgroundWorkStats", logId);
 		int flushCount = flushTotal.load(std::memory_order_relaxed);
 		int compactionCount = compactionTotal.load(std::memory_order_relaxed);
-		e.detail("DurationSeconds", now() - lastResetTime.load(std::memory_order_relaxed));
+		e.detail("DurationSeconds", now() - lastResetTime);
 		e.detail("FlushCountTotal", flushCount);
 		e.detail("CompactionTotal", compactionCount);
 		if (flushCount > 0) {
@@ -266,7 +301,6 @@ public:
 			e.detail("FlushErrorRecovery", flushErrorRecovery.load(std::memory_order_relaxed));
 			e.detail("FlushErrorRecoveryRetryFlush", flushErrorRecoveryRetryFlush.load(std::memory_order_relaxed));
 			e.detail("FlushWalFull", flushWalFull.load(std::memory_order_relaxed));
-			e.detail("FlushTotal", flushTotal.load(std::memory_order_relaxed));
 		}
 		if (compactionCount > 0) {
 			e.detail("CompactionUnknown", compactionUnknown.load(std::memory_order_relaxed));
@@ -293,7 +327,6 @@ public:
 			e.detail("CompactionRoundRobinTtl", compactionRoundRobinTtl.load(std::memory_order_relaxed));
 			e.detail("CompactionRefitLevel", compactionRefitLevel.load(std::memory_order_relaxed));
 			e.detail("CompactionNumOfReasons", compactionNumOfReasons.load(std::memory_order_relaxed));
-			e.detail("CompactionTotal", compactionTotal.load(std::memory_order_relaxed));
 		}
 		return;
 	}
@@ -339,7 +372,7 @@ public:
 		compactionRefitLevel.store(0, std::memory_order_relaxed);
 		compactionNumOfReasons.store(0, std::memory_order_relaxed);
 
-		lastResetTime.store(now(), std::memory_order_relaxed);
+		lastResetTime = now();
 	}
 
 private:
@@ -384,7 +417,7 @@ private:
 	std::atomic_int compactionNumOfReasons;
 	std::atomic_int compactionTotal;
 
-	std::atomic<double> lastResetTime;
+	double lastResetTime;
 };
 
 // Background error handling is tested with Chaos test.
