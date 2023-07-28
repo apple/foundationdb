@@ -565,6 +565,10 @@ struct StorageServerDisk {
 	Future<Void> canCommit() { return storage->canCommit(); }
 	Future<Void> commit() { return storage->commit(); }
 
+	void logRecentRocksDBFlushStats() { return storage->logRecentRocksDBFlushStats(); }
+
+	void logRecentRocksDBCompactionStats() { return storage->logRecentRocksDBCompactionStats(); }
+
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	// Read the key that is equal or greater then 'key' from the storage engine.
 	// For example, readNextKeyInclusive("a") should return:
@@ -12049,6 +12053,20 @@ struct CommitStats {
 	CommitStats()
 	  : seqId(0), whenCommit(0), beforeStorageUpdates(0), beforeStorageCommit(0), duration(0), commitDuration(0),
 	    incompleteCommitDuration(0), mutationBytes(0), fetchKeyBytes(0) {}
+
+	void log(UID ssid, std::string reason) const {
+		TraceEvent(SevInfo, "CommitStats", ssid)
+		    .detail("LogReason", reason)
+		    .detail("SequenceID", seqId)
+		    .detail("IncompleteCommitDuration", incompleteCommitDuration)
+		    .detail("CommitDuration", commitDuration)
+		    .detail("Duration", duration)
+		    .detail("BeforeStorageUpdates", beforeStorageUpdates)
+		    .detail("BeforeStorageCommit", beforeStorageCommit)
+		    .detail("WhenCommit", whenCommit)
+		    .detail("MutationBytes", mutationBytes)
+		    .detail("FetchKeyBytes", fetchKeyBytes);
+	}
 };
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
@@ -12311,47 +12329,36 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
 
 		recentCommitStats.back().whenCommit = now();
-		if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {
-			try {
-				wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
-			} catch (Error& err) {
-				if (err.code() == error_code_io_timeout) {
+		try {
+			wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+		} catch (Error& e) {
+			if (e.code() == error_code_io_timeout) {
+				if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {
 					recentCommitStats.back().incompleteCommitDuration = now() - recentCommitStats.back().whenCommit;
 					for (const auto& commitStats : recentCommitStats) {
-						TraceEvent(SevInfo, "CommitStats", data->thisServerID)
-						    .detail("Reason", "I/O timeout error")
-						    .detail("SequenceID", commitStats.seqId)
-						    .detail("IncompleteCommitDuration", commitStats.incompleteCommitDuration)
-						    .detail("CommitDuration", commitStats.incompleteCommitDuration)
-						    .detail("Duration", commitStats.duration)
-						    .detail("BeforeStorageUpdates", commitStats.beforeStorageUpdates)
-						    .detail("BeforeStorageCommit", commitStats.beforeStorageCommit)
-						    .detail("WhenCommit", commitStats.whenCommit)
-						    .detail("MutationBytes", commitStats.mutationBytes)
-						    .detail("FetchKeyBytes", commitStats.fetchKeyBytes);
+						commitStats.log(data->thisServerID, "I/O timeout error");
 					}
 				}
-				throw err;
+				if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+				    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
+					data->storage.logRecentRocksDBFlushStats();
+					data->storage.logRecentRocksDBCompactionStats();
+				}
 			}
-		} else {
-			wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+			throw e;
 		}
 		recentCommitStats.back().commitDuration = now() - recentCommitStats.back().whenCommit;
 		recentCommitStats.back().duration = now() - beforeStorageCommit;
 
 		if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT &&
 		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY) {
-			TraceEvent(SevInfo, "CommitStats", data->thisServerID)
-			    .detail("Reason", "Random Normal")
-			    .detail("SequenceID", recentCommitStats.back().seqId)
-			    .detail("IncompleteCommitDuration", recentCommitStats.back().incompleteCommitDuration)
-			    .detail("CommitDuration", recentCommitStats.back().incompleteCommitDuration)
-			    .detail("Duration", recentCommitStats.back().duration)
-			    .detail("BeforeStorageUpdates", recentCommitStats.back().beforeStorageUpdates)
-			    .detail("BeforeStorageCommit", recentCommitStats.back().beforeStorageCommit)
-			    .detail("WhenCommit", recentCommitStats.back().whenCommit)
-			    .detail("MutationBytes", recentCommitStats.back().mutationBytes)
-			    .detail("FetchKeyBytes", recentCommitStats.back().fetchKeyBytes);
+			recentCommitStats.back().log(data->thisServerID, "normal");
+		}
+		if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT &&
+		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY) {
+			data->storage.logRecentRocksDBFlushStats();
+			data->storage.logRecentRocksDBCompactionStats();
 		}
 
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);

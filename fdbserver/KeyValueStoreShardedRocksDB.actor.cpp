@@ -85,6 +85,8 @@ struct ReadIterator;
 struct ShardedRocksDBKeyValueStore;
 
 using rocksdb::BackgroundErrorReason;
+using rocksdb::CompactionReason;
+using rocksdb::FlushReason;
 
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
@@ -131,9 +133,9 @@ int getWriteStallState(const rocksdb::WriteStallCondition& condition) {
 	return 3;
 }
 
-class RocksDBEventListener : public rocksdb::EventListener {
+class RocksDBWriteStallListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(UID id) : logId(id) {}
+	RocksDBWriteStallListener(UID id) : logId(id) {}
 	void OnStallConditionsChanged(const rocksdb::WriteStallInfo& info) override {
 		auto curState = getWriteStallState(info.condition.cur);
 		auto prevState = getWriteStallState(info.condition.prev);
@@ -146,6 +148,213 @@ public:
 
 private:
 	UID logId;
+};
+
+// Returns string representation of RocksDB flush reason.
+// Flush reason code:
+// https://github.com/facebook/rocksdb/blob/63a5125a5220d953bf504daf33694f038403cc7c/include/rocksdb/listener.h#L164-L181
+// This function needs to be updated when flush code changes.
+std::string getFlushReason(const FlushReason& reason) {
+	switch (reason) {
+	case FlushReason::kOthers:
+		return format("%d Others", reason);
+	case FlushReason::kGetLiveFiles:
+		return format("%d GetLiveFiles", reason);
+	case FlushReason::kShutDown:
+		return format("%d ShutDown", reason);
+	case FlushReason::kExternalFileIngestion:
+		return format("%d ExternalFileIngestion", reason);
+	case FlushReason::kManualCompaction:
+		return format("%d ManualCompaction", reason);
+	case FlushReason::kWriteBufferManager:
+		return format("%d WriteBufferManager", reason);
+	case FlushReason::kWriteBufferFull:
+		return format("%d WriteBufferFull", reason);
+	case FlushReason::kTest:
+		return format("%d Test", reason);
+	case FlushReason::kDeleteFiles:
+		return format("%d DeleteFiles", reason);
+	case FlushReason::kAutoCompaction:
+		return format("%d AutoCompaction", reason);
+	case FlushReason::kManualFlush:
+		return format("%d ManualFlush", reason);
+	case FlushReason::kErrorRecovery:
+		return format("%d ErrorRecovery", reason);
+	case FlushReason::kErrorRecoveryRetryFlush:
+		return format("%d ErrorRecoveryRetryFlush", reason);
+	case FlushReason::kWalFull:
+		return format("%d WalFull", reason);
+	default:
+		return format("%d Unknown", reason);
+	}
+}
+
+struct FlushStats {
+	std::string cfName;
+	uint64_t threadId;
+	bool triggeredWritesSlowdown;
+	bool triggeredWritesStop;
+	FlushReason reason;
+	double when;
+	FlushStats(std::string cfName,
+	           uint64_t threadId,
+	           bool triggeredWritesSlowdown,
+	           bool triggeredWritesStop,
+	           FlushReason reason,
+	           double when)
+	  : cfName(cfName), threadId(threadId), triggeredWritesSlowdown(triggeredWritesSlowdown),
+	    triggeredWritesStop(triggeredWritesStop), reason(reason), when(when) {}
+};
+
+class RocksDBFlushListener : public rocksdb::EventListener {
+public:
+	RocksDBFlushListener(UID id) : logId(id) {}
+	void OnFlushBegin(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
+		std::lock_guard<std::mutex> lock(mutex);
+		while ((recentFlushStats.size() > 0) &&
+		       (now() - recentFlushStats.front().when > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC)) {
+			recentFlushStats.pop_front();
+		}
+		while (recentFlushStats.size() > SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_COUNT_MAX) {
+			recentFlushStats.pop_front();
+		}
+		recentFlushStats.push_back(FlushStats(info.cf_name,
+		                                      info.thread_id,
+		                                      info.triggered_writes_slowdown,
+		                                      info.triggered_writes_stop,
+		                                      info.flush_reason,
+		                                      now()));
+	}
+
+	void logRecentRocksDBFlushStats() {
+		std::lock_guard<std::mutex> lock(mutex);
+		std::unordered_map<FlushReason, int64_t> flushReasonStats;
+		std::set<std::string> cfNames;
+		for (const auto& flushStats : recentFlushStats) {
+			if (now() - flushStats.when > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC) {
+				continue;
+			}
+			flushReasonStats[flushStats.reason]++;
+			cfNames.insert(flushStats.cfName);
+		}
+		TraceEvent e(SevInfo, "RecentRocksDBFlushStats", logId);
+		e.detail("CFCount", cfNames.size());
+		int64_t totalCount = 0;
+		for (const auto& [reason, count] : flushReasonStats) {
+			e.detail("Reason-" + getFlushReason(reason), count);
+			totalCount += count;
+		}
+		e.detail("FlushCountTotal", totalCount);
+	}
+
+private:
+	UID logId;
+	std::deque<FlushStats> recentFlushStats;
+	std::mutex mutex;
+};
+
+// Returns string representation of RocksDB compaction reason.
+// Compaction reason code:
+// https://github.com/facebook/rocksdb/blob/63a5125a5220d953bf504daf33694f038403cc7c/include/rocksdb/listener.h#L113-L162
+// This function needs to be updated when compaction code changes.
+std::string getCompactionReason(const CompactionReason& reason) {
+	switch (reason) {
+	case CompactionReason::kUnknown:
+		return format("%d Unknown", reason);
+	case CompactionReason::kLevelL0FilesNum:
+		return format("%d LevelL0FilesNum", reason);
+	case CompactionReason::kLevelMaxLevelSize:
+		return format("%d LevelMaxLevelSize", reason);
+	case CompactionReason::kUniversalSizeAmplification:
+		return format("%d UniversalSizeAmplification", reason);
+	case CompactionReason::kUniversalSizeRatio:
+		return format("%d UniversalSizeRatio", reason);
+	case CompactionReason::kUniversalSortedRunNum:
+		return format("%d UniversalSortedRunNum", reason);
+	case CompactionReason::kFIFOMaxSize:
+		return format("%d FIFOMaxSize", reason);
+	case CompactionReason::kFIFOReduceNumFiles:
+		return format("%d FIFOReduceNumFiles", reason);
+	case CompactionReason::kFIFOTtl:
+		return format("%d FIFOTtl", reason);
+	case CompactionReason::kManualCompaction:
+		return format("%d ManualCompaction", reason);
+	case CompactionReason::kFilesMarkedForCompaction:
+		return format("%d FilesMarkedForCompaction", reason);
+	case CompactionReason::kBottommostFiles:
+		return format("%d BottommostFiles", reason);
+	case CompactionReason::kTtl:
+		return format("%d Ttl", reason);
+	case CompactionReason::kFlush:
+		return format("%d Flush", reason);
+	case CompactionReason::kExternalSstIngestion:
+		return format("%d ExternalSstIngestion", reason);
+	case CompactionReason::kPeriodicCompaction:
+		return format("%d PeriodicCompaction", reason);
+	case CompactionReason::kChangeTemperature:
+		return format("%d ChangeTemperature", reason);
+	case CompactionReason::kForcedBlobGC:
+		return format("%d ForcedBlobGC", reason);
+	case CompactionReason::kRoundRobinTtl:
+		return format("%d RoundRobinTtl", reason);
+	case CompactionReason::kRefitLevel:
+		return format("%d RefitLevel", reason);
+	case CompactionReason::kNumOfReasons:
+		return format("%d NumOfReasons", reason);
+	default:
+		return format("%d Unknown", reason);
+	}
+}
+
+struct CompactionStats {
+	std::string cfName;
+	uint64_t threadId;
+	CompactionReason reason;
+	double when;
+	CompactionStats(std::string cfName, uint64_t threadId, CompactionReason reason, double when)
+	  : cfName(cfName), threadId(threadId), reason(reason), when(when) {}
+};
+
+class RocksDBCompactionListener : public rocksdb::EventListener {
+public:
+	RocksDBCompactionListener(UID id) : logId(id) {}
+	void OnCompactionBegin(rocksdb::DB* db, const rocksdb::CompactionJobInfo& info) override {
+		std::lock_guard<std::mutex> lock(mutex);
+		while ((recentCompactionStats.size() > 0) && (now() - recentCompactionStats.front().when >
+		                                              SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC)) {
+			recentCompactionStats.pop_front();
+		}
+		while (recentCompactionStats.size() > SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_COUNT_MAX) {
+			recentCompactionStats.pop_front();
+		}
+		recentCompactionStats.push_back(CompactionStats(info.cf_name, info.thread_id, info.compaction_reason, now()));
+	}
+
+	void logRecentRocksDBCompactionStats() {
+		std::lock_guard<std::mutex> lock(mutex);
+		std::unordered_map<CompactionReason, int64_t> compactionReasonStats;
+		std::set<std::string> cfNames;
+		for (const auto& compactionStats : recentCompactionStats) {
+			if (now() - compactionStats.when > SERVER_KNOBS->LOGGING_RECENT_ROCKSDB_BG_WORK_TIME_WINDOW_SEC) {
+				continue;
+			}
+			compactionReasonStats[compactionStats.reason]++;
+			cfNames.insert(compactionStats.cfName);
+		}
+		TraceEvent e(SevInfo, "RecentRocksDBCompactionStats", logId);
+		e.detail("CFCount", cfNames.size());
+		int64_t totalCount = 0;
+		for (const auto& [reason, count] : compactionReasonStats) {
+			e.detail("Reason-" + getCompactionReason(reason), count);
+			totalCount += count;
+		}
+		e.detail("CompactionCountTotal", totalCount);
+	}
+
+private:
+	UID logId;
+	std::deque<CompactionStats> recentCompactionStats;
+	std::mutex mutex;
 };
 
 // Background error handling is tested with Chaos test.
@@ -912,14 +1121,21 @@ public:
 	             UID logId,
 	             const rocksdb::Options& options,
 	             std::shared_ptr<RocksDBErrorListener> errorListener,
+	             std::shared_ptr<RocksDBWriteStallListener> writeStallListener,
+	             std::shared_ptr<RocksDBFlushListener> flushListener,
+	             std::shared_ptr<RocksDBCompactionListener> compactionListener,
 	             Counters* cc)
 	  : path(path), logId(logId), dbOptions(options), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end),
 	    counters(cc) {
 		if (!g_network->isSimulated()) {
 			// Generating trace events in non-FDB thread will cause errors. The event listener is tested with local FDB
 			// cluster.
-			dbOptions.listeners.push_back(errorListener);
-			dbOptions.listeners.push_back(std::make_shared<RocksDBEventListener>(logId));
+			dbOptions.listeners.push_back(writeStallListener);
+			if (SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT ||
+			    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0) {
+				dbOptions.listeners.push_back(flushListener);
+				dbOptions.listeners.push_back(compactionListener);
+			}
 		}
 	}
 
@@ -3256,8 +3472,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(forwardError(errorListener->getFuture())),
-	    dbOptions(getOptions()), shardManager(path, id, dbOptions, errorListener, &counters),
+	    errorListener(std::make_shared<RocksDBErrorListener>()),
+	    writeStallListener(std::make_shared<RocksDBWriteStallListener>(id)),
+	    flushListener(std::make_shared<RocksDBFlushListener>(id)),
+	    compactionListener(std::make_shared<RocksDBCompactionListener>(id)),
+	    errorFuture(forwardError(errorListener->getFuture())), dbOptions(getOptions()), shardManager(path,
+	                                                                                                 id,
+	                                                                                                 dbOptions,
+	                                                                                                 errorListener,
+	                                                                                                 writeStallListener,
+	                                                                                                 flushListener,
+	                                                                                                 compactionListener,
+	                                                                                                 &counters),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
@@ -3628,9 +3854,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
 
+	void logRecentRocksDBFlushStats() override { return flushListener->logRecentRocksDBFlushStats(); }
+	void logRecentRocksDBCompactionStats() override { return compactionListener->logRecentRocksDBCompactionStats(); }
+
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
+	std::shared_ptr<RocksDBWriteStallListener> writeStallListener;
+	std::shared_ptr<RocksDBFlushListener> flushListener;
+	std::shared_ptr<RocksDBCompactionListener> compactionListener;
 	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;

@@ -107,6 +107,10 @@ public:
 	// Returns the amount of free and total space for this store, in bytes
 	virtual StorageBytes getStorageBytes() const = 0;
 
+	virtual void logRecentRocksDBFlushStats() { throw not_implemented(); }
+
+	virtual void logRecentRocksDBCompactionStats() { throw not_implemented(); }
+
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
