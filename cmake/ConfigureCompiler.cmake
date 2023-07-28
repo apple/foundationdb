@@ -252,10 +252,6 @@ else()
     list(APPEND SANITIZER_LINK_OPTIONS $<${is_cxx_link}:-fsanitize=thread>)
   endif()
 
-  if(USE_VALGRIND)
-    list(APPEND SANITIZER_COMPILE_OPTIONS $<${is_cxx_compile}:-DBOOST_USE_VALGRIND})
-  endif()
-
   if(SANITIZER_COMPILE_OPTIONS)
     add_compile_options(${SANITIZER_COMPILE_OPTIONS})
   endif()
