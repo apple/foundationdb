@@ -293,9 +293,9 @@ ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef
 ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);
 
 // debug commands: getlocation, getall
-ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens);
 ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
-
+ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens);
 } // namespace fdb_cli
 
 #include "flow/unactorcompiler.h"
