@@ -1194,6 +1194,7 @@ public:
 		if (!g_network->isSimulated()) {
 			// Generating trace events in non-FDB thread will cause errors. The event listener is tested with local FDB
 			// cluster.
+			dbOptions.listeners.push_back(errorListener);
 			if (SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT ||
 			    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0) {
 				dbOptions.listeners.push_back(eventListener);
