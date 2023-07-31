@@ -892,6 +892,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUDIT_DATAMOVE_PRE_CHECK,                            false ); if ( isSimulated ) AUDIT_DATAMOVE_PRE_CHECK = true;
 	init( AUDIT_DATAMOVE_POST_CHECK,                           false ); if ( isSimulated ) AUDIT_DATAMOVE_POST_CHECK = true;
 	init( AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX,              50 );
+	init( LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT,               true );
+	init( LOGGING_RECENT_STORAGE_COMMIT_SIZE,                     20 );
+	init( LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY,         0.001 );
+	init( LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT,              true );
+	init( LOGGING_ROCKSDB_BG_WORK_PERIOD_SEC,                     10 );
+	init( LOGGING_ROCKSDB_BG_WORK_PROBABILITY,                 0.001 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;

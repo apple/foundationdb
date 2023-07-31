@@ -85,6 +85,8 @@ struct ReadIterator;
 struct ShardedRocksDBKeyValueStore;
 
 using rocksdb::BackgroundErrorReason;
+using rocksdb::CompactionReason;
+using rocksdb::FlushReason;
 
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
@@ -144,8 +146,281 @@ public:
 		    .detail("PrevState", prevState);
 	}
 
+	// Flush reason code:
+	// https://github.com/facebook/rocksdb/blob/63a5125a5220d953bf504daf33694f038403cc7c/include/rocksdb/listener.h#L164-L181
+	// This function needs to be updated when flush code changes.
+	void OnFlushBegin(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
+		flushTotal++;
+		switch (info.flush_reason) {
+		case FlushReason::kOthers:
+			flushOthers++;
+			return;
+		case FlushReason::kGetLiveFiles:
+			flushGetLiveFiles++;
+			return;
+		case FlushReason::kShutDown:
+			flushShutDown++;
+			return;
+		case FlushReason::kExternalFileIngestion:
+			flushExternalFileIngestion++;
+			return;
+		case FlushReason::kManualCompaction:
+			flushManualCompaction++;
+			return;
+		case FlushReason::kWriteBufferManager:
+			flushWriteBufferManager++;
+			return;
+		case FlushReason::kWriteBufferFull:
+			flushWriteBufferFull++;
+			return;
+		case FlushReason::kTest:
+			flushTest++;
+			return;
+		case FlushReason::kDeleteFiles:
+			flushDeleteFiles++;
+			return;
+		case FlushReason::kAutoCompaction:
+			flushAutoCompaction++;
+			return;
+		case FlushReason::kManualFlush:
+			flushManualFlush++;
+			return;
+		case FlushReason::kErrorRecovery:
+			flushErrorRecovery++;
+			return;
+		case FlushReason::kErrorRecoveryRetryFlush:
+			flushErrorRecoveryRetryFlush++;
+			return;
+		case FlushReason::kWalFull:
+			flushWalFull++;
+			return;
+		default:
+			TraceEvent(SevWarn, "UnknownRocksDBFlushReason", logId)
+			    .suppressFor(5.0)
+			    .detail("Reason", static_cast<int>(info.flush_reason));
+		}
+		return;
+	}
+
+	// Compaction reason code:
+	// https://github.com/facebook/rocksdb/blob/63a5125a5220d953bf504daf33694f038403cc7c/include/rocksdb/listener.h#L113-L162
+	// This function needs to be updated when compaction code changes.
+	void OnCompactionBegin(rocksdb::DB* db, const rocksdb::CompactionJobInfo& info) override {
+		compactionTotal++;
+		switch (info.compaction_reason) {
+		case CompactionReason::kUnknown:
+			compactionUnknown++;
+			return;
+		case CompactionReason::kLevelL0FilesNum:
+			compactionLevelL0FilesNum++;
+			return;
+		case CompactionReason::kLevelMaxLevelSize:
+			compactionLevelMaxLevelSize++;
+			return;
+		case CompactionReason::kUniversalSizeAmplification:
+			compactionUniversalSizeAmplification++;
+			return;
+		case CompactionReason::kUniversalSizeRatio:
+			compactionUniversalSizeRatio++;
+			return;
+		case CompactionReason::kUniversalSortedRunNum:
+			compactionUniversalSortedRunNum++;
+			return;
+		case CompactionReason::kFIFOMaxSize:
+			compactionFIFOMaxSize++;
+			return;
+		case CompactionReason::kFIFOReduceNumFiles:
+			compactionFIFOReduceNumFiles++;
+			return;
+		case CompactionReason::kFIFOTtl:
+			compactionFIFOTtl++;
+			return;
+		case CompactionReason::kManualCompaction:
+			compactionManualCompaction++;
+			return;
+		case CompactionReason::kFilesMarkedForCompaction:
+			compactionFilesMarkedForCompaction++;
+			return;
+		case CompactionReason::kBottommostFiles:
+			compactionBottommostFiles++;
+			return;
+		case CompactionReason::kTtl:
+			compactionTtl++;
+			return;
+		case CompactionReason::kFlush:
+			compactionFlush++;
+			return;
+		case CompactionReason::kExternalSstIngestion:
+			compactionExternalSstIngestion++;
+			return;
+		case CompactionReason::kPeriodicCompaction:
+			compactionPeriodicCompaction++;
+			return;
+		case CompactionReason::kChangeTemperature:
+			compactionChangeTemperature++;
+			return;
+		case CompactionReason::kForcedBlobGC:
+			compactionForcedBlobGC++;
+			return;
+		case CompactionReason::kRoundRobinTtl:
+			compactionRoundRobinTtl++;
+			return;
+		case CompactionReason::kRefitLevel:
+			compactionRefitLevel++;
+			return;
+		case CompactionReason::kNumOfReasons:
+			compactionNumOfReasons++;
+			return;
+		default:
+			TraceEvent(SevWarn, "UnknownRocksDBCompactionReason", logId)
+			    .suppressFor(5.0)
+			    .detail("Reason", static_cast<int>(info.compaction_reason));
+		}
+		return;
+	}
+
+	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) {
+		TraceEvent e(SevInfo, "RecentRocksDBBackgroundWorkStats", logId);
+		int flushCount = flushTotal.load(std::memory_order_relaxed);
+		int compactionCount = compactionTotal.load(std::memory_order_relaxed);
+		e.setMaxEventLength(20000);
+		e.detail("LogReason", logReason);
+		e.detail("StorageServerID", ssId);
+		e.detail("DurationSeconds", now() - lastResetTime);
+		e.detail("FlushCountTotal", flushCount);
+		e.detail("CompactionTotal", compactionCount);
+		if (flushCount > 0) {
+			e.detail("FlushOthers", flushOthers.load(std::memory_order_relaxed));
+			e.detail("FlushGetLiveFiles", flushGetLiveFiles.load(std::memory_order_relaxed));
+			e.detail("FlushShutDown", flushShutDown.load(std::memory_order_relaxed));
+			e.detail("FlushExternalFileIngestion", flushExternalFileIngestion.load(std::memory_order_relaxed));
+			e.detail("FlushManualCompaction", flushManualCompaction.load(std::memory_order_relaxed));
+			e.detail("FlushWriteBufferManager", flushWriteBufferManager.load(std::memory_order_relaxed));
+			e.detail("FlushWriteBufferFull", flushWriteBufferFull.load(std::memory_order_relaxed));
+			e.detail("FlushTest", flushTest.load(std::memory_order_relaxed));
+			e.detail("FlushDeleteFiles", flushDeleteFiles.load(std::memory_order_relaxed));
+			e.detail("FlushAutoCompaction", flushAutoCompaction.load(std::memory_order_relaxed));
+			e.detail("FlushManualFlush", flushManualFlush.load(std::memory_order_relaxed));
+			e.detail("FlushErrorRecovery", flushErrorRecovery.load(std::memory_order_relaxed));
+			e.detail("FlushErrorRecoveryRetryFlush", flushErrorRecoveryRetryFlush.load(std::memory_order_relaxed));
+			e.detail("FlushWalFull", flushWalFull.load(std::memory_order_relaxed));
+		}
+		if (compactionCount > 0) {
+			e.detail("CompactionUnknown", compactionUnknown.load(std::memory_order_relaxed));
+			e.detail("CompactionLevelL0FilesNum", compactionLevelL0FilesNum.load(std::memory_order_relaxed));
+			e.detail("CompactionLevelMaxLevelSize", compactionLevelMaxLevelSize.load(std::memory_order_relaxed));
+			e.detail("CompactionUniversalSizeAmplification",
+			         compactionUniversalSizeAmplification.load(std::memory_order_relaxed));
+			e.detail("CompactionUniversalSizeRatio", compactionUniversalSizeRatio.load(std::memory_order_relaxed));
+			e.detail("CompactionUniversalSortedRunNum",
+			         compactionUniversalSortedRunNum.load(std::memory_order_relaxed));
+			e.detail("CompactionFIFOMaxSize", compactionFIFOMaxSize.load(std::memory_order_relaxed));
+			e.detail("CompactionFIFOReduceNumFiles", compactionFIFOReduceNumFiles.load(std::memory_order_relaxed));
+			e.detail("CompactionFIFOTtl", compactionFIFOTtl.load(std::memory_order_relaxed));
+			e.detail("CompactionManualCompaction", compactionManualCompaction.load(std::memory_order_relaxed));
+			e.detail("CompactionFilesMarkedForCompaction",
+			         compactionFilesMarkedForCompaction.load(std::memory_order_relaxed));
+			e.detail("CompactionBottommostFiles", compactionBottommostFiles.load(std::memory_order_relaxed));
+			e.detail("CompactionTtl", compactionTtl.load(std::memory_order_relaxed));
+			e.detail("CompactionFlush", compactionFlush.load(std::memory_order_relaxed));
+			e.detail("CompactionExternalSstIngestion", compactionExternalSstIngestion.load(std::memory_order_relaxed));
+			e.detail("CompactionPeriodicCompaction", compactionPeriodicCompaction.load(std::memory_order_relaxed));
+			e.detail("CompactionChangeTemperature", compactionChangeTemperature.load(std::memory_order_relaxed));
+			e.detail("CompactionForcedBlobGC", compactionForcedBlobGC.load(std::memory_order_relaxed));
+			e.detail("CompactionRoundRobinTtl", compactionRoundRobinTtl.load(std::memory_order_relaxed));
+			e.detail("CompactionRefitLevel", compactionRefitLevel.load(std::memory_order_relaxed));
+			e.detail("CompactionNumOfReasons", compactionNumOfReasons.load(std::memory_order_relaxed));
+		}
+		return;
+	}
+
+	void resetCounters() {
+		flushTotal.store(0, std::memory_order_relaxed);
+		compactionTotal.store(0, std::memory_order_relaxed);
+
+		flushOthers.store(0, std::memory_order_relaxed);
+		flushGetLiveFiles.store(0, std::memory_order_relaxed);
+		flushShutDown.store(0, std::memory_order_relaxed);
+		flushExternalFileIngestion.store(0, std::memory_order_relaxed);
+		flushManualCompaction.store(0, std::memory_order_relaxed);
+		flushWriteBufferManager.store(0, std::memory_order_relaxed);
+		flushWriteBufferFull.store(0, std::memory_order_relaxed);
+		flushTest.store(0, std::memory_order_relaxed);
+		flushDeleteFiles.store(0, std::memory_order_relaxed);
+		flushAutoCompaction.store(0, std::memory_order_relaxed);
+		flushManualFlush.store(0, std::memory_order_relaxed);
+		flushErrorRecovery.store(0, std::memory_order_relaxed);
+		flushErrorRecoveryRetryFlush.store(0, std::memory_order_relaxed);
+		flushWalFull.store(0, std::memory_order_relaxed);
+
+		compactionUnknown.store(0, std::memory_order_relaxed);
+		compactionLevelL0FilesNum.store(0, std::memory_order_relaxed);
+		compactionLevelMaxLevelSize.store(0, std::memory_order_relaxed);
+		compactionUniversalSizeAmplification.store(0, std::memory_order_relaxed);
+		compactionUniversalSizeRatio.store(0, std::memory_order_relaxed);
+		compactionUniversalSortedRunNum.store(0, std::memory_order_relaxed);
+		compactionFIFOMaxSize.store(0, std::memory_order_relaxed);
+		compactionFIFOReduceNumFiles.store(0, std::memory_order_relaxed);
+		compactionFIFOTtl.store(0, std::memory_order_relaxed);
+		compactionManualCompaction.store(0, std::memory_order_relaxed);
+		compactionFilesMarkedForCompaction.store(0, std::memory_order_relaxed);
+		compactionBottommostFiles.store(0, std::memory_order_relaxed);
+		compactionTtl.store(0, std::memory_order_relaxed);
+		compactionFlush.store(0, std::memory_order_relaxed);
+		compactionExternalSstIngestion.store(0, std::memory_order_relaxed);
+		compactionPeriodicCompaction.store(0, std::memory_order_relaxed);
+		compactionChangeTemperature.store(0, std::memory_order_relaxed);
+		compactionForcedBlobGC.store(0, std::memory_order_relaxed);
+		compactionRoundRobinTtl.store(0, std::memory_order_relaxed);
+		compactionRefitLevel.store(0, std::memory_order_relaxed);
+		compactionNumOfReasons.store(0, std::memory_order_relaxed);
+
+		lastResetTime = now();
+	}
+
 private:
 	UID logId;
+
+	std::atomic_int flushOthers;
+	std::atomic_int flushGetLiveFiles;
+	std::atomic_int flushShutDown;
+	std::atomic_int flushExternalFileIngestion;
+	std::atomic_int flushManualCompaction;
+	std::atomic_int flushWriteBufferManager;
+	std::atomic_int flushWriteBufferFull;
+	std::atomic_int flushTest;
+	std::atomic_int flushDeleteFiles;
+	std::atomic_int flushAutoCompaction;
+	std::atomic_int flushManualFlush;
+	std::atomic_int flushErrorRecovery;
+	std::atomic_int flushErrorRecoveryRetryFlush;
+	std::atomic_int flushWalFull;
+	std::atomic_int flushTotal;
+
+	std::atomic_int compactionUnknown;
+	std::atomic_int compactionLevelL0FilesNum;
+	std::atomic_int compactionLevelMaxLevelSize;
+	std::atomic_int compactionUniversalSizeAmplification;
+	std::atomic_int compactionUniversalSizeRatio;
+	std::atomic_int compactionUniversalSortedRunNum;
+	std::atomic_int compactionFIFOMaxSize;
+	std::atomic_int compactionFIFOReduceNumFiles;
+	std::atomic_int compactionFIFOTtl;
+	std::atomic_int compactionManualCompaction;
+	std::atomic_int compactionFilesMarkedForCompaction;
+	std::atomic_int compactionBottommostFiles;
+	std::atomic_int compactionTtl;
+	std::atomic_int compactionFlush;
+	std::atomic_int compactionExternalSstIngestion;
+	std::atomic_int compactionPeriodicCompaction;
+	std::atomic_int compactionChangeTemperature;
+	std::atomic_int compactionForcedBlobGC;
+	std::atomic_int compactionRoundRobinTtl;
+	std::atomic_int compactionRefitLevel;
+	std::atomic_int compactionNumOfReasons;
+	std::atomic_int compactionTotal;
+
+	double lastResetTime;
 };
 
 // Background error handling is tested with Chaos test.
@@ -912,6 +1187,7 @@ public:
 	             UID logId,
 	             const rocksdb::Options& options,
 	             std::shared_ptr<RocksDBErrorListener> errorListener,
+	             std::shared_ptr<RocksDBEventListener> eventListener,
 	             Counters* cc)
 	  : path(path), logId(logId), dbOptions(options), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end),
 	    counters(cc) {
@@ -919,7 +1195,10 @@ public:
 			// Generating trace events in non-FDB thread will cause errors. The event listener is tested with local FDB
 			// cluster.
 			dbOptions.listeners.push_back(errorListener);
-			dbOptions.listeners.push_back(std::make_shared<RocksDBEventListener>(logId));
+			if (SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT ||
+			    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0) {
+				dbOptions.listeners.push_back(eventListener);
+			}
 		}
 	}
 
@@ -2239,6 +2518,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
+	ACTOR static Future<Void> refreshRocksDBBackgroundEventCounter(
+	    std::shared_ptr<RocksDBEventListener> eventListener) {
+		if (SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT ||
+		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0) {
+			try {
+				loop {
+					wait(delay(SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PERIOD_SEC));
+					eventListener->resetCounters();
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent(SevError, "RefreshRocksDBBackgroundEventCounter").errorUnsuppressed(e);
+				}
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> doRestore(ShardedRocksDBKeyValueStore* self,
 	                                    std::string shardId,
 	                                    std::vector<KeyRange> ranges,
@@ -3256,8 +3553,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(forwardError(errorListener->getFuture())),
-	    dbOptions(getOptions()), shardManager(path, id, dbOptions, errorListener, &counters),
+	    errorListener(std::make_shared<RocksDBErrorListener>()),
+	    eventListener(std::make_shared<RocksDBEventListener>(id)),
+	    errorFuture(forwardError(errorListener->getFuture())), dbOptions(getOptions()),
+	    shardManager(path, id, dbOptions, errorListener, eventListener, &counters),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
@@ -3293,6 +3592,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
 		self->refreshHolder.cancel();
+		self->refreshRocksDBBackgroundWorkHolder.cancel();
 		self->cleanUpJob.cancel();
 		self->counterLogger.cancel();
 
@@ -3351,6 +3651,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
+			this->refreshRocksDBBackgroundWorkHolder = refreshRocksDBBackgroundEventCounter(this->eventListener);
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
 			writeThread->post(a.release());
 			counterLogger = counters.cc.traceCounters("RocksDBCounters", id, SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
@@ -3628,9 +3929,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
 
+	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) override {
+		return eventListener->logRecentRocksDBBackgroundWorkStats(ssId, logReason);
+	}
+
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
+	std::shared_ptr<RocksDBEventListener> eventListener;
 	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;
@@ -3648,6 +3954,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	int numFetchWaiters;
 	Counters counters;
 	Future<Void> refreshHolder;
+	Future<Void> refreshRocksDBBackgroundWorkHolder;
 	Future<Void> cleanUpJob;
 	Future<Void> counterLogger;
 };
