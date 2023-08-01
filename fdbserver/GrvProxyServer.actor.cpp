@@ -485,6 +485,7 @@ void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* 
 // Drop a GetReadVersion request from a queue, by responding an error to the request.
 void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* stats) {
 	proxyGRVThresholdExceeded(&queue->front(), stats);
+	++stats->txnRequestOut;
 	queue->pop_front();
 }
 
