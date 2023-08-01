@@ -219,13 +219,14 @@ struct MoveInUpdates {
 	              struct StorageServer* data,
 	              IKeyValueStore* store,
 	              MoveInUpdatesSpilled spilled)
-	  : id(id), lastAppliedVersion(version), data(data), store(store), range(persistUpdatesKeyRange(id)), fail(false),
-	    spilled(spilled) {}
+	  : id(id), lastAppliedVersion(version), knownSpilledVersion(invalidVersion), data(data), store(store),
+	    range(persistUpdatesKeyRange(id)), fail(false), spilled(spilled), size(0) {}
 
 	void addMutation(Version version,
 	                 bool fromFetch,
 	                 MutationRef const& mutation,
-	                 MutationRefAndCipherKeys const& encryptedMutation);
+	                 MutationRefAndCipherKeys const& encryptedMutation,
+	                 bool allowSpill);
 
 	bool hasNext() const;
 
@@ -237,77 +238,147 @@ struct MoveInUpdates {
 
 	UID id;
 	Version lastAppliedVersion;
+	Version knownSpilledVersion;
 	std::deque<Standalone<VerUpdateRef>> updates;
+	std::vector<Standalone<VerUpdateRef>> spillBuffer;
 	struct StorageServer* data;
 	IKeyValueStore* store;
 	KeyRange range;
 	bool fail;
 	MoveInUpdatesSpilled spilled;
+	size_t size;
+	Future<Void> loadFuture;
 
 private:
-	ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin) {
-		RangeResult res = wait(self->store->readRange(self->range));
-		ASSERT(!res.more); // TODO: support partial restore, and it is important we load mutations with a version >
-		                   // oldestVersion if mutations are applied in different batches.
-		std::map<Version, Standalone<VerUpdateRef>> restored;
-		for (int i = 0; i < res.size(); ++i) {
-			BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
-			Version version;
-			rd >> version;
-			Standalone<MutationRef> mutation =
-			    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
-			DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
-			auto& vur = restored[version];
-			vur.version = version;
-			vur.push_back_deep(vur.arena(), mutation);
-		}
-		TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
+	ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin);
+	// ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin) {
+	// 	RangeResult res = wait(self->store->readRange(self->range));
+	// 	ASSERT(!res.more); // TODO: support partial restore, and it is important we load mutations with a version >
+	// 	                   // oldestVersion if mutations are applied in different batches.
+	// 	std::map<Version, Standalone<VerUpdateRef>> restored;
+	// 	for (int i = 0; i < res.size(); ++i) {
+	// 		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
+	// 		Version version;
+	// 		rd >> version;
+	// 		Standalone<MutationRef> mutation =
+	// 		    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
+	// 		DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
+	// 		auto& vur = restored[version];
+	// 		vur.version = version;
+	// 		vur.push_back_deep(vur.arena(), mutation);
+	// 	}
+	// 	TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
 
-		std::deque<Standalone<VerUpdateRef>> tmp(std::move(self->updates));
-		self->updates = std::deque<Standalone<VerUpdateRef>>();
-		for (const auto& [version, vur] : restored) {
-			ASSERT(version == vur.version);
-			if (version > begin) {
-				self->updates.push_back(vur);
-			}
-		}
+	// 	std::deque<Standalone<VerUpdateRef>> tmp(std::move(self->updates));
+	// 	self->updates = std::deque<Standalone<VerUpdateRef>>();
+	// 	for (const auto& [version, vur] : restored) {
+	// 		ASSERT(version == vur.version);
+	// 		if (version > begin) {
+	// 			self->updates.push_back(vur);
+	// 		}
+	// 	}
 
-		while (!tmp.empty()) {
-			if (self->updates.empty() || tmp.front().version > self->updates.back().version) {
-				TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
-				    .detail("Version", tmp.front().version)
-				    .detail("Size", tmp.front().mutations.size());
-				self->updates.push_back(tmp.front());
-			}
-			tmp.pop_front();
-		}
+	// 	while (!tmp.empty()) {
+	// 		if (self->updates.empty() || tmp.front().version > self->updates.back().version) {
+	// 			TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
+	// 			    .detail("Version", tmp.front().version)
+	// 			    .detail("Size", tmp.front().mutations.size());
+	// 			self->updates.push_back(tmp.front());
+	// 		}
+	// 		tmp.pop_front();
+	// 	}
 
-		return Void();
-	}
+	// 	return Void();
+	// }
+	ACTOR static Future<Void> loadUpdates(MoveInUpdates* self, Version begin, Version end);
 
 	Key getPersistKey(const Version version, const int idx) const;
 };
 
-bool MoveInUpdates::hasNext() const {
-	return !updates.empty();
-}
+ACTOR Future<Void> MoveInUpdates::doRestore(MoveInUpdates* self, Version begin) {
+	RangeResult res = wait(self->store->readRange(self->range));
+	ASSERT(!res.more); // TODO: support partial restore, and it is important we load mutations with a version >
+	                   // oldestVersion if mutations are applied in different batches.
+	std::map<Version, Standalone<VerUpdateRef>> restored;
+	for (int i = 0; i < res.size(); ++i) {
+		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
+		Version version;
+		rd >> version;
+		Standalone<MutationRef> mutation =
+		    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
+		DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
+		auto& vur = restored[version];
+		vur.version = version;
+		vur.push_back_deep(vur.arena(), mutation);
+	}
+	TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
 
-std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
-	std::vector<Standalone<VerUpdateRef>> res;
-	int size = 0;
-	if (!this->fail) {
-		while (!updates.empty()) {
-			if (updates.front().version > this->lastAppliedVersion) {
-				res.push_back(updates.front());
-				size += res.back().mutations.expectedSize();
-			}
-			updates.pop_front();
-			if (size > byteLimit) {
-				break;
-			}
+	std::deque<Standalone<VerUpdateRef>> tmp(std::move(self->updates));
+	self->updates = std::deque<Standalone<VerUpdateRef>>();
+	for (const auto& [version, vur] : restored) {
+		ASSERT(version == vur.version);
+		if (version > begin) {
+			self->updates.push_back(vur);
 		}
 	}
-	return res;
+
+	while (!tmp.empty()) {
+		if (self->updates.empty() || tmp.front().version > self->updates.back().version) {
+			TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
+			    .detail("Version", tmp.front().version)
+			    .detail("Size", tmp.front().mutations.size());
+			self->updates.push_back(tmp.front());
+		}
+		tmp.pop_front();
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
+	RangeResult res =
+	    wait(self->store->readRange(KeyRangeRef(self->getPersistKey(begin, 0), self->getPersistKey(end, 0))));
+	// if(!res.more); // TODO: support partial restore, and it is important we load mutations with a version >
+	// oldestVersion if mutations are applied in different batches.
+	// std::map<Version, Standalone<VerUpdateRef>> restored;
+	std::vector<Standalone<VerUpdateRef>> restored;
+	for (int i = 0; i < res.size(); ++i) {
+		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
+		Version version;
+		rd >> version;
+		Standalone<MutationRef> mutation =
+		    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
+		DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
+		if (restored.empty() || restored.back().version < version) {
+			restored.emplace_back();
+			restored.back().version = version;
+			restored.back().isPrivateData = false;
+		}
+		restored.back().push_back_deep(restored.back().arena(), mutation);
+	}
+	TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
+
+	if (!res.more) {
+		for (const auto& it : restored) {
+			if (self->updates.empty() || it.version > self->updates.back().version) {
+				TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
+				    .detail("Version", it.version)
+				    .detail("Size", it.mutations.size());
+				self->updates.push_back(it);
+			}
+		}
+		self->spilled = MoveInUpdatesSpilled::False;
+	} else {
+		std::swap(self->spillBuffer, restored);
+	}
+
+	self->loadFuture = Future<Void>();
+
+	return Void();
+}
+
+bool MoveInUpdates::hasNext() const {
+	return !updates.empty();
 }
 
 void MoveInUpdates::clear() {
@@ -9680,8 +9751,40 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	return Void();
 }
 
-Key MoveInUpdates::getPersistKey(const Version version, const int idx) const {
+std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
+	std::vector<Standalone<VerUpdateRef>> res;
+	if (this->spilled) {
+		// TODO: schedule load data from (spillBuffer.back().version, updates.front().version/data->version)
+		std::swap(res, this->spillBuffer);
+		if (!this->loadFuture.isValid()) {
+			const Version begin = (res.empty() ? this->lastAppliedVersion : res.back().version) + 1;
+			Version end = this->data->version.get() + 1;
+			if (!this->updates.empty() && this->updates.front().version < end) {
+				end = this->updates.front().version;
+			}
+			this->loadFuture = loadUpdates(this, begin, end);
+		} else if (this->loadFuture.isError()) {
+			throw operation_cancelled();
+		}
+	} else {
+		int size = 0;
+		if (!this->fail) {
+			while (!updates.empty()) {
+				if (updates.front().version > this->lastAppliedVersion) {
+					res.push_back(updates.front());
+					size += res.back().mutations.expectedSize();
+				}
+				updates.pop_front();
+				if (size > byteLimit) {
+					break;
+				}
+			}
+		}
+	}
+	return res;
+}
 
+Key MoveInUpdates::getPersistKey(const Version version, const int idx) const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(range.begin);
 	wr << version;
@@ -9692,13 +9795,14 @@ Key MoveInUpdates::getPersistKey(const Version version, const int idx) const {
 void MoveInUpdates::addMutation(Version version,
                                 bool fromFetch,
                                 MutationRef const& mutation,
-                                MutationRefAndCipherKeys const& encryptedMutation) {
+                                MutationRefAndCipherKeys const& encryptedMutation,
+                                bool allowSpill) {
 	if (version <= lastAppliedVersion || this->fail) {
 		return;
 	}
 
 	if (updates.empty() || version > updates.back().version) {
-		VerUpdateRef v;
+		Standalone<VerUpdateRef> v;
 		v.version = version;
 		v.isPrivateData = false;
 		updates.push_back(v);
@@ -9706,6 +9810,7 @@ void MoveInUpdates::addMutation(Version version,
 
 	// Add the mutation to the version.
 	updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
+	this->size += sizeof(MutationRef) + mutation.expectedSize();
 
 	auto& mLV = data->addVersionToMutationLog(version);
 	const Key pk = getPersistKey(version, updates.back().mutations.size());
@@ -9713,6 +9818,16 @@ void MoveInUpdates::addMutation(Version version,
 	ASSERT(pk > getPersistKey(version, updates.back().mutations.size() - 1));
 	data->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::SetValue, pk, BinaryWriter::toValue(mutation, IncludeVersion())));
+
+	if (allowSpill) {
+		while (this->size > SERVER_KNOBS->FETCH_SHARD_BUFFER_BYTE_LIMIT &&
+		       updates.front().version <= data->durableVersion.get()) {
+			this->size -= updates.front().expectedSize();
+			knownSpilledVersion = updates.front().version;
+			spilled = MoveInUpdatesSpilled::True;
+			updates.pop_front();
+		}
+	}
 }
 
 MoveInShard::MoveInShard(StorageServer* server,
@@ -9818,9 +9933,10 @@ void MoveInShard::addMutation(Version version,
 		ASSERT(range.contains(mutation.param1));
 	}
 
-	if (this->getPhase() < MoveInPhase::ReadWritePending && !fromFetch) {
-		updates->addMutation(version, fromFetch, mutation, encryptedMutation);
-	} else if (getPhase() == MoveInPhase::ReadWritePending || getPhase() == MoveInPhase::Complete || fromFetch) {
+	const MoveInPhase phase = this->getPhase();
+	if (phase < MoveInPhase::ReadWritePending && !fromFetch) {
+		updates->addMutation(version, fromFetch, mutation, encryptedMutation, phase < MoveInPhase::ApplyingUpdates);
+	} else if (phase == MoveInPhase::ReadWritePending || phase == MoveInPhase::Complete || fromFetch) {
 		server->addMutation(version, fromFetch, mutation, encryptedMutation, range, server->updateEagerReads);
 	}
 }
