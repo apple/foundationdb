@@ -262,10 +262,10 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 	return Void();
 }
 
-ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
-                                            MoveKeyLockInfo lock,
-                                            bool isDDEnabled,
-                                            bool isWrite = true) {
+ACTOR static Future<Void> checkMoveKeysLockForAudit(Transaction* tr,
+                                                    MoveKeyLockInfo lock,
+                                                    bool isDDEnabled,
+                                                    bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	if (!isDDEnabled) {
 		TraceEvent(SevDebug, "AuditUtilDisabledByInMemoryCheck").log();
@@ -279,7 +279,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
-			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
 			TraceEvent(SevDebug, "ConflictWithPreviousOwner");
 			throw movekeys_conflict(); // need a new name
 		}
@@ -310,7 +309,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		}
 		return Void();
 	} else {
-		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner")
 		    .detail("CurrentOwner", currentOwner.toString())
 		    .detail("PrevOwner", lock.prevOwner.toString())
@@ -335,7 +333,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+				wait(checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true));
 				RangeResult res =
 				    wait(tr.getRange(auditKeyRange(auditState.getType()), 1, Snapshot::False, Reverse::True));
 				ASSERT(res.size() == 0 || res.size() == 1);
@@ -403,7 +401,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			wait(checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true));
 			// Clear persistent progress data of the new audit if complete
 			if (auditPhase == AuditPhase::Complete) {
 				clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
@@ -794,7 +792,7 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			wait(checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true));
 			RangeResult result = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
 			if (result.more || result.size() >= CLIENT_KNOBS->TOO_MANY) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
