@@ -565,6 +565,10 @@ struct StorageServerDisk {
 	Future<Void> canCommit() { return storage->canCommit(); }
 	Future<Void> commit() { return storage->commit(); }
 
+	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) {
+		return storage->logRecentRocksDBBackgroundWorkStats(ssId, logReason);
+	}
+
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	// Read the key that is equal or greater then 'key' from the storage engine.
 	// For example, readNextKeyInclusive("a") should return:
@@ -11903,11 +11907,46 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	return Void();
 }
 
+struct UpdateStorageCommitStats {
+	double beforeStorageUpdates;
+	double beforeStorageCommit;
+	double whenCommit;
+	double duration;
+	double commitDuration;
+	double incompleteCommitDuration;
+	uint64_t mutationBytes;
+	uint64_t fetchKeyBytes;
+	int64_t seqId;
+
+	UpdateStorageCommitStats()
+	  : seqId(0), whenCommit(0), beforeStorageUpdates(0), beforeStorageCommit(0), duration(0), commitDuration(0),
+	    incompleteCommitDuration(0), mutationBytes(0), fetchKeyBytes(0) {}
+
+	void log(UID ssid, std::string reason) const {
+		TraceEvent(SevInfo, "UpdateStorageCommitStats", ssid)
+		    .detail("LogReason", reason)
+		    .detail("SequenceID", seqId)
+		    .detail("IncompleteCommitDuration", incompleteCommitDuration)
+		    .detail("CommitDuration", commitDuration)
+		    .detail("Duration", duration)
+		    .detail("BeforeStorageUpdates", beforeStorageUpdates)
+		    .detail("BeforeStorageCommit", beforeStorageCommit)
+		    .detail("WhenCommit", whenCommit)
+		    .detail("MutationBytes", mutationBytes)
+		    .detail("FetchKeyBytes", fetchKeyBytes);
+	}
+};
+
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	state UnlimitedCommitBytes unlimitedCommitBytes = UnlimitedCommitBytes::False;
 	state Future<Void> durableDelay = Void();
+	state std::deque<UpdateStorageCommitStats> recentCommitStats;
 
 	loop {
+		while (recentCommitStats.size() > SERVER_KNOBS->LOGGING_RECENT_STORAGE_COMMIT_SIZE) {
+			recentCommitStats.pop_front();
+		}
+		recentCommitStats.push_back(UpdateStorageCommitStats());
 		unlimitedCommitBytes = UnlimitedCommitBytes::False;
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
@@ -12034,6 +12073,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				break;
 		}
 
+		recentCommitStats.back().mutationBytes = SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft;
+		recentCommitStats.back().beforeStorageUpdates = beforeStorageUpdates;
+
 		// Allow data fetch to use an additional bytesLeft but don't penalize fetch budget if bytesLeft is negative
 		if (bytesLeft > 0) {
 			data->fetchKeysBytesBudget += bytesLeft;
@@ -12139,19 +12181,52 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->storage.makeVersionDurable(newOldestVersion);
 		data->storageUpdatesDurableLatencyHistogram->sampleSeconds(now() - beforeStorageUpdates);
 		data->fetchKeysHistograms.bytesPerCommit->sample(data->fetchKeysTotalCommitBytes);
+		recentCommitStats.back().fetchKeyBytes = data->fetchKeysTotalCommitBytes;
 		data->fetchKeysTotalCommitBytes = 0;
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
+		recentCommitStats.back().beforeStorageCommit = beforeStorageCommit;
 		wait(data->storage.canCommit());
 		state Future<Void> durable = data->storage.commit();
 		++data->counters.kvCommits;
+		recentCommitStats.back().seqId = data->counters.kvCommits.getValue();
 
 		// If the mutation bytes budget was not fully used then wait some time before the next commit
 		durableDelay =
 		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
 
-		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+		recentCommitStats.back().whenCommit = now();
+		try {
+			wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+		} catch (Error& e) {
+			if (e.code() == error_code_io_timeout) {
+				if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {
+					recentCommitStats.back().incompleteCommitDuration = now() - recentCommitStats.back().whenCommit;
+					for (const auto& commitStats : recentCommitStats) {
+						commitStats.log(data->thisServerID, "I/O timeout error");
+					}
+				}
+				if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+				    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
+					data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "I/O timeout error");
+				}
+			}
+			throw e;
+		}
+		recentCommitStats.back().commitDuration = now() - recentCommitStats.back().whenCommit;
+		recentCommitStats.back().duration = now() - beforeStorageCommit;
+
+		if (SERVER_KNOBS->LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY > 0 &&
+		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY) {
+			recentCommitStats.back().log(data->thisServerID, "normal");
+		}
+		if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY > 0 &&
+		    deterministicRandom()->random01() < SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY) {
+			data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "normal");
+		}
+
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
