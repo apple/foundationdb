@@ -3292,7 +3292,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog) {
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db, degraded, folder);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
