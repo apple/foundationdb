@@ -5636,15 +5636,15 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 					wait(persistAuditStateByServer(data->cx, res));
-					TraceEvent(SevInfo, "SSAuditStorageSsShardPartialDone", data->thisServerID)
-					    .suppressFor(10.0)
-					    .detail("AuditId", req.id)
-					    .detail("AuditRange", req.range)
-					    .detail("AuditServer", data->thisServerID)
-					    .detail("CompleteRange", res.range)
-					    .detail("ClaimRange", claimRange)
-					    .detail("RangeToReadEnd", req.range.end);
 					if (res.range.end < req.range.end) {
+						TraceEvent(SevInfo, "SSAuditStorageSsShardPartialDone", data->thisServerID)
+						    .suppressFor(10.0)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("AuditServer", data->thisServerID)
+						    .detail("CompleteRange", res.range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("RangeToReadEnd", req.range.end);
 						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
@@ -5924,14 +5924,14 @@ ACTOR Future<Void> auditShardLocationMetadataQ(StorageServer* data, AuditStorage
 					}
 					res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 					wait(persistAuditStateByRange(data->cx, res));
-					TraceEvent(SevInfo, "SSAuditStorageShardLocMetadataPartialDone", data->thisServerID)
-					    .suppressFor(10.0)
-					    .detail("AuditId", req.id)
-					    .detail("AuditRange", req.range)
-					    .detail("Version", readAtVersion)
-					    .detail("AuditServerId", data->thisServerID)
-					    .detail("CompleteRange", res.range);
 					if (res.range.end < req.range.end) {
+						TraceEvent(SevInfo, "SSAuditStorageShardLocMetadataPartialDone", data->thisServerID)
+						    .suppressFor(10.0)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("Version", readAtVersion)
+						    .detail("AuditServerId", data->thisServerID)
+						    .detail("CompleteRange", res.range);
 						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
