@@ -1,5 +1,5 @@
 #include "fdbclient/FDBTypes.h"
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
@@ -39,14 +39,14 @@
 #include <tuple>
 #include <vector>
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 
 // Enforcing rocksdb version.
 static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
@@ -4010,23 +4010,23 @@ ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<Ke
 }
 } // namespace
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 
 IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
                                             bool checkChecksums,
                                             bool checkIntegrity) {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 	return new ShardedRocksDBKeyValueStore(path, logID);
 #else
 	TraceEvent(SevError, "ShardedRocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
 	ASSERT(false);
 	return nullptr;
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 }
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 #include "flow/UnitTest.h"
 
 namespace {
@@ -4860,4 +4860,4 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 }
 } // namespace
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
