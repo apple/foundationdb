@@ -30,7 +30,7 @@ Other Changes
 
 Earlier release notes
 ---------------------
-* :doc:`7.2 (API Version 710) </release-notes/release-notes-720>`
+* :doc:`7.2 (API Version 720) </release-notes/release-notes-720>`
 * :doc:`7.1 (API Version 710) </release-notes/release-notes-710>`
 * :doc:`7.0 (API Version 700) </release-notes/release-notes-700>`
 * :doc:`6.3 (API Version 630) </release-notes/release-notes-630>`
@@ -55,4 +55,3 @@ Earlier release notes
 * :doc:`Beta 1 (API Version 21) </release-notes/release-notes-021>`
 * :doc:`Alpha 6 (API Version 16) </release-notes/release-notes-016>`
 * :doc:`Alpha 5 (API Version 14) </release-notes/release-notes-014>`
-
