@@ -107,6 +107,8 @@ public:
 	// Returns the amount of free and total space for this store, in bytes
 	virtual StorageBytes getStorageBytes() const = 0;
 
+	virtual void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) { throw not_implemented(); }
+
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}

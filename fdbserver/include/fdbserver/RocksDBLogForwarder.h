@@ -24,7 +24,7 @@
 #include <cstdarg>
 #include <thread>
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 #include <rocksdb/env.h>
 
 #include "flow/genericactors.actor.h"
@@ -95,6 +95,6 @@ public:
 	virtual void Logv(const rocksdb::InfoLogLevel log_level, const char* format, va_list ap);
 };
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 
 #endif // __ROCKSDB_LOG_FORWARDER_H__

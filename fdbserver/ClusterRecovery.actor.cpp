@@ -1015,6 +1015,10 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	}
 	self->backupWorkers.swap(recruits.backupWorkers);
 
+	// Store recruitment result, which may be used to check the current being recruited transaction system in gray
+	// failure detection.
+	self->primaryRecruitment = recruits;
+
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
