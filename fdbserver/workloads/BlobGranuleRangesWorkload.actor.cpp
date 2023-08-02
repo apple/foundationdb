@@ -57,6 +57,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	Optional<TenantName> tenantName;
 	Optional<Reference<Tenant>> tenant;
 
+	Optional<TenantName> lockTenantName;
+	Optional<Reference<Tenant>> lockTenant;
+
 	int32_t nextKey;
 
 	std::vector<KeyRange> inactiveRanges;
@@ -89,6 +92,10 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		stopUnitClient = false;
 		tenantName = StringRef("bgrwTenant" + std::to_string(clientId));
+
+		if (clientId == 0) {
+			lockTenantName = StringRef("bgrwLockTenant" + std::to_string(clientId));
+		}
 
 		TraceEvent("BlobGranuleRangesWorkloadInit").detail("TargetRanges", targetRanges);
 	}
@@ -189,6 +196,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		if (cx->clientInfo->get().tenantMode != TenantMode::REQUIRED && deterministicRandom()->coinflip()) {
 			self->tenantName.reset();
+			self->lockTenantName.reset();
 		}
 
 		if (self->tenantName.present()) {
@@ -206,6 +214,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			}
 		}
 
+		if (self->lockTenantName.present()) {
+			wait(success(self->setupTenant(cx, self->lockTenantName.get())));
+			self->lockTenant = makeReference<Tenant>(cx, self->lockTenantName.get());
+		}
+
 		state int i;
 		std::vector<Future<Void>> createInitialRanges;
 		for (i = 0; i < self->targetRanges; i++) {
@@ -219,6 +232,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		client = blobGranuleRangesClient(cx->clone(), this);
 		if (clientId == 0) {
 			unitClient = blobGranuleRangesUnitTests(cx->clone(), this);
+			unitClient = unitClient && lockUnitTests(cx->clone(), this);
 		} else {
 			unitClient = Future<Void>(Void());
 		}
@@ -865,6 +879,105 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			}
 
 			wait(delay(1.0));
+		}
+	}
+
+	ACTOR Future<Void> doLockTest(Database cx,
+	                              BlobGranuleRangesWorkload* self,
+	                              KeyRange range,
+	                              std::function<Future<Void>(KeyRange)> testFunction) {
+		// ensure the function works before locking and after unlocking, but not during
+		state KeyRange beforeRange = singleKeyRange(range.begin.withSuffix("/before/"_sr));
+		state KeyRange duringRange = singleKeyRange(range.begin.withSuffix("/during/"_sr));
+		state KeyRange afterRange = singleKeyRange(range.begin.withSuffix("/after/"_sr));
+
+		state UID lockId = deterministicRandom()->randomUniqueID();
+
+		wait(testFunction(beforeRange));
+
+		// lock tenant
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(TenantAPI::changeLockState(
+				    tr, self->lockTenant.get()->id(), TenantAPI::TenantLockState::LOCKED, lockId));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		try {
+			wait(testFunction(duringRange));
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_tenant_locked);
+		}
+
+		// unlock tenant
+		tr->reset();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(TenantAPI::changeLockState(
+				    tr, self->lockTenant.get()->id(), TenantAPI::TenantLockState::UNLOCKED, lockId));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		wait(testFunction(afterRange));
+
+		// FIXME: could clean up, but only necessary for blobbify
+
+		return Void();
+	}
+
+	// FIXME: extend test support to reads and read lock as well
+	// Should metadata operations like getting the set of blobbified ranges for a tenant also respect the tenant read
+	// lock?
+	ACTOR Future<Void> lockUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
+		if (!self->lockTenant.present()) {
+			return Void();
+		}
+		if (deterministicRandom()->coinflip()) {
+			cx->internal = IsInternal::False;
+		}
+		state std::vector<std::function<Future<Void>(KeyRange)>> testFunctions;
+		std::function<Future<Void>(const KeyRange&)> blobbifyFunc = [this](const KeyRange& keyRange) -> Future<Void> {
+			return success(cx->blobbifyRange(keyRange, self->lockTenant));
+		};
+		testFunctions.push_back(blobbifyFunc);
+
+		std::function<Future<Void>(const KeyRange&)> blobbifyBlockingFunc =
+		    [this](const KeyRange& keyRange) -> Future<Void> {
+			return success(cx->blobbifyRangeBlocking(keyRange, self->lockTenant));
+		};
+		testFunctions.push_back(blobbifyBlockingFunc);
+
+		std::function<Future<Void>(const KeyRange&)> unblobbifyFunc = [this](const KeyRange& keyRange) -> Future<Void> {
+			return success(cx->unblobbifyRange(keyRange, self->lockTenant));
+		};
+		testFunctions.push_back(unblobbifyFunc);
+
+		std::function<Future<Void>(const KeyRange&)> purgeFunc = [this](const KeyRange& keyRange) -> Future<Void> {
+			return success(cx->purgeBlobGranules(keyRange, 1, self->lockTenant, false));
+		};
+		testFunctions.push_back(purgeFunc);
+
+		loop {
+			if (self->stopUnitClient) {
+				return Void();
+			}
+			std::string nextRangeKey = "L_" + self->newKey();
+			state KeyRange range(KeyRangeRef(StringRef(nextRangeKey), strinc(StringRef(nextRangeKey))));
+			int idx = deterministicRandom()->randomInt(0, testFunctions.size());
+			wait(self->doLockTest(cx, self, range, testFunctions[idx]));
+			wait(delayJittered(1.0));
 		}
 	}
 };
