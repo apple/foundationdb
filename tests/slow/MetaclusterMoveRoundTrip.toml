@@ -1,0 +1,17 @@
+[configuration]
+blobGranulesEnabled = true
+allowDefaultTenant = false
+allowCreatingTenants = false
+extraDatabaseMode = 'Multiple'
+extraDatabaseCount = 3
+
+[[test]]
+testTitle = 'MetaclusterMoveRoundTripTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'MetaclusterMoveRoundTrip'
+	maxTenants = 100
+	maxTenantGroups = 10

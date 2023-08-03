@@ -1,5 +1,5 @@
 /*
- * MetaclusterMoveWorkload.actor.cpp
+ * MetaclusterMoveRoundTripWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,7 +28,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/TenantName.h"
@@ -51,8 +51,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct MetaclusterMoveWorkload : TestWorkload {
-	static constexpr auto NAME = "MetaclusterMove";
+struct MetaclusterMoveRoundTripWorkload : TestWorkload {
+	static constexpr auto NAME = "MetaclusterMoveRoundTrip";
 
 	struct DataClusterData {
 		Database db;
@@ -102,7 +102,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int64_t totalQuota;
 	int64_t storageQuota;
 
-	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	MetaclusterMoveRoundTripWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
@@ -140,7 +140,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return tenantGroup;
 	}
 
-	static void updateTestData(MetaclusterMoveWorkload* self,
+	static void updateTestData(MetaclusterMoveRoundTripWorkload* self,
 	                           TenantGroupName tenantGroup,
 	                           ClusterName newCluster,
 	                           ClusterName oldCluster) {
@@ -187,7 +187,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	}
 
 	// Used to gradually increase capacity so that the tenants are somewhat evenly distributed across the clusters
-	ACTOR static Future<Void> increaseMetaclusterCapacity(MetaclusterMoveWorkload* self) {
+	ACTOR static Future<Void> increaseMetaclusterCapacity(MetaclusterMoveRoundTripWorkload* self) {
 		self->tenantGroupCapacity = ceil(self->tenantGroupCapacity * 1.2);
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
 		loop {
@@ -212,7 +212,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> createTenant(MetaclusterMoveWorkload* self) {
+	ACTOR static Future<Void> createTenant(MetaclusterMoveRoundTripWorkload* self) {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
@@ -236,11 +236,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				                               metacluster::IgnoreCapacityLimit::False));
 				metacluster::MetaclusterTenantMapEntry createdEntry =
 				    wait(metacluster::getTenant(self->managementDb, tenantName));
-				TraceEvent(SevDebug, "MetaclusterMoveWorkloadCreatedTenant")
+				TraceEvent(SevDebug, "MetaclusterMoveRoundTripWorkloadCreatedTenant")
 				    .detail("Tenant", tenantName)
-				    .detail("TenantId", createdEntry.id)
-				    .detail("Cluster", createdEntry.assignedCluster)
-				    .detail("TenantGroup", createdEntry.tenantGroup.get());
+				    .detail("TenantId", createdEntry.id);
 				self->createdTenants[createdEntry.id] =
 				    TestTenantData(tenantName, createdEntry.assignedCluster, createdEntry.tenantGroup);
 				self->tenantNameIndex[tenantName] = createdEntry.id;
@@ -263,7 +261,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> verifyTenantLocations(MetaclusterMoveWorkload* self,
+	ACTOR static Future<bool> verifyTenantLocations(MetaclusterMoveRoundTripWorkload* self,
 	                                                TenantGroupName tenantGroup,
 	                                                ClusterName expectedCluster) {
 		state DataClusterData clusterData = self->dataDbs[expectedCluster];
@@ -297,7 +295,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> verifyMoveMetadataErased(MetaclusterMoveWorkload* self, TenantGroupName tenantGroup) {
+	ACTOR static Future<bool> verifyMoveMetadataErased(MetaclusterMoveRoundTripWorkload* self,
+	                                                   TenantGroupName tenantGroup) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
 
 		loop {
@@ -341,7 +340,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> finishVerification(MetaclusterMoveWorkload* self,
+	ACTOR static Future<bool> finishVerification(MetaclusterMoveRoundTripWorkload* self,
 	                                             TenantGroupName tenantGroup,
 	                                             ClusterName expectedCluster) {
 		state bool locationSuccess = wait(verifyTenantLocations(self, tenantGroup, expectedCluster));
@@ -349,273 +348,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return locationSuccess && eraseSuccess;
 	}
 
-	// returns true if move is aborted
-	ACTOR static Future<bool> abortMove(MetaclusterMoveWorkload* self,
-	                                    TenantGroupName tenantGroup,
-	                                    ClusterName srcCluster,
-	                                    ClusterName dstCluster) {
-		state std::vector<std::string> messages;
-		loop {
-			try {
-				TraceEvent("MetaclusterMoveAbortBegin")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				Future<Void> abortFuture = metacluster::abortTenantMovement(
-				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-				Optional<Void> result = wait(timeout(abortFuture, deterministicRandom()->randomInt(1, 30)));
-				if (result.present()) {
-					TraceEvent(SevDebug, "MetaclusterMoveAbortComplete")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster);
-					if (self->tenantGroups[tenantGroup].cluster == dstCluster) {
-						updateTestData(self, tenantGroup, srcCluster, dstCluster);
-					}
-					break;
-				}
-				TraceEvent("MetaclusterMoveAbortTimedOut")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				CODE_PROBE(true, "Metacluster move start timed out");
-			} catch (Error& e) {
-				TraceEvent("MetaclusterMoveAbortFailed")
-				    .error(e)
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				// Abort failed
-				if (e.code() == error_code_invalid_tenant_move) {
-					return false;
-				}
-				// If the move record is missing, the operation likely completed
-				// and this is a retry OR this is aborting after a finish completed
-				if (e.code() == error_code_tenant_move_record_missing) {
-					return true;
-				}
-				throw e;
-			}
-		}
-		return true;
-	}
-
-	// returns true if move is aborted
-	ACTOR static Future<bool> startMove(MetaclusterMoveWorkload* self,
-	                                    TenantGroupName tenantGroup,
-	                                    ClusterName srcCluster,
-	                                    ClusterName dstCluster) {
-		state std::vector<std::string> messages;
-		loop {
-			try {
-				TraceEvent("MetaclusterMoveStartBegin")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				Future<Void> startFuture = metacluster::startTenantMovement(
-				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-				Optional<Void> result = wait(timeout(startFuture, deterministicRandom()->randomInt(1, 30)));
-				if (result.present()) {
-					TraceEvent(SevDebug, "MetaclusterMoveStartComplete")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster);
-					break;
-				}
-				TraceEvent("MetaclusterMoveStartTimedOut")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				CODE_PROBE(true, "Metacluster move start timed out");
-				if (deterministicRandom()->random01() < 0.2) {
-					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
-					TraceEvent("MetaclusterMoveStartAttemptedAbort")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("AbortedSuccessfully", aborted);
-					if (aborted) {
-						return aborted;
-					}
-				}
-			} catch (Error& e) {
-				state Error err(e);
-				TraceEvent("MetaclusterMoveWorkloadStartFailed")
-				    .error(err)
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				if (err.code() == error_code_cluster_no_capacity) {
-					CODE_PROBE(true, "Tenant move prevented by lack of cluster capacity");
-					wait(increaseMetaclusterCapacity(self));
-					continue;
-				}
-				if (err.code() == error_code_tenant_not_found || err.code() == error_code_tenant_move_failed) {
-					// Timing issue with versions or tenant creation
-					wait(delay(5.0));
-					continue;
-				}
-				throw err;
-			}
-		}
-		return false;
-	}
-
-	// returns true if move is aborted
-	ACTOR static Future<bool> switchMove(MetaclusterMoveWorkload* self,
-	                                     TenantGroupName tenantGroup,
-	                                     ClusterName srcCluster,
-	                                     ClusterName dstCluster) {
-		state std::vector<std::string> messages;
-		if (self->badCopy) {
-			loop {
-				try {
-					wait(metacluster::switchTenantMovement(
-					    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
-					ASSERT(false);
-				} catch (Error& e) {
-					state Error err(e);
-					if (err.code() != error_code_invalid_tenant_move) {
-						throw err;
-					}
-					CODE_PROBE(true, "Safety guards caught inconsistent data copy");
-					wait(metacluster::abortTenantMovement(
-					    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
-					return true;
-				}
-			}
-		}
-		loop {
-			try {
-				TraceEvent("MetaclusterMoveSwitchBegin")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				Future<Void> switchFuture = metacluster::switchTenantMovement(
-				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-				Optional<Void> result = wait(timeout(switchFuture, deterministicRandom()->randomInt(1, 30)));
-				if (result.present()) {
-					TraceEvent(SevDebug, "MetaclusterMoveSwitchComplete")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster);
-					if (self->tenantGroups[tenantGroup].cluster == srcCluster) {
-						updateTestData(self, tenantGroup, dstCluster, srcCluster);
-					}
-					break;
-				}
-				TraceEvent("MetaclusterMoveSwitchTimedOut")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				CODE_PROBE(true, "Metacluster move switch timed out");
-				if (deterministicRandom()->random01() < 0.2) {
-					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
-					TraceEvent("MetaclusterMoveSwitchAttemptedAbort")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("AbortedSuccessfully", aborted);
-					if (aborted) {
-						return aborted;
-					}
-				}
-			} catch (Error& e) {
-				TraceEvent("MetaclusterMoveWorkloadSwitchFailed")
-				    .error(e)
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				if (e.code() == error_code_tenant_move_failed) {
-					// Retryable error
-					continue;
-				} else if (e.code() == error_code_invalid_tenant_move) {
-					// Completed and retry threw error
-					return false;
-				}
-				throw;
-			}
-		}
-		return false;
-	}
-
-	// returns true if move is aborted
-	ACTOR static Future<bool> finishMove(MetaclusterMoveWorkload* self,
-	                                     TenantGroupName tenantGroup,
-	                                     ClusterName srcCluster,
-	                                     ClusterName dstCluster) {
-		state std::vector<std::string> messages;
-		// finish tenant move will fail to abort if movement record has been updated
-		// expect this case and keep trying to finish
-		loop {
-			try {
-				TraceEvent("MetaclusterMoveFinishBegin")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				Future<Void> finishFuture = metacluster::finishTenantMovement(
-				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-				Optional<Void> result = wait(timeout(finishFuture, deterministicRandom()->randomInt(1, 30)));
-				if (result.present()) {
-					TraceEvent(SevDebug, "MetaclusterMoveFinishComplete")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster);
-					break;
-				}
-				TraceEvent("MetaclusterMoveFinishTimedOut")
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				CODE_PROBE(true, "Metacluster move finish timed out");
-				if (deterministicRandom()->random01() < 0.2) {
-					// Keep track of move record before calling abort
-					state Optional<metacluster::metadata::management::MovementRecord> moveRecord =
-					    wait(self->tryGetMoveRecord(tenantGroup));
-					// Move completed and metadata was erased
-					if (!moveRecord.present()) {
-						return false;
-					}
-					state bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
-					TraceEvent("MetaclusterMoveFinishAttemptedAbort")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("AbortedSuccessfully", aborted);
-					if (aborted) {
-						// This scenario can be reached when a finishMove retries, completes, times out,
-						// and then abort is attempted. Return false in this case to verify the correct data
-						if (moveRecord.get().mState ==
-						    metacluster::metadata::management::MovementState::FINISH_UNLOCK) {
-							return false;
-						}
-						return aborted;
-					}
-				}
-			} catch (Error& e) {
-				state Error err(e);
-				TraceEvent("MetaclusterMoveWorkloadFinishFailed")
-				    .error(err)
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("SourceCluster", srcCluster)
-				    .detail("DestinationCluster", dstCluster);
-				// If the move record is missing, the operation likely completed
-				// and this is a retry
-				if (err.code() == error_code_tenant_move_record_missing) {
-					return false;
-				}
-				if (err.code() == error_code_tenant_move_failed) {
-					// Retryable error
-					wait(advanceVersion(self->dataDbs[dstCluster].db, self->moveRecord.version));
-					continue;
-				}
-				throw err;
-			}
-		}
-		return false;
-	}
-
-	ACTOR static Future<Void> _setup(Database cx, MetaclusterMoveWorkload* self) {
+	ACTOR static Future<Void> _setup(Database cx, MetaclusterMoveRoundTripWorkload* self) {
 		metacluster::DataClusterEntry clusterEntry;
 		clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
@@ -632,13 +365,14 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			self->dataDbIndex.push_back(name);
 		}
 
-		TraceEvent(SevDebug, "MetaclusterMoveWorkloadCreateTenants").detail("NumTenants", self->initialTenants);
+		TraceEvent(SevDebug, "MetaclusterMoveRoundTripWorkloadCreateTenants")
+		    .detail("NumTenants", self->initialTenants);
 
 		while (self->createdTenants.size() < self->initialTenants) {
 			wait(createTenant(self));
 		}
 
-		TraceEvent(SevDebug, "MetaclusterMoveWorkloadCreateTenantsComplete");
+		TraceEvent(SevDebug, "MetaclusterMoveRoundTripWorkloadCreateTenantsComplete");
 
 		// bulkSetup usually expects all clients
 		// but this is being circumvented by the clientId==0 check
@@ -653,8 +387,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			for (auto const& tId : dataDb.tenants) {
 				TestTenantData testData = self->createdTenants[tId];
 				TenantName tName = testData.name;
-				// TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
-				dataTenants.push_back(makeReference<Tenant>(dbObj, tName));
+				TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
+				dataTenants.push_back(makeReference<Tenant>(tenantLookupInfo, tName));
 			}
 			if (dataTenants.size()) {
 				wait(bulkSetup(dbObj,
@@ -696,7 +430,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent(SevDebug, "MetaclusterMoveWorkloadPopulateTenantDataComplete");
+		TraceEvent(SevDebug, "MetaclusterMoveRoundTripWorkloadPopulateTenantDataComplete");
 
 		return Void();
 	}
@@ -709,7 +443,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		MoveBlock(TenantName tenant, Key begin, Key end) : tenant(tenant), begin(begin), end(end) {}
 	};
 
-	ACTOR static Future<Void> copyTenantData(MetaclusterMoveWorkload* self,
+	ACTOR static Future<Void> copyTenantData(MetaclusterMoveRoundTripWorkload* self,
 	                                         TenantGroupName tenantGroup,
 	                                         MoveBlock moveBlock,
 	                                         ClusterName srcDb,
@@ -721,7 +455,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		state Reference<ReadYourWritesTransaction> srcTr =
 		    makeReference<ReadYourWritesTransaction>(srcDbObj, srcTenant);
 
-		state RangeResult srcRange;
+		state RangeReadResult srcRange;
 		loop {
 			try {
 				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -765,7 +499,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Optional<MoveBlock>> getNextMoveBlock(MetaclusterMoveWorkload* self,
+	ACTOR static Future<Optional<MoveBlock>> getNextMoveBlock(MetaclusterMoveRoundTripWorkload* self,
 	                                                          Reference<ITransaction> tr,
 	                                                          TenantGroupName tenantGroup) {
 		state UID runId = self->moveRecord.runId;
@@ -818,7 +552,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return MoveBlock(queueHead.first, queueHead.second, headEnd);
 	}
 
-	ACTOR static Future<Void> processQueue(MetaclusterMoveWorkload* self,
+	ACTOR static Future<Void> processQueue(MetaclusterMoveRoundTripWorkload* self,
 	                                       TenantGroupName tenantGroup,
 	                                       ClusterName srcDb,
 	                                       ClusterName dstDb) {
@@ -874,49 +608,104 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		});
 	}
 
-	enum class MoveCommand { START, SWITCH, FINISH };
-	// Function that is expected to fail with an error. Run it inbetween steps with invalid states
-	ACTOR static Future<Void> runCommandFail(MetaclusterMoveWorkload* self,
-	                                         TenantGroupName tenantGroup,
-	                                         ClusterName srcCluster,
-	                                         ClusterName dstCluster,
-	                                         MoveCommand moveCommand) {
+	ACTOR static Future<Void> noTimeoutMovement(Database cx,
+	                                            MetaclusterMoveRoundTripWorkload* self,
+	                                            ClusterName srcCluster,
+	                                            ClusterName dstCluster,
+	                                            TenantGroupName tenantGroup) {
 		state std::vector<std::string> messages;
-		Future<Void> commandFuture;
-		switch (moveCommand) {
-		case MoveCommand::START:
-			commandFuture =
-			    metacluster::startTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-			break;
-		case MoveCommand::SWITCH:
-			commandFuture =
-			    metacluster::switchTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-			break;
-		case MoveCommand::FINISH:
-			commandFuture =
-			    metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
-			break;
-		}
-
-		try {
-			wait(commandFuture);
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() != error_code_invalid_tenant_move && e.code() != error_code_tenant_move_record_missing) {
-				throw e;
+		// start
+		loop {
+			try {
+				TraceEvent("BreakpointNoTimeout1");
+				wait(metacluster::startTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+				break;
+			} catch (Error& e) {
+				state Error err(e);
+				TraceEvent("MetaclusterMoveRoundTripWorkloadNoTimeoutStartFailed")
+				    .error(err)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				if (err.code() == error_code_cluster_no_capacity) {
+					CODE_PROBE(true, "Tenant move prevented by lack of cluster capacity");
+					wait(increaseMetaclusterCapacity(self));
+					continue;
+				}
+				if (err.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					continue;
+				}
+				throw err;
 			}
 		}
+		// copy
+		TraceEvent("BreakpointNoTimeout2");
+		// If start completes successfully, the move identifier should be written
+		wait(store(self->moveRecord, self->getMoveRecord(tenantGroup)));
+		wait(processQueue(self, tenantGroup, srcCluster, dstCluster));
+		TraceEvent("BreakpointNoTimeout3");
+		// switch
+		loop {
+			try {
+				TraceEvent("BreakpointNoTimeout4");
+				wait(metacluster::switchTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+				updateTestData(self, tenantGroup, dstCluster, srcCluster);
+				break;
+			} catch (Error& e) {
+				TraceEvent("MetaclusterMoveRoundTripWorkloadNoTimeoutSwitchFailed")
+				    .error(e)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				if (e.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					continue;
+				}
+				throw;
+			}
+		}
+		// finish
+		loop {
+			try {
+				TraceEvent("BreakpointNoTimeout5");
+				wait(metacluster::finishTenantMovement(
+				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages));
+				break;
+			} catch (Error& e) {
+				state Error err2(e);
+				TraceEvent("MetaclusterMoveRoundTripWorkloadNoTimeoutFinishFailed")
+				    .error(err2)
+				    .detail("TenantGroup", tenantGroup)
+				    .detail("SourceCluster", srcCluster)
+				    .detail("DestinationCluster", dstCluster);
+				// If the move record is missing, the operation likely completed
+				// and this is a retry
+				if (err2.code() == error_code_tenant_move_record_missing) {
+					break;
+				}
+				if (err2.code() == error_code_tenant_move_failed) {
+					// Retryable error
+					wait(advanceVersion(self->dataDbs[dstCluster].db, self->moveRecord.version));
+					continue;
+				}
+				throw err2;
+			}
+		}
+
+		TraceEvent("BreakpointNoTimeout6");
+
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) {
-		// Expect an error if the same cluster is picked
+	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveRoundTripWorkload* self) {
 		state ClusterName srcCluster = self->chooseClusterName();
 		state ClusterName dstCluster = self->chooseClusterName();
-		auto& existingGroups = self->dataDbs[srcCluster].tenantGroups;
-
 		state int tries = 0;
 		state int tryLimit = 10;
+		auto& existingGroups = self->dataDbs[srcCluster].tenantGroups;
 		// Pick a cluster that has tenant groups
 		while (existingGroups.empty()) {
 			if (++tries >= tryLimit) {
@@ -925,72 +714,27 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			srcCluster = self->chooseClusterName();
 			existingGroups = self->dataDbs[srcCluster].tenantGroups;
 		}
-
 		state TenantGroupName tenantGroup = self->chooseTenantGroup(srcCluster);
-		state bool aborted;
 
-		// List of commands expected to fail after successful completion of specified step
-		state std::vector<MoveCommand> initFailCmds = { MoveCommand::SWITCH, MoveCommand::FINISH };
-		state std::vector<MoveCommand> startFailCmds = { MoveCommand::FINISH };
-		state std::vector<MoveCommand> switchFailCmds = { MoveCommand::START };
-		state std::vector<MoveCommand> finishFailCmds = { MoveCommand::SWITCH, MoveCommand::FINISH };
-		state MoveCommand cmdChoice;
-		loop {
-			try {
-				TraceEvent("BreakpointTestStart")
-				    .detail("Src", srcCluster)
-				    .detail("Dst", dstCluster)
-				    .detail("TenantGroup", tenantGroup)
-				    .detail("TenantsInGroup", self->tenantGroups[tenantGroup].tenants.size())
-				    .detail("GroupsOnSrc", self->dataDbs[srcCluster].tenantGroups.size())
-				    .detail("GroupsOnDst", self->dataDbs[dstCluster].tenantGroups.size());
-				cmdChoice = deterministicRandom()->randomChoice(initFailCmds);
-				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
-
-				wait(store(aborted, startMove(self, tenantGroup, srcCluster, dstCluster)));
-				if (aborted) {
-					break;
-				}
-
-				cmdChoice = deterministicRandom()->randomChoice(startFailCmds);
-				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
-
-				// If start completes successfully, the move identifier should be written
-				wait(store(self->moveRecord, self->getMoveRecord(tenantGroup)));
-				wait(processQueue(self, tenantGroup, srcCluster, dstCluster));
-				wait(store(aborted, switchMove(self, tenantGroup, srcCluster, dstCluster)));
-				if (aborted) {
-					break;
-				}
-
-				cmdChoice = deterministicRandom()->randomChoice(switchFailCmds);
-				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
-
-				wait(store(self->moveRecord, self->getMoveRecord(tenantGroup)));
-
-				wait(store(aborted, finishMove(self, tenantGroup, srcCluster, dstCluster)));
-
-				cmdChoice = deterministicRandom()->randomChoice(finishFailCmds);
-				wait(runCommandFail(self, tenantGroup, srcCluster, dstCluster, cmdChoice));
-				break;
-			} catch (Error& e) {
-				state Error err(e);
-				TraceEvent("MetaclusterMoveWorkloadError").error(err);
-				if (err.code() == error_code_invalid_tenant_move && srcCluster == dstCluster) {
-					TraceEvent("MetaclusterMoveWorkloadSameSrcDst")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("ClusterName", srcCluster);
-					// Change dst cluster since src is linked to the tenant group
-					dstCluster = self->chooseClusterName();
-					continue;
-				}
-				throw err;
+		tries = 0;
+		while (srcCluster == dstCluster) {
+			if (++tries >= tryLimit) {
+				return Void();
 			}
+			dstCluster = self->chooseClusterName();
 		}
-		bool success = wait(finishVerification(self, tenantGroup, aborted ? srcCluster : dstCluster));
+
+		// Forward: move src -> dst
+		TraceEvent("BreakpointRoundTrip1");
+		wait(noTimeoutMovement(cx, self, srcCluster, dstCluster, tenantGroup));
+		TraceEvent("BreakpointRoundTrip2");
+		// Backward: move dst-> src
+		wait(noTimeoutMovement(cx, self, dstCluster, srcCluster, tenantGroup));
+		TraceEvent("BreakpointRoundTrip3");
+
+		bool success = wait(finishVerification(self, tenantGroup, srcCluster));
 		if (!success) {
-			TraceEvent("MetaclusterMoveFinalVerificationFailed")
-			    .detail("Aborted", aborted)
+			TraceEvent("MetaclusterMoveRoundTripFinalVerificationFailed")
 			    .detail("TenantGroup", tenantGroup)
 			    .detail("DestinationCluster", dstCluster)
 			    .detail("SourceCluster", srcCluster);
@@ -1000,7 +744,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
+	ACTOR static Future<bool> _check(MetaclusterMoveRoundTripWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
 		state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
 		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::False);
@@ -1042,4 +786,4 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 };
 
-WorkloadFactory<MetaclusterMoveWorkload> MetaclusterMoveWorkloadFactory;
+WorkloadFactory<MetaclusterMoveRoundTripWorkload> MetaclusterMoveRoundTripWorkloadFactory;
