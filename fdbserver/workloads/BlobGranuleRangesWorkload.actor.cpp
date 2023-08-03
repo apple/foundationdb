@@ -885,7 +885,17 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	ACTOR Future<Void> doLockTest(Database cx,
 	                              BlobGranuleRangesWorkload* self,
 	                              KeyRange range,
-	                              std::function<Future<Void>(KeyRange)> testFunction) {
+	                              std::function<Future<Void>(KeyRange, Optional<Reference<Tenant>>)> testFunction) {
+		wait(self->lockTenant.get()->ready());
+
+		state Optional<Reference<Tenant>> tenant;
+		// randomly choose to use tenant or to use raw equivalent
+		if (deterministicRandom()->coinflip()) {
+			tenant = self->lockTenant;
+
+		} else {
+			range = range.withPrefix(self->lockTenant.get()->prefix());
+		}
 		// ensure the function works before locking and after unlocking, but not during
 		state KeyRange beforeRange = singleKeyRange(range.begin.withSuffix("/before/"_sr));
 		state KeyRange duringRange = singleKeyRange(range.begin.withSuffix("/during/"_sr));
@@ -893,7 +903,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		state UID lockId = deterministicRandom()->randomUniqueID();
 
-		wait(testFunction(beforeRange));
+		wait(testFunction(beforeRange, tenant));
 
 		// lock tenant
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -910,7 +920,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 
 		try {
-			wait(testFunction(duringRange));
+			wait(testFunction(duringRange, tenant));
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_tenant_locked);
@@ -930,7 +940,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			}
 		}
 
-		wait(testFunction(afterRange));
+		wait(testFunction(afterRange, tenant));
 
 		// FIXME: could clean up, but only necessary for blobbify
 
@@ -940,6 +950,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	// FIXME: extend test support to reads and read lock as well
 	// Should metadata operations like getting the set of blobbified ranges for a tenant also respect the tenant read
 	// lock?
+	using LockTestFunc = std::function<Future<Void>(const KeyRange&, Optional<Reference<Tenant>> tenant)>;
+
 	ACTOR Future<Void> lockUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
 		if (!self->lockTenant.present()) {
 			return Void();
@@ -947,25 +959,22 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		if (deterministicRandom()->coinflip()) {
 			cx->internal = IsInternal::False;
 		}
-		state std::vector<std::function<Future<Void>(KeyRange)>> testFunctions;
-		std::function<Future<Void>(const KeyRange&)> blobbifyFunc = [this](const KeyRange& keyRange) -> Future<Void> {
-			return success(cx->blobbifyRange(keyRange, self->lockTenant));
+		state std::vector<LockTestFunc> testFunctions;
+
+		LockTestFunc blobbifyFunc = [this](const KeyRange& keyRange,
+		                                   Optional<Reference<Tenant>> tenant) -> Future<Void> {
+			return success(cx->blobbifyRange(keyRange, tenant));
 		};
 		testFunctions.push_back(blobbifyFunc);
 
-		std::function<Future<Void>(const KeyRange&)> blobbifyBlockingFunc =
-		    [this](const KeyRange& keyRange) -> Future<Void> {
-			return success(cx->blobbifyRangeBlocking(keyRange, self->lockTenant));
-		};
-		testFunctions.push_back(blobbifyBlockingFunc);
-
-		std::function<Future<Void>(const KeyRange&)> unblobbifyFunc = [this](const KeyRange& keyRange) -> Future<Void> {
-			return success(cx->unblobbifyRange(keyRange, self->lockTenant));
+		LockTestFunc unblobbifyFunc = [this](const KeyRange& keyRange,
+		                                     Optional<Reference<Tenant>> tenant) -> Future<Void> {
+			return success(cx->unblobbifyRange(keyRange, tenant));
 		};
 		testFunctions.push_back(unblobbifyFunc);
 
-		std::function<Future<Void>(const KeyRange&)> purgeFunc = [this](const KeyRange& keyRange) -> Future<Void> {
-			return success(cx->purgeBlobGranules(keyRange, 1, self->lockTenant, false));
+		LockTestFunc purgeFunc = [this](const KeyRange& keyRange, Optional<Reference<Tenant>> tenant) -> Future<Void> {
+			return success(cx->purgeBlobGranules(keyRange, 1, tenant, false));
 		};
 		testFunctions.push_back(purgeFunc);
 
