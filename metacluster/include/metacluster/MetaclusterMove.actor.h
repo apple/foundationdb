@@ -1330,12 +1330,6 @@ struct FinishTenantMovementImpl {
 			        tr, movementRecord.get(), metadata::management::MovementState::FINISH_UNLOCK, self->tenantGroup);
 		    }));
 		TraceEvent("Breakpoint6");
-		wait(unlockDestinationTenants(self));
-
-		wait(self->srcCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return clearDataClusterQuota(tr, self->tenantGroup); }));
-
-		TraceEvent("Breakpoint7");
 		try {
 			wait(purgeSourceBlobRanges(self));
 		} catch (Error& e) {
@@ -1345,6 +1339,12 @@ struct FinishTenantMovementImpl {
 				throw e;
 			}
 		}
+		wait(unlockDestinationTenants(self));
+
+		wait(self->srcCtx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return clearDataClusterQuota(tr, self->tenantGroup); }));
+
+		TraceEvent("Breakpoint7");
 
 		TraceEvent("Breakpoint8");
 
