@@ -506,8 +506,8 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		// liveFileMetaData.smallest = fileMetaData.smallest;
-		// liveFileMetaData.largest = fileMetaData.largest;
+		liveFileMetaData.smallest = fileMetaData.smallest;
+		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.name = fileMetaData.name;
@@ -545,8 +545,8 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 			liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 			liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 			liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-			// liveFileMetaData.smallest = fileMetaData.smallest;
-			// liveFileMetaData.largest = fileMetaData.largest;
+			liveFileMetaData.smallest = fileMetaData.smallest;
+			liveFileMetaData.largest = fileMetaData.largest;
 			liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 			liveFileMetaData.name = fileMetaData.name;
 			liveFileMetaData.db_path = fileMetaData.db_path;
@@ -2267,9 +2267,9 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 		e.detail(name, stat);
 	}
 
-	// std::string propValue = "";
-	// ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
-	// TraceEvent(SevInfo, "DBWriteStallStats", debugID).detail("Stats", propValue);
+	std::string propValue = "";
+	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
+	TraceEvent(SevInfo, "DBWriteStallStats", debugID).detail("Stats", propValue);
 }
 
 void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
