@@ -11320,6 +11320,17 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, 
 	}
 }
 
+ACTOR Future<TenantMode> getOrWaitForTenantMode(Database cx) {
+	loop {
+		Optional<TenantMode> tenantMode = cx->getTenantMode();
+		if (tenantMode.present()) {
+			return tenantMode.get();
+		}
+		// otherwise we don't know the tenant mode yet, wait for non-provisional proxies
+		wait(cx->clientInfo->onChange());
+	}
+}
+
 ACTOR Future<Void> checkTenantLock(Transaction* tr, Optional<Reference<Tenant>> tenant, KeyRange keyRange) {
 	state int64_t tenantId;
 	if (tenant.present()) {
@@ -11327,11 +11338,12 @@ ACTOR Future<Void> checkTenantLock(Transaction* tr, Optional<Reference<Tenant>> 
 		tenantId = tenant.get()->id();
 	} else {
 		// otherwise assume raw access mode and infer it
-		auto tenantMode = tr->trState->cx->clientInfo->get().tenantMode;
+		TenantMode tenantMode = wait(getOrWaitForTenantMode(tr->trState->cx));
 		if (tenantMode == TenantMode::DISABLED || !TenantAPI::withinSingleTenant(keyRange)) {
 			return Void();
 		} else {
-			// in tenant mode optional this could return something that is a bogus tenant id, but that's fine
+			// in optional tenant mode this could return something that is a bogus tenant id, but that's fine because a
+			// non-existent tenant can't be locked
 			tenantId = TenantAPI::extractTenantIdFromKeyRef(keyRange.begin);
 		}
 	}
