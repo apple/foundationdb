@@ -96,7 +96,6 @@ struct MetaclusterMoveRoundTripWorkload : TestWorkload {
 	int maxTenantGroups;
 	int tenantGroupCapacity;
 	metacluster::metadata::management::MovementRecord moveRecord;
-	bool badCopy;
 
 	int64_t reservedQuota;
 	int64_t totalQuota;
@@ -116,7 +115,6 @@ struct MetaclusterMoveRoundTripWorkload : TestWorkload {
 		reservedQuota = getOption(options, "reservedQuota"_sr, 0);
 		totalQuota = getOption(options, "totalQuota"_sr, 1e8);
 		storageQuota = getOption(options, "storageQuota"_sr, 1e8);
-		badCopy = getOption(options, "badCopy"_sr, deterministicRandom()->random01() < 0.05);
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
@@ -481,11 +479,6 @@ struct MetaclusterMoveRoundTripWorkload : TestWorkload {
 				dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				for (const auto& [k, v] : srcRange) {
 					dstTr->set(k, v);
-				}
-				if (self->badCopy) {
-					dstTr->set(deterministicRandom()->randomUniqueID().toString(),
-					           deterministicRandom()->randomUniqueID().toString());
-					CODE_PROBE(true, "Intentionally copied inconsistent data to test safety guards");
 				}
 				TraceEvent("BreakpointCopyCommit1").detail("TenantName", moveBlock.tenant);
 				wait(dstTr->commit());
