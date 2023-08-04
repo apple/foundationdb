@@ -615,7 +615,7 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 	state int idx = 1;
 	state Reference<GranuleTenantData> tenantData;
 	state int retryCount = 0;
-	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
+	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange, false)));
 	while (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant" && !tenantData.isValid()) {
 		retryCount++;
 		TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobManagerUnknownTenantAlignKeys", bmData->id)
@@ -625,7 +625,7 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 		    .detail("Retries", retryCount);
 		// this is a bit of a hack, but if we know this range is supposed to have a tenant, and it doesn't, just wait
 		wait(delay(1.0));
-		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
+		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange, false)));
 	}
 	for (; idx < splits.size() - 1; idx++) {
 		loop {

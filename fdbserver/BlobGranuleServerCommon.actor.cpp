@@ -587,7 +587,9 @@ Optional<TenantMapEntry> BGTenantMap::getTenantById(int64_t id) {
 // FIXME: batch requests for refresh?
 // FIXME: don't double fetch if multiple accesses to refreshing/expired metadata
 // FIXME: log warning if after refresh, data is still expired!
-ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* self, KeyRange keyRange) {
+ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* self,
+                                                                  KeyRange keyRange,
+                                                                  bool needBStore) {
 	state int loopCount = 0;
 	loop {
 		loopCount++;
@@ -598,7 +600,8 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 
 		if (!tenant.isValid()) {
 			return tenant;
-		} else if (!tenant->startedLoadingBStore || (tenant->bstore.isValid() && tenant->bstore->isExpired())) {
+		} else if (needBStore &&
+		           (!tenant->startedLoadingBStore || (tenant->bstore.isValid() && tenant->bstore->isExpired()))) {
 			++BlobCipherMetrics::getInstance()->blobMetadataCacheMiss;
 			tenant->startedLoadingBStore = true;
 			CODE_PROBE(true, "re-fetching expired blob metadata");
@@ -619,21 +622,24 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 				wait(delay(0.001));
 			}
 		} else {
-			++BlobCipherMetrics::getInstance()->blobMetadataCacheHit;
-			// handle refresh in background if tenant needs refres
-			if (tenant->bstore.isValid() && tenant->bstore->needsRefresh()) {
-				++BlobCipherMetrics::getInstance()->blobMetadataNeedsRefresh;
-				Future<Void> reload = loadBlobMetadataForTenant(self, tenant->entry.id);
-				self->addActor.send(reload);
+			if (needBStore) {
+				++BlobCipherMetrics::getInstance()->blobMetadataCacheHit;
+				// handle refresh in background if tenant needs refresh
+				if (tenant->bstore.isValid() && tenant->bstore->needsRefresh()) {
+					++BlobCipherMetrics::getInstance()->blobMetadataNeedsRefresh;
+					Future<Void> reload = loadBlobMetadataForTenant(self, tenant->entry.id);
+					self->addActor.send(reload);
+				}
 			}
+
 			return tenant;
 		}
 	}
 }
 
 // TODO: handle case where tenant isn't loaded yet
-Future<Reference<GranuleTenantData>> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
-	return getDataForGranuleActor(this, keyRange);
+Future<Reference<GranuleTenantData>> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange, bool needBStore) {
+	return getDataForGranuleActor(this, keyRange, needBStore);
 }
 
 ACTOR Future<Void> loadBGTenantMap(BGTenantMap* tenantData, Transaction* tr) {
