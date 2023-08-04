@@ -336,16 +336,27 @@ ACTOR Future<Void> MoveInUpdates::doRestore(MoveInUpdates* self, Version begin) 
 }
 
 ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
+	Key beginKey = self->getPersistKey(begin, 0), endKey = self->getPersistKey(end, 0);
+	TraceEvent(SevDebug, "MoveInUpdatesLoadBegin", self->id)
+	    .detail("BeginVersion", begin)
+	    .detail("EndVersion", end)
+	    .detail("BeginKey", beginKey)
+	    .detail("EndKey", endKey);
+	ASSERT(beginKey < endKey);
 	RangeResult res =
 	    wait(self->store->readRange(KeyRangeRef(self->getPersistKey(begin, 0), self->getPersistKey(end, 0))));
 	// if(!res.more); // TODO: support partial restore, and it is important we load mutations with a version >
 	// oldestVersion if mutations are applied in different batches.
 	// std::map<Version, Standalone<VerUpdateRef>> restored;
+	TraceEvent(SevDebug, "MoveInUpdatesReadBatch", self->id).detail("Size", res.size());
 	std::vector<Standalone<VerUpdateRef>> restored;
 	for (int i = 0; i < res.size(); ++i) {
 		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
 		Version version;
-		rd >> version;
+		uint64_t uv;
+		rd >> uv;
+		version = static_cast<Version>(fromBigEndian64(uv));
+		// rd >> static_cast<uint64_t&>(version);
 		Standalone<MutationRef> mutation =
 		    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
 		DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
@@ -356,19 +367,35 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 		}
 		restored.back().push_back_deep(restored.back().arena(), mutation);
 	}
-	TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
+
+	for (int i = restored.size() - 1; i >= 0; --i) {
+		TraceEvent(SevDebug, "MoveInUpdatesLoadedMutations", self->id)
+		    .detail("Version", restored[i].version)
+		    .detail("MutationCount", restored[i].mutations.size())
+		    .detail("Size", restored[i].expectedSize());
+	}
 
 	if (!res.more) {
-		for (const auto& it : restored) {
-			if (self->updates.empty() || it.version > self->updates.back().version) {
-				TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
-				    .detail("Version", it.version)
-				    .detail("Size", it.mutations.size());
-				self->updates.push_back(it);
+		TraceEvent(SevDebug, "MoveInUpdatesLoaded", self->id)
+		    .detail("MinVersion", restored.empty() ? invalidVersion : restored.front().version)
+		    .detail("MaxVersion", restored.empty() ? invalidVersion : restored.back().version)
+		    .detail("VersionCount", restored.size());
+		for (int i = restored.size() - 1; i >= 0; --i) {
+			if (self->updates.empty() || restored[i].version < self->updates.front().version) {
+				// TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
+				//     .detail("Version", restored[i].version)
+				//     .detail("MutationCount", restored[i].mutations.size())
+				//     .detail("Size", restored[i].expectedSize());
+				self->updates.push_front(restored[i]);
 			}
 		}
 		self->spilled = MoveInUpdatesSpilled::False;
 	} else {
+		ASSERT(self->spillBuffer.empty());
+		TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id)
+		    .detail("MinVersion", restored.empty() ? invalidVersion : restored.front().version)
+		    .detail("MaxVersion", restored.empty() ? invalidVersion : restored.back().version)
+		    .detail("VersionCount", restored.size());
 		std::swap(self->spillBuffer, restored);
 	}
 
@@ -378,7 +405,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 }
 
 bool MoveInUpdates::hasNext() const {
-	return !updates.empty();
+	return this->spilled || !this->updates.empty();
 }
 
 void MoveInUpdates::clear() {
@@ -9517,14 +9544,14 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 	state double startTime = now();
 
 	try {
-		if (moveInShard->isRestored) {
-			wait(moveInUpdates->restore(moveInShard->meta->highWatermark));
-		}
+		// if (moveInShard->isRestored) {
+		// 	wait(moveInUpdates->restore(moveInShard->meta->highWatermark));
+		// }
 		if (moveInShard->failed()) {
 			return Void();
 		}
-		TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdatesRestored", data->thisServerID)
-		    .detail("MoveInShard", moveInShard->toString());
+		// TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdatesRestored", data->thisServerID)
+		//     .detail("MoveInShard", moveInShard->toString());
 
 		loop {
 			// TODO(heliu): Support partial updates.
@@ -9787,7 +9814,9 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 Key MoveInUpdates::getPersistKey(const Version version, const int idx) const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(range.begin);
-	wr << version;
+	wr << bigEndian64(static_cast<uint64_t>(version));
+	// wr << version;
+	wr.serializeBytes("/"_sr);
 	wr << bigEndian64(static_cast<uint64_t>(idx));
 	return wr.toValue();
 }
@@ -9811,6 +9840,7 @@ void MoveInUpdates::addMutation(Version version,
 	// Add the mutation to the version.
 	updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
 	this->size += sizeof(MutationRef) + mutation.expectedSize();
+	TraceEvent(SevDebug, "MoveInUpdatesAddMutation", id).detail("Version", version).detail("Mutation", mutation);
 
 	auto& mLV = data->addVersionToMutationLog(version);
 	const Key pk = getPersistKey(version, updates.back().mutations.size());
@@ -9822,6 +9852,11 @@ void MoveInUpdates::addMutation(Version version,
 	if (allowSpill) {
 		while (this->size > SERVER_KNOBS->FETCH_SHARD_BUFFER_BYTE_LIMIT &&
 		       updates.front().version <= data->durableVersion.get()) {
+			TraceEvent(SevDebug, "MoveInUpdatesSpill", id)
+			    .detail("CurrentSize", this->size)
+			    .detail("SpillSize", updates.front().expectedSize())
+			    .detail("SpillVersion", updates.front().version)
+			    .detail("MutationCount", updates.front().mutations.size());
 			this->size -= updates.front().expectedSize();
 			knownSpilledVersion = updates.front().version;
 			spilled = MoveInUpdatesSpilled::True;

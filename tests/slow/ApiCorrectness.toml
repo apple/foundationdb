@@ -1,5 +1,6 @@
 [configuration]
 storageEngineType = 5
+disableTss = true
 
 [[knobs]]
 shard_encode_location_metadata = true
