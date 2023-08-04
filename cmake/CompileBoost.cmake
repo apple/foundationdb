@@ -52,6 +52,15 @@ function(compile_boost)
   foreach(flag IN LISTS BOOST_LINK_FLAGS COMPILE_BOOST_LDFLAGS)
     string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
   endforeach()
+
+  # CMake can't expand generator expressions without a target to model against.
+  # Create a fake C++ target here and use `file(GENERATE ...)` to expand the
+  # flags appropriately for the boost build system and emit this file instead of
+  # configure_file.
+  # TODO: CMake runs into a memory corruption bug while trying to expand
+  #       generated files with the `file(GENERATE TARGET ...)` API. Once that is
+  #       fixed, we can drop the boost-options lists to reduce maintenance
+  #       burden.
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
@@ -114,10 +123,10 @@ if(USE_SANITIZER)
   message(STATUS "A sanitizer is enabled, need to build boost from source")
   if (USE_VALGRIND)
     compile_boost(TARGET boost_target BUILD_ARGS valgrind=on
-      CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
+      CXXFLAGS ${BOOST_CXX_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
   else()
     compile_boost(TARGET boost_target BUILD_ARGS context-impl=ucontext
-      CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
+      CXXFLAGS ${BOOST_COMPILE_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
   endif()
   return()
 endif()
