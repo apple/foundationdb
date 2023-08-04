@@ -141,8 +141,20 @@ public:
 			for (const auto& [group, storage] : tenantCache->tenantStorageMap) {
 				groups.push_back(group);
 			}
+
+			if (groups.empty()) {
+				wait(delay(refreshInterval));
+			}
+
 			state int i;
 			for (i = 0; i < groups.size(); i++) {
+				// Insert a delay between fetching the size for each tenant group to avoid overwhelming DD (or the
+				// cluster) every "refreshInterval" seconds. The total time taken for a group (for fetching sizes +
+				// inserted delay) should add up to approximately "refreshInterval" seconds by the end of iterating
+				// through all the groups.
+				state double delayTime = (currentFetchStartTime + refreshInterval - now()) / (groups.size() - i);
+				state Future<Void> delayTimer = delay(std::max(delayTime, 0.0));
+
 				state TenantGroupName group = groups[i];
 				state int64_t usage = 0;
 				// `tenants` needs to be a copy so that the erase (below) or inserts/erases from other
@@ -177,6 +189,7 @@ public:
 					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
 					    .detail("Usage", tenantCache->tenantStorageMap[group].usage);
 				}
+				wait(delayTimer);
 			}
 
 			if (now() - currentFetchStartTime > (2 * refreshInterval)) {
@@ -184,7 +197,6 @@ public:
 				    .detail("RefreshTime", now() - currentFetchStartTime)
 				    .log();
 			}
-			wait(delay(refreshInterval));
 		}
 	}
 
