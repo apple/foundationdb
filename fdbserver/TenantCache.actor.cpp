@@ -180,7 +180,9 @@ public:
 			}
 
 			if (now() - currentFetchStartTime > (2 * refreshInterval)) {
-				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshSlow", tenantCache->id()).log();
+				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshSlow", tenantCache->id())
+				    .detail("RefreshTime", now() - currentFetchStartTime)
+				    .log();
 			}
 			wait(delay(refreshInterval));
 		}
