@@ -1388,6 +1388,23 @@ public:
 			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
 			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
 			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
+			specialCounter(cc, "BlockedFeedClients", [self]() { return self->changeFeedClientVersions.size(); });
+			specialCounter(cc, "BlockedFeedStreams", [self]() {
+				int64_t total = 0;
+				for (auto& it : self->changeFeedClientVersions) {
+					total += it.second.size();
+				}
+				return total;
+			});
+			specialCounter(cc, "BlockedFeedVersion", [self]() {
+				Version minVersion = std::numeric_limits<Version>::max();
+				for (auto& client : self->changeFeedClientVersions) {
+					for (auto& stream : client.second) {
+						minVersion = std::min(minVersion, stream.second);
+					}
+				}
+				return minVersion;
+			});
 		}
 	} counters;
 

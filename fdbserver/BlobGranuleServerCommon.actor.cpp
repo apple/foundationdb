@@ -470,6 +470,8 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 	state double startTime = now();
 	state UID prevEKPID = UID();
 	state Future<EKPGetLatestBlobMetadataReply> requestFuture = Never();
+	state ActiveCounter<int>::Releaser holdingRequestCounter =
+	    BlobCipherMetrics::getInstance()->outstandingBlobMetadataRequests.take(1);
 	loop {
 		try {
 			if (self->dbInfo.isValid() && self->dbInfo->get().client.encryptKeyProxy.present()) {
@@ -597,6 +599,7 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 		if (!tenant.isValid()) {
 			return tenant;
 		} else if (!tenant->startedLoadingBStore || (tenant->bstore.isValid() && tenant->bstore->isExpired())) {
+			++BlobCipherMetrics::getInstance()->blobMetadataCacheMiss;
 			tenant->startedLoadingBStore = true;
 			CODE_PROBE(true, "re-fetching expired blob metadata");
 
@@ -616,8 +619,10 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 				wait(delay(0.001));
 			}
 		} else {
+			++BlobCipherMetrics::getInstance()->blobMetadataCacheHit;
 			// handle refresh in background if tenant needs refres
 			if (tenant->bstore.isValid() && tenant->bstore->needsRefresh()) {
+				++BlobCipherMetrics::getInstance()->blobMetadataNeedsRefresh;
 				Future<Void> reload = loadBlobMetadataForTenant(self, tenant->entry.id);
 				self->addActor.send(reload);
 			}

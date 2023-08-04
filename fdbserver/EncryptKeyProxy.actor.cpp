@@ -253,6 +253,10 @@ public:
 	LatencySample kmsLookupByDomainIdsReqLatency;
 	LatencySample kmsBlobMetadataReqLatency;
 
+	ActiveCounter<int> kmsLookupByIdsOutstanding;
+	ActiveCounter<int> kmsLookupByDomainIdsOutstanding;
+	ActiveCounter<int> kmsBlobMetadataOutstanding;
+
 	explicit EncryptKeyProxyData(UID id)
 	  : myId(id), ekpCacheMetrics("EKPMetrics", myId.toString()),
 	    baseCipherKeyIdCacheMisses("EKPCipherIdCacheMisses", ekpCacheMetrics),
@@ -279,7 +283,17 @@ public:
 	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
 	                              id,
 	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    kmsLookupByIdsOutstanding(0), kmsLookupByDomainIdsOutstanding(0), kmsBlobMetadataOutstanding(0) {
+		specialCounter(ekpCacheMetrics, "KmsLookupByIdsOutstanding", [this]() {
+			return this->kmsLookupByIdsOutstanding.getValue();
+		});
+		specialCounter(ekpCacheMetrics, "KmsLookupByDomainIdsOutstanding", [this]() {
+			return this->kmsLookupByDomainIdsOutstanding.getValue();
+		});
+		specialCounter(ekpCacheMetrics, "KmsBlobMetadataOutstanding", [this]() {
+			return this->kmsBlobMetadataOutstanding.getValue();
+		});
 		logger = ekpCacheMetrics.traceCounters(
 		    "EncryptKeyProxyMetrics", id, SERVER_KNOBS->ENCRYPTION_LOGGING_INTERVAL, "EncryptKeyProxyMetrics");
 	}
@@ -451,8 +465,10 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 			}
 			keysByIdsReq.debugId = keysByIds.debugId;
 			state double startTime = now();
+			state ActiveCounter<int>::Releaser holdingRequestCounter = ekpProxyData->kmsLookupByIdsOutstanding.take(1);
 			KmsConnLookupEKsByKeyIdsRep keysByIdsRep = wait(kmsConnectorInf.ekLookupByIds.getReply(keysByIdsReq));
 			ekpProxyData->kmsLookupByIdsReqLatency.addMeasurement(now() - startTime);
+			holdingRequestCounter.release();
 
 			for (const auto& item : keysByIdsRep.cipherKeyDetails) {
 				keyIdsReply.baseCipherDetails.emplace_back(
@@ -602,9 +618,12 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 			keysByDomainIdReq.debugId = latestKeysReq.debugId;
 
 			state double startTime = now();
+			state ActiveCounter<int>::Releaser holdingRequestCounter =
+			    ekpProxyData->kmsLookupByDomainIdsOutstanding.take(1);
 			KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep =
 			    wait(kmsConnectorInf.ekLookupByDomainIds.getReply(keysByDomainIdReq));
 			ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
+			holdingRequestCounter.release();
 
 			for (auto& item : keysByDomainIdRep.cipherKeyDetails) {
 				CipherKeyValidityTS validityTS = getCipherKeyValidityTS(item.refreshAfterSec, item.expireAfterSec);
@@ -890,8 +909,11 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 		ekpProxyData->blobMetadataCacheMisses += kmsReq.domainIds.size();
 		try {
 			state double startTime = now();
+			state ActiveCounter<int>::Releaser holdingRequestCounter = ekpProxyData->kmsBlobMetadataOutstanding.take(1);
 			KmsConnBlobMetadataRep kmsRep = wait(kmsConnectorInf.blobMetadataReq.getReply(kmsReq));
 			ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
+			holdingRequestCounter.release();
+
 			metadataDetails.arena().dependsOn(kmsRep.metadataDetails.arena());
 
 			for (auto& item : kmsRep.metadataDetails) {

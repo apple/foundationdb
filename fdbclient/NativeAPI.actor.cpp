@@ -9555,17 +9555,30 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 }
 
 Version DatabaseContext::getMinimumChangeFeedVersion() {
-	Version minVersion = std::numeric_limits<Version>::max();
+	Version minUpdaterVersion = std::numeric_limits<Version>::max();
+	Version minNALFeedVersion = std::numeric_limits<Version>::max();
+	Version minUpdaterDesiredVersion = std::numeric_limits<Version>::max();
 	for (auto& it : changeFeedUpdaters) {
-		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
-			minVersion = std::min(minVersion, it.second->version.get());
+		if (it.second->version.get() < minUpdaterVersion &&
+		    now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
+			minUpdaterVersion = it.second->version.get();
+			minUpdaterDesiredVersion = it.second->desired.get();
 		}
 	}
 	for (auto& it : notAtLatestChangeFeeds) {
 		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
-			minVersion = std::min(minVersion, it.second->getVersion());
+			minNALFeedVersion = std::min(minNALFeedVersion, it.second->getVersion());
 		}
 	}
+	Version minVersion = std::min(minUpdaterVersion, minNALFeedVersion);
+	TraceEvent("DBMinimumChangeFeedVersion")
+	    .suppressFor(10.0)
+	    .detail("FeedUpdaters", changeFeedUpdaters.size())
+	    .detail("NotAtLatestFeeds", notAtLatestChangeFeeds.size())
+	    .detail("MinVersion", minVersion)
+	    .detail("MinUpdaterVersion", minUpdaterVersion)
+	    .detail("MinUpdaterDesiredVersion", minUpdaterDesiredVersion)
+	    .detail("MinNALFeedVersion", minNALFeedVersion);
 	return minVersion;
 }
 

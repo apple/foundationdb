@@ -1443,6 +1443,34 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	}
 }
 
+template <class T>
+struct ActiveCounter {
+	struct Releaser {
+		ActiveCounter<T>* parent;
+		T delta;
+
+		Releaser() : parent(nullptr) {}
+		Releaser(ActiveCounter<T>* parent, T delta) : parent(parent), delta(delta) { parent->counter += delta; }
+
+		void release() {
+			if (parent) {
+				parent->counter -= delta;
+				parent = nullptr;
+			}
+		}
+
+		~Releaser() { release(); }
+	};
+
+	T counter;
+
+	ActiveCounter(T initialValue) : counter(initialValue) {}
+
+	T getValue() { return counter; }
+
+	Releaser take(T delta) { return Releaser(this, delta); }
+};
+
 // A low-overhead FIFO mutex made with no internal queue structure (no list, deque, vector, etc)
 // The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
 // called Lock.

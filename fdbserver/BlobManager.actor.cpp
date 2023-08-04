@@ -304,6 +304,8 @@ struct BlobManagerStats {
 	int64_t lastManifestDumpTs;
 	int64_t manifestSizeInBytes;
 
+	ActiveCounter<int> activeGranuleSplitChecks;
+
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id,
 	                          double interval,
@@ -318,7 +320,8 @@ struct BlobManagerStats {
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
 	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0), lastFlushVersion(0),
-	    lastMLogTruncationVersion(0), lastManifestSeqNo(0), lastManifestDumpTs(0), manifestSizeInBytes(0) {
+	    lastMLogTruncationVersion(0), lastManifestSeqNo(0), lastManifestDumpTs(0), manifestSizeInBytes(0),
+	    activeGranuleSplitChecks(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
@@ -330,6 +333,8 @@ struct BlobManagerStats {
 		specialCounter(cc, "LastManifestSeqNo", [this]() { return this->lastManifestSeqNo; });
 		specialCounter(cc, "LastManifestDumpTs", [this]() { return this->lastManifestDumpTs; });
 		specialCounter(cc, "ManifestSizeInBytes", [this]() { return this->manifestSizeInBytes; });
+		specialCounter(
+		    cc, "ActiveGranuleSplitChecks", [this]() -> int { return this->activeGranuleSplitChecks.getValue(); });
 		logger = cc.traceCounters("BlobManagerMetrics", id, interval, "BlobManagerMetrics");
 	}
 };
@@ -609,8 +614,15 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 	state Transaction tr = Transaction(bmData->db);
 	state int idx = 1;
 	state Reference<GranuleTenantData> tenantData;
+	state int retryCount = 0;
 	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	while (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant" && !tenantData.isValid()) {
+		retryCount++;
+		TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobManagerUnknownTenantAlignKeys", bmData->id)
+		    .suppressFor(5.0)
+		    .detail("Epoch", bmData->epoch)
+		    .detail("Granule", granuleRange)
+		    .detail("Retries", retryCount);
 		// this is a bit of a hack, but if we know this range is supposed to have a tenant, and it doesn't, just wait
 		wait(delay(1.0));
 		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
@@ -1896,6 +1908,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		return Void();
 	}
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	state ActiveCounter<int>::Releaser holdingSplitCheckCounter = bmData->stats.activeGranuleSplitChecks.take(1);
 
 	// first get ranges to split
 	state BlobGranuleSplitPoints splitPoints = wait(splitRange(bmData, granuleRange, writeHot, false));
@@ -4435,6 +4448,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<Bl
 	}
 	loop {
 		state Reference<GranuleTenantData> data;
+		state int retryCount = 0;
 		wait(store(data, self->tenantData.getDataForGranule(granuleRange)));
 		if (data.isValid()) {
 			wait(data->bstoreLoaded.getFuture());
@@ -4442,6 +4456,12 @@ ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<Bl
 			return data->bstore;
 		} else {
 			// race on startup between loading tenant ranges and bgcc/purging. just wait
+			retryCount++;
+			TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobManagerUnknownTenantForGranule", self->id)
+			    .suppressFor(5.0)
+			    .detail("Epoch", self->epoch)
+			    .detail("KeyRange", granuleRange)
+			    .detail("Retries", retryCount);
 			wait(delay(0.1));
 		}
 	}

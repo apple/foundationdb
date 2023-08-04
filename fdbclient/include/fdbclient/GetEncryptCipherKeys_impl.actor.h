@@ -133,6 +133,8 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> _get
 	}
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
+	state ActiveCounter<int>::Releaser holdingRequestCounter =
+	    BlobCipherMetrics::getInstance()->outstandingLatestCipherKeysRequests.take(1);
 	loop choose {
 		when(EKPGetLatestBaseCipherKeysReply reply =
 		         wait(_getUncachedLatestEncryptCipherKeys(db, request, usageType))) {
@@ -264,6 +266,8 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> _getEncr
 	}
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
+	state ActiveCounter<int>::Releaser holdingRequestCounter =
+	    BlobCipherMetrics::getInstance()->outstandingCipherKeyRequests.take(1);
 	loop choose {
 		when(EKPGetBaseCipherKeysByIdsReply reply = wait(_getUncachedEncryptCipherKeys(db, request, usageType))) {
 			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;

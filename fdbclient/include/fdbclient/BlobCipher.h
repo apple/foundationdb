@@ -122,7 +122,13 @@ public:
 	Counter latestCipherKeyCacheHit;
 	Counter latestCipherKeyCacheMiss;
 	Counter latestCipherKeyCacheNeedsRefresh;
+	Counter blobMetadataCacheHit;
+	Counter blobMetadataCacheMiss;
+	Counter blobMetadataNeedsRefresh;
 	LatencySample getBlobMetadataLatency;
+	ActiveCounter<int> outstandingCipherKeyRequests;
+	ActiveCounter<int> outstandingLatestCipherKeysRequests;
+	ActiveCounter<int> outstandingBlobMetadataRequests;
 	std::array<Reference<CounterSet>, int(UsageType::MAX)> counterSets;
 };
 
