@@ -126,16 +126,15 @@ public:
 		TraceEvent(SevInfo, "StartingTenantCacheStorageUsageMonitor", tenantCache->id()).log();
 
 		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
-		state double lastTenantListFetchTime = now();
 		state double lastTraceTime = 0;
 
 		loop {
-			state double fetchStartTime = now();
+			state double currentFetchStartTime = now();
 
 			state bool toTrace = false;
-			if (fetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
+			if (currentFetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
 				toTrace = true;
-				lastTraceTime = fetchStartTime;
+				lastTraceTime = currentFetchStartTime;
 			}
 
 			state std::vector<TenantGroupName> groups;
@@ -180,8 +179,7 @@ public:
 				}
 			}
 
-			lastTenantListFetchTime = now();
-			if (lastTenantListFetchTime - fetchStartTime > (2 * refreshInterval)) {
+			if (now() - currentFetchStartTime > (2 * refreshInterval)) {
 				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshSlow", tenantCache->id()).log();
 			}
 			wait(delay(refreshInterval));
