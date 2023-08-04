@@ -577,7 +577,9 @@ struct StartTenantMovementImpl {
 		wait(store(self->storageQuota, TenantMetadata::storageQuota().get(tr, self->tenantGroup)));
 
 		Optional<Value> v = wait(safeThreadFutureToFuture(tagQuotaFuture));
-		self->tagQuota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+		if (v.present()) {
+			self->tagQuota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+		}
 
 		return Void();
 	}

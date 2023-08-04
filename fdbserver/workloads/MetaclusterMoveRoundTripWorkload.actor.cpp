@@ -28,7 +28,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/TenantName.h"
@@ -385,8 +385,8 @@ struct MetaclusterMoveRoundTripWorkload : TestWorkload {
 			for (auto const& tId : dataDb.tenants) {
 				TestTenantData testData = self->createdTenants[tId];
 				TenantName tName = testData.name;
-				TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
-				dataTenants.push_back(makeReference<Tenant>(tenantLookupInfo, tName));
+				// TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
+				dataTenants.push_back(makeReference<Tenant>(dbObj, tName));
 			}
 			if (dataTenants.size()) {
 				wait(bulkSetup(dbObj,
@@ -453,7 +453,7 @@ struct MetaclusterMoveRoundTripWorkload : TestWorkload {
 		state Reference<ReadYourWritesTransaction> srcTr =
 		    makeReference<ReadYourWritesTransaction>(srcDbObj, srcTenant);
 
-		state RangeReadResult srcRange;
+		state RangeResult srcRange;
 		loop {
 			try {
 				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
