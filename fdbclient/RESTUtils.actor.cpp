@@ -109,13 +109,31 @@ std::unordered_map<std::string, int> RESTClientKnobs::get() const {
 	return details;
 }
 
+RESTConnectionPool::~RESTConnectionPool() {
+	// Close cached connections
+	for (auto& item : connectionPoolMap) {
+		while (!item.second.empty()) {
+			auto rconn = item.second.front();
+			item.second.pop();
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+				TraceEvent("RESTConnClosePoolDtor")
+				    .detail("Host", item.first.first)
+				    .detail("Service", item.first.second)
+				    .detail("SeqNum", rconn.seqNum);
+			}
+			rconn.conn->close();
+			rconn.conn.clear();
+		}
+	}
+}
+
 ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<RESTConnectionPool> connectionPool,
                                                                   RESTConnectionPoolKey connectKey,
                                                                   bool isSecure,
                                                                   int maxConnLife) {
 
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
-		TraceEvent("RESTUtilConnectStart")
+		TraceEvent("RESTConnConnectStart")
 		    .detail("Host", connectKey.first)
 		    .detail("Service", connectKey.second)
 		    .detail("IsSecure", isSecure)
@@ -129,14 +147,24 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 
 		if (rconn.expirationTime > now()) {
 			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
-				TraceEvent("RESTUtilReuseConn")
+				TraceEvent("RESTConnReuse")
 				    .detail("Host", connectKey.first)
 				    .detail("Service", connectKey.second)
 				    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 				    .detail("ExpireIn", rconn.expirationTime - now())
-				    .detail("NumConnsInPool", poolItr->second.size());
+				    .detail("NumConnsInPool", poolItr->second.size())
+				    .detail("SeqNum", rconn.seqNum);
 			}
 			return rconn;
+		} else {
+			// close expired connection
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+				TraceEvent("RESTConnCloseExpired")
+				    .detail("Host", connectKey.first)
+				    .detail("Service", connectKey.second)
+				    .detail("SeqNum", rconn.seqNum);
+			}
+			rconn.conn->close();
 		}
 	}
 
@@ -145,16 +173,21 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 	// No valid connection exists, create a new one
 	state Reference<IConnection> conn =
 	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
+	if (!conn.isValid()) {
+		// invalid connection handle, treat it as `connection_failure`
+		throw connection_failed();
+	}
 	wait(conn->connectHandshake());
 
-	TraceEvent("RESTTUilCreateNewConn")
+	TraceEvent("RESTConnCreateNew")
 	    .suppressFor(60)
 	    .detail("Host", connectKey.first)
 	    .detail("Service", connectKey.second)
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
-	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size());
+	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size())
+	    .detail("SeqNum", connectionPool->seqNum + 1);
 
-	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
+	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife, ++connectionPool->seqNum });
 }
 
 Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTConnectionPoolKey connectKey,
@@ -170,7 +203,8 @@ void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
 		TraceEvent("RESTUtilReturnConnStart")
 		    .detail("Host", connectKey.first)
 		    .detail("Service", connectKey.second)
-		    .detail("ConnectPoolNumKeys", connectionPoolMap.size());
+		    .detail("ConnectPoolNumKeys", connectionPoolMap.size())
+		    .detail("SeqNum", rconn.seqNum);
 	}
 
 	auto poolItr = connectionPoolMap.find(connectKey);
@@ -183,18 +217,36 @@ void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
 			poolItr->second.push(rconn);
 		} else {
 			// Connection pool at its capacity; do nothing
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+				TraceEvent("RESTConnCloseNoCapacity")
+				    .detail("Host", connectKey.first)
+				    .detail("Service", connectKey.second)
+				    .detail("SeqNum", seqNum);
+			}
+			rconn.conn->close();
 			returned = false;
 		}
 
-		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG && returned) {
+		if (returned && FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			poolItr = connectionPoolMap.find(connectKey);
 			TraceEvent("RESTUtilReturnConnToPool")
 			    .detail("Host", connectKey.first)
 			    .detail("Service", connectKey.second)
 			    .detail("ConnPoolSize", connectionPoolMap.size())
 			    .detail("CachedConns", poolItr->second.size())
-			    .detail("TimeToExpire", rconn.expirationTime - now());
+			    .detail("PeerAddr", rconn.conn->getPeerAddress().toString())
+			    .detail("TimeToExpire", rconn.expirationTime - now())
+			    .detail("SeqNum", rconn.seqNum);
 		}
+	} else {
+		// close expired connection
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+			TraceEvent("RESTConnCloseExpired")
+			    .detail("Host", connectKey.first)
+			    .detail("Service", connectKey.second)
+			    .detail("SeqNum", seqNum);
+		}
+		rconn.conn->close();
 	}
 	rconn.conn = Reference<IConnection>();
 }
