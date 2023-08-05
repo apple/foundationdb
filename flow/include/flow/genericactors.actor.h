@@ -1445,12 +1445,20 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 
 template <class T>
 struct ActiveCounter {
-	struct Releaser {
+	struct Releaser : NonCopyable  {
 		ActiveCounter<T>* parent;
 		T delta;
 
 		Releaser() : parent(nullptr) {}
 		Releaser(ActiveCounter<T>* parent, T delta) : parent(parent), delta(delta) { parent->counter += delta; }
+		Releaser(Releaser&& r) noexcept : parent(r.parent), delta(r.delta) { r.parent = nullptr; }
+		void operator=(Releaser&& r) {
+			release();
+			parent = r.parent;
+			delta = r.delta;
+			r.parent = nullptr;
+		}
+
 
 		void release() {
 			if (parent) {

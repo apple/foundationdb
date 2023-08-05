@@ -4505,7 +4505,6 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<Bl
 			retryCount++;
 			TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForGranule", bwData->id)
 			    .detail("KeyRange", keyRange)
-			    .detail("KeyRange", keyRange)
 			    .detail("Retries", retryCount);
 			;
 			wait(delay(0.1));
