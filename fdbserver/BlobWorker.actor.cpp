@@ -5075,7 +5075,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				}
 				bwData->tenantData.addTenants(tenants);
 
-				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
+				state Future<Void> watchChange = TenantMetadata::lastTenantModification().watch(tr);
 				wait(tr->commit());
 				bwData->addGRVHistory(tr->getReadVersion().get());
 				wait(watchChange);
