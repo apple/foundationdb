@@ -287,6 +287,12 @@ else()
     list(APPEND BOOST_LINK_OPTIONS -fsanitize=thread)
   endif()
 
+  if(USE_VALGRIND)
+    list(APPEND SANITIZER_COMPILE_OPTIONS $<${is_cxx_compile}:-DBOOST_USE_VALGRIND>)
+
+    list(APPEND BOOST_CXX_OPTIONS -DBOOST_USE_VALGRIND)
+  endif()
+
   if(SANITIZER_COMPILE_OPTIONS)
     add_compile_options(${SANITIZER_COMPILE_OPTIONS})
   endif()
