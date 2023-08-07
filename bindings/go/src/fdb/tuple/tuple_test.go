@@ -11,6 +11,10 @@ import (
 )
 
 var update = flag.Bool("update", false, "update .golden files")
+// Since go 1.20 math/rand uses automatically a random seed: https://tip.golang.org/doc/go1.20.
+// To enfore the old behaviour we intialize the random generator with a hard-coded seed.
+// TODO: Rethink how useful the random generator in those test cases is.
+var randomGenerator *rand.Rand
 
 func loadGolden(t *testing.T) (golden map[string][]byte) {
 	f, err := os.Open("testdata/tuples.golden")
@@ -44,13 +48,25 @@ var testUUID = UUID{
 	0x11, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
 }
 
+// Helper method to get the deterministic random number generator seeded with the same number.
+// This has changed in go 1.20: https://pkg.go.dev/math/rand@go1.20.7#Seed which would break the current
+// test setup. Once we remove the "random" test set, we can remove this function again.
+func getRandomGenerator() *rand.Rand {
+	if randomGenerator != nil {
+		return randomGenerator
+	}
+	randomGenerator = rand.New(rand.Source(rand.NewSource(1)))
+
+	return randomGenerator
+}
+
 func genBytes() interface{}     { return []byte("namespace") }
 func genBytesNil() interface{}  { return []byte{0xFF, 0x00, 0xFF} }
 func genString() interface{}    { return "namespace" }
 func genStringNil() interface{} { return "nam\x00es\xFFpace" }
-func genInt() interface{}       { return rand.Int63() }
-func genFloat() interface{}     { return float32(rand.NormFloat64()) }
-func genDouble() interface{}    { return rand.NormFloat64() }
+func genInt() interface{}       { return getRandomGenerator().Int63() }
+func genFloat() interface{}     { return float32(getRandomGenerator().NormFloat64()) }
+func genDouble() interface{}    { return getRandomGenerator().NormFloat64() }
 
 func mktuple(gen func() interface{}, count int) Tuple {
 	tt := make(Tuple, count)
