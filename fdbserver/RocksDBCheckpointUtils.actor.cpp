@@ -98,8 +98,8 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.db_path = fileMetaData.db_path;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
-		liveFileMetaData.smallest = fileMetaData.smallest;
-		liveFileMetaData.largest = fileMetaData.largest;
+		// liveFileMetaData.smallest = fileMetaData.smallest;
+		// liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.file_type = rocksdb::kTableFile;
 		metaData.files.push_back(liveFileMetaData);
 	}

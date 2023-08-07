@@ -1,13 +1,14 @@
+.. _release-notes:
+
 #############
 Release Notes
 #############
 
-7.2.0
+7.3.0
 ======
 
 Features
 --------
-- Read-aware Data Distribution feature is developed for balance the read bytes bandwidth among storage servers.
 
 Performance
 -----------
@@ -17,10 +18,6 @@ Reliability
 
 Fixes
 -----
-
-* In ``fdbcli``, integer options are now expressed as integers rather than byte strings (e.g. ``option on TIMEOUT 1000``). `(PR #7571) <https://github.com/apple/foundationdb/pull/7571>`_
-* Fixed the bug in ``ConflictingKeysImpl::getRange`` which happens when an underlying conflicting range contains the read range. Added additional test coverage for validating random ``getRange`` results from special keys. `(PR #7597) <https://github.com/apple/foundationdb/pull/7597>`_
-* Fixed the bug in ``SpecialKeyRangeAsyncImpl::getRange`` that the local cache is updated incorrectly after a cross-module read range if it touched more than one ``SpecialKeyRangeAsyncImpl`` in resolving key selectors. Extended the ``SpecialKeySpaceCorrectness`` workload to catch the bug. `(PR #7671) <https://github.com/apple/foundationdb/pull/7671>`_
 
 Status
 ------
@@ -33,6 +30,7 @@ Other Changes
 
 Earlier release notes
 ---------------------
+* :doc:`7.2 (API Version 720) </release-notes/release-notes-720>`
 * :doc:`7.1 (API Version 710) </release-notes/release-notes-710>`
 * :doc:`7.0 (API Version 700) </release-notes/release-notes-700>`
 * :doc:`6.3 (API Version 630) </release-notes/release-notes-630>`
