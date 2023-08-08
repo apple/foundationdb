@@ -366,7 +366,7 @@
 Note that since paths must be absolute this will result in three slashes (/) in a row in the URL.</p>
 <p>Note that for local directory URLs the actual backup files will not be written to &lt;base_dir&gt; directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.</p>
 <p>For blob store backup locations, the Backup URL format is</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;&lt;param&gt;=&lt;value&gt;]...]
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;region=&lt;region_name&gt;][&amp;&lt;param&gt;=&lt;value&gt;]...]
 
   &lt;api_key&gt; - API key to use for authentication. Optional.
   &lt;secret&gt; - API key&#39;s secret.  Optional.
@@ -375,6 +375,7 @@ Note that since paths must be absolute this will result in three slashes (/) in 
   &lt;port&gt; - Remote port to connect to.  Optional.  Default is 80.
   &lt;name&gt; - Name of the backup within the backup bucket.  It can contain &#39;/&#39; characters in order to organize backups into a folder-like structure.
   &lt;bucket_name&gt; - Name of the bucket to use for backup data.
+  &lt;region_name&gt; - If &lt;hostname&gt; is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
 
   &lt;param&gt;=&lt;value&gt; - Optional URL parameters.  See below for details.
 </pre></div>
@@ -826,7 +827,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on May 09, 2023.<br/>
+      Last updated on Jul 31, 2023.<br/>
     </p>
   </div>
 </footer>

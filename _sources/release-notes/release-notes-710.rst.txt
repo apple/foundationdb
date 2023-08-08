@@ -4,6 +4,21 @@
 Release Notes
 #############
 
+7.1.35
+======
+* Same as 7.1.34 release with AVX enabled.
+
+7.1.34
+======
+* Released with AVX disabled.
+* Fixed a high GRV latency issue when many storage servers are recruited.  `(PR #10688) <https://github.com/apple/foundationdb/pull/10688>`_
+* Fixed a single key deletion bug when ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled. `(PR #10672) <https://github.com/apple/foundationdb/pull/10672>`_ and `(PR #10676) <https://github.com/apple/foundationdb/pull/10676>`_
+* Added degraded and disconnected peer recovery to gray failure detection. `(PR #10565) <https://github.com/apple/foundationdb/pull/10565>`_
+* Fixed RocksDB engine to avoid read timeout checks for eager reads and system keys. `(PR #10500) <https://github.com/apple/foundationdb/pull/10500>`_
+* Fixed backup to work with s3 compatible service.  `(PR #10369) <https://github.com/apple/foundationdb/pull/10369>`_
+* Fixed data loss during multiple range restores. `(PR #10424) <https://github.com/apple/foundationdb/pull/10424>`_
+* Updated RocksDB to version 8.1.1. `(PR #10268) <https://github.com/apple/foundationdb/pull/10268>`_
+
 7.1.33
 ======
 * Same as 7.1.32 release with AVX enabled.
