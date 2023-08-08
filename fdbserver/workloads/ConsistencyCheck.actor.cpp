@@ -1131,6 +1131,38 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return std::make_pair(estimatedBytes, metrics);
 	}
 
+	ACTOR Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(
+	    std::vector<StorageServerInterface> storageServers) {
+		state std::vector<Future<ErrorOr<KeyValueStoreType>>> storageTypeFutures;
+		state std::unordered_map<UID, KeyValueStoreType> res;
+
+		try {
+			for (int i = 0; i < storageServers.size(); i++) {
+				ReplyPromise<KeyValueStoreType> typeReply;
+				storageTypeFutures.push_back(
+				    storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+			}
+			wait(waitForAll(storageTypeFutures));
+
+			for (int i = 0; i < storageServers.size(); i++) {
+				ErrorOr<KeyValueStoreType> reply = storageTypeFutures[i].get();
+				if (!reply.present()) {
+					TraceEvent(SevWarn, "ConsistencyCheck_FailedToGetStorageType")
+					    .error(reply.getError())
+					    .detail("StorageServer", storageServers[i].id())
+					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False");
+				} else {
+					res[storageServers[i].id()] = reply.get();
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("ConsistencyCheck_ErrorGetStorageType").errorUnsuppressed(e);
+			res.clear();
+		}
+
+		return res;
+	}
+
 	// Comparison function used to compare map elements by value
 	template <class K, class T>
 	static bool compareByValue(std::pair<K, T> a, std::pair<K, T> b) {
@@ -1183,6 +1215,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 		state bool testResult = true;
+		state int64_t numCompleteShards = 0;
+		state int64_t numSkippedShards = 0;
 
 		state double dbSize = 100e12;
 		if (g_network->isSimulated()) {
@@ -1290,6 +1324,40 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						storageServers.push_back(tssPair->second.id());
 						storageServerInterfaces.push_back(tssPair->second);
 					}
+				}
+			}
+
+			if (SERVER_KNOBS->CONSISTENCY_CHECK_SPECIFIC_ENGINE == 1 ||
+			    SERVER_KNOBS->CONSISTENCY_CHECK_SPECIFIC_ENGINE == 2) {
+				state KeyValueStoreType storageEngineTypeToCheck = SERVER_KNOBS->CONSISTENCY_CHECK_SPECIFIC_ENGINE == 1
+				                                                       ? KeyValueStoreType::StoreType::SSD_ROCKSDB_V1
+				                                                       : KeyValueStoreType::StoreType::SSD_BTREE_V2;
+				std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
+				    wait(self->getStorageType(storageServerInterfaces));
+
+				bool anySpecificEngine = false;
+				for (int i = 0; i < storageServers.size(); i++) {
+					auto ssStorageType = storageTypeMapping.find(storageServers[i]);
+					if (ssStorageType != storageTypeMapping.end()) {
+						if (ssStorageType->second == storageEngineTypeToCheck) {
+							anySpecificEngine = true;
+							break;
+						}
+					} else {
+						// We do not get the type for this SS
+					}
+				}
+				if (!anySpecificEngine) {
+					TraceEvent(SevInfo, "ConsistencyCheck_ShardSkipped")
+					    .suppressFor(1.0)
+					    .detail("Reason", "No SSD_ROCKSDB_V1 engine has the shard")
+					    .detail("Range", range.toString())
+					    .detail("ShardSeqNumber", i)
+					    .detail("ShardCount", ranges.size())
+					    .detail("NumSkippedShards", numSkippedShards)
+					    .detail("NumCompletedShards", numCompleteShards);
+					numSkippedShards++;
+					continue;
 				}
 			}
 
@@ -1736,6 +1804,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("Range", range)
 				    .detail("BytesRead", bytesReadInRange);
 			}
+
+			numCompleteShards++;
+			TraceEvent(SevInfo, "ConsistencyCheck_ShardComplete")
+			    .suppressFor(1.0)
+			    .detail("Range", range.toString())
+			    .detail("ShardCount", ranges.size())
+			    .detail("NumCompletedShards", numCompleteShards)
+			    .detail("BytesReadInThisRound", bytesReadInthisRound)
+			    .detail("NumSkippedShards", numSkippedShards);
 		}
 
 		// SOMEDAY: when background data distribution is implemented, include this test
