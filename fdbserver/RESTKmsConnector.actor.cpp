@@ -680,6 +680,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 			for (int i = 0; i < locations.size(); i++) {
 				event.detail("LocId" + std::to_string(i), locations[i].locationId);
 				if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+					// only log this at verbose level because it is expensive and likely contains credentials
 					event.detail("LocPath" + std::to_string(i), locations[i].path);
 				}
 			}

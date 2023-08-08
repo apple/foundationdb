@@ -4249,13 +4249,18 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	}
 
 	state DatabaseConfiguration config = wait(getDatabaseConfiguration(self->db, true));
+	state double lastVerboseLogTs = 0.0;
 
 	loop {
 		try {
 			state RecruitBlobWorkerRequest recruitReq;
 
 			// SevDebug normally but SevInfo if we have no active workers
-			Severity excludeSeverity = self->workersById.empty() ? SevInfo : SevDebug;
+			Severity excludeSeverity = SevDebug;
+			if (self->workersById.empty() && now() - lastVerboseLogTs >= 10.0) {
+				excludeSeverity = SevInfo;
+				lastVerboseLogTs = now();
+			}
 
 			// workers that are used by existing blob workers should be excluded
 			for (auto const& [bwId, bwInterf] : self->workersById) {
