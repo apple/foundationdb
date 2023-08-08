@@ -1,0 +1,66 @@
+[configuration]
+config = 'single'
+storageEngineType = 5
+processesPerMachine = 4
+coordinators = 3
+machineCount = 4
+allowDefaultTenant = false
+disableTss = true
+
+[[knobs]]
+shard_encode_location_metadata = true
+# enable_dd_physical_shard = true
+# min_byte_sampling_probability = 0.99
+# rocksdb_read_range_reuse_iterators = false
+dd_physical_shard_move_probability = 1.0
+
+[[test]]
+testTitle = 'PrepareVacuum'
+
+    [[test.workload]]
+    writesPerTransactionA=10
+    readsPerTransactionA=0
+    writesPerTransactionB=10
+    readsPerTransactionB=1
+    alpha=0.5
+    nodeCount=2000000
+    valueBytes=128
+    testName = 'ReadWrite'
+    testDuration = 120.0
+    transactionsPerSecond = 2000.0
+    adjacentWrites = true
+
+#    [[test.workload]]
+#    testName = 'Cycle'
+#    transactionsPerSecond = 1000.0
+#    testDuration = 120.0
+#    expectedRate = 0
+
+[[test]]
+testTitle = 'Vacuum'
+useDB = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 1000.0
+    testDuration = 120.0
+    expectedRate = 0
+
+    [[test.workload]]
+    writesPerTransactionA=10
+    readsPerTransactionA=0
+    writesPerTransactionB=10
+    readsPerTransactionB=1
+    alpha=0.5
+    nodeCount=2000000
+    valueBytes=128
+    testName = 'ReadWrite'
+    testDuration = 120.0
+    transactionsPerSecond = 2000.0
+    adjacentWrites = true
+
+    [[test.workload]]
+    testName = 'ExcludeIncludeStorageServers'
+    doInclude = false
+    round = 5
+

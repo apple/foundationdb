@@ -43,10 +43,14 @@
 struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 	static constexpr auto NAME = "ExcludeIncludeStorageServers";
 	bool enabled;
+	bool doInclude;
+	int round;
 
 	std::map<AddressExclusion, std::set<AddressExclusion>> machineProcesses; // ip -> ip:port
 
 	ExcludeIncludeStorageServersWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		doInclude = getOption(options, "doInclude"_sr, true);
+		round = getOption(options, "round"_sr, deterministicRandom()->randomInt(10, 80));
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		if (g_network->isSimulated()) {
@@ -75,8 +79,10 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>&) override {}
 
 	ACTOR static Future<Void> workloadMain(ExcludeIncludeStorageServersWorkload* self, Database cx) {
-		state int round = deterministicRandom()->randomInt(10, 80);
+		// state int round = deterministicRandom()->randomInt(10, 80);
+		state int round = self->round;
 		state std::set<AddressExclusion> servers;
+		state std::vector<AddressExclusion> excluded;
 		state std::set<AddressExclusion>::iterator it;
 		state Transaction tr(cx);
 		state double timeout = 100.0;
@@ -91,7 +97,9 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 			try {
 				servers.clear();
 				// including an invalid address means include everything(clear all exclude prefix)
-				wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+				if (self->doInclude) {
+					wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+				}
 
 				tr = Transaction(cx);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -123,10 +131,14 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				// find a SS and exclude it
 				it = std::next(servers.begin(), deterministicRandom()->randomInt(0, servers.size()));
 				wait(excludeServers(cx, std::vector<AddressExclusion>{ *it }));
-				// timeoutError() is needed because sometimes excluding process can take forever
-				std::set<NetworkAddress> inProgress = wait(
-				    timeoutError(checkForExcludingServers(cx, std::vector<AddressExclusion>{ *it }, true), timeout));
-				ASSERT(inProgress.empty());
+				if (self->doInclude) {
+					// timeoutError() is needed because sometimes excluding process can take forever
+					std::set<NetworkAddress> inProgress = wait(timeoutError(
+					    checkForExcludingServers(cx, std::vector<AddressExclusion>{ *it }, true), timeout));
+					ASSERT(inProgress.empty());
+				} else {
+					excluded.push_back(*it);
+				}
 				if (--round <= 0) {
 					break;
 				}
@@ -140,7 +152,11 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 			}
 		}
 		// if it is still in the middle of a exclude, then DD cannot finish and test would timeout
-		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+		if (self->doInclude) {
+			wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+		}
+		std::set<NetworkAddress> inProgress = wait(timeoutError(checkForExcludingServers(cx, excluded, true), timeout));
+		ASSERT(inProgress.empty());
 
 		TraceEvent("WorkloadFinish").detail("QuitEarly", round > 0).detail("TimeoutCount", timeoutCnt).log();
 		return Void();
