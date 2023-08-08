@@ -11233,6 +11233,40 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, 
 	}
 }
 
+ACTOR Future<TenantMode> getOrWaitForTenantMode(Database cx) {
+	loop {
+		Optional<TenantMode> tenantMode = cx->getTenantMode();
+		if (tenantMode.present()) {
+			return tenantMode.get();
+		}
+		// otherwise we don't know the tenant mode yet, wait for non-provisional proxies
+		wait(cx->clientInfo->onChange());
+	}
+}
+
+ACTOR Future<Void> checkTenantLock(Transaction* tr, Optional<Reference<Tenant>> tenant, KeyRange keyRange) {
+	state int64_t tenantId;
+	if (tenant.present()) {
+		// if tenant present, explicitly get id
+		tenantId = tenant.get()->id();
+	} else {
+		// otherwise assume raw access mode and infer it
+		TenantMode tenantMode = wait(getOrWaitForTenantMode(tr->trState->cx));
+		if (tenantMode == TenantMode::DISABLED || !TenantAPI::withinSingleTenant(keyRange)) {
+			return Void();
+		} else {
+			// in optional tenant mode this could return something that is a bogus tenant id, but that's fine because a
+			// non-existent tenant can't be locked
+			tenantId = TenantAPI::extractTenantIdFromKeyRef(keyRange.begin);
+		}
+	}
+	Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, tenantId));
+	if (tenantEntry.present() && tenantEntry.get().tenantLockState != TenantAPI::TenantLockState::UNLOCKED) {
+		throw tenant_locked();
+	}
+	return Void();
+}
+
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
@@ -11272,12 +11306,13 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
+			state Future<Void> tenantLockCheck = checkTenantLock(&tr, tenant, range);
 			// must be aligned to blob range(s)
 			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedBegin =
 			    getBlobRanges(&tr, KeyRangeRef(purgeRange.begin, keyAfter(purgeRange.begin)), 1);
 			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedEnd =
 			    getBlobRanges(&tr, KeyRangeRef(purgeRange.end, keyAfter(purgeRange.end)), 1);
-			wait(success(blobbifiedBegin) && success(blobbifiedEnd));
+			wait(success(blobbifiedBegin) && success(blobbifiedEnd) && tenantLockCheck);
 			// If there are no blob ranges on the boundary that's okay as we allow purging of multiple full ranges.
 			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
 			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().front().begin < purgeRange.end)) {
@@ -11358,12 +11393,13 @@ Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 }
 
 ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
-                                     KeyRange range,
+                                     KeyRange originalRange,
                                      bool active,
                                      Optional<Reference<Tenant>> tenant) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 
+	state KeyRange range = originalRange;
 	if (tenant.present()) {
 		wait(tenant.get()->ready());
 		range = range.withPrefix(tenant.get()->prefix());
@@ -11382,6 +11418,8 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			wait(checkTenantLock(&tr->getTransaction(), tenant, originalRange));
 
 			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(&tr->getTransaction(), range, 1));
 

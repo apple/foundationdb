@@ -2757,6 +2757,8 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	// FIXME: wait for hybrid read version as part of this - need to specify in request  - then check CP state to see if
+	// tenant locked as of version and reject if so
 	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetBlobGranuleLocation"));
 
 	if (!validTenant) {
