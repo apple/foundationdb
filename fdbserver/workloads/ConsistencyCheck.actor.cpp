@@ -1327,27 +1327,27 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
-			if (SERVER_KNOBS->CONSISTENCY_CHECK_SPECIFIC_ENGINE == 1 ||
-			    SERVER_KNOBS->CONSISTENCY_CHECK_SPECIFIC_ENGINE == 2) {
-				state KeyValueStoreType storageEngineTypeToCheck = SERVER_KNOBS->CONSISTENCY_CHECK_SPECIFIC_ENGINE == 1
-				                                                       ? KeyValueStoreType::StoreType::SSD_ROCKSDB_V1
-				                                                       : KeyValueStoreType::StoreType::SSD_BTREE_V2;
+			if (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE || SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE) {
 				std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
 				    wait(self->getStorageType(storageServerInterfaces));
 
-				bool anySpecificEngine = false;
-				for (int i = 0; i < storageServers.size(); i++) {
-					auto ssStorageType = storageTypeMapping.find(storageServers[i]);
+				bool anySpecifiedEngine = false;
+				for (int j = 0; j < storageServers.size(); j++) {
+					auto ssStorageType = storageTypeMapping.find(storageServers[j]);
 					if (ssStorageType != storageTypeMapping.end()) {
-						if (ssStorageType->second == storageEngineTypeToCheck) {
-							anySpecificEngine = true;
+						if (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE &&
+						    ssStorageType->second == KeyValueStoreType::StoreType::SSD_ROCKSDB_V1) {
+							anySpecifiedEngine = true;
 							break;
 						}
-					} else {
-						// We do not get the type for this SS
+						if (SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE &&
+						    ssStorageType->second == KeyValueStoreType::StoreType::SSD_BTREE_V2) {
+							anySpecifiedEngine = true;
+							break;
+						}
 					}
 				}
-				if (!anySpecificEngine) {
+				if (!anySpecifiedEngine) {
 					TraceEvent(SevInfo, "ConsistencyCheck_ShardSkipped")
 					    .suppressFor(1.0)
 					    .detail("Reason", "No SSD_ROCKSDB_V1 engine has the shard")
