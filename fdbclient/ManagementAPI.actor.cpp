@@ -236,7 +236,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 		}
 
-		if (key == "storage_engine" || key == "log_engine" || key == "perpetual_storage_engine") {
+		if (key == "storage_engine" || key == "log_engine" || key == "perpetual_storage_wiggle_engine") {
 			StringRef s = value;
 
 			// Parse as engine_name[:p=v]... to handle future storage engine params

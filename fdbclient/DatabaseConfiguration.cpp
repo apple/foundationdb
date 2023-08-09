@@ -386,7 +386,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
 	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
-		result["perpetual_storage_engine"] = perpetualStoreType.toString();
+		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
 	}
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
@@ -416,7 +416,7 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			// Such properites are listed here:
 			static std::set<std::string> directSet = {
 				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode",
-				"storage_engine",         "log_engine",  "perpetual_storage_engine"
+				"storage_engine",         "log_engine",  "perpetual_storage_wiggle_engine"
 			};
 
 			if (directSet.contains(kv.first)) {
@@ -670,7 +670,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 			return false;
 		}
 		perpetualStorageWiggleLocality = value.toString();
-	} else if (ck == "perpetual_storage_engine"_sr) {
+	} else if (ck == "perpetual_storage_wiggle_engine"_sr) {
 		parse((&type), value);
 		perpetualStoreType = (KeyValueStoreType::StoreType)type;
 	} else if (ck == "storage_migration_type"_sr) {
