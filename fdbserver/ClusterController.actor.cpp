@@ -2038,22 +2038,25 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		}
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageBegin", self->id)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type)
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
-		TriggerAuditRequest fReq(req.getType(), req.range);
+		TriggerAuditRequest fReq(req.getType(), req.range, req.engineType);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString());
 		req.reply.send(auditId);
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString());
 		req.reply.sendError(audit_storage_failed());
 	}
 
@@ -2096,7 +2099,8 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.getType());
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString());
 		if (req.cancel) {
 			ASSERT(req.id.isValid());
 			self->addActor.send(cancelAuditStorage(self, req));
