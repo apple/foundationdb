@@ -37,7 +37,8 @@ void DatabaseConfiguration::resetInternal() {
 	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
 	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
-	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
+	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = perpetualStoreType =
+	    KeyValueStoreType::END;
 	desiredTSSCount = 0;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
@@ -384,6 +385,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
+	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
+		result["perpetual_storage_engine"] = perpetualStoreType.toString();
+	}
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
@@ -411,7 +415,8 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properites are listed here:
 			static std::set<std::string> directSet = {
-				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode", "storage_engine", "log_engine"
+				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode",
+				"storage_engine",         "log_engine",  "perpetual_storage_engine"
 			};
 
 			if (directSet.contains(kv.first)) {
@@ -665,6 +670,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 			return false;
 		}
 		perpetualStorageWiggleLocality = value.toString();
+	} else if (ck == "perpetual_storage_engine"_sr) {
+		parse((&type), value);
+		perpetualStoreType = (KeyValueStoreType::StoreType)type;
 	} else if (ck == "storage_migration_type"_sr) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;

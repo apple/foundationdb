@@ -38,6 +38,19 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 	return it->second;
 }
 
+void ParsePerpetualStorageWiggleLocality(const std::string& localityKeyValue,
+                                         Optional<Value>* localityKey,
+                                         Optional<Value>* localityValue) {
+	// parsing format is like "datahall:0"
+	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
+
+	// get key and value from perpetual_storage_wiggle_locality.
+	int split = localityKeyValue.find(':');
+	*localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
+	*localityValue =
+	    Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+}
+
 } // namespace
 
 namespace data_distribution {
@@ -2385,6 +2398,20 @@ public:
 			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
+			if (self->configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
+				if (self->configuration.perpetualStorageWiggleLocality == "0") {
+					// TODO(wiggle) : consider adding a perpetual wiggle storage engine type for TSS.
+					isr.storeType = self->configuration.perpetualStoreType;
+				} else {
+					Optional<Value> localityKey;
+					Optional<Value> localityValue;
+					ParsePerpetualStorageWiggleLocality(
+					    self->configuration.perpetualStorageWiggleLocality, &localityKey, &localityValue);
+					if (candidateWorker.worker.locality.get(localityKey.get()) == localityValue) {
+						isr.storeType = self->configuration.perpetualStoreType;
+					}
+				}
+			}
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
@@ -3864,14 +3891,7 @@ Future<UID> DDTeamCollection::getNextWigglingServerID() {
 	// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
 	// then recruit a new DD, we only need to read current configuration once
 	if (configuration.perpetualStorageWiggleLocality != "0") {
-		// parsing format is like "datahall:0"
-		std::string& localityKeyValue = configuration.perpetualStorageWiggleLocality;
-		ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
-		// get key and value from perpetual_storage_wiggle_locality.
-		int split = localityKeyValue.find(':');
-		localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
-		localityValue = Optional<Value>(
-		    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+		ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality, &localityKey, &localityValue);
 	}
 
 	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityKey, localityValue, this);
