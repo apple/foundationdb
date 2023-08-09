@@ -854,7 +854,7 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				TraceEvent("TeamHealthChangeDetected", self->distributorId)
+				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
 				    .detail("Team", team->getDesc())
 				    .detail("ServersLeft", serversLeft)
 				    .detail("LastServersLeft", lastServersLeft)
@@ -2398,9 +2398,8 @@ public:
 			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
-			if (self->configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
+			if (!recruitTss && self->configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
 				if (self->configuration.perpetualStorageWiggleLocality == "0") {
-					// TODO(wiggle) : consider adding a perpetual wiggle storage engine type for TSS.
 					isr.storeType = self->configuration.perpetualStoreType;
 				} else {
 					Optional<Value> localityKey;
