@@ -841,7 +841,7 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
+				TraceEvent("TeamHealthChangeDetected", self->distributorId)
 				    .detail("Team", team->getDesc())
 				    .detail("ServersLeft", serversLeft)
 				    .detail("LastServersLeft", lastServersLeft)
@@ -2489,7 +2489,8 @@ public:
 			    .detail("WorkerLocality", candidateWorker.worker.locality.toString())
 			    .detail("Interf", interfaceId)
 			    .detail("Addr", candidateWorker.worker.address())
-			    .detail("RecruitingStream", self->recruitingStream.get());
+			    .detail("RecruitingStream", self->recruitingStream.get())
+			    .detail("StoreType", isr.storeType);
 
 			if (newServer.present()) {
 				UID id = newServer.get().interf.id();

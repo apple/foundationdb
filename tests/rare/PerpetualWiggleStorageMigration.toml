@@ -1,0 +1,12 @@
+[configuration]
+config = 'triple'
+storageEngineType = 0
+encryptModes=['disabled']
+tenantModes=['disabled']
+
+[[test]]
+testTitle = 'PerpetualWiggleStorageMigration'
+useDB = true
+
+    [[test.workload]]
+    testName = 'PerpetualWiggleStorageMigrationWorkload'
