@@ -2438,8 +2438,7 @@ public:
 			// Check if perpetual storage wiggle is enabled and perpetualStoreType is set. If so, we use
 			// perpetualStoreType for all new SSes that match perpetualStorageWiggleLocality.
 			// Note that this only applies to regular storage servers, not TSS.
-			if (!recruitTss && self->configuration.perpetualStorageWiggleSpeed > 0 &&
-			    self->configuration.storageMigrationType == StorageMigrationType::GRADUAL &&
+			if (!recruitTss && self->configuration.storageMigrationType == StorageMigrationType::GRADUAL &&
 			    self->configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
 				if (self->configuration.perpetualStorageWiggleLocality == "0") {
 					isr.storeType = self->configuration.perpetualStoreType;
