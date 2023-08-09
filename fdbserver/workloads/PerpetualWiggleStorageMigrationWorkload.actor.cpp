@@ -1,5 +1,5 @@
 /*
- * PerpetualWiggleStatsWorkload.actor.cpp
+ * PerpetualWiggleStorageMigrationWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -51,22 +51,6 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 	PerpetualWiggleStorageMigrationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
-
-	/*
-	ACTOR static Future<Void> _setup(PerpetualWiggleStorageMigrationWorkload* self, Database cx) {
-	    // wait(success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)));
-	    // bool success = wait(IssueConfigurationChange(cx, "storage_migration_type=disabled", true));
-	    // ASSERT(success);
-	    // wait(delay(30.0)); // make sure the DD has already quit before the test start
-	    return Void();
-	}
-
-	Future<Void> setup(Database const& cx) override {
-	    if (clientId == 0) {
-	        return _setup(this, cx); // force to disable DD
-	    }
-	    return Void();
-	} */
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {

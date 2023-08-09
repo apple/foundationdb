@@ -349,8 +349,7 @@ public:
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 
 		for (auto& it : id_worker) {
-			/*
-			TraceEvent("ZZZZZRecruitStorageTry")
+			TraceEvent(SevVerbose, "RecruitStorageTry")
 			    .detail("Worker", it.second.details.interf.address())
 			    .detail("WorkerAvailable", workerAvailable(it.second, false))
 			    .detail("RecoverDiskFiles", it.second.details.recoveredDiskFiles)
@@ -365,7 +364,6 @@ public:
 			            it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <=
 			                ProcessClass::UnsetFit)
 			    .detail("MachineFitness", it.second.details.processClass.machineClassFitness(ProcessClass::Storage));
-			*/
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
 			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
