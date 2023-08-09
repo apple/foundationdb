@@ -59,7 +59,7 @@ public:
 			for (int i = 0; i < tenantList.size(); i++) {
 				tenantCache->insert(tenantList[i].second);
 
-				TraceEvent(SevInfo, "TenantCacheTenantFound", tenantCache->id())
+				TraceEvent(SevDebug, "TenantCacheTenantFound", tenantCache->id())
 				    .detail("TenantName", tenantList[i].second.tenantName)
 				    .detail("TenantID", tenantList[i].first)
 				    .detail("TenantPrefix", tenantList[i].second.prefix);
@@ -106,7 +106,7 @@ public:
 				}
 
 				if (tenantListUpdated) {
-					TraceEvent(SevInfo, "TenantCacheListUpdated", tenantCache->id())
+					TraceEvent(SevDebug, "TenantCacheListUpdated", tenantCache->id())
 					    .detail("List", tenantCache->desc());
 				}
 
