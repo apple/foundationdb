@@ -58,6 +58,9 @@ ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID
 				rangeToReadBegin = auditStates.back().range.end;
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
 				if (retryCount > 30) {
 					printf("Imcomplete check\n");
 					return Void();
@@ -123,6 +126,9 @@ ACTOR Future<Void> getAuditProgressByServer(Database cx,
 				rangeToReadBegin = auditStates.back().range.end;
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
 				if (retryCount > 30) {
 					printf("Imcomplete check\n");
 					return Void();
