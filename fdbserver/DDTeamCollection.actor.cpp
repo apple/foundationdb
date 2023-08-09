@@ -840,7 +840,7 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
+				TraceEvent("TeamHealthChangeDetected", self->distributorId)
 				    .detail("Team", team->getDesc())
 				    .detail("ServersLeft", serversLeft)
 				    .detail("LastServersLeft", lastServersLeft)
