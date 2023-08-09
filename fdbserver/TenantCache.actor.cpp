@@ -51,7 +51,7 @@ public:
 	ACTOR static Future<Void> build(TenantCache* tenantCache) {
 		state Transaction tr(tenantCache->dbcx());
 
-		TraceEvent(SevInfo, "BuildingTenantCache", tenantCache->id()).log();
+		TraceEvent(SevInfo, "TenantCacheBuildStarting", tenantCache->id());
 
 		try {
 			state std::vector<std::pair<int64_t, TenantMapEntry>> tenantList = wait(getTenantList(tenantCache, &tr));
@@ -59,7 +59,7 @@ public:
 			for (int i = 0; i < tenantList.size(); i++) {
 				tenantCache->insert(tenantList[i].second);
 
-				TraceEvent(SevInfo, "TenantFound", tenantCache->id())
+				TraceEvent(SevInfo, "TenantCacheTenantFound", tenantCache->id())
 				    .detail("TenantName", tenantList[i].second.tenantName)
 				    .detail("TenantID", tenantList[i].first)
 				    .detail("TenantPrefix", tenantList[i].second.prefix);
@@ -68,13 +68,13 @@ public:
 			wait(tr.onError(e));
 		}
 
-		TraceEvent(SevInfo, "BuiltTenantCache", tenantCache->id()).log();
+		TraceEvent(SevInfo, "TenantCacheBuildDone", tenantCache->id());
 
 		return Void();
 	}
 
 	ACTOR static Future<Void> monitorTenantMap(TenantCache* tenantCache) {
-		TraceEvent(SevInfo, "StartingTenantCacheMonitor", tenantCache->id()).log();
+		TraceEvent(SevInfo, "TenantCacheMonitorStarting", tenantCache->id());
 
 		state Transaction tr(tenantCache->dbcx());
 
@@ -83,7 +83,8 @@ public:
 		loop {
 			try {
 				if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL)) {
-					TraceEvent(SevWarn, "TenantListRefreshDelay", tenantCache->id()).log();
+					TraceEvent(SevWarn, "TenantCacheListRefreshSlow", tenantCache->id())
+					    .detail("RefreshTime", now() - lastTenantListFetchTime);
 				}
 
 				state std::vector<std::pair<int64_t, TenantMapEntry>> tenantList =
@@ -105,7 +106,8 @@ public:
 				}
 
 				if (tenantListUpdated) {
-					TraceEvent(SevInfo, "TenantCache", tenantCache->id()).detail("List", tenantCache->desc());
+					TraceEvent(SevInfo, "TenantCacheListUpdated", tenantCache->id())
+					    .detail("List", tenantCache->desc());
 				}
 
 				lastTenantListFetchTime = now();
@@ -113,9 +115,7 @@ public:
 				wait(delay(SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL));
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("TenantCacheGetTenantListError", tenantCache->id())
-					    .errorUnsuppressed(e)
-					    .suppressFor(1.0);
+					TraceEvent("TenantCacheGetListError", tenantCache->id()).errorUnsuppressed(e).suppressFor(1.0);
 				}
 				wait(tr.onError(e));
 			}
@@ -123,7 +123,7 @@ public:
 	}
 
 	ACTOR static Future<Void> monitorStorageUsage(TenantCache* tenantCache) {
-		TraceEvent(SevInfo, "StartingTenantCacheStorageUsageMonitor", tenantCache->id()).log();
+		TraceEvent(SevInfo, "StorageQuotaMonitorUsageStarting", tenantCache->id());
 
 		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
 		state double lastTraceTime = 0;
@@ -174,7 +174,7 @@ public:
 								tenantCache->tenantStorageMap[group].tenants.erase(tenantId);
 								break;
 							} else {
-								TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
+								TraceEvent("StorageQuotaGetUsageError", tenantCache->id()).error(e);
 								wait(tr.onError(e));
 							}
 						}
@@ -184,7 +184,7 @@ public:
 
 				if (toTrace) {
 					// Trace the storage used by all tenant groups for visibility.
-					TraceEvent(SevInfo, "StorageUsageUpdated", tenantCache->id())
+					TraceEvent(SevInfo, "StorageQuotaUsageUpdated", tenantCache->id())
 					    .detail("TenantGroup", group)
 					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
 					    .detail("Usage", tenantCache->tenantStorageMap[group].usage);
@@ -193,15 +193,14 @@ public:
 			}
 
 			if (now() - currentFetchStartTime > (2 * refreshInterval)) {
-				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshSlow", tenantCache->id())
-				    .detail("RefreshTime", now() - currentFetchStartTime)
-				    .log();
+				TraceEvent(SevWarn, "StorageQuotaUsageRefreshSlow", tenantCache->id())
+				    .detail("RefreshTime", now() - currentFetchStartTime);
 			}
 		}
 	}
 
 	ACTOR static Future<Void> monitorStorageQuota(TenantCache* tenantCache) {
-		TraceEvent(SevInfo, "StartingTenantCacheStorageQuotaMonitor", tenantCache->id()).log();
+		TraceEvent(SevInfo, "StorageQuotaMonitorQuotaStarting", tenantCache->id());
 
 		state Reference<ReadYourWritesTransaction> tr = tenantCache->dbcx()->createTransaction();
 
@@ -221,7 +220,7 @@ public:
 				tr->reset();
 				wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
 			} catch (Error& e) {
-				TraceEvent("TenantCacheGetStorageQuotaError", tenantCache->id()).error(e);
+				TraceEvent("StorageQuotaGetQuotaError", tenantCache->id()).error(e);
 				wait(tr->onError(e));
 			}
 		}
