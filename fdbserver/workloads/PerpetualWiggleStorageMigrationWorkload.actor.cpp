@@ -166,13 +166,13 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		state int missingWiggleStorageCount = 0;
 		state std::vector<StorageServerInterface> allSSes;
 		state bool doneCheckingWiggleStorage = false;
-		state bool wiggleStorageGone = false;
+		state bool containWiggleStorage = false;
 		loop {
 			std::vector<StorageServerInterface> SSes = wait(getStorageServers(cx));
 			allSSes = SSes;
 
 			state int i = 0;
-			state bool containWiggleStorage = false;
+			containWiggleStorage = false;
 			doneCheckingWiggleStorage = false;
 			for (i = 0; i < allSSes.size(); ++i) {
 				state StorageServerInterface ssInterface = allSSes[i];
@@ -198,10 +198,8 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 				} else {
 					TraceEvent(SevDebug, "Test_KvStorageType")
 					    .detail("StorageServer", ssInterface.address())
-					    .detail("StorageType", "Unknown");
-					if (ssInterface.address() == ssToWiggle.address()) {
-						wiggleStorageGone = true;
-					}
+					    .detail("StorageType", "Unknown")
+					    .detail("Error", keyValueStoreType.getError().name());
 				}
 			}
 			if (doneCheckingWiggleStorage) {
@@ -221,7 +219,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			// If we fail to validate that the wiggle storage has been migrated to new storage engine, sometimes it is
 			// because after exclusion, the process may not be recruited as storage server, so we must not see it as a
 			// storage engine in the last check.
-			ASSERT(wiggleStorageGone);
+			ASSERT(!containWiggleStorage);
 		}
 		return Void();
 	}
