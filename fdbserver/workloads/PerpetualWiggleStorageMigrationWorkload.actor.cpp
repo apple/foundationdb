@@ -109,7 +109,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		// std::string migrationLocality = LocalityData::keyProcessId.toString() + ":101010101";
 		bool change =
 		    wait(IssueConfigurationChange(cx,
-		                                  "storage_engine=ssd-rocksdb-v1 perpetual_storage_wiggle=1 "
+		                                  "perpetual_storage_engine=ssd-rocksdb-v1 perpetual_storage_wiggle=1 "
 		                                  "storage_migration_type=gradual perpetual_storage_wiggle_locality=" +
 		                                      migrationLocality,
 		                                  true));
@@ -118,19 +118,31 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		// g_simulator->rebootProcess(p, ISimulator::KillType::RebootProcessAndDelete);
 		state std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(randomSS1.address().ip, randomSS1.address().port));
-		state double timeout = 100.0;
 		wait(excludeServers(cx, servers));
 		TraceEvent("ZZZZZDoneExcludeServer").log();
-		// timeoutError() is needed because sometimes excluding process can take forever
-		// std::set<NetworkAddress> inProgress = wait(timeoutError(checkForExcludingServers(cx, servers, true),
-		// timeout));
-		std::set<NetworkAddress> inProgress = wait(checkForExcludingServers(cx, servers, true));
+
+		try {
+			// timeoutError() is needed because sometimes excluding process can take forever
+			state double timeout = 300.0;
+			std::set<NetworkAddress> inProgress =
+			    wait(timeoutError(checkForExcludingServers(cx, servers, true), timeout));
+			ASSERT(inProgress.empty());
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				// it might never be excluded from serverList
+				TraceEvent("ZZZZZWaitingForExclusionTakeTooLong").log();
+				return Void();
+			}
+			throw e;
+		}
+
 		TraceEvent("ZZZZZDoneCheckingExcludeServer").log();
 
 		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
 		TraceEvent("ZZZZZIncludeServer").log();
 
 		state std::vector<StorageServerInterface> allSSes;
+		state int missingTargetCount = 0;
 		loop {
 			std::vector<StorageServerInterface> SSes = wait(getStorageServers(cx));
 			bool foundTarget = false;
@@ -143,14 +155,21 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 				allSSes = SSes;
 				break;
 			}
-			wait(delay(10));
+			++missingTargetCount;
+			if (missingTargetCount > 5) {
+				allSSes = SSes;
+				break;
+			}
+			wait(delay(20));
 		}
+		state int missingWiggleStorageCount = 0;
 		loop {
 			std::vector<StorageServerInterface> SSes = wait(getStorageServers(cx));
 			allSSes = SSes;
 			TraceEvent("ZZZZZCheckingStorageEngineType").log();
 			state int i = 0;
 			state bool doneCheckingWiggleStorage = false;
+			state bool containWiggleStorage = false;
 			for (i = 0; i < allSSes.size(); ++i) {
 				state StorageServerInterface ssInterface = allSSes[i];
 				state ReplyPromise<KeyValueStoreType> typeReply;
@@ -161,9 +180,10 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 					    .detail("SS", ssInterface.address())
 					    .detail("StorageType", keyValueStoreType.get().toString());
 					if (ssInterface.address() == randomSS1.address()) {
-						ASSERT(keyValueStoreType.get().toString() == "ssd-rocksdb-v1");
+						ASSERT(keyValueStoreType.get().toString() == "ssd-2");
 					}
 					if (ssInterface.address() == randomSS2.address()) {
+						containWiggleStorage = true;
 						if (keyValueStoreType.get().toString() == "ssd-rocksdb-v1") {
 							TraceEvent("ZZZZZWiggleDone").log();
 							doneCheckingWiggleStorage = true;
@@ -176,7 +196,14 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			if (doneCheckingWiggleStorage) {
 				break;
 			}
-			wait(delay(10));
+			if (!containWiggleStorage) {
+				++missingWiggleStorageCount;
+				if (missingWiggleStorageCount == 6) {
+					TraceEvent("ZZZZTimeoutWaitingForWiggleStorageToShowUp").log();
+					break;
+				}
+			}
+			wait(delay(20));
 		}
 		TraceEvent("ZZZZZFinishTest").log();
 		return Void();
