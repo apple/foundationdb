@@ -740,6 +740,13 @@ public:
 	                                          // Enabling this can reduce toil of manually restarting the SS.
 	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
 	                                          // want to restart the SS, which increases risk of data corruption.
+	bool CONSISTENCY_CHECK_ROCKSDB_ENGINE; // When set, consistency check only check data corruption for a
+	                                       // shard which is in at least one SS with the rocksdb engine.
+	bool CONSISTENCY_CHECK_SQLITE_ENGINE; // When set, consistency check only check data corruption for a
+	                                      // shard which is in at least one SS with the sqlite engine.
+	                                      // When both CONSISTENCY_CHECK_ROCKSDB_ENGINE and
+	                                      // CONSISTENCY_CHECK_SQLITE_ENGINE are set, consistency check only checks for
+	                                      // the rocksdb engine.
 
 	// Test harness
 	double WORKER_POLL_DELAY;

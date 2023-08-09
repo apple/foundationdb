@@ -802,6 +802,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
+	init( CONSISTENCY_CHECK_ROCKSDB_ENGINE,                    false );
+	init( CONSISTENCY_CHECK_SQLITE_ENGINE,                     false );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
