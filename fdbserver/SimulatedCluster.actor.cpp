@@ -1816,7 +1816,8 @@ std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStora
 		str += std::to_string(static_cast<uint32_t>(e));
 		str += ',';
 	}
-	str.pop_back();
+	if (!excluded.empty())
+		str.pop_back();
 	return str;
 }
 
