@@ -782,6 +782,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 	headers["Host"] = bstore->host;
 	headers["Accept"] = "application/xml";
 
+	// Avoid to send request with an empty resouce.
+	if (resource.empty()) {
+		resource = "/";
+	}
+
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
 		std::string& fieldValue = headers[k];
