@@ -118,14 +118,15 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		// g_simulator->rebootProcess(p, ISimulator::KillType::RebootProcessAndDelete);
 		state std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(randomSS1.address().ip, randomSS1.address().port));
-		wait(excludeServers(cx, servers));
+		wait(excludeServers(cx, servers, true));
 		TraceEvent("ZZZZZDoneExcludeServer").log();
 
 		try {
 			// timeoutError() is needed because sometimes excluding process can take forever
-			state double timeout = 300.0;
-			std::set<NetworkAddress> inProgress =
-			    wait(timeoutError(checkForExcludingServers(cx, servers, true), timeout));
+			// state double timeout = 300.0;
+			// std::set<NetworkAddress> inProgress =
+			//    wait(timeoutError(checkForExcludingServers(cx, servers, true), timeout));
+			std::set<NetworkAddress> inProgress = wait(checkForExcludingServers(cx, servers, true));
 			ASSERT(inProgress.empty());
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
