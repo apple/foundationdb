@@ -5583,7 +5583,7 @@ bool blobWorkerTerminated(Reference<BlobWorkerData> self, IKeyValueStore* persis
 
 #define PERSIST_PREFIX "\xff\xff"
 static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
-static const KeyRef persistEncryptionAtRestModeKey = "encryptionAtRestMode"_sr;
+static const KeyRef persistEncryptionAtRestModeKey = PERSIST_PREFIX "encryptionAtRestMode"_sr;
 
 ACTOR Future<Void> checkUpdateEncryptionAtRestMode(Reference<BlobWorkerData> self,
                                                    Future<DatabaseConfiguration> configF) {
