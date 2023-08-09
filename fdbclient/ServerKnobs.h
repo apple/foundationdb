@@ -744,6 +744,9 @@ public:
 	                                       // shard which is in at least one SS with the rocksdb engine.
 	bool CONSISTENCY_CHECK_SQLITE_ENGINE; // When set, consistency check only check data corruption for a
 	                                      // shard which is in at least one SS with the sqlite engine.
+	                                      // When both CONSISTENCY_CHECK_ROCKSDB_ENGINE and
+	                                      // CONSISTENCY_CHECK_SQLITE_ENGINE are set, consistency check only checks for
+	                                      // the rocksdb engine.
 
 	// Test harness
 	double WORKER_POLL_DELAY;

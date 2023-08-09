@@ -1331,17 +1331,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
 				    wait(self->getStorageType(storageServerInterfaces));
 
+				KeyValueStoreType storageEngineToCheck = SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE
+				                                             ? KeyValueStoreType::StoreType::SSD_ROCKSDB_V1
+				                                             : KeyValueStoreType::StoreType::SSD_BTREE_V2;
 				bool anySpecifiedEngine = false;
 				for (int j = 0; j < storageServers.size(); j++) {
 					auto ssStorageType = storageTypeMapping.find(storageServers[j]);
 					if (ssStorageType != storageTypeMapping.end()) {
-						if (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE &&
-						    ssStorageType->second == KeyValueStoreType::StoreType::SSD_ROCKSDB_V1) {
-							anySpecifiedEngine = true;
-							break;
-						}
-						if (SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE &&
-						    ssStorageType->second == KeyValueStoreType::StoreType::SSD_BTREE_V2) {
+						if (ssStorageType->second == storageEngineToCheck) {
 							anySpecifiedEngine = true;
 							break;
 						}
@@ -1350,7 +1347,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				if (!anySpecifiedEngine) {
 					TraceEvent(SevInfo, "ConsistencyCheck_ShardSkipped")
 					    .suppressFor(1.0)
-					    .detail("Reason", "No SSD_ROCKSDB_V1 engine has the shard")
+					    .detail("Reason", "No specified storage engine has the shard")
 					    .detail("Range", range.toString())
 					    .detail("ShardSeqNumber", i)
 					    .detail("ShardCount", ranges.size())
