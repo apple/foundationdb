@@ -99,6 +99,41 @@ KeyBackedProperty<Versionstamp> maxRestoreId() {
 }
 
 namespace management {
+
+std::string moveStateToString(MovementState moveState) {
+	switch (moveState) {
+	case MovementState::START_LOCK:
+		return "start_lock";
+	case MovementState::START_CREATE:
+		return "start_create";
+	case MovementState::SWITCH_HYBRID:
+		return "switch_hybrid";
+	case MovementState::SWITCH_METADATA:
+		return "switch_metadata";
+	case MovementState::FINISH_UNLOCK:
+		return "finish_unlock";
+	default:
+		UNREACHABLE();
+	}
+}
+
+MovementState stringToMoveState(std::string stateStr) {
+	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
+	if (stateStr == "start_lock") {
+		return MovementState::START_LOCK;
+	} else if (stateStr == "start_create") {
+		return MovementState::START_CREATE;
+	} else if (stateStr == "switch_hybrid") {
+		return MovementState::SWITCH_HYBRID;
+	} else if (stateStr == "switch_metadata") {
+		return MovementState::SWITCH_METADATA;
+	} else if (stateStr == "fnish_unlock") {
+		return MovementState::FINISH_UNLOCK;
+	}
+
+	throw invalid_option();
+}
+
 KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())>& dataClusters() {
 	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> instance(
 	    "metacluster/dataCluster/metadata/"_sr, IncludeVersion());
@@ -133,10 +168,42 @@ KeyBackedSet<Tuple>& clusterTenantGroupIndex() {
 	return instance;
 }
 
+namespace emergency_movement {
+KeyBackedMap<TenantGroupName, MovementRecord>& emergencyMovements() {
+	static KeyBackedMap<TenantGroupName, MovementRecord> instance("emergency_movement/move/"_sr);
+	return instance;
+}
+
+KeyBackedMap<std::pair<TenantGroupName, std::string>, Version>& movementVersions() {
+	static KeyBackedMap<std::pair<TenantGroupName, std::string>, Version> instance("emergency_movement/version/"_sr);
+	return instance;
+}
+
+KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>& movementQueue() {
+	static KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>> instance(
+	    "emergency_movement/queue/"_sr);
+	return instance;
+}
+
+KeyBackedMap<Tuple, Key>& splitPointsMap() {
+	static KeyBackedMap<Tuple, Key> instance("emergency_movement/split_points/"_sr);
+	return instance;
+}
+
+}; // namespace emergency_movement
+
 TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata() {
 	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
 	return instance;
 }
 
 } // namespace management
+namespace data::emergency_movement {
+
+KeyBackedBinaryValue<Versionstamp>& lastTenantMoveAbort() {
+	static KeyBackedBinaryValue<Versionstamp> instance("\xff/emergency_movement_data/lastTenantMoveAbort/"_sr);
+	return instance;
+}
+
+} // namespace data::emergency_movement
 } // namespace metacluster::metadata
