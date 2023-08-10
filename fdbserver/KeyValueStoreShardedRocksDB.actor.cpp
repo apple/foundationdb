@@ -2283,11 +2283,13 @@ void RocksDBMetrics::logStats(rocksdb::DB* db, std::string manifestDirectory) {
 
 	int64_t manifestSizeTotal = 0;
 	auto manifests = getManifestBytes(manifestDirectory);
+	int idx = 0;
 	for (const auto& [fileName, fileBytes] : manifests) {
-		e.detail("FileName-" + fileName, fileBytes);
+		e.detail(format("Manifest-%d", idx), format("%s-%lld", fileName.c_str(), fileBytes));
 		manifestSizeTotal += fileBytes;
+		idx++;
 	}
-	e.detail("ManifestSizeTotal", manifestSizeTotal);
+	e.detail("ManifestSize", manifestSizeTotal);
 
 	std::string propValue = "";
 	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
