@@ -55,6 +55,7 @@ static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSD
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
 const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
+const std::string manifestFilePrefix = "MANIFEST-";
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
 // TODO: move constants to a header file.
 const KeyRef persistVersion = "\xff\xffVersion"_sr;
@@ -1954,7 +1955,7 @@ private:
 class RocksDBMetrics {
 public:
 	RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics> stats);
-	void logStats(rocksdb::DB* db);
+	void logStats(rocksdb::DB* db, std::string manifestDirectory);
 	// PerfContext
 	void resetPerfContext();
 	void collectPerfContext(int index);
@@ -1980,6 +1981,7 @@ public:
 	Reference<Histogram> getDeleteCompactRangeHistogram();
 	// Stat for Memory Usage
 	void logMemUsage(rocksdb::DB* db);
+	std::vector<std::pair<std::string, int64_t>> getManifestBytes(std::string manifestDirectory);
 
 private:
 	const UID debugID;
@@ -2014,6 +2016,18 @@ private:
 
 	uint64_t getRocksdbPerfcontextMetric(int metric);
 };
+
+std::vector<std::pair<std::string, int64_t>> RocksDBMetrics::getManifestBytes(std::string manifestDirectory) {
+	std::vector<std::pair<std::string, int64_t>> res;
+	std::vector<std::string> returnFiles = platform::listFiles(manifestDirectory, "");
+	for (const auto& fileEntry : returnFiles) {
+		if (fileEntry.find(manifestFilePrefix) != std::string::npos) {
+			int64_t manifestSize = fileSize(manifestDirectory + "/" + fileEntry);
+			res.push_back(std::make_pair(fileEntry, manifestSize));
+		}
+	}
+	return res;
+}
 
 // We have 4 readers and 1 writer. Following input index denotes the
 // id assigned to the reader thread when creating it
@@ -2253,7 +2267,7 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::milliseconds);
 }
 
-void RocksDBMetrics::logStats(rocksdb::DB* db) {
+void RocksDBMetrics::logStats(rocksdb::DB* db, std::string manifestDirectory) {
 	TraceEvent e(SevInfo, "ShardedRocksDBMetrics", debugID);
 	uint64_t stat;
 	for (auto& [name, ticker, cumulation] : tickerStats) {
@@ -2266,6 +2280,14 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 		ASSERT(db->GetAggregatedIntProperty(property, &stat));
 		e.detail(name, stat);
 	}
+
+	int64_t manifestSizeTotal = 0;
+	auto manifests = getManifestBytes(manifestDirectory);
+	for (const auto& [fileName, fileBytes] : manifests) {
+		e.detail("FileName-" + fileName, fileBytes);
+		manifestSizeTotal += fileBytes;
+	}
+	e.detail("ManifestSizeTotal", manifestSizeTotal);
 
 	std::string propValue = "";
 	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
@@ -2458,7 +2480,8 @@ uint64_t RocksDBMetrics::getRocksdbPerfcontextMetric(int metric) {
 ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
                                                   Future<Void> openFuture,
                                                   std::shared_ptr<RocksDBMetrics> rocksDBMetrics,
-                                                  ShardManager* shardManager) {
+                                                  ShardManager* shardManager,
+                                                  std::string manifestDirectory) {
 	try {
 		wait(openFuture);
 		state rocksdb::DB* db = shardManager->getDb();
@@ -2467,7 +2490,7 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDB
 			if (rState->closing) {
 				break;
 			}
-			rocksDBMetrics->logStats(db);
+			rocksDBMetrics->logStats(db, manifestDirectory);
 			rocksDBMetrics->logMemUsage(db);
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) {
 				rocksDBMetrics->logPerfContext(true);
@@ -3647,8 +3670,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(&shardManager, metrics, &readSemaphore, &fetchSemaphore);
 			openFuture = a->done.getFuture();
-			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
-			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
+			this->metrics =
+			    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
+			    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			this->refreshRocksDBBackgroundWorkHolder = refreshRocksDBBackgroundEventCounter(this->eventListener);
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
