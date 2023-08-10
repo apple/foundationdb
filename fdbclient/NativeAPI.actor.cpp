@@ -11245,6 +11245,9 @@ ACTOR Future<TenantMode> getOrWaitForTenantMode(Database cx) {
 }
 
 ACTOR Future<Void> checkTenantLock(Transaction* tr, Optional<Reference<Tenant>> tenant, KeyRange keyRange) {
+	if (CLIENT_KNOBS->HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK) {
+		return Void();
+	}
 	state int64_t tenantId;
 	if (tenant.present()) {
 		// if tenant present, explicitly get id

@@ -1,0 +1,49 @@
+# this test is lower value than the BlobGranuleRanges test, the delta is just tests that if the knob is set we don't bypass the lock
+testPriority = '10'
+
+# FIXME: remove this test once we have tenant + db options for this and can bypass lock or not on a per-operation basis
+
+[configuration]
+blobGranulesEnabled = true 
+allowDefaultTenant = false
+injectTargetedSSRestart = true
+injectSSDelay = true
+tenantModes = ['optional', 'required']
+
+[[knobs]]
+hybrid_management_bypass_tenant_lock = true
+
+[[test]]
+testTitle = 'BlobGranuleRanges'
+
+    [[test.workload]]
+    testName = 'BlobGranuleRanges'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 20.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 30.0
+

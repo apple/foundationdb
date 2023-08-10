@@ -286,6 +286,7 @@ public:
 	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 	bool DETERMINISTIC_BLOB_METADATA;
 	bool ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE;
+	bool HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
