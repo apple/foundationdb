@@ -2122,7 +2122,7 @@ public:
 		TraceEvent("ReconnectPair").detail("From", from).detail("To", to);
 		g_clogging.reconnectPair(from, to);
 	}
-		
+
 	std::vector<ProcessInfo*> getAllProcesses() const override {
 		std::vector<ProcessInfo*> processes;
 		for (auto& c : machines) {
