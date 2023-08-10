@@ -295,6 +295,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 	init( DETERMINISTIC_BLOB_METADATA,            false ); if( randomize && BUGGIFY_WITH_PROB(0.01) ) DETERMINISTIC_BLOB_METADATA = true;
 	init( ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE,  false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE = true; }
+	init( HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK,   false );
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );

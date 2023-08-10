@@ -257,6 +257,7 @@ if(WITH_PYTHON)
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
   add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml)
+  add_fdb_test(TEST_FILES rare/BlobGranuleRangesBypassLock.toml)
   add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
