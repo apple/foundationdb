@@ -1,4 +1,4 @@
-#!/opt/rh/rh-python36/root/bin/python3
+#!/usr/bin/env python3
 import base64
 import fdb
 import sys
@@ -15,10 +15,10 @@ import multiprocessing
 from datetime import datetime
 import ast
 
-fdb.api_version(713000)
+fdb.api_version(710300)
 
 # Reserved keyrange on management cluster to store info for data movement
-moveDataPrefix = "emergency_movement"
+moveDataPrefix = b"emergency_movement"
 
 rangeLimit = 100000
 timeoutLen = 60000  # in milliseconds
@@ -26,55 +26,57 @@ tmpSrcClusterFileName = "tmp_src_fdb.cluster"
 tmpDstClusterFileName = "tmp_dst_fdb.cluster"
 
 
-@fdb.transactional
-def readSrcRange(tr, begin, end, throttlingTag):
-    tr.options.set_lock_aware()
-    tr.options.set_auto_throttle_tag(throttlingTag)
-    readRange = tr.get_range(begin, end, 0, False, StreamingMode.want_all)
-    return list(readRange)
+def readSrcRange(
+    tenant: fdb.Tenant, begin: bytes, end: bytes, throttlingTag: bytes
+) -> list:
+    tr = tenant.create_transaction()
+    result = []
+    beginKey = begin
+    while True:
+        try:
+            tr.options.set_lock_aware()
+            tr.options.set_auto_throttle_tag(throttlingTag)
+            readRange = tr.get_range(beginKey, end, 0, False, StreamingMode.want_all)
+            for kv in readRange:
+                lastKey = kv.key
+                result.append(kv)
+            break
+        except fdb.FDBError as e:
+            beginKey = lastKey + b"\x00"
+            # transaction_too_old can just be retried
+            if e.code != 1007:
+                tr.reset()
+            else:
+                tr.on_error(e).wait()
+    return result
 
 
 # Returns the index of the last kv pair NOT set in this transaction
 @fdb.transactional
-def writeDstRange(tr, keyRange, throttlingTag):
+def writeDstRange(tr: fdb.Transaction, keyRange: list, throttlingTag: bytes) -> int:
     tr.options.set_lock_aware()
     tr.options.set_auto_throttle_tag(throttlingTag)
     sizeLimit = pow(10, 5)
     totalSize = 0
     index = 0
     for k, v in keyRange:
-        totalSize += len(k) + len(v)
         if totalSize >= sizeLimit:
             break
+        totalSize += len(k) + len(v)
         tr.set(k, v)
         index += 1
     return index
 
 
 def copyData(
-    srcClusterFile,
-    destClusterFile,
-    srcTenantName,
-    dstTenantName,
-    begin,
-    end,
-    throttlingTag,
-):
-    if not isinstance(begin, bytes):
-        begin = begin.encode("utf-8")
-    if not isinstance(end, bytes):
-        end = end.encode("utf-8")
-
-    if not isinstance(srcTenantName, bytes):
-        srcTenantName = srcTenantName.encode("utf-8")
-    if not isinstance(dstTenantName, bytes):
-        dstTenantName = dstTenantName.encode("utf-8")
-    # print(
-    #     "Copying data from `{}' to `{}' for range `{}' to `{}'".format(
-    #         srcTenantName, dstTenantName, begin, end
-    #     )
-    # )
-
+    srcClusterFile: str,
+    destClusterFile: str,
+    srcTenantName: bytes,
+    dstTenantName: bytes,
+    begin: bytes,
+    end: bytes,
+    throttlingTag: bytes,
+) -> None:
     srcDb = fdb.open(srcClusterFile)
     srcDb.options.set_transaction_timeout(timeoutLen)
 
@@ -98,13 +100,13 @@ def copyData(
                 )
             )
             break
-        except Exception as e:
+        except fdb.FDBError as e:
             print(
                 "Exception while reading from {} for range {} - {}. Error: {}".format(
                     srcTenantName, begin, end, str(e)
                 )
             )
-            None
+            raise
 
     totalKeys = len(readRange)
 
@@ -116,13 +118,13 @@ def copyData(
                 # print("Wrote destination range: {} - {}".format(readRange[0], readRange[cutoffIndex - 1]))
                 readRange = readRange[cutoffIndex:]
                 break
-            except Exception as e:
+            except fdb.FDBError as e:
                 print(
                     "Exception while writing to {} for range {} - {}. Error: {}".format(
                         dstTenantName, begin, end, str(e)
                     )
                 )
-                None
+                raise
     print(
         "Wrote full destination range: {} - {} for tenant {}. Total Keys: {}. Time Elapsed: {}".format(
             begin,
@@ -155,30 +157,32 @@ def run_fdbcli_command_mgmt(*args):
 
 
 @fdb.transactional
-def get_move_record(tr, tenantGroup):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def get_move_record(tr: fdb.Transaction, tenantGroup: bytes) -> tuple:
     tr.options.set_raw_access()
-    packKey = fdb.tuple.pack(
-        (tenantGroup,), (moveDataPrefix + "/move/").encode("utf-8")
-    )
+    packKey = fdb.tuple.pack((tenantGroup,), (moveDataPrefix + b"/move/"))
     result = tr.get(packKey)
+    if result == None:
+        return None
     moveTuple = fdb.tuple.unpack(result)
     return moveTuple
 
 
 @fdb.transactional
-def get_next_queue_head(tr, tenantGroup, runId, currentTenant, key):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def get_next_queue_head(
+    tr: fdb.Transaction,
+    tenantGroup: bytes,
+    runId: bytes,
+    currentTenant: bytes,
+    key: bytes,
+) -> tuple:
     tr.options.set_raw_access()
     packKeyBegin = fdb.tuple.pack(
         (tenantGroup, runId, currentTenant, key),
-        (moveDataPrefix + "/split_points/").encode("utf-8"),
+        (moveDataPrefix + b"/split_points/"),
     )
     packKeyEnd = fdb.tuple.pack(
-        (tenantGroup, runId, "\xff"),
-        (moveDataPrefix + "/split_points/").encode("utf-8"),
+        (tenantGroup, runId, b"\xff"),
+        (moveDataPrefix + b"/split_points/"),
     )
     readRange = tr.get_range(packKeyBegin, packKeyEnd, 2).to_list()
     if len(readRange) == 2:
@@ -186,7 +190,7 @@ def get_next_queue_head(tr, tenantGroup, runId, currentTenant, key):
         # By convention, tenant name is 3rd element in the tuple
         # and the key is the 4th element
         nextTuple = fdb.tuple.unpack(
-            nextSplitPoint, len(moveDataPrefix + "/split_points/")
+            nextSplitPoint, len(moveDataPrefix + b"/split_points/")
         )
         nextTenant = nextTuple[2]
         key = nextTuple[3]
@@ -195,13 +199,9 @@ def get_next_queue_head(tr, tenantGroup, runId, currentTenant, key):
 
 
 @fdb.transactional
-def get_queue_head(tr, tenantGroup, runId):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def get_queue_head(tr: fdb.Transaction, tenantGroup: bytes, runId: bytes) -> tuple:
     tr.options.set_raw_access()
-    packKey = fdb.tuple.pack(
-        (tenantGroup, runId), (moveDataPrefix + "/queue/").encode("utf-8")
-    )
+    packKey = fdb.tuple.pack((tenantGroup, runId), (moveDataPrefix + b"/queue/"))
     result = tr.get(packKey)
     if result == None:
         return None
@@ -209,38 +209,30 @@ def get_queue_head(tr, tenantGroup, runId):
 
 
 @fdb.transactional
-def set_queue_head(tr, tenantGroup, runId, tenantName, key):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
-    if not isinstance(key, bytes):
-        key = key.encode("utf-8")
+def set_queue_head(
+    tr: fdb.Transaction, tenantGroup: bytes, runId: bytes, tenantName: bytes, key: bytes
+) -> None:
     tr.options.set_raw_access()
-    packKey = fdb.tuple.pack(
-        (tenantGroup, runId), (moveDataPrefix + "/queue/").encode("utf-8")
-    )
+    packKey = fdb.tuple.pack((tenantGroup, runId), (moveDataPrefix + b"/queue/"))
     packValue = fdb.tuple.pack((tenantName, key))
     tr.set(packKey, packValue)
 
 
 @fdb.transactional
-def clear_queue_head(tr, tenantGroup, runId):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def clear_queue_head(tr, tenantGroup: bytes, runId: bytes) -> None:
     tr.options.set_raw_access()
-    packKey = fdb.tuple.pack(
-        (tenantGroup, runId), (moveDataPrefix + "/queue/").encode("utf-8")
-    )
+    packKey = fdb.tuple.pack((tenantGroup, runId), (moveDataPrefix + b"/queue/"))
     tr.clear(packKey)
 
 
 @fdb.transactional
-def get_stored_split_point(tr, tenantGroup, runId, tenantName, key):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def get_stored_split_point(
+    tr: fdb.Transaction, tenantGroup: bytes, runId: bytes, tenantName: bytes, key: bytes
+) -> bytes:
     tr.options.set_raw_access()
     packKey = fdb.tuple.pack(
         (tenantGroup, runId, tenantName, key),
-        (moveDataPrefix + "/split_points/").encode("utf-8"),
+        (moveDataPrefix + b"/split_points/"),
     )
     result = tr.get(packKey)
     if result == None:
@@ -249,21 +241,21 @@ def get_stored_split_point(tr, tenantGroup, runId, tenantName, key):
 
 
 @fdb.transactional
-def get_queue_head_from_split_points(tr, tenantGroup, runId):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def get_queue_head_from_split_points(
+    tr: fdb.Transaction, tenantGroup: bytes, runId: bytes
+) -> tuple:
     tr.options.set_raw_access()
     packBegin = fdb.tuple.pack(
-        (tenantGroup, runId), (moveDataPrefix + "/split_points/").encode("utf-8")
+        (tenantGroup, runId), (moveDataPrefix + b"/split_points/")
     )
     packEnd = fdb.tuple.pack(
-        (tenantGroup, runId, "\xff"),
-        (moveDataPrefix + "/split_points/").encode("utf-8"),
+        (tenantGroup, runId, b"\xff"),
+        (moveDataPrefix + b"/split_points/"),
     )
     readRange = tr.get_range(packBegin, packEnd, 1).to_list()
     if len(readRange) > 0:
         tupleStr = readRange[0].key
-        result = fdb.tuple.unpack(tupleStr, len(moveDataPrefix + "/split_points/"))
+        result = fdb.tuple.unpack(tupleStr, len(moveDataPrefix + b"/split_points/"))
         tenantName = result[2]
         key = result[3]
         return tenantName, key
@@ -272,9 +264,9 @@ def get_queue_head_from_split_points(tr, tenantGroup, runId):
 
 # return currentTenant, begin, end: 3 arguments passed to copyData
 @fdb.transactional
-def get_and_update_queue_head(tr, tenantGroup, runId):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def get_and_update_queue_head(
+    tr: fdb.Transaction, tenantGroup: bytes, runId: bytes
+) -> tuple:
     queue_tuple = get_queue_head(tr, tenantGroup, runId)
     if queue_tuple == None:
         (
@@ -295,35 +287,37 @@ def get_and_update_queue_head(tr, tenantGroup, runId):
         return None, None, None
     if nextTenant is None:
         clear_queue_head(tr, tenantGroup, runId)
-        return headTenant, headKey, headEnd
-    set_queue_head(tr, tenantGroup, runId, nextTenant, nextKey)
+    else:
+        set_queue_head(tr, tenantGroup, runId, nextTenant, nextKey)
     return headTenant, headKey, headEnd
 
 
 @fdb.transactional
-def clear_stored_split_point(tr, tenantGroup, runId, tenantName, key):
-    if not isinstance(tenantGroup, bytes):
-        tenantGroup = tenantGroup.encode("utf-8")
+def clear_stored_split_point(
+    tr: fdb.Transaction, tenantGroup: bytes, runId: bytes, tenantName: bytes, key: bytes
+) -> None:
     tr.options.set_raw_access()
     packKey = fdb.tuple.pack(
         (tenantGroup, runId, tenantName, key),
-        (moveDataPrefix + "/split_points/").encode("utf-8"),
+        (moveDataPrefix + b"/split_points/"),
     )
     tr.clear(packKey)
 
 
-def process_queue(mgmtDbName, tenantGroup, srcClusterName, dstClusterName):
+def process_queue(
+    mgmtDbName: str, tenantGroup: bytes, srcClusterName: bytes, dstClusterName: bytes
+) -> int:
     print("Process Queue Started")
     mgmtDb = fdb.open(mgmtDbName)
     mgmtDb.options.set_transaction_timeout(timeoutLen)
     moveRecord = get_move_record(mgmtDb, tenantGroup)
+    if moveRecord is None:
+        print("No move record found for the tenant group {}".format(tenantGroup))
+        return -1
+
     # Validate move record with parameters
     runId = moveRecord[0]
     mrSrc = moveRecord[1]
-    if not isinstance(srcClusterName, bytes):
-        srcClusterName = srcClusterName.encode("utf-8")
-    if not isinstance(dstClusterName, bytes):
-        dstClusterName = dstClusterName.encode("utf-8")
     if mrSrc != srcClusterName:
         print("Mismatch between move record and provided source cluster name:")
         print("  Provided: {}".format(srcClusterName))
@@ -331,7 +325,7 @@ def process_queue(mgmtDbName, tenantGroup, srcClusterName, dstClusterName):
         return -1
     mrDst = moveRecord[2]
     if mrDst != dstClusterName:
-        print("Mismatch between move record and provided source cluster name:")
+        print("Mismatch between move record and provided destination cluster name:")
         print("  Provided: {}".format(dstClusterName))
         print("  Move Record: {}".format(mrDst))
         return -1
@@ -403,9 +397,15 @@ if __name__ == "__main__":
     #   Also add cert files and other args needed for AuthZ
     # mgmt fdbcli command template
     command_template_mgmt = [
-        "fdbcli",
+        "/usr/bin/fdbcli",
         "-C",
         args.cluster,
+        "--tls_certificate_file",
+        "/etc/foundationdb/fdb.pem",
+        "--tls_ca_file",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "--tls_key_file",
+        "/etc/foundationdb/fdb.pem",
         "--exec",
     ]
 
@@ -450,10 +450,16 @@ if __name__ == "__main__":
         print("Error creating temporary cluster files.")
         print(e)
         exit(0)
-    tenantGroup = ast.literal_eval("'%s'" % args.tenant_group)
-    poolArgs = (args.cluster, tenantGroup, args.src_name, args.dst_name)
-    multiArgs = [poolArgs for i in range(args.num_procs)]
+
+    # Arguments to the queue
+    cluster = args.cluster
+    tenantGroup = ast.literal_eval("b'%s'" % args.tenant_group)
+    srcName = ast.literal_eval("b'%s'" % args.src_name)
+    dstName = ast.literal_eval("b'%s'" % args.dst_name)
+
     start = datetime.now()
+    poolArgs = (cluster, tenantGroup, srcName, dstName)
+    multiArgs = [poolArgs for i in range(args.num_procs)]
     with multiprocessing.Pool(processes=args.num_procs) as pool:
         pool.starmap(process_queue, multiArgs)
     print("Time Elapsed for Copy: ", (datetime.now() - start).total_seconds())
