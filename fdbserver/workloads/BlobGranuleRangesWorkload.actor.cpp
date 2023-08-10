@@ -921,13 +921,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		try {
 			wait(testFunction(duringRange, tenant));
-			if (!CLIENT_KNOBS->HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK) {
-				ASSERT(false);
-			}
+			ASSERT(CLIENT_KNOBS->HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK);
 		} catch (Error& e) {
-			if (CLIENT_KNOBS->HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK) {
-				ASSERT(false);
-			}
+			ASSERT(!CLIENT_KNOBS->HYBRID_MANAGEMENT_BYPASS_TENANT_LOCK);
 			ASSERT(e.code() == error_code_tenant_locked);
 		}
 
