@@ -41,13 +41,6 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 Optional<CompressionFilter> compressFilter,
                                 Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
-ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
-                                                    const KeyRangeRef& keyRange,
-                                                    Version beginVersion,
-                                                    Version readVersion,
-                                                    ReadBlobGranuleContext granuleContext,
-                                                    GranuleMaterializeStats& stats);
-
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,
                                    Version beginVersion,

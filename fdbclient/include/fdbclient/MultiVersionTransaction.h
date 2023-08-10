@@ -36,7 +36,7 @@
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_future FDBFuture;
-	typedef struct FDB_result FDBResult;
+	typedef struct FDBResult_ FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
 	typedef struct FDB_tenant FDBTenant;
@@ -372,33 +372,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              int end_key_name_length,
 	                                              int rangeLimit);
 
-	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* tr,
-	                                          uint8_t const* begin_key_name,
-	                                          int begin_key_name_length,
-	                                          uint8_t const* end_key_name,
-	                                          int end_key_name_length,
-	                                          int64_t beginVersion,
-	                                          int64_t readVersion);
-
-	FDBFuture* (*transactionReadBlobGranulesStart)(FDBTransaction* tr,
-	                                               uint8_t const* begin_key_name,
-	                                               int begin_key_name_length,
-	                                               uint8_t const* end_key_name,
-	                                               int end_key_name_length,
-	                                               int64_t beginVersion,
-	                                               int64_t readVersion,
-	                                               int64_t* readVersionOut);
-
-	FDBResult* (*transactionReadBlobGranulesFinish)(FDBTransaction* tr,
-	                                                FDBFuture* startFuture,
-	                                                uint8_t const* begin_key_name,
-	                                                int begin_key_name_length,
-	                                                uint8_t const* end_key_name,
-	                                                int end_key_name_length,
-	                                                int64_t beginVersion,
-	                                                int64_t readVersion,
-	                                                FDBReadBlobGranuleContext* granule_context);
-
 	FDBFuture* (*transactionSummarizeBlobGranules)(FDBTransaction* tr,
 	                                               uint8_t const* begin_key_name,
 	                                               int begin_key_name_length,
@@ -424,6 +397,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                           int endKeyNameLength,
 	                                           FDBConflictRangeType);
 
+	FDBFuture* (*transactionExecAsync)(FDBTransaction* tr, FDBRequest* request);
+	FDBAllocatorIfc* (*getAllocatorInterface)();
+
 	// Future
 	fdb_error_t (*futureGetDatabase)(FDBFuture* f, FDBDatabase** outDb);
 	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
@@ -443,6 +419,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            fdb_bool_t* outMore);
 	fdb_error_t (*futureGetGranuleSummaryArray)(FDBFuture* f, const FDBGranuleSummary** out_summaries, int* outCount);
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
+	fdb_error_t (*futureGetResult)(FDBFuture* f, FDBResult** response);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
@@ -503,23 +480,6 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
-
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
-	                                                                               Version beginVersion,
-	                                                                               Optional<Version> readVersion,
-	                                                                               Version* readVersionOut) override;
-
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
-
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
 	                                                                                 int rangeLimit) override;
@@ -556,6 +516,10 @@ public:
 
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
+
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
+
+	FDBAllocatorIfc* getAllocatorInterface() override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -673,6 +637,8 @@ public:
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
+	FDBAllocatorIfc* getAllocatorInterface() override;
+
 private:
 	const std::string fdbCPath;
 	const Reference<FdbCApi> api;
@@ -742,23 +708,6 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
-
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
-	                                                                               Version beginVersion,
-	                                                                               Optional<Version> readVersion,
-	                                                                               Version* readVersionOut) override;
-
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
-
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
 	                                                                                 int rangeLimit) override;
@@ -793,6 +742,10 @@ public:
 
 	// return true if the underlying transaction pointer is not empty
 	bool isValid() override;
+
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
+
+	FDBAllocatorIfc* getAllocatorInterface() override;
 
 private:
 	const Reference<MultiVersionDatabase> db;
@@ -829,12 +782,6 @@ private:
 	// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
 	template <class T>
 	ThreadFuture<T> makeTimeout();
-
-	template <class T>
-	ThreadResult<T> abortableTimeoutResult(ThreadFuture<Void> abortSignal);
-
-	template <class T>
-	ThreadResult<T> abortableResult(ThreadResult<T> result, ThreadFuture<Void> abortSignal);
 
 	TransactionInfo transaction;
 
@@ -1179,6 +1126,8 @@ public:
 	Reference<IDatabase> createDatabase(ClusterConnectionRecord const& connectionRecord);
 	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
 	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
+
+	FDBAllocatorIfc* getAllocatorInterface() override;
 
 	static MultiVersionApi* api;
 
