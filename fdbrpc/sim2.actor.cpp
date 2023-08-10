@@ -152,7 +152,7 @@ struct SimClogging {
 
 	bool disconnected(const IPAddress& from, const IPAddress& to) {
 		auto pair = std::make_pair(from, to);
-		if (g_simulator->speedUpSimulation || disconnectPairUntil.find(pair) == disconnectPairUntil.end()) {
+		if (g_simulator.speedUpSimulation || disconnectPairUntil.find(pair) == disconnectPairUntil.end()) {
 			return false;
 		}
 
