@@ -30,7 +30,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "fdbclient/ThrottleApi.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/TenantName.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -699,8 +699,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			for (auto const& tId : dataDb.tenants) {
 				TestTenantData testData = self->createdTenants[tId];
 				TenantName tName = testData.name;
-				TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
-				dataTenants.push_back(makeReference<Tenant>(dataDb.db, tenantLookupInfo, tName));
+				// TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
+				dataTenants.push_back(makeReference<Tenant>(dbObj, tName));
 			}
 			if (dataTenants.size()) {
 				wait(bulkSetup(dbObj,
@@ -764,9 +764,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 
 		state Database srcDbObj = self->dataDbs[srcDb].db;
 		state Reference<Tenant> srcTenant = makeReference<Tenant>(srcDbObj, moveBlock.tenant);
-		state Reference<ReadYourWritesTransaction> srcTr = makeReference<ReadYourWritesTransaction>(srcTenant);
+		state Reference<ReadYourWritesTransaction> srcTr =
+		    makeReference<ReadYourWritesTransaction>(srcDbObj, srcTenant);
 
-		state RangeReadResult srcRange;
+		state RangeResult srcRange;
 		loop {
 			try {
 				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -780,7 +781,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 
 		state Database dstDbObj = self->dataDbs[dstDb].db;
 		state Reference<Tenant> dstTenant = makeReference<Tenant>(dstDbObj, moveBlock.tenant);
-		state Reference<ReadYourWritesTransaction> dstTr = makeReference<ReadYourWritesTransaction>(dstTenant);
+		state Reference<ReadYourWritesTransaction> dstTr =
+		    makeReference<ReadYourWritesTransaction>(dstDbObj, dstTenant);
 		loop {
 			try {
 				dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);

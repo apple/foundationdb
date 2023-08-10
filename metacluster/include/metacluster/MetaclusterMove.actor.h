@@ -35,9 +35,9 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbclient/ThrottleApi.h"
 
 #include "flow/FastRef.h"
 #include "flow/flow.h"
@@ -488,7 +488,7 @@ struct StartTenantMovementImpl {
 	Version lockedVersion;
 	Optional<ThreadFuture<Standalone<StringRef>>> vsFuture;
 	Versionstamp mgmtStartVersion;
-	Optional<ThrottleApi::ThroughputQuotaValue> tagQuota;
+	Optional<ThrottleApi::TagQuotaValue> tagQuota;
 	Optional<int64_t> storageQuota;
 
 	StartTenantMovementImpl(Reference<DB> managementDb,
@@ -592,12 +592,14 @@ struct StartTenantMovementImpl {
 		state ThreadFuture<Version> versionFuture = tr->getReadVersion();
 		wait(store(self->lockedVersion, safeThreadFutureToFuture(versionFuture)));
 
-		state ThreadFuture<ValueReadResult> tagQuotaFuture = tr->get(ThrottleApi::getTagQuotaKey(self->tenantGroup));
+		state ThreadFuture<Optional<Value>> tagQuotaFuture = tr->get(ThrottleApi::getTagQuotaKey(self->tenantGroup));
 
 		wait(store(self->storageQuota, TenantMetadata::storageQuota().get(tr, self->tenantGroup)));
 
-		ValueReadResult v = wait(safeThreadFutureToFuture(tagQuotaFuture));
-		self->tagQuota = v.map([](Value val) { return ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(val)); });
+		Optional<Value> v = wait(safeThreadFutureToFuture(tagQuotaFuture));
+		if (v.present()) {
+			self->tagQuota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+		}
 
 		return Void();
 	}
@@ -843,16 +845,16 @@ struct SwitchTenantMovementImpl {
 		return false;
 	}
 
-	ACTOR static Future<RangeReadResult> readTenantData(Reference<ITransaction> tr,
-	                                                    KeySelectorRef begin,
-	                                                    KeySelectorRef end,
-	                                                    int64_t limit,
-	                                                    ThreadFuture<RangeReadResult>* resultFuture) {
+	ACTOR static Future<RangeResult> readTenantData(Reference<ITransaction> tr,
+	                                                KeySelectorRef begin,
+	                                                KeySelectorRef end,
+	                                                int64_t limit,
+	                                                ThreadFuture<RangeResult>* resultFuture) {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
 				*resultFuture = tr->getRange(begin, end, limit);
-				RangeReadResult result = wait(safeThreadFutureToFuture(*resultFuture));
+				RangeResult result = wait(safeThreadFutureToFuture(*resultFuture));
 				return result;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -872,10 +874,10 @@ struct SwitchTenantMovementImpl {
 		// what should limit be?
 		state int64_t limit = 10000;
 
-		state ThreadFuture<RangeReadResult> resultFutureSrc;
-		state ThreadFuture<RangeReadResult> resultFutureDst;
-		state RangeReadResult srcRange;
-		state RangeReadResult dstRange;
+		state ThreadFuture<RangeResult> resultFutureSrc;
+		state ThreadFuture<RangeResult> resultFutureDst;
+		state RangeResult srcRange;
+		state RangeResult dstRange;
 
 		loop {
 			srcTr->reset();
