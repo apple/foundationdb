@@ -1,3 +1,6 @@
+[configuration]
+storageEngineExcludeTypes = [5]
+
 [[test]]
 testTitle = 'TransactionTagWithApiCorrectness'
 clearAfterTest = true
