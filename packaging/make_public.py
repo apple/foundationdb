@@ -66,6 +66,8 @@ def makePublic(clusterFile, newAddress, makeTLS):
     for line in f:
         line = line.strip()
         if len(line) > 0:
+            if line[0] == '#':
+                continue
             if clusterStr is not None:
                 invalidClusterFile(clusterFile)
                 return

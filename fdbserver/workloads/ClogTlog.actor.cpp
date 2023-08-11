@@ -165,7 +165,7 @@ struct ClogTlogWorkload : TestWorkload {
 		}
 
 		double startTime = now();
-		state double workloadEnd = now() + self->testDuration;
+		state double workloadEnd = now() + self->testDuration - 10;
 		TraceEvent("ClogTlog").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Clog and wait for recovery to happen
@@ -174,13 +174,21 @@ struct ClogTlogWorkload : TestWorkload {
 			wait(self->dbInfo->onChange());
 		}
 
-		// start exclusion and wait for fully recovery
-		state Future<Void> excludeLog = excludeFailedLog(self, cx);
+		state bool useGrayFailureToRecover = false;
+		if (deterministicRandom()->coinflip() && self->useDisconnection) {
+			// Use gray failure instead of exclusion to recover the cluster.
+			TraceEvent("ClogTlogUseGrayFailreToRecover").log();
+			useGrayFailureToRecover = true;
+		}
+
+		// start exclusion and wait for fully recovery. When using gray failure, the cluster should recover by itself
+		// eventually.
+		state Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(self, cx);
 		state Future<Void> onChange = self->dbInfo->onChange();
 		loop choose {
 			when(wait(onChange)) {
 				if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
-					TraceEvent("ClogDoneFullyRecovered");
+					TraceEvent("ClogDoneFullyRecovered").log();
 					self->unclogAll();
 					return Void();
 				}

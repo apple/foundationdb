@@ -60,6 +60,8 @@
 #include "SwiftModules/Flow_CheckedContinuation.h"
 #endif  /* SWIFT_HIDE_CHECKED_CONTINUATION */
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
 #endif /* WITH_SWIFT */
 
 #include "pthread.h"
@@ -97,7 +99,7 @@ bool validationIsEnabled(BuggifyType type);
 
 namespace SwiftBridging {
 
-inline bool buggify(const char *filename, int line) {
+inline bool buggify(const char * _Nonnull filename, int line) {
     // SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
     return getSBVar(filename, line, BuggifyType::General) && deterministicRandom()->random01() < (P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)]);
 }
@@ -942,7 +944,9 @@ using flow_swift::FlowCheckedContinuation;
 
 template<class T>
 class
-SWIFT_CONFORMS_TO(flow_swift, FlowCallbackForSwiftContinuationT)
+#ifdef WITH_SWIFT
+SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
+#endif
 FlowCallbackForSwiftContinuation : Callback<T> {
 public:
 	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
@@ -995,7 +999,9 @@ template <class T>
 class
 SWIFT_SENDABLE
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
-SWIFT_CONFORMS_TO(flow_swift, FlowFutureOps)
+#ifdef WITH_SWIFT
+SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowFutureOps)
+#endif
 #endif
 Future {
 public:
@@ -1608,6 +1614,10 @@ inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 }
 
 void bindDeterministicRandomToOpenssl();
+
+#ifdef WITH_SWIFT
+#pragma clang diagnostic pop
+#endif
 
 #include "flow/genericactors.actor.h"
 #endif

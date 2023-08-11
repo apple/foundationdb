@@ -5674,7 +5674,7 @@ ACTOR Future<Void> truncateMutations(Reference<BlobManagerData> bmData, Version 
 	state std::string timestamp = BackupAgentBase::formatTime(epochs);
 	state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
 
-	if (truncVersion > 0) {
+	if (truncVersion > 0 && truncVersion < flushVersion) {
 		state std::string mlogsUrl =
 		    wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
@@ -5682,6 +5682,8 @@ ACTOR Future<Void> truncateMutations(Reference<BlobManagerData> bmData, Version 
 		bmData->stats.lastMLogTruncationVersion = truncVersion;
 		TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
 		CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+	} else {
+		TraceEvent("SkipTruncateMutations").detail("Version", truncVersion).detail("FlushVer", flushVersion);
 	}
 	return Void();
 }
@@ -5696,12 +5698,11 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	                                  bmData->dbInfo,
 	                                  manifestStore,
 	                                  bmData->epoch,
-	                                  bmData->manifestDumperSeqNo,
+	                                  bmData->manifestDumperSeqNo++,
 	                                  bmData->enableManifestEncryption));
 	bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 	bmData->stats.manifestSizeInBytes += bytes;
 	bmData->stats.lastManifestDumpTs = now();
-	bmData->manifestDumperSeqNo++;
 	bmData->manifestCompletitionTrigger.trigger();
 	return Void();
 }

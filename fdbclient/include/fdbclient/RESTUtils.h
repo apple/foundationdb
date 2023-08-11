@@ -87,7 +87,12 @@ struct RESTConnectionType {
 
 // Util interface facilitating management and update for RESTClient knob parameters
 struct RESTClientKnobs {
-	int connection_pool_size, connect_timeout, connect_tries, max_connection_life, request_tries, request_timeout_secs;
+	int connection_pool_size;
+	int connect_timeout;
+	int connect_tries;
+	int max_connection_life; // Note: this knob is not implemented yet in RESTClient
+	int request_tries;
+	int request_timeout_secs;
 
 	RESTClientKnobs();
 

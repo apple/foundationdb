@@ -20,7 +20,7 @@
 
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 #include <rocksdb/db.h>
 #include <rocksdb/env.h>
 #include <rocksdb/options.h>
@@ -29,7 +29,7 @@
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/types.h>
 #include <rocksdb/version.h>
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -45,7 +45,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 
 // Enforcing rocksdb version.
 static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
@@ -1239,7 +1239,7 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0));
 	return Void();
 }
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 
 int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints) {
 	int64_t totalBytes = 0;
@@ -1268,29 +1268,29 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
                                               const CheckpointAsKeyValues checkpointAsKeyValues,
                                               UID logId) {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF && !checkpointAsKeyValues) {
 		return new RocksDBCFCheckpointReader(checkpoint, logId);
 	} else {
 		return new RocksDBColumnFamilyReader(checkpoint, logId);
 	}
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 	return nullptr;
 }
 
 std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter() {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = std::make_unique<RocksDBSstFileWriter>();
 	return sstWriter;
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 	return nullptr;
 }
 
 std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint) {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 	return std::make_unique<RocksDBCheckpointByteSampleReader>(checkpoint);
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB
 	return nullptr;
 }
 

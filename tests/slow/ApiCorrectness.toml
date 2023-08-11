@@ -1,3 +1,10 @@
+[configuration]
+storageEngineType = 5
+
+[[knobs]]
+shard_encode_location_metadata = true
+dd_physical_shard_move_probability = 1.0
+
 [[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = true

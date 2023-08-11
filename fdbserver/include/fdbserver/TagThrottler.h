@@ -83,7 +83,7 @@ class GlobalTagThrottler : public ITagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
 public:
-	GlobalTagThrottler(Database db, UID id, int maxFallingBehind);
+	GlobalTagThrottler(Database db, UID id, int maxFallingBehind, double limitingThreshold);
 	~GlobalTagThrottler();
 
 	Future<Void> monitorThrottlingChanges() override;

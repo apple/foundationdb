@@ -184,7 +184,50 @@ public:
 			// including cancellation
 			self->storageQueueInfo.erase(ssi.id());
 			self->storageServerInterfaces.erase(ssi.id());
+			self->healthMetrics.storageStats.erase(ssi.id());
 			throw;
+		}
+	}
+
+	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
+	ACTOR static Future<Void> monitorStorageServerQueueSizeInSimulation(ActorWeakSelfRef<Ratekeeper> self) {
+		if (!g_network->isSimulated()) {
+			return Void();
+		}
+		state int threshold = SERVER_KNOBS->RATEKEEPER_MONITOR_SS_THRESHOLD;
+		state int cnt = 0;
+		state int maxCount = 5;
+		state Transaction tr(self->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
+				state int serverListSize = results.size();
+				state int interfaceSize = self->storageServerInterfaces.size();
+				state int metricSize = self->healthMetrics.storageStats.size();
+				if (interfaceSize - serverListSize > threshold || metricSize - serverListSize > threshold) {
+					cnt++;
+				} else {
+					cnt = 0;
+				}
+				if (cnt > maxCount) {
+					TraceEvent(SevError, "TooManySSInRK")
+					    .detail("Threshold", threshold)
+					    .detail("ServerListSize", serverListSize)
+					    .detail("InterfaceSize", interfaceSize)
+					    .detail("MetricSize", metricSize)
+					    .log();
+				}
+				// wait for monitorServerListChange to remove the interface
+				wait(delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY));
+				tr = Transaction(self->db);
+			} catch (Error& e) {
+				TraceEvent("RateKeeperFailedToReadSSList").log();
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -239,8 +282,9 @@ public:
 					}
 				} else {
 					storageServerTrackers.erase(id);
-
 					self->storageServerInterfaces.erase(id);
+					self->storageQueueInfo.erase(id); // remove the entry if an old storage server is absent
+					self->healthMetrics.storageStats.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
@@ -379,6 +423,7 @@ public:
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
 		self.addActor.send(self.monitorServerListChange(serverChanges));
 		self.addActor.send(RatekeeperImpl::trackEachStorageServer(pSelf, serverChanges.getFuture()));
+		self.addActor.send(monitorStorageServerQueueSizeInSimulation(pSelf));
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
@@ -663,7 +708,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
     maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
+		tagThrottler = std::make_unique<GlobalTagThrottler>(
+		    db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
