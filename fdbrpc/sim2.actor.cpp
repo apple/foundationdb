@@ -150,6 +150,16 @@ struct SimClogging {
 		return t - tnow;
 	}
 
+	bool disconnected(const IPAddress& from, const IPAddress& to) {
+		auto pair = std::make_pair(from, to);
+		if (g_simulator.speedUpSimulation || disconnectPairUntil.find(pair) == disconnectPairUntil.end()) {
+			return false;
+		}
+
+		double disconnectUntil = disconnectPairUntil[pair];
+		return now() < disconnectUntil;
+	}
+
 	void clogPairFor(const IPAddress& from, const IPAddress& to, double t) {
 		auto& u = clogPairUntil[std::make_pair(from, to)];
 		u = std::max(u, now() + t);
@@ -183,11 +193,22 @@ struct SimClogging {
 		return i->second;
 	}
 
+	void disconnectPairFor(const IPAddress& from, const IPAddress& to, double t) {
+		auto& u = disconnectPairUntil[std::make_pair(from, to)];
+		u = std::max(u, now() + t);
+	}
+
+	void reconnectPair(const IPAddress& from, const IPAddress& to) {
+		disconnectPairUntil.erase(std::make_pair(from, to));
+	}
+
 private:
 	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
 	std::map<std::pair<NetworkAddress, NetworkAddress>, double> clogProcessPairUntil;
+	std::map<std::pair<IPAddress, IPAddress>, double> disconnectPairUntil;
+
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
@@ -234,6 +255,14 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		                   std::any_of(peerProcess->childs.begin(),
 		                               peerProcess->childs.end(),
 		                               [&](ISimulator::ProcessInfo* child) { return child && child == process; });
+
+		if (g_clogging.disconnected(process->address.ip, peerProcess->address.ip)) {
+			TraceEvent("SimulatedDisconnection")
+			    .detail("Phase", "Connect")
+			    .detail("Address", process->address)
+			    .detail("Peer", peerProcess->address);
+			throw connection_failed();
+		}
 
 		TraceEvent("Sim2Connection")
 		    .detail("SendBufSize", sendBufSize)
@@ -372,16 +401,26 @@ private:
 			while (self->sentBytes.get() == self->receivedBytes.get())
 				wait(self->sentBytes.onChange());
 			ASSERT(g_simulator.getCurrentProcess() == self->peerProcess);
+
+			// Simulated network disconnection. Make sure to only throw connection_failed() on the sender process.
+			if (g_clogging.disconnected(self->peerProcess->address.ip, self->process->address.ip)) {
+				TraceEvent("SimulatedDisconnection")
+				    .detail("Phase", "DataTransfer")
+				    .detail("Sender", self->peerProcess->address)
+				    .detail("Receiver", self->process->address);
+				throw connection_failed();
+			}
+
 			state int64_t pos =
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
 			wait(delay(g_clogging.getSendDelay(
-			    self->process->address, self->peerProcess->address, self->isStableConnection())));
+			    self->peerProcess->address, self->process->address, self->isStableConnection())));
 			wait(g_simulator.onProcess(self->process));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			wait(delay(g_clogging.getRecvDelay(
-			    self->process->address, self->peerProcess->address, self->isStableConnection())));
+			    self->peerProcess->address, self->process->address, self->isStableConnection())));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
 				wait(Future<Void>(Never()));
@@ -2072,6 +2111,16 @@ public:
 	void unclogPair(const IPAddress& from, const IPAddress& to) override {
 		TraceEvent("UncloggingPair").detail("From", from).detail("To", to);
 		g_clogging.unclogPair(from, to);
+	}
+
+	void disconnectPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+		TraceEvent("DisconnectPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
+		g_clogging.disconnectPairFor(from, to, seconds);
+	}
+
+	void reconnectPair(const IPAddress& from, const IPAddress& to) override {
+		TraceEvent("ReconnectPair").detail("From", from).detail("To", to);
+		g_clogging.reconnectPair(from, to);
 	}
 
 	std::vector<ProcessInfo*> getAllProcesses() const override {
