@@ -2688,7 +2688,11 @@ public:
 							// FIXME: better way to do this than timer?
 						} else {
 							pendingTSSCheck = false;
-							checkTss = Never();
+							if (!self->zeroHealthyTeams->get()) {
+								checkTss = Never();
+							} else {
+								checkTss = delay(SERVER_KNOBS->TSS_DD_CHECK_INTERVAL);
+							}
 						}
 					}
 					when(wait(self->restartRecruiting.onTrigger())) {}
