@@ -91,7 +91,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	std::map<TenantGroupName, TenantGroupData> tenantGroups;
 
 	int initialTenants;
-	int maxTenants;
 	int maxTenantGroups;
 	int tenantGroupCapacity;
 	int timeoutLimit;
@@ -106,11 +105,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		nodeCount = getOption(options, "nodeCount"_sr, 5000.0);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
-		maxTenants =
-		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
-		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
+		initialTenants = getOption(options, "initialTenants"_sr, 20);
 		maxTenantGroups = deterministicRandom()->randomInt(
-		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
+		    1, std::min<int>(2 * initialTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		tenantGroupCapacity =
 		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
 		reservedQuota = getOption(options, "reservedQuota"_sr, 0);
@@ -124,7 +121,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
 
 	TenantName chooseTenantName() {
-		TenantName tenant(format("tenant%08d", deterministicRandom()->randomInt(0, maxTenants)));
+		TenantName tenant(format("tenant%08d", deterministicRandom()->randomInt(0, initialTenants)));
 		return tenant;
 	}
 
