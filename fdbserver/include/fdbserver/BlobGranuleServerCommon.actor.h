@@ -134,7 +134,7 @@ public:
 	void removeTenants(std::vector<int64_t> tenantIds);
 
 	Optional<TenantMapEntry> getTenantById(int64_t id);
-	Future<Reference<GranuleTenantData>> getDataForGranule(const KeyRangeRef& keyRange);
+	Future<Reference<GranuleTenantData>> getDataForGranule(const KeyRangeRef& keyRange, bool needBStore = true);
 
 	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
 	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;

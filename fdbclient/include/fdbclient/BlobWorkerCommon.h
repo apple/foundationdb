@@ -52,8 +52,6 @@ struct BlobWorkerStats {
 	int64_t numRangesAssigned;
 	int64_t mutationBytesBuffered;
 	int activeReadRequests;
-	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
-	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
 	Version cfVersionLag;
 	int notAtLatestChangeFeeds;
@@ -69,6 +67,10 @@ struct BlobWorkerStats {
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotBudget;
 	Reference<FlowLock> deltaWritesBudget;
+
+	ActiveCounter<int> granulesBlockedSplitCheck;
+	ActiveCounter<int> granulesBlockedOldSnapshot;
+	ActiveCounter<int> granulesBlockedCommittedVersion;
 
 	Future<Void> logger;
 
@@ -98,22 +100,21 @@ struct BlobWorkerStats {
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc),
 	    forceFlushCleanups("ForceFlushCleanups", cc), readDrivenCompactions("ReadDrivenCompactions", cc),
 	    oldFeedSnapshots("OldFeedSnapshots", cc), blockInFlightSnapshots("BlockInFlightSnapshots", cc),
-	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0),
-	    minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0),
-	    snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
-	                                   id,
-	                                   sampleLoggingInterval,
-	                                   fileOpLatencySketchAccuracy),
+	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), minimumCFVersion(0), cfVersionLag(0),
+	    notAtLatestChangeFeeds(0), lastResidentMemory(0), snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
+	                                                                                     id,
+	                                                                                     sampleLoggingInterval,
+	                                                                                     fileOpLatencySketchAccuracy),
 	    deltaBlobWriteLatencySample("DeltaBlobWriteMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),
 	    deltaUpdateSample("DeltaUpdateMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
-	    deltaWritesBudget(deltaWritesBudget) {
+	    deltaWritesBudget(deltaWritesBudget), granulesBlockedSplitCheck(0), granulesBlockedOldSnapshot(0),
+	    granulesBlockedCommittedVersion(0) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
-		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
 		specialCounter(cc, "MinimumChangeFeedVersion", [this]() { return this->minimumCFVersion; });
 		specialCounter(cc, "CFVersionLag", [this]() { return this->cfVersionLag; });
 		specialCounter(cc, "NotAtLatestChangeFeeds", [this]() { return this->notAtLatestChangeFeeds; });
@@ -125,6 +126,13 @@ struct BlobWorkerStats {
 		specialCounter(cc, "ReSnapshotBytesWaiting", [this]() { return this->resnapshotBudget->waiters(); });
 		specialCounter(cc, "DeltaFileWriteBytesActive", [this]() { return this->deltaWritesBudget->activePermits(); });
 		specialCounter(cc, "DeltaFileWriteBytesWaiting", [this]() { return this->deltaWritesBudget->waiters(); });
+		specialCounter(
+		    cc, "GranulesBlockedSplitCheck", [this]() { return this->granulesBlockedSplitCheck.getValue(); });
+		specialCounter(
+		    cc, "GranulesBlockedOldSnapshot", [this]() { return this->granulesBlockedOldSnapshot.getValue(); });
+		specialCounter(cc, "GranulesBlockedCommittedVersion", [this]() {
+			return this->granulesBlockedCommittedVersion.getValue();
+		});
 
 		logger = cc.traceCounters("BlobWorkerMetrics", id, interval, "BlobWorkerMetrics");
 	}

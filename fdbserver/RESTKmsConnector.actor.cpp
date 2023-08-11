@@ -672,6 +672,25 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		double expireAt = detail.HasMember(EXPIRE_AFTER_SEC) ? now() + detail[EXPIRE_AFTER_SEC].GetInt64()
 		                                                     : std::numeric_limits<double>::max();
 		result.emplace_back_deep(result.arena(), domainId, locations, refreshAt, expireAt);
+
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+			TraceEvent event("RESTParseBlobMetadataResponse", ctx->uid);
+			event.detail("DomainId", domainId);
+			event.detail("LocationCount", locations.size());
+			for (int i = 0; i < locations.size(); i++) {
+				event.detail("LocId" + std::to_string(i), locations[i].locationId);
+				if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+					// only log this at verbose level because it is expensive and likely contains credentials
+					event.detail("LocPath" + std::to_string(i), locations[i].path);
+				}
+			}
+			if (refreshAt != std::numeric_limits<double>::max()) {
+				event.detail("RefreshAt", refreshAt);
+			}
+			if (expireAt != std::numeric_limits<double>::max()) {
+				event.detail("ExpireAt", expireAt);
+			}
+		}
 	}
 
 	checkDocForNewKmsUrls(ctx, resp, doc);

@@ -329,7 +329,9 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 				// loading tenants, and instead a persistent issue.
 				retryCount++;
 				TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForCipherKeys", bwData->id)
-				    .detail("KeyRange", keyRange);
+				    .suppressFor(10.0)
+				    .detail("KeyRange", keyRange)
+				    .detail("Retries", retryCount);
 				wait(delay(0.1));
 			}
 		}
@@ -750,7 +752,11 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	startTimer = g_network->timer();
 	try {
 		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
+		state ActiveCounter<int>::Releaser holdingBlockedCommittedVersionCounter =
+		    bwData->stats.granulesBlockedCommittedVersion.take(1);
 		wait(waitCommitted);
+		holdingBlockedCommittedVersionCounter.release();
+
 		BlobFileIndex prev = wait(previousDeltaFileFuture);
 		wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
@@ -1384,23 +1390,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 }
 
-struct CounterHolder {
-	int* counter;
-	bool completed;
-
-	CounterHolder() : counter(nullptr), completed(true) {}
-	CounterHolder(int* counter) : counter(counter), completed(false) { (*counter)++; }
-
-	void complete() {
-		if (!completed) {
-			completed = true;
-			(*counter)--;
-		}
-	}
-
-	~CounterHolder() { complete(); }
-};
-
 ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
                                                     Reference<BlobConnectionProvider> bstore,
                                                     Reference<GranuleMetadata> metadata,
@@ -1409,15 +1398,15 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
                                                     Future<BlobFileIndex> lastDeltaBeforeSnapshot,
                                                     int64_t versionsSinceLastSnapshot) {
 
-	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	state BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	state ActiveCounter<int>::Releaser holdingSplitCheckCounter = bwData->stats.granulesBlockedSplitCheck.take(1);
+
 	state Version reSnapshotVersion = lastDeltaIdx.version;
 	while (!bwData->statusStreamInitialized) {
 		wait(bwData->currentManagerStatusStream.onChange());
 	}
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
-
-	state CounterHolder pendingCounter(&bwData->stats.granulesPendingSplitCheck);
 
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) checking with BM for re-snapshot after {2} bytes\n",
@@ -1509,8 +1498,6 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		}
 	}
 
-	pendingCounter.complete();
-
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) re-snapshotting after {2} bytes\n",
 		           metadata->keyRange.begin.printable(),
@@ -1525,6 +1512,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
 		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 	}
+	holdingSplitCheckCounter.release();
 	std::vector<GranuleFiles> toSnapshot;
 	toSnapshot.push_back(metadata->files);
 	BlobFileIndex reSnapshotIdx =
@@ -2162,7 +2150,9 @@ ACTOR Future<Key> getTenantPrefix(Reference<BlobWorkerData> bwData, KeyRange key
 			CODE_PROBE(true, "Get prefix for unknown tenant");
 			retryCount++;
 			TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantPrefix", bwData->id)
-			    .detail("KeyRange", keyRange);
+			    .suppressFor(10.0)
+			    .detail("KeyRange", keyRange)
+			    .detail("Retries", retryCount);
 			wait(delay(0.1));
 		}
 	}
@@ -4518,7 +4508,9 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<Bl
 			// loading tenants, and instead a persistent issue.
 			retryCount++;
 			TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForGranule", bwData->id)
-			    .detail("KeyRange", keyRange);
+			    .suppressFor(10.0)
+			    .detail("KeyRange", keyRange)
+			    .detail("Retries", retryCount);
 			wait(delay(0.1));
 		}
 	}
@@ -5560,6 +5552,7 @@ ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWo
 	self->shuttingDown = true;
 
 	wait(self->granuleMetadata.clearAsync());
+	TraceEvent("BlobWorkerCoreRemovingSelf", self->id);
 	throw worker_removed();
 }
 
@@ -5696,6 +5689,7 @@ ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 
 	if (!SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED || !fID.get().present()) {
 		CODE_PROBE(true, "Restored uninitialized blob worker");
+		TraceEvent("BlobWorkerRestorePersistentStateRemovingSeld", self->id);
 		throw worker_removed();
 	}
 	UID recoveredID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());

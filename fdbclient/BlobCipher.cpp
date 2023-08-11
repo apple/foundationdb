@@ -361,11 +361,23 @@ BlobCipherMetrics::BlobCipherMetrics()
     cipherKeyCacheExpired("CipherKeyCacheExpired", cc), latestCipherKeyCacheHit("LatestCipherKeyCacheHit", cc),
     latestCipherKeyCacheMiss("LatestCipherKeyCacheMiss", cc),
     latestCipherKeyCacheNeedsRefresh("LatestCipherKeyCacheNeedsRefresh", cc),
+    blobMetadataCacheHit("BlobMetadataCacheHit", cc), blobMetadataCacheMiss("BlobMetadataCacheMiss", cc),
+    blobMetadataNeedsRefresh("BlobMetadataNeedsRefresh", cc),
     getBlobMetadataLatency("GetBlobMetadataLatency",
                            UID(),
                            FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY) {
+                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
+    outstandingCipherKeyRequests(0), outstandingLatestCipherKeysRequests(0), outstandingBlobMetadataRequests(0) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
+
+	specialCounter(
+	    cc, "OutstandingCipherKeyRequests", [this]() { return this->outstandingCipherKeyRequests.getValue(); });
+	specialCounter(cc, "OutstandingLatestCipherKeysRequests", [this]() {
+		return this->outstandingLatestCipherKeysRequests.getValue();
+	});
+	specialCounter(
+	    cc, "OutstandingBlobMetadataRequests", [this]() { return this->outstandingBlobMetadataRequests.getValue(); });
+
 	traceFuture = cc.traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL);
 }
 
