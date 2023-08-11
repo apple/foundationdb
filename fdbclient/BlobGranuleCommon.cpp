@@ -43,3 +43,27 @@ BlobGranuleSummaryRef summarizeGranuleChunk(Arena& ar, const BlobGranuleChunkRef
 
 	return summary;
 }
+
+BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKeysCtx& cipherKeysCtx) {
+	BlobGranuleFileEncryptionKeys eKeys;
+
+	// Cipher key reconstructed is 'never' inserted into BlobCipherKey cache, choose 'neverExpire'
+	eKeys.textCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.textCipherKey.encryptDomainId,
+	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
+	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
+	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
+	                                                   cipherKeysCtx.textCipherKey.baseCipherKCV,
+	                                                   cipherKeysCtx.textCipherKey.salt,
+	                                                   std::numeric_limits<int64_t>::max(),
+	                                                   std::numeric_limits<int64_t>::max());
+	eKeys.headerCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.headerCipherKey.encryptDomainId,
+	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
+	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
+	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
+	                                                     cipherKeysCtx.headerCipherKey.baseCipherKCV,
+	                                                     cipherKeysCtx.headerCipherKey.salt,
+	                                                     std::numeric_limits<int64_t>::max(),
+	                                                     std::numeric_limits<int64_t>::max());
+
+	return eKeys;
+}

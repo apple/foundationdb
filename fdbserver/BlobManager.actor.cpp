@@ -606,7 +606,6 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 
 	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.front());
 
-	state Transaction tr = Transaction(bmData->db);
 	state int idx = 1;
 	state Reference<GranuleTenantData> tenantData;
 	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
@@ -616,28 +615,41 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	}
 	for (; idx < splits.size() - 1; idx++) {
+		alignKeyBoundary(bmData, tenantData, splits[idx], offset, splitPoints);
+	}
+
+	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.back());
+
+	return splitPoints;
+}
+
+// Find the next full db key for each split point
+ACTOR Future<Standalone<VectorRef<KeyRef>>> nextFullKeys(Reference<BlobManagerData> bmData,
+                                                         Standalone<VectorRef<KeyRef>> keys) {
+	state Standalone<VectorRef<KeyRef>> result;
+	result.push_back_deep(result.arena(), keys.front()); // keep the begin key as is
+
+	state Transaction tr = Transaction(bmData->db);
+	state int i = 1;
+	for (; i < keys.size() - 1; ++i) {
 		loop {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				// Get the next full key in the granule.
-				RangeResult nextKeyRes = wait(
-				    tr.getRange(firstGreaterOrEqual(splits[idx]), lastLessThan(splits[idx + 1]), GetRangeLimits(1)));
+				RangeResult nextKeyRes =
+				    wait(tr.getRange(firstGreaterOrEqual(keys[i]), lastLessThan(keys[i + 1]), GetRangeLimits(1)));
 				if (nextKeyRes.size() == 0) {
 					break;
 				}
-
-				alignKeyBoundary(bmData, tenantData, nextKeyRes[0].key, offset, splitPoints);
+				result.push_back_deep(result.arena(), nextKeyRes[0].key);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
 	}
-
-	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.back());
-
-	return splitPoints;
+	result.push_back_deep(result.arena(), keys.back()); // keep the end key as is
+	return result;
 }
 
 ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmData,
@@ -714,7 +726,8 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 
 			// We only need to align the keys if there is a proposed split.
 			if (keys.size() > 2) {
-				BlobGranuleSplitPoints _splitPoints = wait(alignKeys(bmData, range, keys));
+				Standalone<VectorRef<KeyRef>> fullKeys = wait(nextFullKeys(bmData, keys));
+				BlobGranuleSplitPoints _splitPoints = wait(alignKeys(bmData, range, fullKeys));
 				splitPoints = _splitPoints;
 			} else {
 				splitPoints.keys = keys;
@@ -1327,7 +1340,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(loadTenantMap(tr, bmData));
 
-				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
+				state Future<Void> watchChange = TenantMetadata::lastTenantModification().watch(tr);
 				wait(tr->commit());
 				wait(watchChange);
 				tr->reset();
@@ -1674,17 +1687,19 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	ASSERT(splitFirst.keys.size() >= 2);
 	ASSERT(splitFirst.keys.front() == granuleRange.begin);
 	ASSERT(splitFirst.keys.back() == proposedSplitKey);
-	for (int i = 0; i < splitFirst.keys.size(); i++) {
-		newRanges.push_back_deep(newRanges.arena(), splitFirst.keys[i]);
+	Standalone<VectorRef<KeyRef>> splitFirstFullKeys = wait(nextFullKeys(bmData, splitFirst.keys));
+	for (int i = 0; i < splitFirstFullKeys.size(); i++) {
+		newRanges.push_back_deep(newRanges.arena(), splitFirstFullKeys[i]);
 	}
 
 	BlobGranuleSplitPoints splitSecond = wait(fSplitSecond);
 	ASSERT(splitSecond.keys.size() >= 2);
 	ASSERT(splitSecond.keys.front() == proposedSplitKey);
 	ASSERT(splitSecond.keys.back() == granuleRange.end);
+	Standalone<VectorRef<KeyRef>> splitSecondFullKeys = wait(nextFullKeys(bmData, splitSecond.keys));
 	// i=1 to skip proposedSplitKey, since above already added it
-	for (int i = 1; i < splitSecond.keys.size(); i++) {
-		newRanges.push_back_deep(newRanges.arena(), splitSecond.keys[i]);
+	for (int i = 1; i < splitSecondFullKeys.size(); i++) {
+		newRanges.push_back_deep(newRanges.arena(), splitSecondFullKeys[i]);
 	}
 
 	if (BM_DEBUG) {
@@ -5594,10 +5609,13 @@ ACTOR Future<Void> updateLastFlushVersion(Database db, Version flushVersion) {
 // Try to flush blob granules. Return the flushed version if it's successful.
 ACTOR Future<Version> maybeFlushGranules(Reference<BlobManagerData> bmData) {
 	state BlobGranuleBackupConfig config;
-	int64_t lastFlushTs = wait(config.lastFlushTs().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+	state int64_t lastFlushTs = wait(config.lastFlushTs().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 	bool shouldFlush = lastFlushTs == 0 || (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
 	if (!shouldFlush) {
-		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+		int64_t lastFlushVersion =
+		    wait(config.lastFlushVersion().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs).detail("LastFlushVer", lastFlushVersion);
+		bmData->stats.lastFlushVersion = lastFlushVersion;
 		return invalidVersion;
 	}
 
@@ -5703,6 +5721,7 @@ ACTOR Future<Void> backupManifestLoop(Reference<BlobManagerData> bmData) {
 				TraceEvent("BackupManifestLoopExit").log();
 				bmData->stats.lastFlushVersion = 0;
 				bmData->stats.lastManifestDumpTs = 0;
+				bmData->stats.manifestSizeInBytes = 0;
 				return Void();
 			}
 			wait(backupManifest(bmData));

@@ -41,16 +41,6 @@
 #error Requested API version requires a newer version of this header
 #endif
 
-#if FDB_API_VERSION >= 23 && !defined(WARN_UNUSED_RESULT)
-#ifdef __GNUG__
-#define WARN_UNUSED_RESULT __attribute__((warn_unused_result))
-#else
-#define WARN_UNUSED_RESULT
-#endif
-#else
-#define WARN_UNUSED_RESULT
-#endif
-
 /*
  * With default settings, gcc will not warn about unprototyped functions being
  * called, so it is easy to erroneously call a function which is not available
@@ -66,6 +56,23 @@
 
 #include "fdb_c_options.g.h"
 #include "fdb_c_types.h"
+
+/**
+ * Assuming Blob Granule API V1 by default for compatibility with the current release
+ * The application code using Blob Granule API, should be upgraded to V2, because V1
+ * will be deprecated in the next major release
+ */
+#if !defined(FDB_BLOB_GRANULE_API_VERSION)
+#define FDB_BLOB_GRANULE_API_VERSION 1
+#endif
+
+#define BUILD_BLOB_GRANULE_IDENTIFIER(symbolname, version) symbolname##version
+#define BLOB_GRANULE_IDENTIFIER_(symbolname, version) BUILD_BLOB_GRANULE_IDENTIFIER(symbolname, version)
+#define BLOB_GRANULE_IDENTIFIER(symbolname) BLOB_GRANULE_IDENTIFIER_(symbolname, FDB_BLOB_GRANULE_API_VERSION)
+
+typedef BLOB_GRANULE_IDENTIFIER(FDBBGEncryptionCtxV) FDBBGEncryptionCtx;
+typedef BLOB_GRANULE_IDENTIFIER(FDBBGFilePointerV) FDBBGFilePointer;
+typedef BLOB_GRANULE_IDENTIFIER(FDBBGFileDescriptionV) FDBBGFileDescription;
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,29 +107,6 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_stop_network(void);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*),
                                                                                 void* hook_parameter);
-
-#pragma pack(push, 4)
-typedef struct key {
-	const uint8_t* key;
-	int key_length;
-} FDBKey;
-#if FDB_API_VERSION >= 630
-typedef struct keyvalue {
-	const uint8_t* key;
-	int key_length;
-	const uint8_t* value;
-	int value_length;
-} FDBKeyValue;
-#else
-typedef struct keyvalue {
-	const void* key;
-	int key_length;
-	const void* value;
-	int value_length;
-} FDBKeyValue;
-#endif
-
-#pragma pack(pop)
 
 /* Memory layout of KeySelectorRef. */
 typedef struct keyselector {
@@ -177,107 +161,6 @@ typedef struct mappedkeyvalue {
 	FDBGetRangeReqAndResult getRange;
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
-
-#pragma pack(push, 4)
-typedef struct keyrange {
-	const uint8_t* begin_key;
-	int begin_key_length;
-	const uint8_t* end_key;
-	int end_key_length;
-} FDBKeyRange;
-
-typedef struct granulesummary {
-	FDBKeyRange key_range;
-	int64_t snapshot_version;
-	int64_t snapshot_size;
-	int64_t delta_version;
-	int64_t delta_size;
-} FDBGranuleSummary;
-#pragma pack(pop)
-
-typedef struct readgranulecontext {
-	/* User context to pass along to functions */
-	void* userContext;
-
-	/* Returns a unique id for the load. Asynchronous to support queueing multiple in parallel. */
-	int64_t (*start_load_f)(const char* filename,
-	                        int filenameLength,
-	                        int64_t offset,
-	                        int64_t length,
-	                        int64_t fullFileLength,
-	                        void* context);
-
-	/* Returns data for the load. Pass the loadId returned by start_load_f */
-	uint8_t* (*get_load_f)(int64_t loadId, void* context);
-
-	/* Frees data from load. Pass the loadId returned by start_load_f */
-	void (*free_load_f)(int64_t loadId, void* context);
-
-	/* Set this to true for testing if you don't want to read the granule files,
-	   just do the request to the blob workers */
-	fdb_bool_t debugNoMaterialize;
-
-	/* Number of granules to load in parallel */
-	int granuleParallelism;
-} FDBReadBlobGranuleContext;
-
-typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
-
-#pragma pack(push, 4)
-
-typedef struct bgtenantprefix {
-	fdb_bool_t present;
-	FDBKey prefix;
-} FDBBGTenantPrefix;
-
-/* encryption structs correspond to similar ones in BlobGranuleCommon.h */
-typedef struct bgencryptionkey {
-	int64_t domain_id;
-	uint64_t base_key_id;
-	uint32_t base_kcv;
-	uint64_t random_salt;
-	FDBKey base_key;
-} FDBBGEncryptionKey;
-
-typedef struct bgencryptionctx {
-	fdb_bool_t present;
-	FDBBGEncryptionKey textKey;
-	uint32_t textKCV;
-	FDBBGEncryptionKey headerKey;
-	uint32_t headerKCV;
-	FDBKey iv;
-} FDBBGEncryptionCtx;
-
-typedef struct bgfilepointer {
-	const uint8_t* filename_ptr;
-	int filename_length;
-	int64_t file_offset;
-	int64_t file_length;
-	int64_t full_file_length;
-	int64_t file_version;
-	FDBBGEncryptionCtx encryption_ctx;
-} FDBBGFilePointer;
-
-typedef struct bgmutation {
-	/* FDBBGMutationType */ uint8_t type;
-	int64_t version;
-	const uint8_t* param1_ptr;
-	int param1_length;
-	const uint8_t* param2_ptr;
-	int param2_length;
-} FDBBGMutation;
-
-typedef struct bgfiledescription {
-	FDBKeyRange key_range;
-	fdb_bool_t snapshot_present;
-	FDBBGFilePointer snapshot_file_pointer;
-	int delta_file_count;
-	FDBBGFilePointer* delta_files;
-	int memory_mutation_count;
-	FDBBGMutation* memory_mutations;
-	FDBBGTenantPrefix tenant_prefix;
-} FDBBGFileDescription;
-#pragma pack(pop)
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
@@ -343,19 +226,39 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FD
                                                                               int* out_count);
 
 /* all for using future result from read_blob_granules_description */
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
-                                                                            FDBBGFileDescription** out,
-                                                                            int* desc_count);
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions_v1(FDBFuture* f,
+                                                                               FDBBGFileDescriptionV1** out_descs,
+                                                                               int* out_count);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions_v2(FDBFuture* f,
+                                                                               FDBBGFileDescriptionV2*** out_descs,
+                                                                               int* out_count);
+
+#define fdb_future_readbg_get_descriptions BLOB_GRANULE_IDENTIFIER(fdb_future_readbg_get_descriptions_v)
+
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file_v1(const uint8_t* file_data,
+                                                                          int file_len,
+                                                                          FDBBGTenantPrefix const* tenant_prefix,
+                                                                          FDBBGEncryptionCtxV1 const* encryption_ctx);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file_v2(const uint8_t* file_data,
+                                                                          int file_len,
+                                                                          FDBBGTenantPrefix const* tenant_prefix,
+                                                                          FDBBGEncryptionCtxV2 const* encryption_ctx);
+
+#define fdb_readbg_parse_snapshot_file BLOB_GRANULE_IDENTIFIER(fdb_readbg_parse_snapshot_file_v)
+
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file_v1(const uint8_t* file_data,
                                                                        int file_len,
                                                                        FDBBGTenantPrefix const* tenant_prefix,
-                                                                       FDBBGEncryptionCtx const* encryption_ctx);
+                                                                       FDBBGEncryptionCtxV1 const* encryption_ctx);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data,
-                                                                    int file_len,
-                                                                    FDBBGTenantPrefix const* tenant_prefix,
-                                                                    FDBBGEncryptionCtx const* encryption_ctx);
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file_v2(const uint8_t* file_data,
+                                                                       int file_len,
+                                                                       FDBBGTenantPrefix const* tenant_prefix,
+                                                                       FDBBGEncryptionCtxV2 const* encryption_ctx);
+
+#define fdb_readbg_parse_delta_file BLOB_GRANULE_IDENTIFIER(fdb_readbg_parse_delta_file_v)
 
 /* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
 DLLEXPORT void fdb_result_destroy(FDBResult* r);
@@ -698,14 +601,25 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_summarize_blob_granules(
                                                                                 int64_t summaryVersion,
                                                                                 int rangeLimit);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_description(FDBTransaction* tr,
-                                                                                       uint8_t const* begin_key_name,
-                                                                                       int begin_key_name_length,
-                                                                                       uint8_t const* end_key_name,
-                                                                                       int end_key_name_length,
-                                                                                       int64_t begin_version,
-                                                                                       int64_t read_version,
-                                                                                       int64_t* read_version_out);
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_description_v1(FDBTransaction* tr,
+                                                                                          uint8_t const* begin_key_name,
+                                                                                          int begin_key_name_length,
+                                                                                          uint8_t const* end_key_name,
+                                                                                          int end_key_name_length,
+                                                                                          int64_t begin_version,
+                                                                                          int64_t read_version,
+                                                                                          int64_t* read_version_out);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_description_v2(FDBTransaction* tr,
+                                                                                          uint8_t const* begin_key_name,
+                                                                                          int begin_key_name_length,
+                                                                                          uint8_t const* end_key_name,
+                                                                                          int end_key_name_length,
+                                                                                          int64_t begin_version,
+                                                                                          int64_t read_version);
+
+#define fdb_transaction_read_blob_granules_description                                                                 \
+	BLOB_GRANULE_IDENTIFIER(fdb_transaction_read_blob_granules_description_v)
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0
