@@ -23,6 +23,7 @@
 #include <cctype>
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/md5/md5.h"
 #include "fdbrpc/libb64/encode.h"
 #include "flow/Knobs.h"
