@@ -441,7 +441,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BLOOM_WHOLE_KEY_FILTERING,                   false );
 	init( ROCKSDB_MAX_AUTO_READAHEAD_SIZE,                     65536 );
 	// If rocksdb block cache size is 0, the default 8MB is used.
-	int64_t blockCacheSize = isSimulated ? 16 * 1024 * 1024 : 2147483648 /* 2GB */;
+	int64_t blockCacheSize = isSimulated ? 16 * 1024 : 2147483648 /* 2GB */;
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize );
 	init( ROCKSDB_METRICS_DELAY,                                60.0 );
 	// ROCKSDB_READ_VALUE_TIMEOUT, ROCKSDB_READ_VALUE_PREFIX_TIMEOUT, ROCKSDB_READ_RANGE_TIMEOUT knobs:
@@ -538,7 +538,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 false ); if (isSimulated) ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN = deterministicRandom()->coinflip();
 	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
 	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
-	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); // 100MB
+	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
 	init (ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                           6 ); // RocksDB default.
 
 	// Leader election
