@@ -338,8 +338,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 ACTOR Future<Void> scheduleAuditLocationMetadata(Reference<DataDistributor> self,
                                                  std::shared_ptr<DDAudit> audit,
                                                  KeyRange range);
-ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
-                                        std::shared_ptr<DDAudit> audit);
+ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range);
@@ -2644,6 +2643,9 @@ ACTOR Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent("AuditStorageErrorGetStorageType").errorUnsuppressed(e);
 		res.clear();
 	}
