@@ -113,6 +113,7 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
 				                                 auditRange,
 				                                 type,
+				                                 KeyValueStoreType::END, // do not specific any storage engine to check
 				                                 /*timeoutSecond=*/300));
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
