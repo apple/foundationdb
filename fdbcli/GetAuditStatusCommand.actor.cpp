@@ -93,17 +93,20 @@ ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx)
 	}
 }
 
-ACTOR Future<Void> getAuditProgressByServer(Database cx,
-                                            AuditType auditType,
-                                            UID auditId,
-                                            KeyRange auditRange,
-                                            UID serverId) {
+// Return progress of the server:
+// 1. the server audit completes/running/error
+// 2. the number of ranges that are completed
+ACTOR Future<std::pair<AuditPhase, int64_t>> getAuditProgressByServer(Database cx,
+                                                                      AuditType auditType,
+                                                                      UID auditId,
+                                                                      KeyRange auditRange,
+                                                                      UID serverId) {
 	state KeyRange rangeToRead = auditRange;
 	state Key rangeToReadBegin = auditRange.begin;
 	state int retryCount = 0;
 	state int64_t finishCount = 0;
 	state int64_t unfinishedCount = 0;
-	printf("Storage server: %s\n", serverId.toString().c_str());
+	state AuditPhase auditServerStatus = AuditPhase::Invalid;
 	while (rangeToReadBegin < auditRange.end) {
 		loop {
 			try {
@@ -113,14 +116,14 @@ ACTOR Future<Void> getAuditProgressByServer(Database cx,
 				for (int i = 0; i < auditStates.size(); i++) {
 					AuditPhase phase = auditStates[i].getPhase();
 					if (phase == AuditPhase::Invalid) {
-						printf("( Ongoing ) %s\n", auditStates[i].range.toString().c_str());
 						++unfinishedCount;
 					} else if (phase == AuditPhase::Error) {
-						printf("( Error   ) %s\n", auditStates[i].range.toString().c_str());
+						auditServerStatus = AuditPhase::Error;
+						++finishCount;
+					} else if (phase == AuditPhase::Complete) {
 						++finishCount;
 					} else {
-						++finishCount;
-						continue;
+						UNREACHABLE();
 					}
 				}
 				rangeToReadBegin = auditStates.back().range.end;
@@ -130,35 +133,56 @@ ACTOR Future<Void> getAuditProgressByServer(Database cx,
 					throw e;
 				}
 				if (retryCount > 30) {
-					printf("Imcomplete check\n");
-					return Void();
+					return std::make_pair(auditServerStatus, finishCount);
 				}
 				wait(delay(0.5));
 				retryCount++;
 			}
 		}
 	}
-	printf("Finished range count: %ld\n", finishCount);
-	return Void();
+	if (auditServerStatus != AuditPhase::Error) {
+		if (unfinishedCount == 0) {
+			auditServerStatus = AuditPhase::Complete;
+		} else {
+			auditServerStatus = AuditPhase::Running;
+		}
+	}
+	return std::make_pair(auditServerStatus, finishCount);
 }
 
 ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
 	if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	    auditType == AuditType::ValidateLocationMetadata) {
 		wait(getAuditProgressByRange(cx, auditType, auditId, auditRange));
-	} else {
-		if (auditType != AuditType::ValidateStorageServerShard) {
-			printf("AuditType not implemented\n");
-			return Void();
-		}
+	} else if (auditType == AuditType::ValidateStorageServerShard) {
 		state std::vector<Future<Void>> fs;
 		state std::unordered_map<UID, bool> res;
 		state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 		state int i = 0;
+		state int numCompleteServers = 0;
+		state int numOngoingServers = 0;
+		state int numErrorServers = 0;
+		state int64_t totalFinishRanges = 0;
 		for (; i < interfs.size(); i++) {
-			UID serverId = interfs[i].uniqueID;
-			wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, serverId));
+			std::pair<AuditPhase, int64_t> serverStats =
+			    wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
+			if (serverStats.first == AuditPhase::Running) {
+				numOngoingServers++;
+			} else if (serverStats.first == AuditPhase::Complete) {
+				numCompleteServers++;
+			} else if (serverStats.first == AuditPhase::Error) {
+				numErrorServers++;
+			} else if (serverStats.first == AuditPhase::Invalid) {
+				printf("SS %s partial progress fetched\n", interfs[i].id().toString().c_str());
+			}
+			totalFinishRanges += serverStats.second;
 		}
+		printf("CompleteServers: %d\n", numCompleteServers);
+		printf("OngoingServers: %d\n", numOngoingServers);
+		printf("ErrorServers: %d\n", numErrorServers);
+		printf("TotalFinishRanges: %ld\n", totalFinishRanges);
+	} else {
+		printf("AuditType not implemented\n");
 	}
 	return Void();
 }
