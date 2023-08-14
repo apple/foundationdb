@@ -1677,13 +1677,13 @@ public:
 						self->unhealthyServers--;
 					}
 					if (!unhealthy && status->isUnhealthy()) {
-						TraceEvent(SevWarn, "StorangeServerUnhealthy", self->distributorId)
+						TraceEvent(SevWarn, "StorageServerUnhealthy", self->distributorId)
 						    .detail("ServerID", interf.id())
 						    .detail("ServerIpAddress", interf.address());
 						self->unhealthyServers++;
 					}
 				} else if (status->isUnhealthy()) {
-					TraceEvent(SevWarn, "StorangeServerUnhealthy", self->distributorId)
+					TraceEvent(SevWarn, "StorageServerUnhealthy", self->distributorId)
 					    .detail("ServerID", interf.id())
 					    .detail("ServerIpAddress", interf.address());
 					self->unhealthyServers++;
