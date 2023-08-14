@@ -262,10 +262,10 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 	return Void();
 }
 
-ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
-                                            MoveKeyLockInfo lock,
-                                            bool isDDEnabled,
-                                            bool isWrite = true) {
+ACTOR static Future<Void> checkMoveKeysLockForAudit(Transaction* tr,
+                                                    MoveKeyLockInfo lock,
+                                                    bool isDDEnabled,
+                                                    bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	if (!isDDEnabled) {
 		TraceEvent(SevDebug, "AuditUtilDisabledByInMemoryCheck").log();
@@ -279,7 +279,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
-			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
 			TraceEvent(SevDebug, "ConflictWithPreviousOwner");
 			throw movekeys_conflict(); // need a new name
 		}
@@ -310,7 +309,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		}
 		return Void();
 	} else {
-		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner")
 		    .detail("CurrentOwner", currentOwner.toString())
 		    .detail("PrevOwner", lock.prevOwner.toString())
@@ -335,7 +333,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+				wait(checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true));
 				RangeResult res =
 				    wait(tr.getRange(auditKeyRange(auditState.getType()), 1, Snapshot::False, Reverse::True));
 				ASSERT(res.size() == 0 || res.size() == 1);
@@ -403,7 +401,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			wait(checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true));
 			// Clear persistent progress data of the new audit if complete
 			if (auditPhase == AuditPhase::Complete) {
 				clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
@@ -666,7 +664,10 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 	return res;
 }
 
-ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
+                                                     AuditType auditType,
+                                                     UID auditId,
+                                                     KeyRange auditRange) {
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateLocationMetadata);
 	state KeyRange rangeToRead = auditRange;
@@ -696,7 +697,7 @@ ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, 
 					throw e;
 				}
 				if (retryCount > 30) {
-					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressIncomplete")
+					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressFailed")
 					    .detail("AuditID", auditId)
 					    .detail("AuditRange", auditRange)
 					    .detail("AuditType", auditType);
@@ -707,6 +708,68 @@ ACTOR Future<bool> checkAuditProgressComplete(Database cx, AuditType auditType, 
 			}
 		}
 	}
+	TraceEvent(SevInfo, "AuditUtilCheckAuditProgressFinish")
+	    .detail("AuditID", auditId)
+	    .detail("AuditRange", auditRange)
+	    .detail("AuditType", auditType);
+	return true;
+}
+
+ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
+                                                      AuditType auditType,
+                                                      UID auditId,
+                                                      KeyRange auditRange,
+                                                      UID serverId,
+                                                      std::shared_ptr<AsyncVar<int>> checkProgressBudget) {
+	ASSERT(auditType == AuditType::ValidateStorageServerShard);
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByServer(cx, auditType, auditId, serverId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						TraceEvent(SevWarn, "AuditUtilCheckAuditProgressNotFinished")
+						    .detail("ServerID", serverId)
+						    .detail("AuditID", auditId)
+						    .detail("AuditRange", auditRange)
+						    .detail("AuditType", auditType)
+						    .detail("UnfinishedRange", auditStates[i].range);
+						checkProgressBudget->set(checkProgressBudget->get() + 1);
+						return false;
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryCount > 30) {
+					TraceEvent(SevWarn, "AuditUtilCheckAuditProgressFailed")
+					    .detail("ServerID", serverId)
+					    .detail("AuditID", auditId)
+					    .detail("AuditRange", auditRange)
+					    .detail("AuditType", auditType);
+					checkProgressBudget->set(checkProgressBudget->get() + 1);
+					throw audit_storage_failed();
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
+		}
+	}
+	checkProgressBudget->set(checkProgressBudget->get() + 1);
+	TraceEvent(SevInfo, "AuditUtilCheckAuditProgressFinish")
+	    .detail("ServerID", serverId)
+	    .detail("AuditID", auditId)
+	    .detail("AuditRange", auditRange)
+	    .detail("AuditType", auditType);
 	return true;
 }
 
@@ -729,7 +792,7 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			wait(checkMoveKeysLockForAudit(&tr, lock, ddEnabled, true));
 			RangeResult result = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
 			if (result.more || result.size() >= CLIENT_KNOBS->TOO_MANY) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,

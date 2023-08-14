@@ -3,6 +3,7 @@ extraDatabaseMode = "Local"
 # In 7.2, DR is not supported in required tenant mode
 allowDefaultTenant = false
 encryptModes = ['disabled']
+storageEngineExcludeTypes = [4,5]
 
 [[test]]
 testTitle = "DrUpgrade"
