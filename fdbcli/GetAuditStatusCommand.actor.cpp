@@ -93,20 +93,14 @@ ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx)
 	}
 }
 
-// Return progress of the server:
-// 1. the server audit completes/running/error
-// 2. the number of ranges that are completed
-ACTOR Future<std::pair<AuditPhase, int64_t>> getAuditProgressByServer(Database cx,
-                                                                      AuditType auditType,
-                                                                      UID auditId,
-                                                                      KeyRange auditRange,
-                                                                      UID serverId) {
+ACTOR Future<AuditPhase> getAuditProgressByServer(Database cx,
+                                                  AuditType auditType,
+                                                  UID auditId,
+                                                  KeyRange auditRange,
+                                                  UID serverId) {
 	state KeyRange rangeToRead = auditRange;
 	state Key rangeToReadBegin = auditRange.begin;
 	state int retryCount = 0;
-	state int64_t finishCount = 0;
-	state int64_t unfinishedCount = 0;
-	state AuditPhase auditServerStatus = AuditPhase::Invalid;
 	while (rangeToReadBegin < auditRange.end) {
 		loop {
 			try {
@@ -116,14 +110,9 @@ ACTOR Future<std::pair<AuditPhase, int64_t>> getAuditProgressByServer(Database c
 				for (int i = 0; i < auditStates.size(); i++) {
 					AuditPhase phase = auditStates[i].getPhase();
 					if (phase == AuditPhase::Invalid) {
-						++unfinishedCount;
+						return AuditPhase::Running;
 					} else if (phase == AuditPhase::Error) {
-						auditServerStatus = AuditPhase::Error;
-						++finishCount;
-					} else if (phase == AuditPhase::Complete) {
-						++finishCount;
-					} else {
-						UNREACHABLE();
+						return AuditPhase::Error;
 					}
 				}
 				rangeToReadBegin = auditStates.back().range.end;
@@ -133,21 +122,14 @@ ACTOR Future<std::pair<AuditPhase, int64_t>> getAuditProgressByServer(Database c
 					throw e;
 				}
 				if (retryCount > 30) {
-					return std::make_pair(auditServerStatus, finishCount);
+					return AuditPhase::Invalid;
 				}
 				wait(delay(0.5));
 				retryCount++;
 			}
 		}
 	}
-	if (auditServerStatus != AuditPhase::Error) {
-		if (unfinishedCount == 0) {
-			auditServerStatus = AuditPhase::Complete;
-		} else {
-			auditServerStatus = AuditPhase::Running;
-		}
-	}
-	return std::make_pair(auditServerStatus, finishCount);
+	return AuditPhase::Complete;
 }
 
 ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
@@ -162,25 +144,21 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 		state int numCompleteServers = 0;
 		state int numOngoingServers = 0;
 		state int numErrorServers = 0;
-		state int64_t totalFinishRanges = 0;
 		for (; i < interfs.size(); i++) {
-			std::pair<AuditPhase, int64_t> serverStats =
-			    wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
-			if (serverStats.first == AuditPhase::Running) {
+			AuditPhase serverPhase = wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
+			if (serverPhase == AuditPhase::Running) {
 				numOngoingServers++;
-			} else if (serverStats.first == AuditPhase::Complete) {
+			} else if (serverPhase == AuditPhase::Complete) {
 				numCompleteServers++;
-			} else if (serverStats.first == AuditPhase::Error) {
+			} else if (serverPhase == AuditPhase::Error) {
 				numErrorServers++;
-			} else if (serverStats.first == AuditPhase::Invalid) {
+			} else if (serverPhase == AuditPhase::Invalid) {
 				printf("SS %s partial progress fetched\n", interfs[i].id().toString().c_str());
 			}
-			totalFinishRanges += serverStats.second;
 		}
 		printf("CompleteServers: %d\n", numCompleteServers);
 		printf("OngoingServers: %d\n", numOngoingServers);
 		printf("ErrorServers: %d\n", numErrorServers);
-		printf("TotalFinishRanges: %ld\n", totalFinishRanges);
 	} else {
 		printf("AuditType not implemented\n");
 	}
