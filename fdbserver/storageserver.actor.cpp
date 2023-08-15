@@ -7961,12 +7961,15 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranuleChunk
 			    .detail("FetchVersion", fetchVersion);
 			return chunks;
 		} catch (Error& e) {
-			if (SERVER_KNOBS->BLOB_RESTORE_SKIP_EMPTY_RANGES &&
-			    e.code() == error_code_blob_granule_transaction_too_old) {
-				CODE_PROBE(true, "Skip blob ranges for restore", probe::decoration::rare);
-				TraceEvent(SevWarn, "SkipBlobGranuleForRestore").error(e).detail("Keys", keys);
-				Standalone<VectorRef<BlobGranuleChunkRef>> empty;
-				return empty;
+			if (e.code() == error_code_blob_granule_transaction_too_old) {
+				if (SERVER_KNOBS->BLOB_RESTORE_SKIP_EMPTY_RANGES) {
+					CODE_PROBE(true, "Skip blob ranges for restore", probe::decoration::rare);
+					TraceEvent(SevWarn, "SkipBlobGranuleForRestore").error(e).detail("Keys", keys);
+					Standalone<VectorRef<BlobGranuleChunkRef>> empty;
+					return empty;
+				} else {
+					TraceEvent(SevWarn, "NotRestorableBlobGranule").error(e).detail("Keys", keys);
+				}
 			}
 			wait(tr->onError(e));
 		}
@@ -8034,14 +8037,18 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				}
 				results.send(rows);
 			} catch (Error& err) {
-				if (SERVER_KNOBS->BLOB_RESTORE_SKIP_EMPTY_RANGES &&
-				    (err.code() == error_code_file_not_found ||
-				     err.code() == error_code_blob_granule_transaction_too_old)) {
-					// skip no data ranges and restore as much data as we can
-					TraceEvent(SevWarn, "SkipBlobChunkForRestore").error(err).detail("ChunkRange", chunkRange);
-					RangeResult rows;
-					results.send(rows);
-					CODE_PROBE(true, "Skip blob chunks for restore", probe::decoration::rare);
+				if (err.code() == error_code_file_not_found ||
+				    err.code() == error_code_blob_granule_transaction_too_old) {
+					if (SERVER_KNOBS->BLOB_RESTORE_SKIP_EMPTY_RANGES) {
+						// skip no data ranges and restore as much data as we can
+						TraceEvent(SevWarn, "SkipBlobChunkForRestore").error(err).detail("ChunkRange", chunkRange);
+						RangeResult rows;
+						results.send(rows);
+						CODE_PROBE(true, "Skip blob chunks for restore", probe::decoration::rare);
+					} else {
+						TraceEvent(SevWarn, "NotRestorableBlobChunk").error(err).detail("ChunkRange", chunkRange);
+						throw;
+					}
 				} else {
 					throw;
 				}
