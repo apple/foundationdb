@@ -646,7 +646,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("FailedAddresses", describe(toKillMarkFailedArray))
 				    .detail("FailedLocaitiesSize", toKillLocalitiesFailed.size())
 				    .detail("FailedLocaities", describe(toKillLocalitiesFailed));
-
+				// Do not allow reboot and delete when doing locality based exclusions because it can cause processId to
+				// change
+				g_simulator->allowRebootAndDelete = false;
 				wait(excludeLocalities(cx, toKillLocalitiesFailed, true));
 			} else {
 				TraceEvent("RemoveAndKill", functionId)
@@ -666,7 +668,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Addresses", describe(toKillArray))
 			    .detail("LocaitiesSize", toKillLocalities.size())
 			    .detail("Locaities", describe(toKillLocalities));
-
+			// Do not allow reboot and delete when doing locality based exclusions because it can cause processId to
+			// change
+			g_simulator->allowRebootAndDelete = false;
 			wait(excludeLocalities(cx, toKillLocalities, false));
 		} else {
 			TraceEvent("RemoveAndKill", functionId)
