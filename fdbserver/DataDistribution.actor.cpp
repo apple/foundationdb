@@ -2875,7 +2875,9 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
                                     std::shared_ptr<DDAudit> audit,
                                     KeyRange rangeToSkip) {
 	try {
-		AuditStorageState res(audit->coreState.id, rangeToSkip, audit->coreState.getType());
+		state AuditType auditType = audit->coreState.getType();
+		ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica);
+		AuditStorageState res(audit->coreState.id, rangeToSkip, auditType);
 		res.setPhase(AuditPhase::Complete);
 		res.ddId = self->ddId;
 		wait(persistAuditStateByRange(self->txnProcessor->context(), res));
@@ -2883,11 +2885,18 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		TraceEvent(SevInfo, "DDSkipAuditOnRangeComplete", self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditRange", audit->coreState.range)
-		    .detail("AuditType", audit->coreState.getType())
+		    .detail("AuditType", auditType)
 		    .detail("KeyValueStoreType", audit->coreState.engineType.toString())
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
 		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
+		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		    .detail("Loc", "skipAuditOnRange")
+		    .detail("Ops", "Increase")
+		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+		    .detail("AuditType", auditType);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -2896,12 +2905,25 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditRange", audit->coreState.range)
-		    .detail("AuditType", audit->coreState.getType())
+		    .detail("AuditType", auditType)
 		    .detail("KeyValueStoreType", audit->coreState.engineType.toString())
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
 		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
-		audit->auditStorageAnyChildFailed = true;
+		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		    .detail("Loc", "skipAuditOnRange")
+		    .detail("Ops", "Increase")
+		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+		    .detail("AuditType", auditType);
+		if (e.code() == error_code_audit_storage_cancelled) {
+			throw e;
+		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+			throw audit_storage_failed();
+		} else {
+			audit->actors.add(scheduleAuditOnRange(self, audit, rangeToSkip));
+		}
 	}
 	return Void();
 }
