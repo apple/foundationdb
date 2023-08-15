@@ -63,7 +63,8 @@
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include

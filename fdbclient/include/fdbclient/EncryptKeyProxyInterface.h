@@ -34,6 +34,36 @@
 
 #include <limits>
 
+#define DEBUG_ENCRYPT_KEY_PROXY false
+
+struct KMSHealthStatus {
+	constexpr static FileIdentifier file_identifier = 2378149;
+	bool canConnectToKms;
+	bool canConnectToEKP;
+	double lastUpdatedTS;
+
+	KMSHealthStatus() : canConnectToEKP(false), canConnectToKms(false), lastUpdatedTS(-1) {}
+	KMSHealthStatus(bool canConnectToKms, bool canConnectToEKP, double lastUpdatedTS)
+	  : canConnectToKms(canConnectToKms), canConnectToEKP(canConnectToEKP), lastUpdatedTS(lastUpdatedTS) {}
+
+	bool operator==(const KMSHealthStatus& other) {
+		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "CanConnectToKms(" << canConnectToKms << ")"
+		   << ", CanConnectToEKP(" << canConnectToEKP << ")"
+		   << ", LastUpdatedTS(" << lastUpdatedTS << ")";
+		return ss.str();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, canConnectToKms, canConnectToEKP, lastUpdatedTS);
+	}
+};
+
 struct EncryptKeyProxyInterface {
 	constexpr static FileIdentifier file_identifier = 1303419;
 	struct LocalityData locality;
@@ -43,6 +73,7 @@ struct EncryptKeyProxyInterface {
 	RequestStream<struct EKPGetBaseCipherKeysByIdsRequest> getBaseCipherKeysByIds;
 	RequestStream<struct EKPGetLatestBaseCipherKeysRequest> getLatestBaseCipherKeys;
 	RequestStream<struct EKPGetLatestBlobMetadataRequest> getLatestBlobMetadata;
+	RequestStream<struct EncryptKeyProxyHealthStatusRequest> getHealthStatus;
 
 	EncryptKeyProxyInterface() {}
 	explicit EncryptKeyProxyInterface(const struct LocalityData& loc, UID id) : locality(loc), myId(id) {}
@@ -70,6 +101,8 @@ struct EncryptKeyProxyInterface {
 			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
 			getLatestBlobMetadata =
 			    RequestStream<struct EKPGetLatestBlobMetadataRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			getHealthStatus = RequestStream<struct EncryptKeyProxyHealthStatusRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(5));
 		}
 	}
 
@@ -80,6 +113,7 @@ struct EncryptKeyProxyInterface {
 		streams.push_back(getBaseCipherKeysByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(getLatestBaseCipherKeys.getReceiver(TaskPriority::Worker));
 		streams.push_back(getLatestBlobMetadata.getReceiver(TaskPriority::Worker));
+		streams.push_back(getHealthStatus.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -95,6 +129,18 @@ struct HaltEncryptKeyProxyRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct EncryptKeyProxyHealthStatusRequest {
+	constexpr static FileIdentifier file_identifier = 2378139;
+	ReplyPromise<KMSHealthStatus> reply;
+
+	EncryptKeyProxyHealthStatusRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

@@ -26,7 +26,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"

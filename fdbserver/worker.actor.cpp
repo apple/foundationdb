@@ -51,7 +51,7 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/TesterInterface.actor.h" // for poisson()
 #include "fdbserver/IDiskQueue.h"
@@ -1878,6 +1878,19 @@ ACTOR Future<Void> updateClusterId(UID ccClusterId, Reference<AsyncVar<Optional<
 	return Void();
 }
 
+ACTOR Future<Void> deleteStorageFile(KeyValueStoreType storeType,
+                                     std::string filename,
+                                     UID storeID,
+                                     int64_t memoryLimit,
+                                     Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state IKeyValueStore* kvs = openKVStore(storeType, filename, storeID, memoryLimit, false, false, false, dbInfo, {});
+	wait(ready(kvs->init()));
+	kvs->dispose();
+	CODE_PROBE(true, "Removed stale disk file");
+	TraceEvent("RemoveStorageDisk").detail("Filename", filename).detail("StoreID", storeID);
+	return Void();
+}
+
 ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                            std::unordered_map<UID, StorageDiskCleaner>* cleaners,
                                            UID storeID,
@@ -1907,13 +1920,7 @@ ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbI
 			if (e.code() == error_code_worker_removed) {
 				// delete the files on disk
 				if (fileExists(cleaner.filename)) {
-					state IKeyValueStore* kvs = openKVStore(
-					    cleaner.storeType, cleaner.filename, storeID, memoryLimit, false, false, false, dbInfo, {});
-					wait(ready(kvs->init()));
-					TraceEvent("KVSRemoved").detail("Reason", "WorkerRemoved");
-					kvs->dispose();
-					CODE_PROBE(true, "Removed stale disk file");
-					TraceEvent("RemoveStorageDisk").detail("Filename", cleaner.filename).detail("StoreID", storeID);
+					wait(deleteStorageFile(cleaner.storeType, cleaner.filename, storeID, memoryLimit, dbInfo));
 				}
 
 				// remove the cleaner
@@ -2244,7 +2251,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			} else if (s.storedComponent == DiskStore::BlobWorker) {
-				if (blobWorkerFuture.isReady()) {
+				if (blobWorkerFuture.isReady() && SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
 
@@ -2272,7 +2279,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                   false,
 					                                   false,
 					                                   dbInfo,
-					                                   EncryptionAtRestMode());
+					                                   Optional<EncryptionAtRestMode>(),
+					                                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 					filesClosed.add(data->onClosed());
 
 					Promise<Void> recovery;
@@ -2283,16 +2291,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 				} else {
 					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
-					IKeyValueStore* data = openKVStore(s.storeType,
-					                                   s.filename,
-					                                   UID(),
-					                                   memoryLimit,
-					                                   false,
-					                                   false,
-					                                   false,
-					                                   dbInfo,
-					                                   EncryptionAtRestMode());
-					data->dispose();
+					recoveries.push_back(deleteStorageFile(s.storeType, s.filename, s.storeID, memoryLimit, dbInfo));
 				}
 			}
 		}
@@ -2717,6 +2716,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
 					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
 					DUMPTOKEN(recruited.getLatestBlobMetadata);
+					DUMPTOKEN(recruited.getHealthStatus);
 
 					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
@@ -2951,7 +2951,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						                   false,
 						                   false,
 						                   dbInfo,
-						                   EncryptionAtRestMode());
+						                   req.encryptMode,
+						                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 						filesClosed.add(data->onClosed());
 					}
 

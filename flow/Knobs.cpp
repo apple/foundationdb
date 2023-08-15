@@ -154,6 +154,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SIM_PAGE_CACHE_64K,                                  1e7 );
 	init( BUGGIFY_SIM_PAGE_CACHE_4K,                           1e6 );
 	init( BUGGIFY_SIM_PAGE_CACHE_64K,                          1e6 );
+	init( BLOB_WORKER_PAGE_CACHE,                            500e6 );
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
@@ -309,6 +310,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(2, 10) * 60; }
 	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
+	init( ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,                    10 );
+	if ( randomize && BUGGIFY) { ENCRYPT_KEY_HEALTH_CHECK_INTERVAL = deterministicRandom()->randomInt(10, 60); }
+	init( EKP_HEALTH_CHECK_REQUEST_TIMEOUT,                    10.0);
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LATENCY_LOGGING_INTERVAL,         60.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,          0.01 );

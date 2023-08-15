@@ -30,7 +30,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"

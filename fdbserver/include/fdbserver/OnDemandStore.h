@@ -23,7 +23,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 
 // Create a key value store if and only if it is actually used
 class OnDemandStore : public IClosable, NonCopyable {
