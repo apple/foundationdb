@@ -2806,16 +2806,28 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							// Do not specify any storage engine, so check for all engine types
 							anySpecifiedEngine = true;
 						} else {
-							std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
-							    wait(getStorageType(storageServersToCheck));
-							for (int j = 0; j < storageServersToCheck.size(); j++) {
-								auto ssStorageType = storageTypeMapping.find(storageServersToCheck[j].id());
-								if (ssStorageType != storageTypeMapping.end()) {
-									if (ssStorageType->second == audit->coreState.engineType) {
-										anySpecifiedEngine = true;
-										break;
+							try {
+								std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
+								    wait(getStorageType(storageServersToCheck));
+								for (int j = 0; j < storageServersToCheck.size(); j++) {
+									auto ssStorageType = storageTypeMapping.find(storageServersToCheck[j].id());
+									if (ssStorageType != storageTypeMapping.end()) {
+										if (ssStorageType->second == audit->coreState.engineType) {
+											anySpecifiedEngine = true;
+											break;
+										}
 									}
 								}
+							} catch (Error& e) {
+								audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+								ASSERT(audit->remainingBudgetForAuditTasks.get() <=
+								       SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+								TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+								    .detail("Loc", "scheduleAuditOnRange")
+								    .detail("Ops", "Increase")
+								    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+								    .detail("AuditType", auditType);
+								throw e;
 							}
 						}
 						if (!anySpecifiedEngine) {
