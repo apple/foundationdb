@@ -763,6 +763,7 @@ rocksdb::Options getOptions() {
 
 	options.wal_recovery_mode = getWalRecoveryMode();
 	options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
+	options.target_file_size_multiplier = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
@@ -1231,26 +1232,26 @@ public:
 					    .detail("ShardId", id)
 					    .detail("LiveDataSize", liveDataSize);
 
-					std::string propValue = "";
-					ASSERT(shard->db->GetProperty(shard->cf, rocksdb::DB::Properties::kCFStats, &propValue));
-					TraceEvent(SevInfo, "PhysicalShardCFStats")
-					    .detail("PhysicalShardID", id)
-					    .detail("Detail", propValue);
-
 					// Get compression ratio for each level.
 					rocksdb::ColumnFamilyMetaData cfMetadata;
 					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
 					TraceEvent e(SevInfo, "PhysicalShardLevelStats");
-					e.detail("ShardId", id);
+					e.detail("ShardId", id).detail("NumFiles", cfMetadata.file_count);
 					std::string levelProp;
+					int numLevels = 0;
 					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
 						std::string propValue = "";
 						ASSERT(shard->db->GetProperty(shard->cf,
 						                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
 						                                  std::to_string(it->level),
 						                              &propValue));
-						e.detail("Level" + std::to_string(it->level), std::to_string(it->size) + " " + propValue);
+						e.detail("Level" + std::to_string(it->level),
+						         std::to_string(it->size) + " " + propValue + " " + std::to_string(it->files.size()));
+						if (it->size > 0) {
+							++numLevels;
+						}
 					}
+					e.detail("NumLevels", numLevels);
 				}
 			}
 		} catch (Error& e) {
