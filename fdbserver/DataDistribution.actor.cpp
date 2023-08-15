@@ -2864,6 +2864,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("AuditRange", audit->coreState.range)
 		    .detail("RangeToSchedule", rangeToSchedule)
 		    .detail("AuditType", auditType)
+		    .detail("SkippedShardsCountInThisSchedule", numSkippedShards)
 		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 
 	} catch (Error& e) {
@@ -2876,7 +2877,8 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("AuditRange", audit->coreState.range)
 		    .detail("RangeToSchedule", rangeToSchedule)
 		    .detail("AuditType", auditType)
-		    .detail("IssuedDoAuditCount", issueDoAuditCount);
+		    .detail("SkippedShardsCountInThisSchedule", numSkippedShards)
+		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 		audit->auditStorageAnyChildFailed = true;
 	}
 
@@ -2886,9 +2888,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
                                     std::shared_ptr<DDAudit> audit,
                                     KeyRange rangeToSkip) {
+	state AuditType auditType = audit->coreState.getType();
+	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica);
 	try {
-		state AuditType auditType = audit->coreState.getType();
-		ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica);
 		AuditStorageState res(audit->coreState.id, rangeToSkip, auditType);
 		res.setPhase(AuditPhase::Complete);
 		res.ddId = self->ddId;
