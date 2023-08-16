@@ -1873,15 +1873,18 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount)
 		    .detail("DDDoAuditTasksIssued", audit->overallIssuedDoAuditCount)
-		    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount);
-		// reset for the usage for future retry
-		audit->overallCompleteDoAuditCount = 0;
-		audit->overallIssuedDoAuditCount = 0;
+		    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount)
+		    .detail("DDDoAuditTasksSkipped", audit->overallSkippedDoAuditCount);
 
 		if (audit->foundError) {
 			audit->coreState.setPhase(AuditPhase::Error);
 		} else if (audit->auditStorageAnyChildFailed) {
 			audit->auditStorageAnyChildFailed = false;
+			TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+			    .detail("Reason", "AuditStorageAnyChildFailed")
+			    .detail("AuditID", auditID)
+			    .detail("RetryCount", audit->retryCount)
+			    .detail("AuditType", auditType);
 			throw retry();
 		} else {
 			// Check audit persist progress to double check if any range omitted to be check
@@ -1892,17 +1895,32 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				                                                        audit->coreState.id,
 				                                                        audit->coreState.range));
 				if (!allFinish) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "AuditReplicaNotFinish")
+					    .detail("AuditID", auditID)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
 					throw retry();
 				}
 			} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 				bool allFinish = wait(checkAuditProgressCompleteByRange(
 				    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, allKeys));
 				if (!allFinish) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "AuditLocationMetadataNotFinish")
+					    .detail("AuditID", auditID)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
 					throw retry();
 				}
 			} else {
 				bool allFinish = wait(checkAuditProgressCompleteForSSShard(self->txnProcessor->context(), audit));
 				if (!allFinish) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "AuditSSShardNotFinish")
+					    .detail("AuditID", auditID)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
 					throw retry();
 				}
 			}
@@ -1939,7 +1957,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			// this audit does removeAuditFromAuditMap
 			throw e;
 		}
-		TraceEvent(SevDebug, "DDAuditStorageCoreError", self->ddId)
+		TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("Context", audit->getDDAuditContext())
 		    .detail("AuditID", auditID)
@@ -2891,6 +2909,7 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 	state AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica);
 	try {
+		audit->overallIssuedDoAuditCount++;
 		AuditStorageState res(audit->coreState.id, rangeToSkip, auditType);
 		res.setPhase(AuditPhase::Complete);
 		res.ddId = self->ddId;
@@ -2958,7 +2977,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	    .detail("StorageServer", ssi.toString())
 	    .detail("TargetServers", describe(req.targetServers))
 	    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
-	    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
+	    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
+	    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
 
 	try {
 		audit->overallIssuedDoAuditCount++;
