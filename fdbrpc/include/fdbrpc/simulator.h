@@ -358,6 +358,8 @@ public:
 	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
+	bool allowRebootAndDelete = true;
+
 	enum SimConsistencyScanState {
 		DisabledStart = 0,
 		Enabling = 1,

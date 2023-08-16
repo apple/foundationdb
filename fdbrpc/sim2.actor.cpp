@@ -2114,6 +2114,10 @@ public:
 			}
 		}
 
+		if (!forceKill && !allowRebootAndDelete && kt == KillType::RebootAndDelete) {
+			kt = KillType::Reboot;
+		}
+
 		CODE_PROBE(originalKt != kt,
 		           "Kill type was changed from requested to reboot.",
 		           probe::context::sim2,
