@@ -798,6 +798,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
+		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
 		                   "tenant_mode=",
 		                   "blob_granules_enabled=",

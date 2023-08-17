@@ -250,6 +250,7 @@ set(FDBSERVER_SRCS
   workloads/MutationLogReaderCorrectness.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
+  workloads/PerpetualWiggleStorageMigrationWorkload.actor.cpp
   workloads/PhysicalShardMove.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp

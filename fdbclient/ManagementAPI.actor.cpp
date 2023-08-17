@@ -217,6 +217,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				p = end + 1;
 			}
 		}
+
+		if (key == "perpetual_storage_wiggle_engine") {
+			StringRef s = value;
+
+			// Parse as engine_name[:p=v]... to handle future storage engine params
+			Value engine = s.eat(":");
+			std::map<Key, Value> params;
+			while (!s.empty()) {
+				params[s.eat("=")] = s.eat(":");
+			}
+
+			try {
+				out[p + key] = format("%d", KeyValueStoreType::fromString(engine.toString()).storeType());
+			} catch (Error& e) {
+				printf("Error: Invalid value for %s (%s): %s\n", key.c_str(), value.c_str(), e.what());
+			}
+			return out;
+		}
 		return out;
 	}
 
