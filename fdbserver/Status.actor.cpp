@@ -3375,8 +3375,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (addresses.present()) {
 				coordinatorAddresses = std::move(addresses.get());
 			} else {
-				messages.push_back(JsonString::makeMessage("fetch_coordinator_addresses",
-				                                           "Fetching co-ordinators addresses timed out"));
+				messages.push_back(
+				    JsonString::makeMessage("fetch_coordinator_addresses", "Fetching coordinator addresses timed out"));
 			}
 
 			int logFaultTolerance = 100;
