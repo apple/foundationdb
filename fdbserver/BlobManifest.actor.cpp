@@ -191,18 +191,19 @@ public:
 	}
 
 	// Delete all files of oldest manifest
-	static void deleteOldest(const std::vector<BlobManifestFile>& allFiles,
-	                         Reference<BackupContainerFileSystem> container) {
-		if (allFiles.empty()) {
-			return;
-		}
-		int64_t epoch = allFiles.back().epoch;
-		int64_t seqNo = allFiles.back().seqNo;
+	ACTOR static Future<Void> deleteOldest(std::vector<BlobManifestFile> allFiles,
+	                                       Reference<BackupContainerFileSystem> container) {
+		ASSERT(!allFiles.empty());
+		state int64_t epoch = allFiles.back().epoch;
+		state int64_t seqNo = allFiles.back().seqNo;
+		std::vector<Future<Void>> futures;
 		for (auto& f : allFiles) {
 			if (f.epoch == epoch && f.seqNo == seqNo) {
-				container->deleteFile(f.fileName);
+				futures.push_back(container->deleteFile(f.fileName));
 			}
 		}
+		wait(waitForAll(futures));
+		return Void();
 	}
 
 	// Count how many manifests
@@ -614,10 +615,11 @@ private:
 		loop {
 			state std::vector<BlobManifestFile> allFiles = wait(BlobManifestFile::listAll(writer));
 			int count = BlobManifest::count(allFiles);
+			TraceEvent("BlobManfiestCleanup").detail("Count", count);
 			if (count <= SERVER_KNOBS->BLOB_RESTORE_MANIFEST_RETENTION_MAX) {
 				return Void();
 			}
-			BlobManifest::deleteOldest(allFiles, writer);
+			wait(BlobManifest::deleteOldest(allFiles, writer));
 		}
 	}
 
