@@ -47,8 +47,8 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 	static constexpr auto NAME = "PerpetualWiggleStorageMigrationWorkload";
 
 	PerpetualWiggleStorageMigrationWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
-    
-    std::string description() const override { return "PerpetualWiggleStorageMigrationWorkload"; }
+
+	std::string description() const override { return "PerpetualWiggleStorageMigrationWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
@@ -223,4 +223,5 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }
 };
 
-WorkloadFactory<PerpetualWiggleStorageMigrationWorkload> PerpetualWiggleStorageMigrationWorkloadFactory("PerpetualWiggleStorageMigration");
+WorkloadFactory<PerpetualWiggleStorageMigrationWorkload> PerpetualWiggleStorageMigrationWorkloadFactory(
+    "PerpetualWiggleStorageMigration");
