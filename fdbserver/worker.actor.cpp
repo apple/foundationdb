@@ -1566,7 +1566,7 @@ struct TrackRunningStorage {
 	                    std::unordered_map<UID, StorageDiskCleaner>* storageCleaners)
 	  : self(self), storeType(storeType), locality(locality), filename(filename), runningStorages(runningStorages),
 	    storageCleaners(storageCleaners) {
-		TraceEvent("StorageServerInitProgress", self).detail("Step", "AddedItselfToRunningStorageOnSameWorker");
+		TraceEvent("StorageServerInitProgress", self).detail("Step", "4.AddedItselfToRunningStorageOnSameWorker");
 		runningStorages->emplace(self, storeType);
 	}
 	~TrackRunningStorage() {
@@ -2928,8 +2928,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				activeSharedTLog->set(logData.back().uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
-				TraceEvent e("StorageServerInitProgress", req.reqId);
-				e.detail("Step", "RequestReceived");
+				TraceEvent e("StorageServerInitProgress", req.interfaceId);
+				e.detail("Step", "1.RequestReceived");
+				e.detail("ReqID", req.reqId);
 				e.detail("WorkerID", interf.id());
 				e.detail("StorageType", req.storeType.toString());
 				e.detail("SeedTag", req.seedTag.toString());
@@ -2976,8 +2977,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 					startRole(ssRole, recruited.id(), interf.id(), details);
 					TraceEvent("StorageServerInitProgress", recruited.id())
+					    .detail("ReqID", req.reqId)
 					    .detail("StorageType", req.storeType.toString())
-					    .detail("Step", "RoleStarted")
+					    .detail("Step", "2.RoleStarted")
 					    .detail("WorkerID", interf.id());
 
 					DUMPTOKEN(recruited.getValue);
@@ -3020,8 +3022,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    dbInfo,
 					    req.encryptMode);
 					TraceEvent("StorageServerInitProgress", recruited.id())
+					    .detail("ReqID", req.reqId)
 					    .detail("StorageType", req.storeType.toString())
-					    .detail("Step", "KVStoreOpened")
+					    .detail("Step", "3.KVStoreOpened")
 					    .detail("WorkerID", interf.id());
 
 					Future<Void> kvClosed =
