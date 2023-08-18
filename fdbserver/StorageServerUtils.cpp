@@ -29,38 +29,51 @@ const KeyRef persistMoveInUpdatesPrefix = PERSIST_PREFIX "MoveInShardUpdates/"_s
 } // namespace
 
 KeyRange persistMoveInShardsKeyRange() {
-	return persistMoveInShardKeys;
+    return persistMoveInShardKeys;
 }
 
 KeyRange persistUpdatesKeyRange(const UID& id) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistMoveInUpdatesPrefix);
-	wr << id;
-	wr.serializeBytes("/"_sr);
-	return prefixRange(wr.toValue());
+    BinaryWriter wr(Unversioned());
+    wr.serializeBytes(persistMoveInUpdatesPrefix);
+    wr << id;
+    wr.serializeBytes("/"_sr);
+    return prefixRange(wr.toValue());
 }
 
+Key persistUpdatesKey(const UID& id, const Version version) {
+    BinaryWriter wr(Unversioned());
+    wr.serializeBytes(persistMoveInUpdatesPrefix);
+    wr << id;
+    wr.serializeBytes("/"_sr);
+    wr << bigEndian64(static_cast<uint64_t>(version));
+    return wr.toValue();
+}
+
+// Value persistUpdatesValue(const VerUpdateRef& update) {
+//     return ObjectWriter::toValue(update, IncludeVersion());
+// }
+
 Key persistMoveInShardKey(const UID& id) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistMoveInShardKeys.begin);
-	wr << id;
-	return wr.toValue();
+    BinaryWriter wr(Unversioned());
+    wr.serializeBytes(persistMoveInShardKeys.begin);
+    wr << id;
+    return wr.toValue();
 }
 
 UID decodeMoveInShardKey(const KeyRef& key) {
-	UID id;
-	BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
-	rd >> id;
-	return id;
+    UID id;
+    BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
+    rd >> id;
+    return id;
 }
 
 Value moveInShardValue(const MoveInShardMetaData& meta) {
-	return ObjectWriter::toValue(meta, IncludeVersion());
+    return ObjectWriter::toValue(meta, IncludeVersion());
 }
 
 MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value) {
-	MoveInShardMetaData shard;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(shard);
-	return shard;
+    MoveInShardMetaData shard;
+    ObjectReader reader(value.begin(), IncludeVersion());
+    reader.deserialize(shard);
+    return shard;
 }
