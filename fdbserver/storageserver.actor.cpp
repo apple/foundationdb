@@ -14332,6 +14332,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
 	}
+	TraceEvent("StorageServerInitProgress", ssi.id())
+	    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+	    .detail("Step", "5.StartInit");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
@@ -14341,7 +14344,13 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	try {
 		wait(self.storage.init());
+		TraceEvent("StorageServerInitProgress", ssi.id())
+		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+		    .detail("Step", "6.StorageInited");
 		wait(self.storage.commit());
+		TraceEvent("StorageServerInitProgress", ssi.id())
+		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+		    .detail("Step", "7.StorageCommitted");
 		++self.counters.kvCommits;
 
 		platform::createDirectory(self.checkpointFolder);
@@ -14356,6 +14365,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 			// Might throw recruitment_failed in case of simultaneous master failure
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
+			TraceEvent("StorageServerInitProgress", ssi.id())
+			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+			    .detail("Step", "8.StorageServerAdded");
 
 			self.tag = verAndTag.second;
 			if (ssi.isTss()) {
@@ -14365,12 +14377,18 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			}
 
 			wait(initTenantMap(&self));
+			TraceEvent("StorageServerInitProgress", ssi.id())
+			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+			    .detail("Step", "9.TenantMapInited");
 		} else {
 			self.tag = seedTag;
 		}
 
 		self.storage.makeNewStorageServerDurable(self.shardAware);
 		wait(self.storage.commit());
+		TraceEvent("StorageServerInitProgress", ssi.id())
+		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+		    .detail("Step", "10.NewStorageServerDurable");
 		++self.counters.kvCommits;
 
 		self.interfaceRegistered =
@@ -14378,6 +14396,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		wait(delay(0));
 
 		TraceEvent("StorageServerInit", ssi.id())
+		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
 		    .detail("Version", self.version.get())
 		    .detail("SeedTag", seedTag.toString())
 		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
@@ -14386,6 +14405,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
+		TraceEvent("StorageServerInitProgress", ssi.id())
+		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+		    .detail("Step", "11.RecruitReplied");
 
 		ssCore = storageServerCore(&self, ssi);
 		wait(ssCore);
