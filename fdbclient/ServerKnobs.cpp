@@ -1177,6 +1177,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
 	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
+	init( FORCE_PURGE_WAIT_BLOBBIFY_TIMEOUT, isSimulated ? 20.0 : 600.0 ); if( randomize && BUGGIFY ) FORCE_PURGE_WAIT_BLOBBIFY_TIMEOUT = 1 + 30 * deterministicRandom()->random01();
 	init( BLOB_MANIFEST_BACKUP,                                false );
 	init( BLOB_MANIFEST_BACKUP_INTERVAL,  isSimulated ?  5.0 : 600.0 );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,     isSimulated ?  1.0 : 5.0 );
