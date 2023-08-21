@@ -294,6 +294,8 @@ struct BlobManagerStats {
 	Counter granulesFullyPurged;
 	Counter granulesPartiallyPurged;
 	Counter filesPurged;
+	Counter purgeLatestReads;
+	Counter purgeDAGReads;
 	Future<Void> logger;
 	int64_t activeMerges;
 	int64_t blockedAssignments;
@@ -317,8 +319,9 @@ struct BlobManagerStats {
 	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0), lastFlushVersion(0),
-	    lastMLogTruncationVersion(0), lastManifestSeqNo(0), lastManifestDumpTs(0), manifestSizeInBytes(0) {
+	    filesPurged("FilesPurged", cc), purgeLatestReads("PurgeLatestReads", cc), purgeDAGReads("PurgeDAGReads", cc),
+	    activeMerges(0), blockedAssignments(0), lastFlushVersion(0), lastMLogTruncationVersion(0), lastManifestSeqNo(0),
+	    lastManifestDumpTs(0), manifestSizeInBytes(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
@@ -4796,11 +4799,15 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		           force);
 	}
 
+	state UID purgeID = deterministicRandom()->randomUniqueID();
+	state ActiveCounter<int>::Releaser holdingPurgesCounter = self->stats.activePurges.take(1);
+
 	TraceEvent("PurgeGranulesBegin", self->id)
 	    .detail("Epoch", self->epoch)
 	    .detail("Range", range)
 	    .detail("PurgeVersion", purgeVersion)
-	    .detail("Force", force);
+	    .detail("Force", force)
+	    .detail("PurgeID", purgeID);
 
 	// queue of <range, startVersion, endVersion, mergeChildID> for BFS traversal of history
 	state std::queue<std::tuple<KeyRange, Version, Version, Optional<UID>>> historyEntryQueue;
@@ -4837,7 +4844,18 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		for (auto& it : knownPurgeRanges) {
 			waitForBlobbifies.push_back(waitForcePurgeBlobbified(self, it));
 		}
+		TraceEvent(SevDebug, "PurgeGranulesWaitForBlobbifiesStart", self->id)
+		    .detail("Epoch", self->epoch)
+		    .detail("PurgeVersion", purgeVersion)
+		    .detail("Count", waitForBlobbifies.size())
+		    .detail("PurgeID", purgeID);
+
 		wait(waitForAll(waitForBlobbifies));
+
+		TraceEvent(SevDebug, "PurgeGranulesWaitForBlobbifiesDone", self->id)
+		    .detail("Epoch", self->epoch)
+		    .detail("PurgeVersion", purgeVersion)
+		    .detail("PurgeID", purgeID);
 
 		// TODO could clean this up after force purge is done, but it's safer not to
 		self->forcePurgingRanges.insert(range, true);
@@ -4868,6 +4886,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.reset();
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+		TraceEvent(SevDebug, "PurgeGranulesSetForcePurged", self->id)
+		    .detail("Epoch", self->epoch)
+		    .detail("PurgeVersion", purgeVersion)
+		    .detail("PurgeID", purgeID);
 	}
 
 	if (knownPurgeRanges.empty()) {
@@ -4876,7 +4899,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		    .detail("Epoch", self->epoch)
 		    .detail("Range", range)
 		    .detail("PurgeVersion", purgeVersion)
-		    .detail("Force", force);
+		    .detail("Force", force)
+		    .detail("PurgeID", purgeID);
 		return Void();
 	}
 
@@ -4890,9 +4914,20 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 	}
 
+	TraceEvent(SevDebug, "PurgeGranulesWaitActiveBoundaryEvals", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Count", activeBoundaryEvals.size())
+	    .detail("PurgeID", purgeID);
+
 	if (!activeBoundaryEvals.empty()) {
 		wait(waitForAll(activeBoundaryEvals));
 	}
+
+	TraceEvent(SevDebug, "PurgeGranulesWaitMergeActive", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("PurgeID", purgeID);
 
 	// some merges aren't counted in boundary evals, for merge/split race reasons
 	while (self->isMergeActive(range)) {
@@ -4908,6 +4943,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 
 	state std::set<Key> knownBoundariesPurged;
+
+	TraceEvent(SevDebug, "PurgeGranulesTraverseBegin", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("PurgeID", purgeID);
 
 	if (force) {
 		// revoke range from all active blob workers - AFTER we copy set of active ranges to purge
@@ -4945,7 +4985,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			TraceEvent(SevWarn, "GranulePurgeRangesUnaligned", self->id)
 			    .detail("Epoch", self->epoch)
 			    .detail("PurgeRange", range)
-			    .detail("GranuleRange", activeRange);
+			    .detail("GranuleRange", activeRange)
+			    .detail("PurgeID", purgeID);
 			continue;
 		}
 
@@ -4962,6 +5003,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				}
 				// FIXME: doing this serially will likely be too slow for large purges
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange));
+				++self->stats.purgeLatestReads;
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a
 				// get
 				if (history.present()) {
@@ -4983,6 +5025,17 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			}
 		}
 	}
+
+	// no longer needed, can save memory
+	activeRanges.clear();
+
+	TraceEvent("PurgeGranulesTraversalGotLatest", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force)
+	    .detail("Count", historyEntryQueue.size())
+	    .detail("PurgeID", purgeID);
 
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0} Beginning BFS traversal of {1} history items for range [{2} - {3}) \n",
@@ -5019,6 +5072,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				Optional<Value> persistedHistory = wait(tr.get(historyKey));
+				++self->stats.purgeDAGReads;
 				if (persistedHistory.present()) {
 					currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
 					foundHistory = true;
@@ -5124,7 +5178,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("Force", force)
 	    .detail("VisitedCount", visited.size())
 	    .detail("DeletingFullyCount", toFullyDelete.size())
-	    .detail("DeletingPartiallyCount", toPartiallyDelete.size());
+	    .detail("DeletingPartiallyCount", toPartiallyDelete.size())
+	    .detail("PurgeID", purgeID);
 
 	state int i;
 	if (BM_PURGE_DEBUG) {
@@ -5133,25 +5188,35 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the
 	// deletion process
 	if (!toFullyDelete.empty()) {
-		state std::vector<Future<Void>> fullDeletions;
-		KeyRangeMap<std::pair<Version, Future<Void>>> parentDelete;
+		state std::deque<Future<Void>> fullDeletions;
+		state KeyRangeMap<std::pair<Version, Future<Void>>> parentDelete;
 		parentDelete.insert(normalKeys, { 0, Future<Void>(Void()) });
 
-		std::vector<std::pair<Version, int>> deleteOrder;
-		deleteOrder.reserve(toFullyDelete.size());
-		for (int i = 0; i < toFullyDelete.size(); i++) {
-			deleteOrder.push_back({ std::get<4>(toFullyDelete[i]), i });
+		// ordered set to order by version + index
+		// do this way instead of std::sort on a vector to be able to yield during it
+		state std::set<std::pair<Version, int>> deleteOrderSet;
+		for (i = 0; i < toFullyDelete.size(); i++) {
+			deleteOrderSet.insert({ std::get<4>(toFullyDelete[i]), i });
+			if (i % 1000 == 999) {
+				wait(yield());
+			}
 		}
-		std::sort(deleteOrder.begin(), deleteOrder.end());
+		state std::set<std::pair<Version, int>>::iterator it = deleteOrderSet.begin();
 
-		for (i = 0; i < deleteOrder.size(); i++) {
-			state UID granuleId;
+		state Version previousVersion = 0;
+		for (i = 0; i < deleteOrderSet.size(); i++) {
+			if (fullDeletions.size() == SERVER_KNOBS->BLOB_MANAGER_PURGE_GRANULE_PARALLELISM) {
+				wait(fullDeletions.front());
+				fullDeletions.pop_front();
+			}
+			UID granuleId;
 			Key historyKey;
 			KeyRange keyRange;
 			Optional<UID> mergeChildId;
 			Version startVersion;
-			std::tie(granuleId, historyKey, keyRange, mergeChildId, startVersion) =
-			    toFullyDelete[deleteOrder[i].second];
+			std::tie(granuleId, historyKey, keyRange, mergeChildId, startVersion) = toFullyDelete[it->second];
+			ASSERT(previousVersion <= startVersion);
+			previousVersion = startVersion;
 			// FIXME: consider batching into a single txn (need to take care of txn size limit)
 			if (BM_PURGE_DEBUG) {
 				fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
@@ -5175,17 +5240,32 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			    self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force, waitForAll(parents));
 			fullDeletions.push_back(deleteFuture);
 			parentDelete.insert(keyRange, { startVersion, deleteFuture });
+			++it;
 		}
 
-		wait(waitForAll(fullDeletions));
+		// no waitForAll(deque)
+		for (i = 0; i < fullDeletions.size(); i++) {
+			wait(fullDeletions[i]);
+		}
+		fullDeletions.clear();
+		parentDelete.insert(normalKeys, { 0, Future<Void>(Void()) });
+	}
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to partially delete\n", self->epoch, toPartiallyDelete.size());
 	}
 
-	state std::vector<Future<Void>> partialDeletions;
+	state std::deque<Future<Void>> partialDeletions;
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
+		if (partialDeletions.size() == SERVER_KNOBS->BLOB_MANAGER_PURGE_GRANULE_PARALLELISM) {
+			wait(partialDeletions.front());
+			partialDeletions.pop_front();
+		}
 		UID granuleId;
 		KeyRange keyRange;
 		std::tie(granuleId, keyRange) = toPartiallyDelete[i];
@@ -5195,7 +5275,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion, keyRange));
 	}
 
-	wait(waitForAll(partialDeletions));
+	// no waitForAll(deque)
+	for (i = 0; i < partialDeletions.size(); i++) {
+		wait(partialDeletions[i]);
+	}
+	partialDeletions.clear();
 
 	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
 		wait(delay(0)); // should be cancelled
@@ -5249,7 +5333,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("Epoch", self->epoch)
 	    .detail("Range", range)
 	    .detail("PurgeVersion", purgeVersion)
-	    .detail("Force", force);
+	    .detail("Force", force)
+	    .detail("PurgeID", purgeID);
 
 	CODE_PROBE(true, "range purge complete");
 
