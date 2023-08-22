@@ -108,7 +108,7 @@ FoundationDB's C bindings are installed with the FoundationDB client binaries (s
 
 On Linux,
     | ``fdb_c.h``, ``fdb_c_types.h``, ``fdb_c_internal.h``, ``fdb_c_options.g.h``, ``fdb.options`` and ``fdb_c_shim.h`` are installed into ``/usr/include/foundationdb/``
-    | ``libfdb_c.so`` and ``libfdb_c_shim.so`` is installed into ``/usr/lib/`` with the `deb` package and into with the `rpm` ``/usr/lib64/``
+    | ``libfdb_c.so`` and ``libfdb_c_shim.so`` is installed into ``/usr/lib/`` with the ``deb`` package and into with the ``rpm`` ``/usr/lib64/``
 
 On macOS,
     | ``fdb_c.h``, ``fdb_c_types.h``, ``fdb_c_internal.h``, ``fdb_c_options.g.h``, ``fdb.options`` and ``fdb_c_shim.h`` are installed into ``/usr/local/include/foundationdb/``
