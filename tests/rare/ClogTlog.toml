@@ -9,6 +9,10 @@ desiredTLogCount = 6
 [[knobs]]
 enable_worker_health_monitor = true
 cc_enable_worker_health_monitor = true
+cc_worker_health_checking_interval = 15
+cc_min_degradation_interval = 30
+cc_health_trigger_recovery = true
+peer_latency_degradation_threshold = 1
 
 [[test]]
 testTitle = 'ClogTlog'
@@ -22,4 +26,4 @@ testTitle = 'ClogTlog'
 
     [[test.workload]]
     testName = 'ClogTlog'
-    testDuration = 150.0
+    testDuration = 250.0
