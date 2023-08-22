@@ -117,6 +117,8 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
+struct ClusterRecoveryData;
+
 class ClusterControllerData {
 public:
 	struct DBInfo {
@@ -138,6 +140,7 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		Reference<ClusterRecoveryData> recoveryData;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -3126,92 +3129,11 @@ public:
 	}
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
-	bool transactionSystemContainsDegradedServers() {
-		const ServerDBInfo& dbi = db.serverInfo->get();
-		auto transactionWorkerInList =
-		    [&dbi](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
-			for (const auto& server : serverList) {
-				if (dbi.master.addresses().contains(server)) {
-					return true;
-				}
-
-				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
-						continue;
-					}
-
-					if (skipRemote && !logSet.isLocal) {
-						continue;
-					}
-
-					if (!logSet.isLocal) {
-						// Only check log routers in the remote region.
-						for (const auto& logRouter : logSet.logRouters) {
-							if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
-								return true;
-							}
-						}
-					} else {
-						for (const auto& tlog : logSet.tLogs) {
-							if (tlog.present() && tlog.interf().addresses().contains(server)) {
-								return true;
-							}
-						}
-					}
-				}
-
-				for (const auto& proxy : dbi.client.grvProxies) {
-					if (proxy.addresses().contains(server)) {
-						return true;
-					}
-				}
-
-				for (const auto& proxy : dbi.client.commitProxies) {
-					if (proxy.addresses().contains(server)) {
-						return true;
-					}
-				}
-
-				for (const auto& resolver : dbi.resolvers) {
-					if (resolver.addresses().contains(server)) {
-						return true;
-					}
-				}
-			}
-
-			return false;
-		};
-
-		// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
-		// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
-		// stable.
-		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
-		       transactionWorkerInList(degradationInfo.disconnectedServers,
-		                               /*skipSatellite=*/false,
-		                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
-	}
+	bool transactionSystemContainsDegradedServers();
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
-	bool remoteTransactionSystemContainsDegradedServers() {
-		if (db.config.usableRegions <= 1) {
-			return false;
-		}
-
-		for (const auto& excludedServer : degradationInfo.degradedServers) {
-			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
-				return true;
-			}
-		}
-
-		for (const auto& excludedServer : degradationInfo.disconnectedServers) {
-			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
+	bool remoteTransactionSystemContainsDegradedServers();
 
 	// Returns true if remote DC is healthy and can failover to.
 	bool remoteDCIsHealthy() {
@@ -3244,10 +3166,6 @@ public:
 	bool shouldTriggerRecoveryDueToDegradedServers() {
 		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
 		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
-			return false;
-		}
-
-		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			return false;
 		}
 

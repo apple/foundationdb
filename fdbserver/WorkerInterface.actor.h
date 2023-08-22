@@ -1132,7 +1132,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo> const> db);
@@ -1181,7 +1182,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 }
 namespace oldTLog_6_2 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
@@ -1196,7 +1198,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 }
 
 typedef decltype(&tLog) TLogFn;

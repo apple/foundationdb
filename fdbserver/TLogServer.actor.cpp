@@ -373,13 +373,17 @@ struct TLogData : NonCopyable {
 
 	Reference<Histogram> commitLatencyDist;
 
+	// Controls whether the health monitoring running in this TLog force checking any other processes are degraded.
+	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck;
+
 	TLogData(UID dbgid,
 	         UID workerID,
 	         IKeyValueStore* persistentData,
 	         IDiskQueue* persistentQueue,
 	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
-	         std::string folder)
+	         std::string folder,
+	         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck)
 	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
 	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
 	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
@@ -389,7 +393,8 @@ struct TLogData : NonCopyable {
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
 	    degraded(degraded), commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                                                  LiteralStringRef("commit"),
-	                                                                  Histogram::Unit::microseconds)) {
+	                                                                  Histogram::Unit::microseconds)),
+	    enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -3548,13 +3553,20 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					logData->logRouterPopToVersion = recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
+					// Force gray failure monitoring during recovery.
+					self->enablePrimaryTxnSystemHealthCheck->set(true);
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, recoverAt, true) ||
 					     logData->removed || logData->stopCommit.onTrigger());
+					self->enablePrimaryTxnSystemHealthCheck->set(false);
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
+
+					// Force gray failure monitoring during recovery.
+					self->enablePrimaryTxnSystemHealthCheck->set(true);
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, recoverAt, false) ||
 					     logData->removed || logData->stopCommit.onTrigger());
+					self->enablePrimaryTxnSystemHealthCheck->set(false);
 				}
 				pulledRecoveryVersions = true;
 				logData->knownCommittedVersion = recoverAt;
@@ -3651,8 +3663,10 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog) {
-	state TLogData self(tlogId, workerID, persistentData, persistentQueue, db, degraded, folder);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
+	state TLogData self(
+	    tlogId, workerID, persistentData, persistentQueue, db, degraded, folder, enablePrimaryTxnSystemHealthCheck);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
 	TraceEvent("SharedTlog", tlogId).log();
