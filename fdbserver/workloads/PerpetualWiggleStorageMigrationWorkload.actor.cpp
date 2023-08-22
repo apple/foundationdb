@@ -42,6 +42,15 @@ ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, boo
 	wait(delay(5.0)); // wait for read window
 	return true;
 }
+
+constexpr bool hasRocksDB =
+#ifdef WITH_ROCKSDB
+    true
+#else
+    false
+#endif
+    ;
+
 } // namespace
 
 struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
@@ -65,6 +74,10 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; };
 
 	ACTOR static Future<Void> _start(PerpetualWiggleStorageMigrationWorkload* self, Database cx) {
+		if (!hasRocksDB) {
+			// RocksDB, which is required by this test, is not supported
+			return Void();
+		}
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 		// The test should have enough storage servers to exclude.
 		ASSERT(storageServers.size() > 3);
