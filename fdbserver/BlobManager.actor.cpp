@@ -652,10 +652,37 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> nextFullKeys(Reference<BlobManagerDa
 	return result;
 }
 
+// split recursively in the middle to guarantee roughly equal splits across different parts of key space
+static void downsampleSplit(const Standalone<VectorRef<KeyRef>>& splits,
+                            Standalone<VectorRef<KeyRef>>& out,
+                            int startIdx,
+                            int endIdx,
+                            int remaining) {
+	ASSERT(endIdx - startIdx >= remaining);
+	ASSERT(remaining >= 0);
+	if (remaining == 0) {
+		return;
+	}
+	if (endIdx - startIdx == remaining) {
+		out.append(out.arena(), splits.begin() + startIdx, remaining);
+	} else {
+		int mid = (startIdx + endIdx) / 2;
+		int startCount = (remaining - 1) / 2;
+		int endCount = remaining - startCount - 1;
+		// ensure no infinite recursion
+		ASSERT(mid != endIdx);
+		ASSERT(mid + 1 != startIdx);
+		downsampleSplit(splits, out, startIdx, mid, startCount);
+		out.push_back(out.arena(), splits[mid]);
+		downsampleSplit(splits, out, mid + 1, endIdx, endCount);
+	}
+}
+
 ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmData,
                                                 KeyRange range,
                                                 bool writeHot,
-                                                bool initialSplit) {
+                                                bool initialSplit,
+                                                Optional<int> maxSplitPoints = Optional<int>()) {
 	state BlobGranuleSplitPoints splitPoints;
 	try {
 		if (BM_DEBUG) {
@@ -724,11 +751,37 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 				}
 			}
 
-			// We only need to align the keys if there is a proposed split.
 			if (keys.size() > 2) {
-				Standalone<VectorRef<KeyRef>> fullKeys = wait(nextFullKeys(bmData, keys));
+				// We only need to align the keys if there is a proposed split.
+				state Standalone<VectorRef<KeyRef>> fullKeys = wait(nextFullKeys(bmData, keys));
 				BlobGranuleSplitPoints _splitPoints = wait(alignKeys(bmData, range, fullKeys));
 				splitPoints = _splitPoints;
+
+				// Enforce max split fanout for performance reasons. This mainly happens when a blob worker is behind.
+				if (maxSplitPoints.present() && splitPoints.keys.size() > maxSplitPoints.get()) {
+					// downsample full keys and re-align
+					CODE_PROBE(true, "downsampling granule split because fanout too high");
+					Standalone<VectorRef<KeyRef>> downsampledKeys;
+					downsampledKeys.arena().dependsOn(fullKeys.arena());
+					downsampledKeys.push_back(downsampledKeys.arena(), fullKeys.front());
+
+					// since we include start + end boundaries here, only need maxSplitPoints - 2 split boundaries to
+					// produce maxSplitPoints - 1 granules
+					downsampleSplit(fullKeys, downsampledKeys, 1, fullKeys.size() - 1, maxSplitPoints.get() - 2);
+
+					downsampledKeys.push_back(downsampledKeys.arena(), fullKeys.back());
+					ASSERT(downsampledKeys.size() == maxSplitPoints.get());
+					if (BM_DEBUG) {
+						fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n",
+						           range.begin.printable(),
+						           range.end.printable(),
+						           splitPoints.keys.size() - 1,
+						           maxSplitPoints.get() - 1);
+					}
+
+					wait(store(splitPoints, alignKeys(bmData, range, downsampledKeys)));
+					ASSERT(splitPoints.keys.size() <= maxSplitPoints.get());
+				}
 			} else {
 				splitPoints.keys = keys;
 			}
@@ -1150,6 +1203,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 		} else {
 			if (!forcePurging) {
+				// FIXME: not handling error propagation correctly here
 				bmData->assignsInProgress.insert(assignment.keyRange,
 				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 			}
@@ -1162,6 +1216,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 		bmData->workerAssignments.insert(assignment.keyRange, UID());
 		ASSERT(assignment.assign.get().type != AssignRequestType::Continue);
 		if (!forcePurging) {
+			// FIXME: not handling error propagation correctly here
 			bmData->assignsInProgress.insert(
 			    assignment.keyRange, doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
 		}
@@ -1622,32 +1677,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	}
 }
 
-// split recursively in the middle to guarantee roughly equal splits across different parts of key space
-static void downsampleSplit(const Standalone<VectorRef<KeyRef>>& splits,
-                            Standalone<VectorRef<KeyRef>>& out,
-                            int startIdx,
-                            int endIdx,
-                            int remaining) {
-	ASSERT(endIdx - startIdx >= remaining);
-	ASSERT(remaining >= 0);
-	if (remaining == 0) {
-		return;
-	}
-	if (endIdx - startIdx == remaining) {
-		out.append(out.arena(), splits.begin() + startIdx, remaining);
-	} else {
-		int mid = (startIdx + endIdx) / 2;
-		int startCount = (remaining - 1) / 2;
-		int endCount = remaining - startCount - 1;
-		// ensure no infinite recursion
-		ASSERT(mid != endIdx);
-		ASSERT(mid + 1 != startIdx);
-		downsampleSplit(splits, out, startIdx, mid, startCount);
-		out.push_back(out.arena(), splits[mid]);
-		downsampleSplit(splits, out, mid + 1, endIdx, endCount);
-	}
-}
-
 ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
                                           UID currentWorkerId,
                                           KeyRange granuleRange,
@@ -1913,7 +1942,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 	// first get ranges to split
-	state BlobGranuleSplitPoints splitPoints = wait(splitRange(bmData, granuleRange, writeHot, false));
+	// +1 because this is boundaries, so N granules would have N+1 boundaries
+	state BlobGranuleSplitPoints splitPoints =
+	    wait(splitRange(bmData, granuleRange, writeHot, false, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 
 	ASSERT(splitPoints.keys.size() >= 2);
 	if (splitPoints.keys.size() == 2) {
@@ -1945,34 +1976,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		}
 
 		return Void();
-	}
-
-	// Enforce max split fanout for performance reasons. This mainly happens when a blob worker is behind.
-	if (splitPoints.keys.size() >=
-	    SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 2) { // +2 because this is boundaries, so N keys would have N+1 bounaries.
-		CODE_PROBE(true, "downsampling granule split because fanout too high");
-		Standalone<VectorRef<KeyRef>> coalescedRanges;
-		coalescedRanges.arena().dependsOn(splitPoints.keys.arena());
-		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.front());
-
-		// since we include start + end boundaries here, only need maxSplitFanout-1 split boundaries to produce
-		// maxSplitFanout granules
-		downsampleSplit(
-		    splitPoints.keys, coalescedRanges, 1, splitPoints.keys.size() - 1, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT - 1);
-
-		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.back());
-		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
-		if (BM_DEBUG) {
-			fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n",
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           splitPoints.keys.size() - 1,
-			           SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
-		}
-
-		// TODO probably do something better here?
-		wait(store(splitPoints, alignKeys(bmData, granuleRange, coalescedRanges)));
-		ASSERT(splitPoints.keys.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
 	ASSERT(granuleRange.begin == splitPoints.keys.front());
@@ -3165,6 +3168,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 							                                     rep.originalEpoch,
 							                                     rep.originalSeqno);
 						}
+						// also add to actor collection for error propagation
+						bmData->addActor.send(newEval.inProgress);
 						bmData->boundaryEvaluations.insert(rep.granuleRange, newEval);
 					}
 
