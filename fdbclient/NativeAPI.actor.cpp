@@ -6036,6 +6036,13 @@ void Transaction::atomicOp(const KeyRef& key,
 	CODE_PROBE(true, "NativeAPI atomic operation");
 }
 
+void TransactionState::addClearCost() {
+	// NOTE: The throttling cost of each clear is assumed to be one page.
+	// This makes compuation fast, but can be inaccurate and may
+	// underestimate the cost of large clears.
+	totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+}
+
 void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange) {
 	++trState->cx->transactionClearMutations;
 	auto& req = tr;
@@ -6060,10 +6067,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 		return;
 
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
-	// NOTE: The throttling cost of each clear is assumed to be one page.
-	// This makes compuation fast, but can be inaccurate and may
-	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	trState->addClearCost();
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6083,6 +6087,7 @@ void Transaction::clear(const KeyRef& key, AddConflictRange addConflictRange) {
 	data[key.size()] = 0;
 	t.mutations.emplace_back(
 	    req.arena, MutationRef::ClearRange, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
+	trState->addClearCost();
 	if (addConflictRange)
 		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
