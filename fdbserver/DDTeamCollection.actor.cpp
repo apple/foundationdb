@@ -2346,6 +2346,7 @@ public:
 		state bool lastIsTss = false;
 		TraceEvent("StorageServerRecruitment", self->distributorId)
 		    .detail("State", "Idle")
+		    .detail("Primary", self->primary)
 		    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 		loop {
 			if (!recruiting) {
@@ -2355,6 +2356,7 @@ public:
 				TraceEvent("StorageServerRecruitment", self->distributorId)
 				    .detail("State", "Recruiting")
 				    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
+				    .detail("Primary", self->primary)
 				    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 				recruiting = true;
 				lastIsTss = self->isTssRecruiting;
@@ -2365,6 +2367,7 @@ public:
 							if (lastIsTss != self->isTssRecruiting) {
 								TraceEvent("StorageServerRecruitment", self->distributorId)
 								    .detail("State", "Recruiting")
+								    .detail("Primary", self->primary)
 								    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
 								    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 								lastIsTss = self->isTssRecruiting;
@@ -2379,6 +2382,7 @@ public:
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
 				    .detail("State", "Idle")
+				    .detail("Primary", self->primary)
 				    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 				recruiting = false;
 			}
@@ -2424,7 +2428,8 @@ public:
 				    .detail("TSSID", interfaceId)
 				    .detail("Stage", "TSSWaitingPair")
 				    .detail("TSSAddr", candidateWorker.worker.address())
-				    .detail("TSSLocality", candidateWorker.worker.locality.toString());
+				    .detail("TSSLocality", candidateWorker.worker.locality.toString())
+				    .detail("Primary", self->primary);
 
 				Optional<std::pair<UID, Version>> ssPairInfoResult = wait(tssState->waitOnSS());
 				if (ssPairInfoResult.present()) {
@@ -2437,7 +2442,8 @@ public:
 					    .detail("Stage", "TSSGotPair")
 					    .detail("TSSAddr", candidateWorker.worker.address())
 					    .detail("SSVersion", ssPairInfoResult.get().second)
-					    .detail("TSSLocality", candidateWorker.worker.locality.toString());
+					    .detail("TSSLocality", candidateWorker.worker.locality.toString())
+					    .detail("Primary", self->primary);
 				} else {
 					doRecruit = false;
 
@@ -2446,7 +2452,8 @@ public:
 					    .detail("TSSID", interfaceId)
 					    .detail("Reason", "TSS failed to get SS pair for some reason")
 					    .detail("TSSAddr", candidateWorker.worker.address())
-					    .detail("TSSLocality", candidateWorker.worker.locality.toString());
+					    .detail("TSSLocality", candidateWorker.worker.locality.toString())
+					    .detail("Primary", self->primary);
 				}
 			}
 
@@ -2488,7 +2495,8 @@ public:
 				    .detail("SSID", interfaceId)
 				    .detail("Stage", "SSSignaling")
 				    .detail("SSAddr", candidateWorker.worker.address())
-				    .detail("SSLocality", candidateWorker.worker.locality.toString());
+				    .detail("SSLocality", candidateWorker.worker.locality.toString())
+				    .detail("Primary", self->primary);
 
 				// wait for timeout, but eventually move on if no TSS pair recruited
 				Optional<bool> tssSuccessful =
@@ -2500,7 +2508,8 @@ public:
 					    .detail("SSID", interfaceId)
 					    .detail("Stage", "SSGotPair")
 					    .detail("SSAddr", candidateWorker.worker.address())
-					    .detail("SSLocality", candidateWorker.worker.locality.toString());
+					    .detail("SSLocality", candidateWorker.worker.locality.toString())
+					    .detail("Primary", self->primary);
 				} else {
 					TraceEvent(SevWarn, "TSS_RecruitError", self->distributorId)
 					    .detail("ReqID", isr.reqId)
@@ -2509,7 +2518,8 @@ public:
 					            tssSuccessful.present() ? "TSS recruitment failed for some reason"
 					                                    : "TSS recruitment timed out")
 					    .detail("SSAddr", candidateWorker.worker.address())
-					    .detail("SSLocality", candidateWorker.worker.locality.toString());
+					    .detail("SSLocality", candidateWorker.worker.locality.toString())
+					    .detail("Primary", self->primary);
 				}
 			}
 
@@ -2556,7 +2566,8 @@ public:
 					TraceEvent(SevWarn, "DDRecruitmentError")
 					    .detail("ReqID", isr.reqId)
 					    .detail("Reason", "Server ID already recruited")
-					    .detail("ServerID", id);
+					    .detail("ServerID", id)
+					    .detail("Primary", self->primary);
 				}
 			}
 		}
@@ -2609,7 +2620,8 @@ public:
 					    .detail("Desired", targetTSSInDC)
 					    .detail("Existing", self->tss_info_by_pair.size())
 					    .detail("InProgress", inProgressTSSCount)
-					    .detail("NotStarted", newTssToRecruit);
+					    .detail("NotStarted", newTssToRecruit)
+					    .detail("Primary", self->primary);
 					tssToRecruit = newTssToRecruit;
 
 					// if we need to get rid of some TSS processes, signal to either cancel recruitment or kill existing
@@ -2720,7 +2732,8 @@ public:
 							TraceEvent("TSS_Recruit", self->distributorId)
 							    .detail("Stage", "HoldTSS")
 							    .detail("Addr", candidateSSAddr.toString())
-							    .detail("Locality", candidateWorker.worker.locality.toString());
+							    .detail("Locality", candidateWorker.worker.locality.toString())
+							    .detail("Primary", self->primary);
 
 							CODE_PROBE(true, "Starting TSS recruitment");
 							self->isTssRecruiting = true;
@@ -2737,7 +2750,8 @@ public:
 								TraceEvent("TSS_Recruit", self->distributorId)
 								    .detail("Stage", "PairSS")
 								    .detail("Addr", candidateSSAddr.toString())
-								    .detail("Locality", candidateWorker.worker.locality.toString());
+								    .detail("Locality", candidateWorker.worker.locality.toString())
+								    .detail("Primary", self->primary);
 								self->addActor.send(
 								    initializeStorage(self, candidateWorker, ddEnabledState, false, tssState));
 								// successfully started recruitment of pair, reset tss recruitment state
