@@ -58,6 +58,7 @@ const std::string METADATA_SHARD_ID = "kvs-metadata";
 const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
 const std::string manifestFilePrefix = "MANIFEST-";
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
+const KeyRef compactionTimestampPrefix("\xff\xff/CompactionTimestamp/"_sr);
 // TODO: move constants to a header file.
 const KeyRef persistVersion = "\xff\xffVersion"_sr;
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = "RocksDBStorage"_sr;
@@ -1217,10 +1218,8 @@ public:
 				if (rState->closing) {
 					break;
 				}
-				TraceEvent(SevInfo, "ShardedRocksKVSPhysialShardMetrics")
-				    .detail("NumActiveShards", shardManager->numActiveShards())
-				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards());
 
+				uint64_t numSstFiles = 0;
 				for (auto& [id, shard] : *physicalShards) {
 					if (!shard->initialized()) {
 						continue;
@@ -1228,15 +1227,15 @@ public:
 					uint64_t liveDataSize = 0;
 					ASSERT(shard->db->GetIntProperty(
 					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
-					TraceEvent(SevInfo, "PhysicalShardCFSize")
-					    .detail("ShardId", id)
-					    .detail("LiveDataSize", liveDataSize);
+
+					TraceEvent e(SevInfo, "PhysicalShardStats");
+					e.detail("ShardId", id).detail("LiveDataSize", liveDataSize);
 
 					// Get compression ratio for each level.
 					rocksdb::ColumnFamilyMetaData cfMetadata;
 					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
-					TraceEvent e(SevInfo, "PhysicalShardLevelStats");
-					e.detail("ShardId", id).detail("NumFiles", cfMetadata.file_count);
+					e.detail("NumFiles", cfMetadata.file_count);
+					numSstFiles += cfMetadata.file_count;
 					std::string levelProp;
 					int numLevels = 0;
 					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
@@ -1253,6 +1252,10 @@ public:
 					}
 					e.detail("NumLevels", numLevels);
 				}
+				TraceEvent(SevInfo, "ShardedRocksKVSPhysialShardMetrics")
+				    .detail("NumActiveShards", shardManager->numActiveShards())
+				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards())
+				    .detail("NumSstFiles", numSstFiles);
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -2635,7 +2638,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					continue;
 				}
 				std::string value;
-				auto s = db->Get(rocksdb::ReadOptions(), a.metadataShard->cf, shard->id, &value);
+				auto s = db->Get(rocksdb::ReadOptions(),
+				                 a.metadataShard->cf,
+				                 compactionTimestampPrefix.toString() + shard->id,
+				                 &value);
 				if (s.ok()) {
 					auto lastComapction = std::stod(value);
 					if (now() - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
@@ -2643,8 +2649,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						continue;
 					}
 				} else if (!s.IsNotFound()) {
-					TraceEvent(SevWarnAlways, "ShardedRocksDBReadValueError", logId)
-					    .detail("Description", s.ToString());
+					TraceEvent(SevError, "ShardedRocksDBReadValueError", logId).detail("Description", s.ToString());
 					a.done.sendError(internal_error());
 				}
 
@@ -2652,6 +2657,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// Force RocksDB to rewrite file to last level.
 				compactOptions.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
 				shard->db->CompactRange(compactOptions, shard->cf, /*begin=*/nullptr, /*end=*/nullptr);
+				shard->db->Put(rocksdb::WriteOptions(),
+				               a.metadataShard->cf,
+				               compactionTimestampPrefix.toString() + shard->id,
+				               std::to_string(now()));
 				TraceEvent("ManualCompaction", logId).detail("ShardId", shard->id);
 			}
 
@@ -2741,9 +2750,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct RemoveShardAction : TypedAction<Writer, RemoveShardAction> {
 			std::vector<std::shared_ptr<PhysicalShard>> shards;
+			PhysicalShard* metadataShard;
 			ThreadReturnPromise<Void> done;
 
-			RemoveShardAction(std::vector<std::shared_ptr<PhysicalShard>>& shards) : shards(shards) {}
+			RemoveShardAction(std::vector<std::shared_ptr<PhysicalShard>>& shards, PhysicalShard* metadataShard)
+			  : shards(shards), metadataShard(metadataShard) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
@@ -2751,6 +2762,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			for (auto& shard : a.shards) {
 				shard->deletePending = true;
 				columnFamilyMap->erase(shard->cf->GetID());
+				a.metadataShard->db->Delete(
+				    rocksdb::WriteOptions(), a.metadataShard->cf, compactionTimestampPrefix.toString() + shard->id);
 			}
 			a.shards.clear();
 			a.done.send(Void());
@@ -3983,26 +3996,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					}
 
 					shards.push_back(shard);
-					/*
-					std::string value;
-					auto s = metadataShard->db->Get(rocksdb::ReadOptions(), metadataShard->cf, id, &value);
-					if (s.ok()) {
-					    auto lastComapction = std::stod(value);
-					    if (now() - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
-					        continue;
-					    }
-					} else if (!s.IsNotFound()) {
-					    TraceEvent(SevWarnAlways, "ShardedRocksDBReadValueError").detail("Description", s.ToString());
-					    throw internal_error();
-					}
 
-					TraceEvent("StartCompaction").log();
-
-					rocksdb::CompactRangeOptions compactOptions;
-					// Force RocksDB to rewrite file to last level.
-					compactOptions.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
-					*/
-					TraceEvent("ManualCompaction")
+					TraceEvent("CompactionScheduled")
 					    .detail("ShardId", id)
 					    .detail("NumFiles", cfMetadata.file_count)
 					    .detail("ShardSize", liveDataSize);
@@ -4014,6 +4009,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					auto res = a->done.getFuture();
 					thread->post(a);
 					wait(res);
+				} else {
+					TraceEvent("CompactionSkipped").detail("Reason", "NoCandidate");
 				}
 			}
 		} catch (Error& e) {
@@ -4038,7 +4035,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 				auto shards = shardManager->getPendingDeletionShards(cleanUpDelay);
 				if (shards.size() > 0) {
-					auto a = new Writer::RemoveShardAction(shards);
+					auto a = new Writer::RemoveShardAction(shards, shardManager->getMetaDataShard());
 					Future<Void> f = a->done.getFuture();
 					writeThread->post(a);
 					TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
