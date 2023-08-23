@@ -1113,7 +1113,8 @@ struct PhysicalShard {
 	bool deletePending = false;
 	std::atomic<bool> isInitialized;
 	uint64_t numRangeDeletions = 0;
-	double deleteTimeSec;
+	double deleteTimeSec = 0.0;
+	double lastCompactionTime = 0.0;
 };
 
 int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, int byteLimit, RangeResult* result) {
@@ -1252,7 +1253,7 @@ public:
 					}
 					e.detail("NumLevels", numLevels);
 				}
-				TraceEvent(SevInfo, "ShardedRocksKVSPhysialShardMetrics")
+				TraceEvent(SevInfo, "KVSPhysialShardMetrics")
 				    .detail("NumActiveShards", shardManager->numActiveShards())
 				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards())
 				    .detail("NumSstFiles", numSstFiles);
@@ -2638,19 +2639,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					continue;
 				}
 				std::string value;
-				auto s = db->Get(rocksdb::ReadOptions(),
-				                 a.metadataShard->cf,
-				                 compactionTimestampPrefix.toString() + shard->id,
-				                 &value);
-				if (s.ok()) {
-					auto lastComapction = std::stod(value);
-					if (now() - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
-						++skipped;
-						continue;
+				// TODO: Consider load last compaction time during shard init once rocksdb's start time is reduced.
+				if (shard->lastCompactionTime <= 0.0) {
+					auto s = db->Get(rocksdb::ReadOptions(),
+					                 a.metadataShard->cf,
+					                 compactionTimestampPrefix.toString() + shard->id,
+					                 &value);
+					if (s.ok()) {
+						auto lastComapction = std::stod(value);
+						if (start - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
+							shard->lastCompactionTime = lastComapction; 
+							++skipped;
+							continue;
+						}
+					} else if (!s.IsNotFound()) {
+						TraceEvent(SevError, "ShardedRocksDBReadValueError", logId).detail("Description", s.ToString());
+						a.done.sendError(internal_error());
+						return;
 					}
-				} else if (!s.IsNotFound()) {
-					TraceEvent(SevError, "ShardedRocksDBReadValueError", logId).detail("Description", s.ToString());
-					a.done.sendError(internal_error());
 				}
 
 				rocksdb::CompactRangeOptions compactOptions;
@@ -2660,7 +2666,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				shard->db->Put(rocksdb::WriteOptions(),
 				               a.metadataShard->cf,
 				               compactionTimestampPrefix.toString() + shard->id,
-				               std::to_string(now()));
+				               std::to_string(start));
+				shard->lastCompactionTime = start;
 				TraceEvent("ManualCompaction", logId).detail("ShardId", shard->id);
 			}
 
@@ -3670,7 +3677,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
-			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
@@ -3974,12 +3981,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 				wait(delay(SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY));
 				int count = 0;
+				double start = now();
 				std::vector<std::shared_ptr<PhysicalShard>> shards;
 				for (auto& [id, shard] : *physicalShards) {
 					if (count > SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT) {
 						break;
 					}
 					if (!shard->initialized() || shard->deletePending) {
+						continue;
+					}
+					if (shard->lastCompactionTime > 0.0 &&
+					    start - shard->lastCompactionTime < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
 						continue;
 					}
 					uint64_t liveDataSize = 0;

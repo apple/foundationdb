@@ -424,6 +424,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                        65535 ); if( randomize && BUGGIFY )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
 	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
+	init( ROCKSDB_COMPACTION_THREAD_PRIORITY,                      0 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          2 );
 	init( ROCKSDB_READ_PARALLELISM,                isSimulated? 2: 4 );
 	init( ROCKSDB_CHECKPOINT_READER_PARALLELISM,                   4 );
@@ -542,8 +543,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
 	init (ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                           6 ); // RocksDB default.
 	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
-	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                      21600 ); // 6h 
-	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  7200 ); // 2h
+	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
+	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 2h
 	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                     1 );
 
 	// Leader election
