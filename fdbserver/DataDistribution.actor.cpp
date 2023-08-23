@@ -92,14 +92,14 @@ std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
+} // anonymous namespace
+
 enum class DDAuditContext : uint8_t {
 	INVALID = 0,
 	RESUME = 1,
 	LAUNCH = 2,
 	RETRY = 3,
 };
-
-} // anonymous namespace
 
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
