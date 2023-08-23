@@ -2333,6 +2333,7 @@ public:
 		state bool lastIsTss = false;
 		TraceEvent("StorageServerRecruitment", self->distributorId)
 		    .detail("State", "Idle")
+		    .detail("Primary", self->primary)
 		    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 		loop {
 			if (!recruiting) {
@@ -2342,6 +2343,7 @@ public:
 				TraceEvent("StorageServerRecruitment", self->distributorId)
 				    .detail("State", "Recruiting")
 				    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
+				    .detail("Primary", self->primary)
 				    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 				recruiting = true;
 				lastIsTss = self->isTssRecruiting;
@@ -2352,6 +2354,7 @@ public:
 							if (lastIsTss != self->isTssRecruiting) {
 								TraceEvent("StorageServerRecruitment", self->distributorId)
 								    .detail("State", "Recruiting")
+								    .detail("Primary", self->primary)
 								    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
 								    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 								lastIsTss = self->isTssRecruiting;
@@ -2366,6 +2369,7 @@ public:
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
 				    .detail("State", "Idle")
+				    .detail("Primary", self->primary)
 				    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 				recruiting = false;
 			}
