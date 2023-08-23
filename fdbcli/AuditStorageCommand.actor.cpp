@@ -98,13 +98,9 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 
 		KeyValueStoreType engineType = KeyValueStoreType::END;
 		if (tokens.size() == 5 && (type == AuditType::ValidateHA || type == AuditType::ValidateReplica)) {
-			if (tokencmp(tokens[4], "sqlite")) {
-				engineType = KeyValueStoreType::SSD_BTREE_V2;
-			} else if (tokencmp(tokens[4], "rocksdb")) {
-				engineType = KeyValueStoreType::SSD_ROCKSDB_V1;
-			} else if (tokencmp(tokens[4], "shardedrocksdb")) {
-				engineType = KeyValueStoreType::SSD_SHARDED_ROCKSDB;
-			} else {
+			engineType = KeyValueStoreType::fromString(tokens[4].toString());
+			if (engineType != KeyValueStoreType::SSD_BTREE_V2 && engineType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+			    engineType != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 				printUsage(tokens[0]);
 				return UID();
 			}
@@ -126,7 +122,8 @@ CommandFactory auditStorageFactory(
                 "`ssshard' `Type' are supported currently), and\n"
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
                 "Specify audit `EngineType' when auditType is `ha' or `replica'\n"
-                "(only `rocksdb' and `shardedrocksdb' and `sqlite' are supported).\n"
+                "(only `ssd-rocksdb-v1' and `ssd-sharded-rocksdb' and `ssd-2' are supported).\n"
+                "If no EngineType is specified, every storage engine will be audited.\n"
                 "For example, to audit the full key range: `audit_storage ha'\n"
                 "To audit a sub-range only: `audit_storage ha \\xa \\xb'\n"
                 "Returns an audit `ID'. See also `get_audit_status' command.\n"
