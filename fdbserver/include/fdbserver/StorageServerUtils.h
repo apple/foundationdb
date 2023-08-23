@@ -84,7 +84,8 @@ struct MoveInShardMetaData {
 		return "MoveInShardMetaData: [Range]: " + describe(this->ranges) +
 		       " [DataMoveID]: " + this->dataMoveId.toString() +
 		       " [ShardCreateVersion]: " + std::to_string(this->createVersion) + " [ID]: " + this->id.toString() +
-		       " [State]: " + std::to_string(static_cast<int>(this->phase));
+		       " [State]: " + std::to_string(static_cast<int>(this->phase)) +
+		       " [HighWatermark]: " + std::to_string(this->highWatermark);
 	}
 
 	template <class Ar>

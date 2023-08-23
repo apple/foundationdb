@@ -252,18 +252,17 @@ private:
 };
 
 ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
-	Key beginKey = self->getPersistKey(begin, 0), endKey = self->getPersistKey(end, 0);
+	Key beginKey = persistUpdatesKey(self->id, begin), endKey = persistUpdatesKey(self->id, end);
 	TraceEvent(SevDebug, "MoveInUpdatesLoadBegin", self->id)
 	    .detail("BeginVersion", begin)
 	    .detail("EndVersion", end)
 	    .detail("BeginKey", beginKey)
 	    .detail("EndKey", endKey);
 	ASSERT(beginKey < endKey);
-	RangeResult res =
-	    // wait(self->store->readRange(KeyRangeRef(self->getPersistKey(begin, 0), self->getPersistKey(end, 0)),
-	    //                             SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT,
-	    //                             SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT));
-	    wait(self->store->readRange(KeyRangeRef(self->getPersistKey(begin, 0), self->getPersistKey(end, 0))));
+	RangeResult res = wait(self->store->readRange(KeyRangeRef(beginKey, endKey),
+	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT,
+	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT));
+	// wait(self->store->readRange(KeyRangeRef(self->getPersistKey(begin, 0), self->getPersistKey(end, 0))));
 	std::vector<Standalone<VerUpdateRef>> restored;
 	for (int i = 0; i < res.size(); ++i) {
 		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
@@ -271,26 +270,33 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 		uint64_t uv;
 		rd >> uv;
 		version = static_cast<Version>(fromBigEndian64(uv));
-		Standalone<MutationRef> mutation =
-		    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
-		DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
-		if (restored.empty() || restored.back().version < version) {
-			restored.emplace_back();
-			restored.back().version = version;
-			restored.back().isPrivateData = false;
-		}
-		restored.back().push_back_deep(restored.back().arena(), mutation);
+		// Standalone<MutationRef> mutation =
+		//     BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
+		Standalone<VerUpdateRef> vur =
+		    BinaryReader::fromStringRef<Standalone<VerUpdateRef>>(res[i].value, IncludeVersion());
+		ASSERT(version == vur.version);
+		// DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
+		// if (restored.empty() || restored.back().version < version) {
+		// 	restored.emplace_back();
+		// 	restored.back().version = version;
+		// 	restored.back().isPrivateData = false;
+		// }
+		// restored.back().push_back_deep(restored.back().arena(), mutation);
+		TraceEvent(SevDebug, "MoveInUpdatesLoadedMutations", self->id)
+		    .detail("Version", version)
+		    .detail("Mutations", vur.mutations.size());
+		restored.push_back(std::move(vur));
 	}
 
-	for (int i = restored.size() - 1; i >= 0; --i) {
-		TraceEvent(SevDebug, "MoveInUpdatesLoadedMutations", self->id)
-		    .detail("Version", restored[i].version)
-		    .detail("MutationCount", restored[i].mutations.size())
-		    .detail("Size", restored[i].expectedSize());
-	}
+	// for (int i = restored.size() - 1; i >= 0; --i) {
+	// 	TraceEvent(SevDebug, "MoveInUpdatesLoadedMutations", self->id)
+	// 	    .detail("Version", restored[i].version)
+	// 	    .detail("MutationCount", restored[i].mutations.size())
+	// 	    .detail("Size", restored[i].expectedSize());
+	// }
 
 	if (!res.more) {
-		TraceEvent(SevDebug, "MoveInUpdatesLoaded", self->id)
+		TraceEvent(SevDebug, "MoveInUpdatesLoadComplete", self->id)
 		    .detail("MinVersion", restored.empty() ? invalidVersion : restored.front().version)
 		    .detail("MaxVersion", restored.empty() ? invalidVersion : restored.back().version)
 		    .detail("VersionCount", restored.size());
@@ -306,7 +312,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 		self->spilled = MoveInUpdatesSpilled::False;
 	} else {
 		ASSERT(self->spillBuffer.empty());
-		TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id)
+		TraceEvent(SevDebug, "MoveInUpdatesLoadedBatchs", self->id)
 		    .detail("MinVersion", restored.empty() ? invalidVersion : restored.front().version)
 		    .detail("MaxVersion", restored.empty() ? invalidVersion : restored.back().version)
 		    .detail("VersionCount", restored.size());
@@ -9494,6 +9500,9 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			for (auto i = updates.begin(); i != updates.end(); ++i) {
 				ASSERT(i->version <= version);
 				ASSERT(i->version > highWatermark);
+				TraceEvent(SevDebug, "MoveInUpdatesInject", moveInShard->id())
+				    .detail("Version", i->version)
+				    .detail("Size", i->mutations.size());
 				highWatermark = i->version;
 				i->version = version;
 				batch->arena.dependsOn(i->arena());
@@ -9721,16 +9730,32 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 		}
 	} else {
 		int size = 0;
-		while (!updates.empty()) {
-			if (updates.front().version > this->lastAppliedVersion) {
-				res.push_back(updates.front());
+		Version version = this->lastAppliedVersion;
+		for (auto it = updates.begin(); it != updates.end();) {
+			if (it->version > this->lastAppliedVersion) {
+				res.push_back(*it);
 				size += res.back().mutations.expectedSize();
+				version = it->version;
 			}
-			updates.pop_front();
+			if (it->version < version && it->version < this->data->durableVersion.get()) {
+				it = updates.erase(it);
+			} else {
+				++it;
+			}
 			if (size > byteLimit) {
 				break;
 			}
 		}
+		// while (!updates.empty()) {
+		// 	if (updates.front().version > this->lastAppliedVersion) {
+		// 		res.push_back(updates.front());
+		// 		size += res.back().mutations.expectedSize();
+		// 	}
+		// 	updates.pop_front();
+		// 	if (size > byteLimit) {
+		// 		break;
+		// 	}
+		// }
 	}
 	return res;
 }
@@ -9773,7 +9798,7 @@ void MoveInUpdates::addMutation(Version version,
 	//     mLV, MutationRef(MutationRef::SetValue, pk, BinaryWriter::toValue(mutation, IncludeVersion())));
 
 	if (allowSpill) {
-		while (this->size > SERVER_KNOBS->FETCH_SHARD_BUFFER_BYTE_LIMIT &&
+		while (!updates.empty() && this->size > SERVER_KNOBS->FETCH_SHARD_BUFFER_BYTE_LIMIT &&
 		       updates.front().version <= data->durableVersion.get()) {
 			TraceEvent(SevDebug, "MoveInUpdatesSpill", id)
 			    .detail("CurrentSize", this->size)
@@ -12102,22 +12127,29 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		// Handle MoveInShard::MoveInUpdates.
+		TraceEvent(SevDebug, "MoveInUpdatesPrePersist", data->thisServerID)
+		    .detail("NewOldestVersion", newOldestVersion)
+		    .detail("StartOldestVersion", startOldestVersion);
 		for (const auto& [_, moveInShard] : data->moveInShards) {
-			const MoveInPhase phase = moveInShard->getPhase();
-			if (phase == MoveInPhase::Fetching || phase == MoveInPhase::Ingesting ||
-			    phase == MoveInPhase::ApplyingUpdates) {
-				const auto& queue = moveInShard->updates->getUpdatesQueue();
-				for (auto it = queue.begin(); it != queue.end(); ++it) {
-					if (it->version > newOldestVersion) {
-						break;
-					}
-					if (it->version > startOldestVersion) {
-						data->storage.writeKeyValue(
-						    KeyValueRef(persistUpdatesKey(moveInShard->id(), it->version),
-						                BinaryWriter::toValue<VerUpdateRef>(*it, IncludeVersion())));
-					}
+			// const MoveInPhase phase = moveInShard->getPhase();
+			// if (phase != MoveInPhase::Pending && phase != MoveInPhase::Error &&
+			//     phase != MoveInPhase::Cancel) {
+			const auto& queue = moveInShard->updates->getUpdatesQueue();
+			for (auto it = queue.begin(); it != queue.end(); ++it) {
+				if (it->version > newOldestVersion) {
+					break;
+				}
+				if (it->version > startOldestVersion) {
+					TraceEvent(SevDebug, "MoveInUpdatesPersist", moveInShard->id())
+					    .detail("MoveInShard", moveInShard->toString())
+					    .detail("Version", it->version)
+					    .detail("Mutations", it->mutations.size());
+					data->storage.writeKeyValue(
+					    KeyValueRef(persistUpdatesKey(moveInShard->id(), it->version),
+					                BinaryWriter::toValue<VerUpdateRef>(*it, IncludeVersion())));
 				}
 			}
+			// }
 		}
 
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
@@ -12799,6 +12831,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
 	data->bytesRestored += fVersion.get().expectedSize();
+	TraceEvent("SSRestoreDurableState", data->thisServerID).detail("Version", version);
 
 	state RangeResult pendingCheckpoints = fPendingCheckpoints.get();
 	state int pCLoc;
