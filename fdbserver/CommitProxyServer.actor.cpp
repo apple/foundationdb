@@ -1965,10 +1965,13 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
 					    trCost->get().clearIdxCosts[0].first == mutationNum) {
-						for (const auto& ssInfo : ranges.begin().value().src_info) {
+						auto const& ssInfos = ranges.begin().value().src_info;
+						for (auto const& ssInfo : ssInfos) {
 							auto id = ssInfo->interf.id();
-							pProxyCommitData->updateSSTagCost(
-							    id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
+							pProxyCommitData->updateSSTagCost(id,
+							                                  trs[self->transactionNum].tagSet.get(),
+							                                  m,
+							                                  trCost->get().clearIdxCosts[0].second / ssInfos.size());
 						}
 						trCost->get().clearIdxCosts.pop_front();
 					}
@@ -1982,12 +1985,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						// check whether clear is sampled
 						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
 						    trCost->get().clearIdxCosts[0].first == mutationNum) {
-							for (const auto& ssInfo : r.value().src_info) {
+							auto const& ssInfos = r.value().src_info;
+							for (auto const& ssInfo : ssInfos) {
 								auto id = ssInfo->interf.id();
 								pProxyCommitData->updateSSTagCost(id,
 								                                  trs[self->transactionNum].tagSet.get(),
 								                                  m,
-								                                  trCost->get().clearIdxCosts[0].second);
+								                                  trCost->get().clearIdxCosts[0].second /
+								                                      ssInfos.size());
 							}
 							trCost->get().clearIdxCosts.pop_front();
 						}
