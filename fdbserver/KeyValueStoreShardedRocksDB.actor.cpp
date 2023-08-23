@@ -2648,7 +2648,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					if (s.ok()) {
 						auto lastComapction = std::stod(value);
 						if (start - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
-							shard->lastCompactionTime = lastComapction; 
+							shard->lastCompactionTime = lastComapction;
 							++skipped;
 							continue;
 						}

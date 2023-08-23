@@ -544,7 +544,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                           6 ); // RocksDB default.
 	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
 	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
-	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 2h
+	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
 	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                     1 );
 
 	// Leader election

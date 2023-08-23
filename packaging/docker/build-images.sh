@@ -246,7 +246,6 @@ build_date=$(date +"%Y-%m-%dT%H:%M:%S%z")
 build_output_directory="${script_dir}/../../"
 source_code_diretory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${build_output_directory}/CMakeCache.txt")
 commit_sha=$(cd "${source_code_diretory}" && git rev-parse --verify HEAD --short=10)
-# commit_sha='ssssds'
 fdb_version=$(cat "${build_output_directory}/version.txt")
 fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' '6.3.18' "${fdb_version}" )
 fdb_website="https://github.com/apple/foundationdb/releases/download"
@@ -257,7 +256,7 @@ image_list=(
     'foundationdb'
     # 'foundationdb-kubernetes-monitor'
     'foundationdb-kubernetes-sidecar'
-    # 'ycsb'
+    'ycsb'
 )
 registry=""
 tag_base="foundationdb/"
