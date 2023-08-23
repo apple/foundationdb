@@ -14135,7 +14135,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	}
 	TraceEvent("StorageServerInitProgress", ssi.id())
 	    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-	    .detail("Step", "5.StartInit");
+	    .detail("Step", "4.StartInit");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
@@ -14147,17 +14147,20 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		wait(self.storage.init());
 		TraceEvent("StorageServerInitProgress", ssi.id())
 		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Step", "6.StorageInited");
+		    .detail("Step", "5.StorageInited");
 		wait(self.storage.commit());
 		TraceEvent("StorageServerInitProgress", ssi.id())
 		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		    .detail("Step", "7.StorageCommitted");
+		    .detail("Step", "6.StorageCommitted");
 		++self.counters.kvCommits;
 
 		platform::createDirectory(self.checkpointFolder);
 		platform::createDirectory(self.fetchedCheckpointFolder);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
+		TraceEvent("StorageServerInitProgress", ssi.id())
+		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+		    .detail("Step", "7.EncryptionMode");
 		self.encryptionMode = encryptionMode;
 
 		if (seedTag == invalidTag) {
