@@ -2608,6 +2608,61 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
+	struct CompactionWorker : IThreadPoolReceiver {
+		const UID logId;
+		explicit CompactionWorker(UID logId) : logId(logId) {}
+
+		void init() override {}
+		~CompactionWorker() override {}
+
+		struct CompactShardsAction : TypedAction<CompactionWorker, CompactShardsAction> {
+			std::vector<std::shared_ptr<PhysicalShard>> shards;
+			std::shared_ptr<PhysicalShard> metadataShard;
+			ThreadReturnPromise<Void> done;
+			CompactShardsAction(std::vector<std::shared_ptr<PhysicalShard>> shards, PhysicalShard* metadataShard)
+			  : shards(shards), metadataShard(metadataShard) {}
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+		};
+
+		void action(CompactShardsAction& a) {
+			auto start = now();
+			ASSERT(a.metadataShard);
+			auto db = a.metadataShard->db;
+			int skipped = 0;
+			for (auto& shard : a.shards) {
+				if (shard->deletePending) {
+					++skipped;
+					continue;
+				}
+				std::string value;
+				auto s = db->Get(rocksdb::ReadOptions(), a.metadataShard->cf, shard->id, &value);
+				if (s.ok()) {
+					auto lastComapction = std::stod(value);
+					if (now() - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
+						++skipped;
+						continue;
+					}
+				} else if (!s.IsNotFound()) {
+					TraceEvent(SevWarnAlways, "ShardedRocksDBReadValueError", logId)
+					    .detail("Description", s.ToString());
+					a.done.sendError(internal_error());
+				}
+
+				rocksdb::CompactRangeOptions compactOptions;
+				// Force RocksDB to rewrite file to last level.
+				compactOptions.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
+				shard->db->CompactRange(compactOptions, shard->cf, /*begin=*/nullptr, /*end=*/nullptr);
+				TraceEvent("ManualCompaction", logId).detail("ShardId", shard->id);
+			}
+
+			TraceEvent("CompactionCompleted", logId)
+			    .detail("NumShards", a.shards.size())
+			    .detail("Skipped", skipped)
+			    .detail("Duration", now() - start);
+			a.done.send(Void());
+		}
+	};
+
 	struct Writer : IThreadPoolReceiver {
 		const UID logId;
 		int threadIndex;
@@ -3598,12 +3653,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		if (g_network->isSimulated()) {
 			TraceEvent(SevDebug, "ShardedRocksDB").detail("Info", "Use Coro threads in simulation.");
 			writeThread = CoroThreadPool::createThreadPool();
+			compactionThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
+		compactionThread->addThread(new CompactionWorker(id), "fdb-rocksdb-cw");
 		TraceEvent("ShardedRocksDBReadThreads", id)
 		    .detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
@@ -3640,6 +3698,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		try {
 			wait(self->writeThread->stop());
+			wait(self->compactionThread->stop());
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
 		}
@@ -3677,6 +3736,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->metrics =
 			    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);
+			this->compactionJob = compactShards(this->rState, openFuture, &shardManager, compactionThread);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			this->refreshRocksDBBackgroundWorkHolder = refreshRocksDBBackgroundEventCounter(this->eventListener);
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
@@ -3887,6 +3947,82 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
+	ACTOR static Future<Void> compactShards(std::shared_ptr<ShardedRocksDBState> rState,
+	                                        Future<Void> openFuture,
+	                                        ShardManager* shardManager,
+	                                        Reference<IThreadPool> thread) {
+		try {
+			wait(openFuture);
+			state std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
+			    shardManager->getAllShards();
+			loop {
+				if (rState->closing) {
+					break;
+				}
+				wait(delay(SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY));
+				int count = 0;
+				std::vector<std::shared_ptr<PhysicalShard>> shards;
+				for (auto& [id, shard] : *physicalShards) {
+					if (count > SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT) {
+						break;
+					}
+					if (!shard->initialized() || shard->deletePending) {
+						continue;
+					}
+					uint64_t liveDataSize = 0;
+					ASSERT(shard->db->GetIntProperty(
+					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
+
+					rocksdb::ColumnFamilyMetaData cfMetadata;
+					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
+					if (cfMetadata.file_count <= 5) {
+						continue;
+					}
+					if (liveDataSize / cfMetadata.file_count >= SERVER_KNOBS->SHARDED_ROCKSDB_AVERAGE_FILE_SIZE) {
+						continue;
+					}
+
+					shards.push_back(shard);
+					/*
+					std::string value;
+					auto s = metadataShard->db->Get(rocksdb::ReadOptions(), metadataShard->cf, id, &value);
+					if (s.ok()) {
+					    auto lastComapction = std::stod(value);
+					    if (now() - lastComapction < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
+					        continue;
+					    }
+					} else if (!s.IsNotFound()) {
+					    TraceEvent(SevWarnAlways, "ShardedRocksDBReadValueError").detail("Description", s.ToString());
+					    throw internal_error();
+					}
+
+					TraceEvent("StartCompaction").log();
+
+					rocksdb::CompactRangeOptions compactOptions;
+					// Force RocksDB to rewrite file to last level.
+					compactOptions.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
+					*/
+					TraceEvent("ManualCompaction")
+					    .detail("ShardId", id)
+					    .detail("NumFiles", cfMetadata.file_count)
+					    .detail("ShardSize", liveDataSize);
+					++count;
+				}
+
+				if (shards.size() > 0) {
+					auto a = new CompactionWorker::CompactShardsAction(shards, shardManager->getMetaDataShard());
+					auto res = a->done.getFuture();
+					thread->post(a);
+					wait(res);
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent(SevError, "ShardedRocksDBCompactionActorError").errorUnsuppressed(e);
+			}
+		}
+		return Void();
+	}
 	ACTOR static Future<Void> emptyShardCleaner(std::shared_ptr<ShardedRocksDBState> rState,
 	                                            Future<Void> openFuture,
 	                                            ShardManager* shardManager,
@@ -3970,6 +4106,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	std::set<Key> keysSet;
 	Reference<IThreadPool> writeThread;
+	Reference<IThreadPool> compactionThread;
 	Reference<IThreadPool> readThreads;
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
@@ -3980,6 +4117,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	FlowLock fetchSemaphore;
 	int numFetchWaiters;
 	Counters counters;
+	Future<Void> compactionJob;
 	Future<Void> refreshHolder;
 	Future<Void> refreshRocksDBBackgroundWorkHolder;
 	Future<Void> cleanUpJob;
