@@ -1202,7 +1202,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 			       !dbInfo->get().distributor.present()) {
 				wait(dbInfo->onChange());
 			}
-			TriggerAuditRequest req(auditType, allKeys);
+			TriggerAuditRequest req(auditType, allKeys, KeyValueStoreType::END); // do not specify engine type to check
 			UID auditId_ = wait(timeoutError(dbInfo->get().distributor.get().triggerAudit.getReply(req), 300));
 			auditId = auditId_;
 			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered")

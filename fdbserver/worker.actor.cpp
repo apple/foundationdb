@@ -1566,11 +1566,12 @@ struct TrackRunningStorage {
 	                    std::unordered_map<UID, StorageDiskCleaner>* storageCleaners)
 	  : self(self), storeType(storeType), locality(locality), filename(filename), runningStorages(runningStorages),
 	    storageCleaners(storageCleaners) {
-		TraceEvent("StorageServerInitProgress", self).detail("Step", "4.AddedItselfToRunningStorageOnSameWorker");
+		TraceEvent("StorageServerAddedToRunningStorage", self);
 		runningStorages->emplace(self, storeType);
 	}
 	~TrackRunningStorage() {
 		runningStorages->erase(std::make_pair(self, storeType));
+		TraceEvent("StorageServerRemoveFromRunningStorage", self);
 
 		// Start a disk cleaner except for tss data store
 		try {

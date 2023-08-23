@@ -2658,6 +2658,7 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
+                               KeyValueStoreType engineType,
                                double timeoutSeconds) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
@@ -2668,7 +2669,7 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 			wait(clusterInterface->onChange());
 		}
 		TraceEvent(SevVerbose, "ManagementAPIAuditStorageBegin").detail("AuditType", type).detail("Range", range);
-		TriggerAuditRequest req(type, range);
+		TriggerAuditRequest req(type, range, engineType);
 		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "ManagementAPIAuditStorageEnd")
