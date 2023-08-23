@@ -2757,7 +2757,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						if (auditType == AuditType::ValidateHA) {
 							if (rangeLocations[rangeLocationIndex].servers.size() < 2) {
 								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-								    .detail("Reason", "Single replica, ignore")
+								    .detail("Reason", "Single DC, ignore")
 								    .detail("AuditID", audit->coreState.id)
 								    .detail("AuditRange", audit->coreState.range)
 								    .detail("AuditType", auditType);
@@ -3268,6 +3268,12 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 						    .detail("CompleteRange", res.range);
 						rangeToReadBegin = res.range.end;
 					} else { // complete
+						TraceEvent(SevInfo, "DDDoAuditLocationMetadataComplete", self->ddId)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("CompleteRange", res.range)
+						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
+						    .detail("NumValidatedKeyServers", cumulatedValidatedKeyServersNum);
 						break;
 					}
 				}
@@ -3287,7 +3293,7 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			return Void(); // sliently exit
+			throw e;
 		}
 		TraceEvent(SevInfo, "DDDoAuditLocationMetadataFailed", self->ddId)
 		    .errorUnsuppressed(e)
@@ -3311,12 +3317,6 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 			audit->actors.add(dispatchAuditLocationMetadata(self, audit, auditRange));
 		}
 	}
-	TraceEvent(SevInfo, "DDDoAuditLocationMetadataComplete", self->ddId)
-	    .detail("AuditId", audit->coreState.id)
-	    .detail("AuditRange", auditRange)
-	    .detail("CompleteRange", res.range)
-	    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
-	    .detail("NumValidatedKeyServers", cumulatedValidatedKeyServersNum);
 
 	return Void();
 }

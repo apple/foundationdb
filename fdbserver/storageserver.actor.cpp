@@ -5381,6 +5381,13 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
+						TraceEvent(SevInfo, "SSAuditStorageSsShardComplete", data->thisServerID)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("AuditServer", data->thisServerID)
+						    .detail("CompleteRange", res.range)
+						    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
+						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum);
 						break;
 					}
 				}
@@ -5412,14 +5419,6 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
-
-	TraceEvent(SevInfo, "SSAuditStorageSsShardComplete", data->thisServerID)
-	    .detail("AuditId", req.id)
-	    .detail("AuditRange", req.range)
-	    .detail("AuditServer", data->thisServerID)
-	    .detail("CompleteRange", res.range)
-	    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
-	    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum);
 
 	// Make sure the history collection is not open due to this audit
 	data->stopTrackShardAssignment();
@@ -5744,6 +5743,14 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 					// Expand persisted complete range
 					if (complete) {
 						req.reply.send(res);
+						TraceEvent(SevInfo, "SSAuditStorageShardReplicaComplete", data->thisServerID)
+						    .detail("AuditId", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("AuditServer", data->thisServerID)
+						    .detail("CompleteRange", res.range)
+						    .detail("CheckTimes", checkTimes)
+						    .detail("NumValidatedKeys", numValidatedKeys)
+						    .detail("ValidatedBytes", validatedBytes);
 						break;
 					} else {
 						TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
@@ -5778,14 +5785,6 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
-	TraceEvent(SevInfo, "SSAuditStorageShardReplicaComplete", data->thisServerID)
-	    .detail("AuditId", req.id)
-	    .detail("AuditRange", req.range)
-	    .detail("AuditServer", data->thisServerID)
-	    .detail("CompleteRange", res.range)
-	    .detail("CheckTimes", checkTimes)
-	    .detail("NumValidatedKeys", numValidatedKeys)
-	    .detail("ValidatedBytes", validatedBytes);
 
 	return Void();
 }
