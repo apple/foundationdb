@@ -92,13 +92,6 @@ std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
-template <typename T>
-bool isDataDistributorTxnProcessorMocked(Reference<T> ref) {
-	ASSERT(ref.isValid());
-
-	return dynamic_cast<DDMockTxnProcessor*>(ref.getPtr()) != nullptr;
-}
-
 enum class DDAuditContext : uint8_t {
 	INVALID = 0,
 	RESUME = 1,
@@ -532,7 +525,7 @@ public:
 			// AuditStorage read neccessary info purely from system key space
 			if (!self->auditStorageInitStarted) {
 				// AuditStorage currently does not support DDMockTxnProcessor
-				if (!isDataDistributorTxnProcessorMocked(self->txnProcessor)) {
+				if (!self->txnProcessor->isMocked()) {
 					// Avoid multiple initAuditStorages
 					self->addActor.send(self->initAuditStorage(self));
 				}
@@ -541,7 +534,7 @@ public:
 			// is set to 2 at this point
 			// No polling MoveKeyLock is running
 			// So, we need to check MoveKeyLock when waitUntilDataDistributorExitSecurityMode
-			if (!isDataDistributorTxnProcessorMocked(self->txnProcessor)) {
+			if (!self->txnProcessor->isMocked()) {
 				// AuditStorage  currently does not suport DDMockTxnProcessor
 				wait(waitUntilDataDistributorExitSecurityMode(self)); // Trap DDMode == 2
 			}
