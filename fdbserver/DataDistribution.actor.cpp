@@ -106,6 +106,8 @@ enum class DDAuditContext : uint8_t {
 	RETRY = 3,
 };
 
+} // anonymous namespace
+
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
@@ -140,8 +142,6 @@ struct DDAudit {
 
 	bool isCancelled() const { return cancelled; }
 };
-
-} // anonymous namespace
 
 void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
 	if (!valid) {
