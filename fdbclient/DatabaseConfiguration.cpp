@@ -35,8 +35,8 @@ void DatabaseConfiguration::resetInternal() {
 	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
 	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
-	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = perpetualStoreType =
-	    KeyValueStoreType::END;
+	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
+	perpetualStoreType = KeyValueStoreType::NONE;
 	desiredTSSCount = 0;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
