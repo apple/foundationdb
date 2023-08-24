@@ -192,7 +192,7 @@ public:
 			}
 		}
 		if (ipV4Addresses.size() > 0 && FLOW_KNOBS->RESOLVE_PREFER_IPV4_ADDR) {
-			return addresses[deterministicRandom()->randomInt(0, ipV4Addresses.size())];
+			return ipV4Addresses[deterministicRandom()->randomInt(0, ipV4Addresses.size())];
 		}
 		if (ipV6Addresses.size() > 0) {
 			return ipV6Addresses[deterministicRandom()->randomInt(0, ipV6Addresses.size())];
