@@ -4182,6 +4182,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	}
 
 	int totalShardCount = 0;
+	largeTeamSizeShards.clear();
 	for (auto& team : largeTeams) {
 		const auto servers = team->getServerIDs();
 		const int shardCount =
