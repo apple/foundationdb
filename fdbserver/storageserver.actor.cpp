@@ -325,7 +325,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 }
 
 bool MoveInUpdates::hasNext() const {
-	return this->spilled || !this->updates.empty();
+	return this->spilled || (!this->updates.empty() && this->updates.back().version > this->lastAppliedVersion);
 }
 
 void MoveInUpdates::clear() {
@@ -365,12 +365,7 @@ struct MoveInShard {
 	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ApplyingUpdates; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
 	bool failed() const { return this->getPhase() == MoveInPhase::Cancel || this->getPhase() == MoveInPhase::Error; }
-	void setHighWatermark(const Version version) {
-		this->meta->highWatermark = version;
-		if (updates != nullptr) {
-			updates->lastAppliedVersion = version;
-		}
-	}
+	void setHighWatermark(const Version version) { this->meta->highWatermark = version; }
 	Version getHighWatermark() const { return this->meta->highWatermark; }
 
 	void addMutation(Version version,
@@ -9719,9 +9714,10 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 	if (this->spilled) {
 		std::swap(res, this->spillBuffer);
 		if (!this->loadFuture.isValid()) {
-			const Version begin = (res.empty() ? this->lastAppliedVersion : res.back().version) + 1;
+			const Version begin = this->lastAppliedVersion + 1;
 			Version end = this->data->version.get() + 1;
 			if (!this->updates.empty() && this->updates.front().version < end) {
+				ASSERT(this->lastAppliedVersion < this->updates.front().version);
 				end = this->updates.front().version;
 			}
 			this->loadFuture = loadUpdates(this, begin, end);
@@ -9757,6 +9753,11 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 		// 	}
 		// }
 	}
+
+	if (!res.empty()) {
+		this->lastAppliedVersion = res.back().version;
+	}
+
 	return res;
 }
 
