@@ -3018,17 +3018,22 @@ public:
 						}
 					}
 
-					TraceEvent("TotalDataInFlight", self->distributorId)
-					    .detail("Primary", self->primary)
+					TraceEvent e("TotalDataInFlight", self->distributorId);
+					e.detail("Primary", self->primary)
 					    .detail("TotalBytes", self->getDebugTotalDataInFlight())
 					    .detail("UnhealthyServers", self->unhealthyServers)
 					    .detail("ServerCount", self->server_info.size())
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
-					    .detail("HighestPriority", highestPriority)
-					    .trackLatest(self->primary ? "TotalDataInFlight"
-					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
-					                                                             // lifetime is controlled by
+					    .detail("HighestPriority", highestPriority);
+
+					for (auto& it : self->largeTeamSizeShards) {
+						e.detail(fmt::format("ShardCountLargeTeam{}", it.first), it.second);
+					}
+
+					e.trackLatest(self->primary ? "TotalDataInFlight"
+					                            : "TotalDataInFlightRemote"); // This trace event's trackLatest
+					                                                          // lifetime is controlled by
 					// DataDistributor::totalDataInFlightEventHolder or
 					// DataDistributor::totalDataInFlightRemoteEventHolder.
 					// The track latest key we use here must match the key used in
@@ -4182,6 +4187,8 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		const int shardCount =
 		    shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(servers, primary));
 		totalShardCount += shardCount;
+		largeTeamSizeShards[servers.size()] += shardCount;
+
 		if (team->isHealthy()) {
 			for (auto& it : servers) {
 				auto f = server_priority.find(it);

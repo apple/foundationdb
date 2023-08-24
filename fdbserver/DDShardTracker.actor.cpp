@@ -1228,6 +1228,9 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	state std::vector<Key> customBoundaries;
 	for (auto it : self->userRangeConfig->ranges()) {
 		customBoundaries.push_back(it->range().begin);
+		if (it->value().replicationFactor.present() && it->value().replicationFactor.get() > self->teamSize) {
+			self->largeTeamSizeRanges[it->value().replicationFactor.get()]++;
+		}
 	}
 
 	state int s;
@@ -1432,7 +1435,7 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
     anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
-    ddTenantCache(params.ddTenantCache) {}
+    ddTenantCache(params.ddTenantCache), teamSize(params.teamSize) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
@@ -1464,11 +1467,16 @@ struct DataDistributionTrackerImpl {
 					req.send(self->getAverageShardBytes());
 				}
 				when(wait(loggingTrigger)) {
-					TraceEvent("DDTrackerStats", self->distributorId)
-					    .detail("Shards", self->shards->size())
+					TraceEvent e("DDTrackerStats", self->distributorId);
+					e.detail("Shards", self->shards->size())
 					    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
-					    .detail("SystemSizeBytes", self->systemSizeEstimate)
-					    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
+					    .detail("SystemSizeBytes", self->systemSizeEstimate);
+
+					for (auto& it : self->largeTeamSizeRanges) {
+						e.detail(fmt::format("RangeCountLargeTeam{}", it.first), it.second);
+					}
+
+					e.trackLatest(ddTrackerStatsEventHolder->trackingKey);
 
 					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 				}
