@@ -778,7 +778,7 @@ Future<T> kmsRequestImpl(
 
 	state KmsUrlCtx<KmsUrlPenaltyParams>* urlCtx;
 	state int pass = 0;
-	state double retryDelay = 0.05; // 50 ms
+	state double retryDelay = SERVER_KNOBS->REST_KMS_CONNECTOR_INIT_REQUEST_RETRY_DELAY;
 	state bool forceRefreshKMSUrls = BUGGIFY && (deterministicRandom()->random01() < 0.01);
 
 	loop {
@@ -856,7 +856,7 @@ Future<T> kmsRequestImpl(
 			// retry-delay is injected after all in-memory and on-disk URLs are tried once.
 			wait(delay(retryDelay));
 
-			retryDelay = std::min(retryDelay * 2.0, 60.0);
+			retryDelay = std::min(retryDelay * 2.0, SERVER_KNOBS->REST_KMS_CONNECTOR_MAX_REQUEST_RETRY_DELAY);
 
 			if (forceRefreshKMSUrls) {
 				ASSERT(g_network->isSimulated());

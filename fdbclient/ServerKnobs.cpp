@@ -1148,6 +1148,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
 	init( REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,  "");
 	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
+	init( REST_KMS_CONNECTOR_INIT_REQUEST_RETRY_DELAY,           0.05);
+	init( REST_KMS_CONNECTOR_MAX_REQUEST_RETRY_DELAY,            60.0);
 	// Details to fetch validation token from a localhost file
 	// acceptable format: "<token_name1>$<absolute_file_path1>,<token_name2>$<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '$' character
