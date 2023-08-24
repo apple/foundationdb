@@ -892,6 +892,25 @@ struct KeyValueStoreType {
 		}
 	}
 
+	// Convert a string to a KeyValueStoreType
+	// This is a many-to-one mapping as there are aliases for some storage engines
+	static KeyValueStoreType fromString(const std::string& str) {
+		static std::map<std::string, StoreType> names = { { "ssd-1", SSD_BTREE_V1 },
+			                                              { "ssd-2", SSD_BTREE_V2 },
+			                                              { "ssd", SSD_BTREE_V2 },
+			                                              { "redwood", SSD_REDWOOD_V1 },
+			                                              { "ssd-redwood-1", SSD_REDWOOD_V1 },
+			                                              { "ssd-redwood-1-experimental", SSD_REDWOOD_V1 },
+			                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
+			                                              { "memory", MEMORY },
+			                                              { "memory-radixtree-beta", MEMORY_RADIXTREE } };
+		auto it = names.find(str);
+		if (it == names.end()) {
+			throw unknown_storage_engine();
+		}
+		return it->second;
+	}
+
 private:
 	uint32_t type;
 };
