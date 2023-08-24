@@ -9713,6 +9713,9 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 	}
 	if (this->spilled) {
 		std::swap(res, this->spillBuffer);
+		if (!res.empty()) {
+			this->lastAppliedVersion = res.back().version;
+		}
 		if (!this->loadFuture.isValid()) {
 			const Version begin = this->lastAppliedVersion + 1;
 			Version end = this->data->version.get() + 1;
@@ -9726,14 +9729,14 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 		}
 	} else {
 		int size = 0;
-		Version version = this->lastAppliedVersion;
+		// Version version = this->lastAppliedVersion;
 		for (auto it = updates.begin(); it != updates.end();) {
 			if (it->version > this->lastAppliedVersion) {
 				res.push_back(*it);
-				size += res.back().mutations.expectedSize();
-				version = it->version;
+				size += it->mutations.expectedSize();
+				// version = it->version;
 			}
-			if (it->version < version && it->version < this->data->durableVersion.get()) {
+			if (it->version <= this->data->durableVersion.get()) {
 				it = updates.erase(it);
 			} else {
 				++it;
