@@ -940,7 +940,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
-			} else if (configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
+			} else if (configuration.perpetualStoreType.isValid()) {
 				// Perpetual storage wiggle is used to migrate storage. Check that the matched storage servers are
 				// correctly migrated.
 				if (wiggleLocalityKeyValue == "0" ||
