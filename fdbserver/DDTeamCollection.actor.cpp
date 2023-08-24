@@ -2128,6 +2128,12 @@ public:
 					pausePenalty = std::min(pausePenalty * 2, (int)self->teams.size());
 				}
 				self->pauseWiggle->set(true);
+				TraceEvent("PerpetualWigglePausedDueToClusterHealth")
+				    .detail("UnhealthyRelocation", count)
+				    .detail("HealthyTeamCount", self->healthyTeamCount)
+				    .detail("BestTeamStuckCount", self->bestTeamKeepStuckCount)
+				    .detail("PausePenalty", pausePenalty)
+				    .detail("Primary", self->primary);
 			} else {
 				self->pauseWiggle->set(false);
 			}
