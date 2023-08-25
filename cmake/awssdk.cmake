@@ -9,7 +9,7 @@ endif()
 include(ExternalProject)
 ExternalProject_Add(awssdk_project
   GIT_REPOSITORY https://github.com/aws/aws-sdk-cpp.git
-  GIT_TAG e4b4b310d8631bc7e9a797b6ac03a73c6f210bf6 # v1.9.331
+  GIT_TAG 9a7606a6c98e13c759032c2e920c7c64a6a35264 # v1.11.150
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/awssdk-src"
   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build"
   GIT_CONFIG advice.detachedHead=false
