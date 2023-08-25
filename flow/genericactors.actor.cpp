@@ -164,6 +164,41 @@ ACTOR Future<Void> lowPriorityDelay(double waitTime) {
 	return Void();
 }
 
+ACTOR Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> condition, double time, TaskPriority taskID) {
+	state Future<Void> timer = condition->get() ? Never() : delay(time, taskID);
+	state bool previousState = condition->get();
+	loop choose {
+		when(wait(timer)) {
+			return Void();
+		}
+		when(wait(condition->onChange())) {
+			bool currentState = condition->get();
+			if (currentState != previousState) {
+				timer = currentState ? Never() : delay(time, taskID);
+				previousState = currentState;
+			}
+		}
+	}
+}
+
+// Same as delayAfterCleared, but use lowPriorityDelay.
+ACTOR Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condition, double time) {
+	state Future<Void> timer = condition->get() ? Never() : lowPriorityDelay(time);
+	state bool previousState = condition->get();
+	loop choose {
+		when(wait(timer)) {
+			return Void();
+		}
+		when(wait(condition->onChange())) {
+			bool currentState = condition->get();
+			if (currentState != previousState) {
+				timer = currentState ? Never() : lowPriorityDelay(time);
+				previousState = currentState;
+			}
+		}
+	}
+}
+
 namespace {
 
 struct DummyState {

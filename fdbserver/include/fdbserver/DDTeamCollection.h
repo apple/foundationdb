@@ -240,6 +240,9 @@ protected:
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	std::vector<Reference<TCTeamInfo>> largeTeams;
+	// shards have been over-replicated
+	std::map<int, int> largeTeamSizeShards;
+
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	PromiseStream<UID> removedServers;
 	PromiseStream<UID> removedTSS;
