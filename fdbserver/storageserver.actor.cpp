@@ -1189,6 +1189,7 @@ public:
 	Optional<LatencyBandConfig> latencyBandConfig;
 
 	Optional<EncryptionAtRestMode> encryptionMode;
+	Reference<GetEncryptCipherKeysMonitor> getEncryptCipherKeysMonitor;
 
 	struct Counters : CommonStorageCounters {
 
@@ -1418,7 +1419,8 @@ public:
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
-	              StorageServerInterface const& ssi)
+	              StorageServerInterface const& ssi,
+	              Reference<GetEncryptCipherKeysMonitor> encryptionMonitor)
 	  : shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
 	                                                                               Histogram::Unit::milliseconds)),
@@ -1473,7 +1475,7 @@ public:
 	                          /*maxTagsTracked=*/SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
 	                          /*minRateTracked=*/SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE *
 	                              CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE),
-	    busiestWriteTagContext(ssi.id()), counters(this),
+	    busiestWriteTagContext(ssi.id()), getEncryptCipherKeysMonitor(encryptionMonitor), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
 	    tenantData(db) {
@@ -10080,7 +10082,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		durableDelay =
 		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
 
-		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+		wait(ioTimeoutErrorIfCleared(durable,
+		                             SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME,
+		                             data->getEncryptCipherKeysMonitor->degraded(),
+		                             "StorageCommit"));
+
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
@@ -11942,8 +11948,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
+                                 std::string folder,
+                                 Reference<GetEncryptCipherKeysMonitor> encryptionMonitor) {
+	state StorageServer self(persistentData, db, ssi, encryptionMonitor);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
@@ -12036,8 +12043,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
+                                 Reference<IClusterConnectionRecord> connRecord,
+                                 Reference<GetEncryptCipherKeysMonitor> encryptionMonitor) {
+	state StorageServer self(persistentData, db, ssi, encryptionMonitor);
 	state Future<Void> ssCore;
 	self.folder = folder;
 
