@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM amazonlinux:2.0.20210326.0 as base
+FROM amazonlinux:2.0.20210326.0 AS base
 
 RUN yum install -y \
     bind-utils-9.11.4-26.P2.amzn2.5.2 \
@@ -67,13 +67,13 @@ RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-e
 
 WORKDIR /
 
-FROM golang:1.17.11-bullseye AS go-build
+FROM golang:1.20.6-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
 
-FROM base as foundationdb-base
+FROM base AS foundationdb-base
 
 WORKDIR /tmp
 ARG FDB_VERSION=6.3.22
@@ -124,7 +124,7 @@ RUN curl -Ls $FDB_WEBSITE/$FDB_VERSION/libfdb_c.x86_64.so -o /usr/lib/libfdb_c.s
 RUN rm -rf /tmp/*
 WORKDIR /
 
-FROM foundationdb-base as fdb-kubernetes-monitor
+FROM foundationdb-base AS fdb-kubernetes-monitor
 
 # Install the kubernetes monitor binary
 COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
@@ -135,7 +135,7 @@ WORKDIR /var/fdb
 VOLUME /var/fdb/data
 ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 
-FROM foundationdb-base as foundationdb-kubernetes-sidecar
+FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 
 RUN yum -y install \
     python3-3.7.10-1.amzn2.0.1 \
@@ -153,7 +153,7 @@ VOLUME /var/output-files
 ENV LISTEN_PORT 8080
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.bash"]
 
-FROM foundationdb-base as foundationdb
+FROM foundationdb-base AS foundationdb
 
 WORKDIR /tmp
 RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
@@ -178,7 +178,7 @@ ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
-FROM base as ycsb
+FROM base AS ycsb
 
 RUN yum -y install \
     java-11-amazon-corretto-11.0.13+8-1.amzn2 && \
