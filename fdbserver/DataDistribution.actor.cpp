@@ -852,7 +852,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
 			                                       .shards = &shards,
 			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .ddTenantCache = self->ddTenantCache });
+			                                       .ddTenantCache = self->ddTenantCache,
+			                                       .teamSize = self->configuration.storageTeamSize });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),

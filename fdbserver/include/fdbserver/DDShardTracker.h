@@ -46,6 +46,7 @@ struct DataDistributionTrackerInitParams {
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
 	Optional<Reference<TenantCache>> ddTenantCache;
+	int teamSize = 0;
 };
 
 // track the status of shards
@@ -109,6 +110,9 @@ public:
 	Optional<Reference<TenantCache>> ddTenantCache;
 
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
+	int teamSize;
+	// logical range configured to be over-replicated. key: replica, value: range count
+	std::map<int, int> largeTeamSizeRanges;
 
 	DataDistributionTracker() = default;
 
