@@ -1828,6 +1828,13 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
+		if (testConfig.excludedStorageEngineType(result) ||
+		    std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
+		        std::end(SIMULATION_STORAGE_ENGINE)) {
+
+			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
+			ASSERT(false);
+		}
 	} else {
 		constexpr auto NUM_RETRIES = 1000;
 		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
