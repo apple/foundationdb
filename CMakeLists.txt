@@ -28,7 +28,7 @@ if(POLICY CMP0135)
 endif()
 
 project(foundationdb
-  VERSION 71.3.4
+  VERSION 71.3.5
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
