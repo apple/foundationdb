@@ -318,17 +318,23 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
                                     int currentRetryCount);
-ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType);
+ACTOR Future<UID> launchAudit(Reference<DataDistributor> self,
+                              KeyRange auditRange,
+                              AuditType auditType,
+                              KeyValueStoreType auditStorageEngineType);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
                                                      std::shared_ptr<DDAudit> audit,
                                                      StorageServerInterface ssi);
-ACTOR Future<Void> scheduleAuditLocationMetadata(Reference<DataDistributor> self,
+ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
+ACTOR Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self,
                                                  std::shared_ptr<DDAudit> audit,
                                                  KeyRange range);
-ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
+ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
+                                           std::shared_ptr<DDAudit> audit,
+                                           KeyRange auditRange);
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range);
@@ -2220,7 +2226,7 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
 		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-		audit->actors.add(scheduleAuditLocationMetadata(self, audit, allKeys));
+		audit->actors.add(dispatchAuditLocationMetadata(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
 	} else {
@@ -2231,20 +2237,18 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 
 // This function is for locationmetadata audits
 // Schedule audit task on input range
-ACTOR Future<Void> scheduleAuditLocationMetadata(Reference<DataDistributor> self,
+ACTOR Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self,
                                                  std::shared_ptr<DDAudit> audit,
                                                  KeyRange range) {
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateLocationMetadata);
-	TraceEvent(SevInfo, "DDScheduleAuditLocationMetadataBegin", self->ddId)
+	TraceEvent(SevInfo, "DDdispatchAuditLocationMetadataBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", auditType);
 	state Key begin = range.begin;
 	state KeyRange currentRange = range;
 	state std::vector<AuditStorageState> auditStates;
 	state int64_t issueDoAuditCount = 0;
-	state AuditStorageRequest req;
-	state std::vector<StorageServerInterface> targetCandidates;
 
 	try {
 		while (begin < range.end) {
@@ -2254,7 +2258,7 @@ ACTOR Future<Void> scheduleAuditLocationMetadata(Reference<DataDistributor> self
 			    getAuditStateByRange(self->txnProcessor->context(), auditType, audit->coreState.id, currentRange)));
 			ASSERT(!auditStates.empty());
 			begin = auditStates.back().range.end;
-			TraceEvent(SevInfo, "DDScheduleAuditLocationMetadataDispatch", self->ddId)
+			TraceEvent(SevInfo, "DDdispatchAuditLocationMetadataDispatch", self->ddId)
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("CurrentRange", currentRange)
 			    .detail("AuditType", auditType)
@@ -2279,23 +2283,17 @@ ACTOR Future<Void> scheduleAuditLocationMetadata(Reference<DataDistributor> self
 					audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() - 1);
 					ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 					TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-					    .detail("Loc", "scheduleAuditLocationMetadata")
+					    .detail("Loc", "dispatchAuditLocationMetadata")
 					    .detail("Ops", "Decrease")
 					    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 					    .detail("AuditType", auditType);
-
-					req = AuditStorageRequest(audit->coreState.id, auditStates[i].range, auditType);
 					issueDoAuditCount++;
-					req.ddId = self->ddId; // send this ddid to SS
-					targetCandidates.clear();
-					wait(store(targetCandidates, getStorageServers(self->txnProcessor->context())));
-					StorageServerInterface targetServer = deterministicRandom()->randomChoice(targetCandidates);
-					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
+					audit->actors.add(doAuditLocationMetadata(self, audit, auditStates[i].range));
 				}
 			}
 			wait(delay(0.1));
 		}
-		TraceEvent(SevInfo, "DDScheduleAuditLocationMetadataEnd", self->ddId)
+		TraceEvent(SevInfo, "DDdispatchAuditLocationMetadataEnd", self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
@@ -2304,7 +2302,7 @@ ACTOR Future<Void> scheduleAuditLocationMetadata(Reference<DataDistributor> self
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevWarn, "DDScheduleAuditLocationMetadataError", self->ddId)
+		TraceEvent(SevWarn, "DDdispatchAuditLocationMetadataError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
@@ -2660,7 +2658,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						if (auditType == AuditType::ValidateHA) {
 							if (rangeLocations[rangeLocationIndex].servers.size() < 2) {
 								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-								    .detail("Reason", "Single replica, ignore")
+								    .detail("Reason", "Single DC, ignore")
 								    .detail("AuditID", audit->coreState.id)
 								    .detail("AuditRange", audit->coreState.range)
 								    .detail("AuditType", auditType);
@@ -2870,6 +2868,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           StorageServerInterface ssi,
                                           AuditStorageRequest req) {
 	state AuditType auditType = req.getType();
+	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	       auditType == AuditType::ValidateStorageServerShard);
 	TraceEvent(SevInfo, "DDDoAuditOnStorageServerBegin", self->ddId)
 	    .detail("AuditID", req.id)
 	    .detail("Range", req.range)
@@ -2942,13 +2942,283 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else {
 			ASSERT(req.getType() != AuditType::ValidateStorageServerShard);
 			audit->retryCount++;
-			if (req.getType() == AuditType::ValidateLocationMetadata) {
-				audit->actors.add(scheduleAuditLocationMetadata(self, audit, req.range));
-			} else {
-				audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
-			}
+			audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
 		}
 	}
+	return Void();
+}
+
+// Check consistency between KeyServers and ServerKeys system key space
+ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
+                                           std::shared_ptr<DDAudit> audit,
+                                           KeyRange auditRange) {
+	ASSERT(audit->coreState.getType() == AuditType::ValidateLocationMetadata);
+	TraceEvent(SevInfo, "DDDoAuditLocationMetadataBegin", self->ddId)
+	    .detail("AuditId", audit->coreState.id)
+	    .detail("AuditRange", auditRange);
+	state AuditStorageState res(audit->coreState.id, audit->coreState.getType()); // we will set range of audit later
+	state std::vector<Future<Void>> actors;
+	state std::vector<std::string> errors;
+	state AuditGetKeyServersRes keyServerRes;
+	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
+	state Version readAtVersion;
+	state std::unordered_map<UID, std::vector<KeyRange>> mapFromKeyServersRaw;
+	// Note that since krmReadRange may not return the value of the entire range at a time
+	// Given auditRange, a part of the range is returned, thus, only a part of the range is
+	// able to be compared --- claimRange
+	// Given claimRange, rangeToRead is decided for reading the remaining range
+	// At beginning, rangeToRead is auditRange
+	state KeyRange claimRange;
+	state KeyRange completeRangeByKeyServer;
+	// To compare
+	state std::unordered_map<UID, std::vector<KeyRange>> mapFromServerKeys;
+	state std::unordered_map<UID, std::vector<KeyRange>> mapFromKeyServers;
+
+	state Transaction tr(self->txnProcessor->context());
+	state Key rangeToReadBegin = auditRange.begin;
+	state KeyRangeRef rangeToRead;
+	state int64_t cumulatedValidatedServerKeysNum = 0;
+	state int64_t cumulatedValidatedKeyServersNum = 0;
+	state Reference<IRateControl> rateLimiter =
+	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	state int64_t remoteReadBytes = 0;
+
+	try {
+		loop {
+			try {
+				// Read
+				actors.clear();
+				errors.clear();
+				mapFromServerKeys.clear();
+				mapFromKeyServers.clear();
+				serverKeyResMap.clear();
+				mapFromKeyServersRaw.clear();
+				remoteReadBytes = 0;
+
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				// Read KeyServers
+				wait(store(keyServerRes, getShardMapFromKeyServers(self->ddId, &tr, rangeToRead)));
+				completeRangeByKeyServer = keyServerRes.completeRange;
+				readAtVersion = keyServerRes.readAtVersion;
+				mapFromKeyServersRaw = keyServerRes.rangeOwnershipMap;
+				remoteReadBytes += keyServerRes.readBytes;
+				// Use ssid of mapFromKeyServersRaw to read ServerKeys
+				for (auto& [ssid, _] : mapFromKeyServersRaw) {
+					actors.push_back(
+					    store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, &tr, rangeToRead)));
+				}
+				wait(waitForAll(actors));
+
+				// Decide claimRange and check readAtVersion
+				claimRange = completeRangeByKeyServer;
+				for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
+					KeyRange serverKeyCompleteRange = serverKeyRes.completeRange;
+					TraceEvent(SevVerbose, "DDDoAuditLocationMetadataGetClaimRange", self->ddId)
+					    .detail("ServerId", ssid)
+					    .detail("ServerKeyCompleteRange", serverKeyCompleteRange)
+					    .detail("CurrentClaimRange", claimRange);
+					KeyRange overlappingRange = serverKeyCompleteRange & claimRange;
+					if (serverKeyCompleteRange.begin != claimRange.begin || overlappingRange.empty() ||
+					    readAtVersion != serverKeyRes.readAtVersion) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "DDDoAuditLocationMetadataReadCheckWrong",
+						           self->ddId)
+						    .detail("ServerKeyCompleteRangeBegin", serverKeyCompleteRange.begin)
+						    .detail("ClaimRangeBegin", claimRange.begin)
+						    .detail("OverlappingRange", overlappingRange)
+						    .detail("ReadAtVersion", readAtVersion)
+						    .detail("ServerKeyResReadAtVersion", serverKeyRes.readAtVersion);
+						throw audit_storage_cancelled();
+					}
+					claimRange = overlappingRange;
+					remoteReadBytes += serverKeyRes.readBytes;
+				}
+				// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
+				int64_t numValidatedServerKeys = 0;
+				for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
+					for (auto& range : serverKeyRes.ownRanges) {
+						KeyRange overlappingRange = range & claimRange;
+						if (overlappingRange.empty()) {
+							continue;
+						}
+						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToServerKeyMap", self->ddId)
+						    .detail("RawRange", range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("Range", overlappingRange)
+						    .detail("SSID", ssid);
+						mapFromServerKeys[ssid].push_back(overlappingRange);
+						numValidatedServerKeys++;
+					}
+				}
+				cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + numValidatedServerKeys;
+
+				int64_t numValidatedKeyServers = 0;
+				for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
+					std::vector mergedRanges = coalesceRangeList(ranges);
+					for (auto& range : mergedRanges) {
+						KeyRange overlappingRange = range & claimRange;
+						if (overlappingRange.empty()) {
+							continue;
+						}
+						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToKeyServerMap", self->ddId)
+						    .detail("RawRange", range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("Range", overlappingRange)
+						    .detail("SSID", ssid);
+						mapFromKeyServers[ssid].push_back(overlappingRange);
+						numValidatedKeyServers++;
+					}
+				}
+				cumulatedValidatedKeyServersNum = cumulatedValidatedKeyServersNum + numValidatedKeyServers;
+
+				// Compare: check if mapFromKeyServers === mapFromServerKeys
+				// 1. check mapFromKeyServers => mapFromServerKeys
+				for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
+					if (!mapFromServerKeys.contains(ssid)) {
+						std::string error =
+						    format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
+						           "on Server(%s) in KeyServers but not ServerKeys",
+						           claimRange.toString().c_str(),
+						           claimRange.toString().c_str(),
+						           ssid.toString().c_str());
+						errors.push_back(error);
+						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error);
+					}
+					std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
+					Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, serverKeyRanges);
+					if (anyMismatch.present()) { // mismatch detected
+						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
+						KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
+						std::string error =
+						    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+						           ssid.toString().c_str(),
+						           mismatchedRangeByKeyServer.toString().c_str(),
+						           mismatchedRangeByServerKey.toString().c_str());
+						errors.push_back(error);
+						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error)
+						    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
+						    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
+					}
+				}
+				// 2. check mapFromServerKeys => mapFromKeyServers
+				for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
+					if (!mapFromKeyServers.contains(ssid)) {
+						std::string error =
+						    format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
+						           "on Server(%s) in ServerKeys but not KeyServers",
+						           claimRange.toString().c_str(),
+						           claimRange.toString().c_str(),
+						           ssid.toString().c_str());
+						errors.push_back(error);
+						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error);
+					}
+				}
+
+				// Log statistic
+				TraceEvent(SevInfo, "DDDoAuditLocationMetadataMetadata", self->ddId)
+				    .suppressFor(30.0)
+				    .detail("AuditType", audit->coreState.getType())
+				    .detail("AuditId", audit->coreState.id)
+				    .detail("AuditRange", auditRange)
+				    .detail("CurrentValidatedServerKeysNum", numValidatedServerKeys)
+				    .detail("CurrentValidatedKeyServersNum", numValidatedServerKeys)
+				    .detail("CurrentValidatedInclusiveRange", claimRange)
+				    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
+				    .detail("CumulatedValidatedKeyServersNum", cumulatedValidatedKeyServersNum)
+				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(auditRange.begin, claimRange.end));
+
+				// Return result
+				if (!errors.empty()) {
+					TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+					    .detail("AuditId", audit->coreState.id)
+					    .detail("AuditRange", auditRange)
+					    .detail("NumErrors", errors.size())
+					    .detail("Version", readAtVersion)
+					    .detail("ClaimRange", claimRange);
+					res.range = claimRange;
+					res.setPhase(AuditPhase::Error);
+					res.ddId = self->ddId; // used to compare self->ddId with existing persisted ddId
+					wait(persistAuditStateByRange(self->txnProcessor->context(), res));
+					throw audit_storage_error();
+				} else {
+					// Expand persisted complete range
+					res.range = Standalone(KeyRangeRef(auditRange.begin, claimRange.end));
+					res.setPhase(AuditPhase::Complete);
+					res.ddId = self->ddId; // used to compare self->ddId with existing persisted ddId
+					wait(persistAuditStateByRange(self->txnProcessor->context(), res));
+					if (res.range.end < auditRange.end) {
+						TraceEvent(SevInfo, "DDDoAuditLocationMetadataPartialDone", self->ddId)
+						    .suppressFor(10.0)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("Version", readAtVersion)
+						    .detail("CompleteRange", res.range);
+						rangeToReadBegin = res.range.end;
+					} else { // complete
+						TraceEvent(SevInfo, "DDDoAuditLocationMetadataComplete", self->ddId)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("CompleteRange", res.range)
+						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
+						    .detail("NumValidatedKeyServers", cumulatedValidatedKeyServersNum);
+						break;
+					}
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+
+			wait(rateLimiter->getAllowance(remoteReadBytes)); // Rate Keeping
+		}
+		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		    .detail("Loc", "doAuditLocationMetadata")
+		    .detail("Ops", "Increase")
+		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+		    .detail("AuditType", audit->coreState.getType());
+
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevInfo, "DDDoAuditLocationMetadataFailed", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("AuditId", audit->coreState.id)
+		    .detail("AuditRange", auditRange);
+		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		    .detail("Loc", "doAuditLocationMetadataFailed")
+		    .detail("Ops", "Increase")
+		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+		    .detail("AuditType", audit->coreState.getType());
+		if (e.code() == error_code_audit_storage_error) {
+			throw audit_storage_error();
+		} else if (e.code() == error_code_audit_storage_cancelled) {
+			throw audit_storage_cancelled();
+		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+			throw audit_storage_failed();
+		} else {
+			audit->retryCount++;
+			audit->actors.add(dispatchAuditLocationMetadata(self, audit, auditRange));
+		}
+	}
+
 	return Void();
 }
 
