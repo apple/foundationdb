@@ -30,10 +30,10 @@
 
 // The function at present is only called through "fdbserver -r simulation"
 void simulationSetupAndRun(std::string const& dataFolder,
-                 const char* const& testFile,
-                 bool const& rebooting,
-                 bool const& restoring,
-                 std::string const& whitelistBinPath);
+                           const char* const& testFile,
+                           bool const& rebooting,
+                           bool const& restoring,
+                           std::string const& whitelistBinPath);
 
 enum class SimulationStorageEngine : uint8_t {
 	SSD = 0,
