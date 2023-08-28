@@ -234,7 +234,6 @@ struct MoveInUpdates {
 
 	UID id;
 	Version lastAppliedVersion;
-	Version knownSpilledVersion;
 	std::deque<Standalone<VerUpdateRef>> updates;
 	std::vector<Standalone<VerUpdateRef>> spillBuffer;
 	struct StorageServer* data;
@@ -252,6 +251,11 @@ private:
 };
 
 ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
+	if (begin >= end) {
+		self->spilled = MoveInUpdatesSpilled::False;
+		return Void();
+	}
+
 	Key beginKey = persistUpdatesKey(self->id, begin), endKey = persistUpdatesKey(self->id, end);
 	TraceEvent(SevDebug, "MoveInUpdatesLoadBegin", self->id)
 	    .detail("BeginVersion", begin)
@@ -262,7 +266,6 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	RangeResult res = wait(self->store->readRange(KeyRangeRef(beginKey, endKey),
 	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT,
 	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT));
-	// wait(self->store->readRange(KeyRangeRef(self->getPersistKey(begin, 0), self->getPersistKey(end, 0))));
 	std::vector<Standalone<VerUpdateRef>> restored;
 	for (int i = 0; i < res.size(); ++i) {
 		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
@@ -270,30 +273,14 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 		uint64_t uv;
 		rd >> uv;
 		version = static_cast<Version>(fromBigEndian64(uv));
-		// Standalone<MutationRef> mutation =
-		//     BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
 		Standalone<VerUpdateRef> vur =
 		    BinaryReader::fromStringRef<Standalone<VerUpdateRef>>(res[i].value, IncludeVersion());
 		ASSERT(version == vur.version);
-		// DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
-		// if (restored.empty() || restored.back().version < version) {
-		// 	restored.emplace_back();
-		// 	restored.back().version = version;
-		// 	restored.back().isPrivateData = false;
-		// }
-		// restored.back().push_back_deep(restored.back().arena(), mutation);
 		TraceEvent(SevDebug, "MoveInUpdatesLoadedMutations", self->id)
 		    .detail("Version", version)
 		    .detail("Mutations", vur.mutations.size());
 		restored.push_back(std::move(vur));
 	}
-
-	// for (int i = restored.size() - 1; i >= 0; --i) {
-	// 	TraceEvent(SevDebug, "MoveInUpdatesLoadedMutations", self->id)
-	// 	    .detail("Version", restored[i].version)
-	// 	    .detail("MutationCount", restored[i].mutations.size())
-	// 	    .detail("Size", restored[i].expectedSize());
-	// }
 
 	if (!res.more) {
 		TraceEvent(SevDebug, "MoveInUpdatesLoadComplete", self->id)
@@ -302,10 +289,6 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 		    .detail("VersionCount", restored.size());
 		for (int i = restored.size() - 1; i >= 0; --i) {
 			if (self->updates.empty() || restored[i].version < self->updates.front().version) {
-				// TraceEvent(SevDebug, "MoveInUpdatesRestoreAddingNewUpdates", self->id)
-				//     .detail("Version", restored[i].version)
-				//     .detail("MutationCount", restored[i].mutations.size())
-				//     .detail("Size", restored[i].expectedSize());
 				self->updates.push_front(restored[i]);
 			}
 		}
@@ -9699,8 +9682,8 @@ MoveInUpdates::MoveInUpdates(UID id,
                              struct StorageServer* data,
                              IKeyValueStore* store,
                              MoveInUpdatesSpilled spilled)
-  : id(id), lastAppliedVersion(version), knownSpilledVersion(invalidVersion), data(data), store(store),
-    range(persistUpdatesKeyRange(id)), fail(false), spilled(spilled), size(0) {
+  : id(id), lastAppliedVersion(version), data(data), store(store), range(persistUpdatesKeyRange(id)), fail(false),
+    spilled(spilled), size(0) {
 	if (spilled) {
 		this->loadFuture = loadUpdates(this, lastAppliedVersion + 1, data->version.get() + 1);
 	}
@@ -9729,12 +9712,10 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 		}
 	} else {
 		int size = 0;
-		// Version version = this->lastAppliedVersion;
 		for (auto it = updates.begin(); it != updates.end();) {
 			if (it->version > this->lastAppliedVersion) {
 				res.push_back(*it);
 				size += it->mutations.expectedSize();
-				// version = it->version;
 			}
 			if (it->version <= this->data->durableVersion.get()) {
 				it = updates.erase(it);
@@ -9745,16 +9726,6 @@ std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
 				break;
 			}
 		}
-		// while (!updates.empty()) {
-		// 	if (updates.front().version > this->lastAppliedVersion) {
-		// 		res.push_back(updates.front());
-		// 		size += res.back().mutations.expectedSize();
-		// 	}
-		// 	updates.pop_front();
-		// 	if (size > byteLimit) {
-		// 		break;
-		// 	}
-		// }
 	}
 
 	if (!res.empty()) {
@@ -9810,7 +9781,6 @@ void MoveInUpdates::addMutation(Version version,
 			    .detail("SpillVersion", updates.front().version)
 			    .detail("MutationCount", updates.front().mutations.size());
 			this->size -= updates.front().expectedSize();
-			knownSpilledVersion = updates.front().version;
 			spilled = MoveInUpdatesSpilled::True;
 			updates.pop_front();
 		}
