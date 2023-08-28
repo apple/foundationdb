@@ -490,7 +490,7 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
 			ASSERT(ddAuditState.ddId.isValid());
 			if (ddAuditState.ddId != auditState.ddId) {
-				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
+				throw audit_storage_task_outdated(); // a new dd starts and this audit task is outdated
 			}
 			// It is possible ddAuditState is complete while some progress is about to persist
 			// Since doAuditOnStorageServer may repeatedly issue multiple requests (see getReplyUnlessFailedFor)
@@ -581,7 +581,7 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
 			ASSERT(ddAuditState.ddId.isValid());
 			if (ddAuditState.ddId != auditState.ddId) {
-				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
+				throw audit_storage_task_outdated(); // a new dd starts and this audit task is outdated
 			}
 			// It is possible ddAuditState is complete while some progress is about to persist
 			// Since doAuditOnStorageServer may repeatedly issue multiple requests (see getReplyUnlessFailedFor)

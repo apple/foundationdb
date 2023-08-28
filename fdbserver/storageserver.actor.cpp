@@ -5330,6 +5330,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 
 		if (e.code() == error_code_audit_storage_cancelled) {
 			req.reply.sendError(audit_storage_cancelled());
+		} else if (e.code() == error_code_audit_storage_task_outdated) {
+			req.reply.sendError(audit_storage_task_outdated());
 		} else {
 			req.reply.sendError(audit_storage_failed());
 		}
@@ -5696,6 +5698,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		    .detail("AuditServer", data->thisServerID);
 		if (e.code() == error_code_audit_storage_cancelled) {
 			req.reply.sendError(audit_storage_cancelled());
+		} else if (e.code() == error_code_audit_storage_task_outdated) {
+			req.reply.sendError(audit_storage_task_outdated());
 		} else {
 			req.reply.sendError(audit_storage_failed());
 		}
