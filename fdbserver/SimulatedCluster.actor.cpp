@@ -2794,10 +2794,10 @@ using namespace std::literals;
 } // namespace
 
 ACTOR void simulationSetupAndRun(std::string dataFolder,
-                       const char* testFile,
-                       bool rebooting,
-                       bool restoring,
-                       std::string whitelistBinPaths) {
+                                 const char* testFile,
+                                 bool rebooting,
+                                 bool restoring,
+                                 std::string whitelistBinPaths) {
 	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
@@ -2830,11 +2830,11 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-		// NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
-		// Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
-		// override will not take effect until the test starts. Here, we do an additional check
-		// for this special simulation test.
-		std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
+	    // NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
+	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
+	    // override will not take effect until the test starts. Here, we do an additional check
+	    // for this special simulation test.
+	    std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
