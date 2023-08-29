@@ -1,6 +1,7 @@
 [[knobs]]
 rocksdb_disable_auto_compactions = true
 rocksdb_suggest_compact_clear_range = false
+rocksdb_empty_range_check = false
 
 [[test]]
  testTitle = 'UnitTests'
