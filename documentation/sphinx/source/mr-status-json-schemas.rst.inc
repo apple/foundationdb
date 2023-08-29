@@ -792,6 +792,20 @@
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle": 0,
          "perpetual_storage_wiggle_locality":"0",
+         "storage_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta",
+             "none"
+         ]},
          "storage_migration_type":{
          "$enum":[
              "disabled",
