@@ -11814,23 +11814,22 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		    .detail("StartOldestVersion", startOldestVersion);
 		for (const auto& [_, moveInShard] : data->moveInShards) {
 			const MoveInPhase phase = moveInShard->getPhase();
-			if (phase != MoveInPhase::Pending && phase != MoveInPhase::Error &&
-			    phase != MoveInPhase::Cancel) {
-			const auto& queue = moveInShard->updates->getUpdatesQueue();
-			for (auto it = queue.begin(); it != queue.end(); ++it) {
-				if (it->version > newOldestVersion) {
-					break;
+			if (phase != MoveInPhase::Pending && phase != MoveInPhase::Error && phase != MoveInPhase::Cancel) {
+				const auto& queue = moveInShard->updates->getUpdatesQueue();
+				for (auto it = queue.begin(); it != queue.end(); ++it) {
+					if (it->version > newOldestVersion) {
+						break;
+					}
+					if (it->version > startOldestVersion) {
+						TraceEvent(SevDebug, "MoveInUpdatesPersist", moveInShard->id())
+						    .detail("MoveInShard", moveInShard->toString())
+						    .detail("Version", it->version)
+						    .detail("Mutations", it->mutations.size());
+						data->storage.writeKeyValue(
+						    KeyValueRef(persistUpdatesKey(moveInShard->id(), it->version),
+						                BinaryWriter::toValue<VerUpdateRef>(*it, IncludeVersion())));
+					}
 				}
-				if (it->version > startOldestVersion) {
-					TraceEvent(SevDebug, "MoveInUpdatesPersist", moveInShard->id())
-					    .detail("MoveInShard", moveInShard->toString())
-					    .detail("Version", it->version)
-					    .detail("Mutations", it->mutations.size());
-					data->storage.writeKeyValue(
-					    KeyValueRef(persistUpdatesKey(moveInShard->id(), it->version),
-					                BinaryWriter::toValue<VerUpdateRef>(*it, IncludeVersion())));
-				}
-			}
 			}
 		}
 
