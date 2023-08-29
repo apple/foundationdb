@@ -80,7 +80,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		Key begin = allKeys.begin, end = allKeys.end;
 		if (tokens.size() == 3) {
 			begin = tokens[2];
-		} else if (tokens.size() == 4) {
+		} else if (tokens.size() == 4 || tokens.size() == 5) {
 			begin = tokens[2];
 			end = tokens[3];
 		} else {
@@ -96,7 +96,19 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			return UID();
 		}
 
-		UID startedAuditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds=*/60));
+		KeyValueStoreType engineType = KeyValueStoreType::END;
+		if (tokens.size() == 5 && (type == AuditType::ValidateHA || type == AuditType::ValidateReplica)) {
+			engineType = KeyValueStoreType::fromString(tokens[4].toString());
+			if (engineType != KeyValueStoreType::SSD_BTREE_V2 && engineType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+			    engineType != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+				printUsage(tokens[0]);
+				return UID();
+			}
+		}
+		// For KeyValueStoreType::END: do not specify any storage engine
+		// Every storage engine will be audited
+		UID startedAuditId =
+		    wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, engineType, /*timeoutSeconds=*/60));
 		resAuditId = startedAuditId;
 	}
 	return resAuditId;
@@ -104,11 +116,14 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 
 CommandFactory auditStorageFactory(
     "audit_storage",
-    CommandHelp("audit_storage <Type> [BeginKey EndKey]",
+    CommandHelp("audit_storage <Type> [BeginKey EndKey] <EngineType>",
                 "Start an audit storage",
-                "Specify audit `Type' (only `ha' and `replica` and `locationmetadata` and "
-                "`ssshard` `Type' are supported currently), and\n"
+                "Specify audit `Type' (only `ha' and `replica' and `locationmetadata' and "
+                "`ssshard' `Type' are supported currently), and\n"
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
+                "Specify audit `EngineType' when auditType is `ha' or `replica'\n"
+                "(only `ssd-rocksdb-v1' and `ssd-sharded-rocksdb' and `ssd-2' are supported).\n"
+                "If no EngineType is specified, every storage engine will be audited.\n"
                 "For example, to audit the full key range: `audit_storage ha'\n"
                 "To audit a sub-range only: `audit_storage ha \\xa \\xb'\n"
                 "Returns an audit `ID'. See also `get_audit_status' command.\n"

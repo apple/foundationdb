@@ -30,10 +30,7 @@
 
 namespace fdb_cli {
 
-ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
-	if (auditType == AuditType::ValidateStorageServerShard) {
-		printf("ssshard not supported yet\n");
-	}
+ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
 	state KeyRange rangeToRead = auditRange;
 	state Key rangeToReadBegin = auditRange.begin;
 	state int retryCount = 0;
@@ -48,7 +45,7 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 				for (int i = 0; i < auditStates.size(); i++) {
 					AuditPhase phase = auditStates[i].getPhase();
 					if (phase == AuditPhase::Invalid) {
-						printf("( Unfinished ) %s\n", auditStates[i].range.toString().c_str());
+						printf("( Ongoing ) %s\n", auditStates[i].range.toString().c_str());
 						++unfinishedCount;
 					} else if (phase == AuditPhase::Error) {
 						printf("( Error   ) %s\n", auditStates[i].range.toString().c_str());
@@ -61,6 +58,9 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 				rangeToReadBegin = auditStates.back().range.end;
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
 				if (retryCount > 30) {
 					printf("Imcomplete check\n");
 					return Void();
@@ -71,7 +71,97 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 		}
 	}
 	printf("Finished range count: %ld\n", finishCount);
-	printf("Unfinished range count: %ld\n", unfinishedCount);
+	return Void();
+}
+
+ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			std::vector<StorageServerInterface> servers;
+			servers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++)
+				servers.push_back(decodeServerListValue(serverList[i].value));
+			return servers;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<AuditPhase> getAuditProgressByServer(Database cx,
+                                                  AuditType auditType,
+                                                  UID auditId,
+                                                  KeyRange auditRange,
+                                                  UID serverId) {
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByServer(cx, auditType, auditId, serverId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						return AuditPhase::Running;
+					} else if (phase == AuditPhase::Error) {
+						return AuditPhase::Error;
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryCount > 30) {
+					return AuditPhase::Invalid;
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
+		}
+	}
+	return AuditPhase::Complete;
+}
+
+ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	    auditType == AuditType::ValidateLocationMetadata) {
+		wait(getAuditProgressByRange(cx, auditType, auditId, auditRange));
+	} else if (auditType == AuditType::ValidateStorageServerShard) {
+		state std::vector<Future<Void>> fs;
+		state std::unordered_map<UID, bool> res;
+		state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+		state int i = 0;
+		state int numCompleteServers = 0;
+		state int numOngoingServers = 0;
+		state int numErrorServers = 0;
+		for (; i < interfs.size(); i++) {
+			AuditPhase serverPhase = wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
+			if (serverPhase == AuditPhase::Running) {
+				numOngoingServers++;
+			} else if (serverPhase == AuditPhase::Complete) {
+				numCompleteServers++;
+			} else if (serverPhase == AuditPhase::Error) {
+				numErrorServers++;
+			} else if (serverPhase == AuditPhase::Invalid) {
+				printf("SS %s partial progress fetched\n", interfs[i].id().toString().c_str());
+			}
+		}
+		printf("CompleteServers: %d\n", numCompleteServers);
+		printf("OngoingServers: %d\n", numOngoingServers);
+		printf("ErrorServers: %d\n", numErrorServers);
+	} else {
+		printf("AuditType not implemented\n");
+	}
 	return Void();
 }
 
