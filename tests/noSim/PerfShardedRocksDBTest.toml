@@ -1,3 +1,7 @@
+[[knobs]]
+rocksdb_cf_range_deletion_limit=1000
+rocksdb_use_point_delete_for_system_keys=true
+
 [[test]]
  testTitle = 'UnitTests'
  useDB = false
