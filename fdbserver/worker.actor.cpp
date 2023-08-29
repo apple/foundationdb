@@ -1141,7 +1141,8 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const LocalityData& locality,
                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                            const UpdateWorkerHealthRequest& lastReq) {
+                                            const UpdateWorkerHealthRequest& lastReq,
+                                            Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
@@ -1159,8 +1160,8 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		workerLocation = Satellite;
 	}
 
-	if (workerLocation == None) {
-		// This worker doesn't need to monitor anything if it is in remote satellite.
+	if (workerLocation == None && !enablePrimaryTxnSystemHealthCheck->get()) {
+		// This worker doesn't need to monitor anything if it is not in transaction system or in remote satellite.
 		return req;
 	}
 
@@ -1174,6 +1175,22 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 		// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
+
+		TraceEvent(SevDebug, "PeerHealthMonitor")
+		    .detail("Peer", address)
+		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
+		    .detail("Elapsed", now() - lastLoggedTime)
+		    .detail("Disconnected", disconnectedPeer)
+		    .detail("MinLatency", peer->pingLatencies.min())
+		    .detail("MaxLatency", peer->pingLatencies.max())
+		    .detail("MeanLatency", peer->pingLatencies.mean())
+		    .detail("MedianLatency", peer->pingLatencies.median())
+		    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+		    .detail("CheckedPercentileLatency",
+		            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+		    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+		    .detail("PingTimeoutCount", peer->timeoutCount)
+		    .detail("ConnectionFailureCount", peer->connectFailedCount);
 		if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 		    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 			// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
@@ -1254,6 +1271,26 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				    .detail("ConnectionFailureCount", peer->connectFailedCount);
 				disconnectedPeer = true;
 			}
+		} else if (enablePrimaryTxnSystemHealthCheck->get() &&
+		           (addressInDbAndPrimaryDc(address, dbInfo) || addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+			// For force checking, we only detect connection timeout. Currently this should only be used during recovery
+			// and only used in TLogs.
+			if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+				TraceEvent("HealthMonitorDetectDegradedPeer")
+				    .detail("WorkerLocation", workerLocation)
+				    .detail("Peer", address)
+				    .detail("ExtensiveConnectivityCheck", true)
+				    .detail("Elapsed", now() - lastLoggedTime)
+				    .detail("Disconnected", true)
+				    .detail("MinLatency", peer->pingLatencies.min())
+				    .detail("MaxLatency", peer->pingLatencies.max())
+				    .detail("MeanLatency", peer->pingLatencies.mean())
+				    .detail("MedianLatency", peer->pingLatencies.median())
+				    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+				    .detail("PingTimeoutCount", peer->timeoutCount)
+				    .detail("ConnectionFailureCount", peer->connectFailedCount);
+				disconnectedPeer = true;
+			}
 		}
 
 		if (disconnectedPeer) {
@@ -1316,13 +1353,16 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
                                  LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                 Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	state UpdateWorkerHealthRequest req;
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
+		if ((dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ||
+		     enablePrimaryTxnSystemHealthCheck->get()) &&
+		    ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			req = doPeerHealthCheck(interf, locality, dbInfo, req);
+			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck);
 
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty() || !req.recoveredPeers.empty()) {
 				if (g_network->isSimulated()) {
@@ -1347,6 +1387,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			when(wait(nextHealthCheckDelay)) {}
 			when(wait(ccInterface->onChange())) {}
 			when(wait(dbInfo->onChange())) {}
+			when(wait(enablePrimaryTxnSystemHealthCheck->onChange())) {}
 		}
 	}
 }
@@ -1525,10 +1566,12 @@ struct TrackRunningStorage {
 	                    std::unordered_map<UID, StorageDiskCleaner>* storageCleaners)
 	  : self(self), storeType(storeType), locality(locality), filename(filename), runningStorages(runningStorages),
 	    storageCleaners(storageCleaners) {
+		TraceEvent("StorageServerAddedToRunningStorage", self);
 		runningStorages->emplace(self, storeType);
 	}
 	~TrackRunningStorage() {
 		runningStorages->erase(std::make_pair(self, storeType));
+		TraceEvent("StorageServerRemoveFromRunningStorage", self);
 
 		// Start a disk cleaner except for tss data store
 		try {
@@ -1563,7 +1606,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
-                                                 Promise<Void>* rebootKVStore) {
+                                                 Promise<Void>* rebootKVStore,
+                                                 Reference<GetEncryptCipherKeysMonitor> encryptionMonitor) {
 	state TrackRunningStorage _(id, storeType, locality, filename, runningStorages, storageCleaners);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1632,8 +1676,13 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
-		prevStorageServer =
-		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
+		prevStorageServer = storageServer(store,
+		                                  recruited,
+		                                  db,
+		                                  folder,
+		                                  Promise<Void>(),
+		                                  Reference<IClusterConnectionRecord>(nullptr),
+		                                  encryptionMonitor);
 		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
 	}
 }
@@ -2092,6 +2141,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	state Future<Void> updateClusterIdFuture;
 
+	// When set to true, the health monitor running in this worker starts monitor other transaction process in this
+	// cluster.
+	state Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
+
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
 		chaosMetricsActor = chaosMetricsLogger();
@@ -2178,6 +2231,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
+				Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = makeReference<GetEncryptCipherKeysMonitor>();
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -2191,7 +2245,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    dbInfo);
+				    dbInfo,
+				    Optional<EncryptionAtRestMode>(),
+				    0,
+				    encryptionMonitor);
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -2240,7 +2297,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				Future<ErrorOr<Void>> storeError = errorOr(kv->getError());
 				Promise<Void> recovery;
-				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, encryptionMonitor);
 				recoveries.push_back(recovery.getFuture());
 
 				f = handleIOErrors(f, storeError, s.storeID, kvClosed);
@@ -2258,7 +2315,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise);
+				                                  &rebootKVSPromise,
+				                                  encryptionMonitor);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -2315,7 +2373,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                         recovery,
 				                         folder,
 				                         degraded,
-				                         activeSharedTLog);
+				                         activeSharedTLog,
+				                         enablePrimaryTxnSystemHealthCheck);
 				recoveries.push_back(recovery.getFuture());
 				activeSharedTLog->set(s.storeID);
 
@@ -2453,7 +2512,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
-			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo));
+			errorForwarders.add(
+			    healthMonitor(ccInterface, interf, locality, dbInfo, enablePrimaryTxnSystemHealthCheck));
 		}
 
 		loop choose {
@@ -2868,7 +2928,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               Promise<Void>(),
 					                               folder,
 					                               degraded,
-					                               activeSharedTLog);
+					                               activeSharedTLog,
+					                               enablePrimaryTxnSystemHealthCheck);
 					tLogCore = handleIOErrors(tLogCore, data, logId);
 					tLogCore = handleIOErrors(tLogCore, queue, logId);
 					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
@@ -2879,6 +2940,22 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				activeSharedTLog->set(logData.back().uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
+				TraceEvent e("StorageServerInitProgress", req.interfaceId);
+				e.detail("Step", "1.RequestReceived");
+				e.detail("ReqID", req.reqId);
+				e.detail("WorkerID", interf.id());
+				e.detail("StorageType", req.storeType.toString());
+				e.detail("SeedTag", req.seedTag.toString());
+				e.detail("IsTssPair", req.tssPairIDAndVersion.present());
+				if (req.tssPairIDAndVersion.present()) {
+					e.detail("TssPairID", req.tssPairIDAndVersion.get().first);
+				}
+				int j = 0;
+				for (const auto& runningStorage : runningStorages) {
+					e.detail("RunningStorageIDOnSameWorker" + std::to_string(j), runningStorage.first);
+					e.detail("RunningStorageEngineOnSameWorker" + std::to_string(j), runningStorage.second);
+					j++;
+				}
 				// We want to prevent double recruiting on a worker unless we try to recruit something
 				// with a different storage engine (otherwise storage migration won't work for certain
 				// configuration). Additionally we also need to allow double recruitment for seed servers.
@@ -2911,6 +2988,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					details["IsTSS"] = std::to_string(isTss);
 					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 					startRole(ssRole, recruited.id(), interf.id(), details);
+					TraceEvent("StorageServerInitProgress", recruited.id())
+					    .detail("ReqID", req.reqId)
+					    .detail("StorageType", req.storeType.toString())
+					    .detail("Step", "2.RoleStarted")
+					    .detail("WorkerID", interf.id());
 
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
@@ -2936,6 +3018,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
+					Reference<GetEncryptCipherKeysMonitor> encryptionMonitor =
+					    makeReference<GetEncryptCipherKeysMonitor>();
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2950,7 +3034,14 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                deterministicRandom()->coinflip())
 					             : true),
 					    dbInfo,
-					    req.encryptMode);
+					    req.encryptMode,
+					    0,
+					    encryptionMonitor);
+					TraceEvent("StorageServerInitProgress", recruited.id())
+					    .detail("ReqID", req.reqId)
+					    .detail("StorageType", req.storeType.toString())
+					    .detail("Step", "3.KVStoreOpened")
+					    .detail("WorkerID", interf.id());
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2967,7 +3058,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
-					                               folder);
+					                               folder,
+					                               encryptionMonitor);
 					s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2984,7 +3076,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  &rebootKVSPromise2);
+					                                  &rebootKVSPromise2,
+					                                  encryptionMonitor);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));

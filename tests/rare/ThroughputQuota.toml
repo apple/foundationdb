@@ -4,7 +4,7 @@ testTitle='ThroughputQuotaTest'
   [[test.workload]]
   testName='ThroughputQuota'
   transactionTag='a'
-  totalQuota=16384
+  totalQuotaInPages=4
 
   [[test.workload]]
   testName = 'Cycle'

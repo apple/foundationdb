@@ -20,6 +20,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/RandomKeyValueUtils.h"
 #include "fdbclient/Tuple.h"
 #include "fdbrpc/DDSketch.h"
@@ -42,6 +43,7 @@
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/PriorityMultiLock.actor.h"
+#include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -1459,6 +1461,7 @@ struct RedwoodMetrics {
 		unsigned int pagerEvictFail;
 		unsigned int btreeLeafPreload;
 		unsigned int btreeLeafPreloadExt;
+		unsigned int readRequestDecryptTimeNS;
 	};
 
 	RedwoodMetrics() {
@@ -2798,7 +2801,8 @@ public:
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
 	                                                           PhysicalPageID pageID,
 	                                                           int priority,
-	                                                           bool header) {
+	                                                           bool header,
+	                                                           PagerEventReasons reason) {
 		ASSERT(!self->memoryOnly);
 
 		state Reference<ArenaPage> page =
@@ -2834,7 +2838,11 @@ public:
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageID);
+			double decryptTime = 0;
+			page->postReadPayload(pageID, &decryptTime);
+			if (isReadRequest(reason)) {
+				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
+			}
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -2867,7 +2875,8 @@ public:
 
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalMultiPage(DWALPager* self,
 	                                                                Standalone<VectorRef<PhysicalPageID>> pageIDs,
-	                                                                int priority) {
+	                                                                int priority,
+	                                                                Optional<PagerEventReasons> reason) {
 		ASSERT(!self->memoryOnly);
 
 		// if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
@@ -2913,7 +2922,12 @@ public:
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageIDs.front());
+			double decryptTime = 0;
+			page->postReadPayload(pageIDs.front(), &decryptTime);
+			if (reason.present() && isReadRequest(reason.get())) {
+				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
+			}
+
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageIDs).c_str(),
@@ -2940,7 +2954,12 @@ public:
 
 	Future<Reference<ArenaPage>> readHeaderPage(PhysicalPageID pageID) {
 		debug_printf("DWALPager(%s) readHeaderPage %s\n", filename.c_str(), toString(pageID).c_str());
-		return readPhysicalPage(this, pageID, ioMaxPriority, true);
+		return readPhysicalPage(this, pageID, ioMaxPriority, true, PagerEventReasons::MetaData);
+	}
+
+	static bool isReadRequest(PagerEventReasons reason) {
+		return reason == PagerEventReasons::PointRead || reason == PagerEventReasons::FetchRange ||
+		       reason == PagerEventReasons::RangeRead || reason == PagerEventReasons::RangePrefetch;
 	}
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
@@ -2970,7 +2989,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
-			return forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
+			return forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise);
 		}
 		PageCacheEntry& cacheEntry = pageCache.get(pageID, physicalPageSize, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
@@ -2982,7 +3001,7 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise);
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -3019,7 +3038,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
-			return forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
+			return forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise);
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * physicalPageSize, noHit);
@@ -3032,7 +3051,7 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageIDs).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
+			cacheEntry.readFuture = forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise);
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -5025,10 +5044,12 @@ public:
 	               Reference<AsyncVar<ServerDBInfo> const> db,
 	               Optional<EncryptionAtRestMode> expectedEncryptionMode,
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	               Reference<IPageEncryptionKeyProvider> keyProvider = {})
+	               Reference<IPageEncryptionKeyProvider> keyProvider = {},
+	               Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = {})
 	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
-	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
-	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_encryptionMonitor(encryptionMonitor),
+	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_logID(logID),
+	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5203,14 +5224,14 @@ public:
 			case EncodingType::AESEncryption:
 				ASSERT(m_expectedEncryptionMode.present());
 				ASSERT(m_db.isValid());
-				m_keyProvider =
-				    makeReference<AESEncryptionKeyProvider<AESEncryption>>(m_db, m_expectedEncryptionMode.get());
+				m_keyProvider = makeReference<AESEncryptionKeyProvider<AESEncryption>>(
+				    m_db, m_expectedEncryptionMode.get(), m_encryptionMonitor);
 				break;
 			case EncodingType::AESEncryptionWithAuth:
 				ASSERT(m_expectedEncryptionMode.present());
 				ASSERT(m_db.isValid());
 				m_keyProvider = makeReference<AESEncryptionKeyProvider<AESEncryptionWithAuth>>(
-				    m_db, m_expectedEncryptionMode.get());
+				    m_db, m_expectedEncryptionMode.get(), m_encryptionMonitor);
 				break;
 			default:
 				ASSERT(false);
@@ -5640,6 +5661,7 @@ private:
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
+	Reference<GetEncryptCipherKeysMonitor> m_encryptionMonitor;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -8000,7 +8022,8 @@ public:
 	                     Optional<EncryptionAtRestMode> encryptionMode,
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	                     Reference<IPageEncryptionKeyProvider> keyProvider = {},
-	                     int64_t pageCacheBytes = 0)
+	                     int64_t pageCacheBytes = 0,
+	                     Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = {})
 	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
 			ASSERT(keyProvider.isValid() || db.isValid());
@@ -8032,7 +8055,8 @@ public:
 		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false);
-		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
+		m_tree = new VersionedBTree(
+		    pager, filename, logID, db, encryptionMode, encodingType, keyProvider, encryptionMonitor);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -8327,14 +8351,16 @@ IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        Optional<EncryptionAtRestMode> encryptionMode,
-                                       int64_t pageCacheBytes) {
+                                       int64_t pageCacheBytes,
+                                       Reference<GetEncryptCipherKeysMonitor> encryptionMonitor) {
 	return new KeyValueStoreRedwood(filename,
 	                                logID,
 	                                db,
 	                                encryptionMode,
 	                                EncodingType::MAX_ENCODING_TYPE,
 	                                Reference<IPageEncryptionKeyProvider>(),
-	                                pageCacheBytes);
+	                                pageCacheBytes,
+	                                encryptionMonitor);
 }
 
 int randomSize(int max) {
@@ -8855,6 +8881,8 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 		                                               { "PagerRemapFree", metric.pagerRemapFree },
 		                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 		                                               { "PagerRemapSkip", metric.pagerRemapSkip },
+		                                               { "", 0 },
+		                                               { "ReadRequestDecryptTimeNS", metric.readRequestDecryptTimeNS },
 		                                               { "", 0 } };
 
 	double elapsed = now() - startTime;

@@ -225,8 +225,10 @@ struct RangeAssignment {
 // FIXME: namespace?
 struct BlobWorkerInfo {
 	int numGranulesAssigned;
+	int recentGranulesAssigned;
 
-	BlobWorkerInfo(int numGranulesAssigned = 0) : numGranulesAssigned(numGranulesAssigned) {}
+	BlobWorkerInfo(int numGranulesAssigned = 0, int recentGranulesAssigned = 0)
+	  : numGranulesAssigned(numGranulesAssigned), recentGranulesAssigned(recentGranulesAssigned) {}
 };
 
 // recover is when the BM assigns an ambiguously owned range on recovery
@@ -294,6 +296,8 @@ struct BlobManagerStats {
 	Counter granulesFullyPurged;
 	Counter granulesPartiallyPurged;
 	Counter filesPurged;
+	Counter granulesHitMedianLimit;
+
 	Future<Void> logger;
 	int64_t activeMerges;
 	int64_t blockedAssignments;
@@ -317,8 +321,9 @@ struct BlobManagerStats {
 	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0), lastFlushVersion(0),
-	    lastMLogTruncationVersion(0), lastManifestSeqNo(0), lastManifestDumpTs(0), manifestSizeInBytes(0) {
+	    filesPurged("FilesPurged", cc), granulesHitMedianLimit("GranulesHitMedianLimit", cc), activeMerges(0),
+	    blockedAssignments(0), lastFlushVersion(0), lastMLogTruncationVersion(0), lastManifestSeqNo(0),
+	    lastManifestDumpTs(0), manifestSizeInBytes(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
@@ -390,6 +395,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
+	std::deque<UID> recentBWAssignments;
 	std::unordered_set<NetworkAddress> workerAddresses;
 	std::unordered_set<UID> deadWorkers;
 	std::unordered_map<UID, UID> workerAffinities;
@@ -606,7 +612,6 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 
 	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.front());
 
-	state Transaction tr = Transaction(bmData->db);
 	state int idx = 1;
 	state Reference<GranuleTenantData> tenantData;
 	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
@@ -616,23 +621,7 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	}
 	for (; idx < splits.size() - 1; idx++) {
-		loop {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				// Get the next full key in the granule.
-				RangeResult nextKeyRes = wait(
-				    tr.getRange(firstGreaterOrEqual(splits[idx]), lastLessThan(splits[idx + 1]), GetRangeLimits(1)));
-				if (nextKeyRes.size() == 0) {
-					break;
-				}
-
-				alignKeyBoundary(bmData, tenantData, nextKeyRes[0].key, offset, splitPoints);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+		alignKeyBoundary(bmData, tenantData, splits[idx], offset, splitPoints);
 	}
 
 	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.back());
@@ -640,10 +629,66 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 	return splitPoints;
 }
 
+// Find the next full db key for each split point
+ACTOR Future<Standalone<VectorRef<KeyRef>>> nextFullKeys(Reference<BlobManagerData> bmData,
+                                                         Standalone<VectorRef<KeyRef>> keys) {
+	state Standalone<VectorRef<KeyRef>> result;
+	result.push_back_deep(result.arena(), keys.front()); // keep the begin key as is
+
+	state Transaction tr = Transaction(bmData->db);
+	state int i = 1;
+	for (; i < keys.size() - 1; ++i) {
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				RangeResult nextKeyRes =
+				    wait(tr.getRange(firstGreaterOrEqual(keys[i]), lastLessThan(keys[i + 1]), GetRangeLimits(1)));
+				if (nextKeyRes.size() == 0) {
+					break;
+				}
+				result.push_back_deep(result.arena(), nextKeyRes[0].key);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+	result.push_back_deep(result.arena(), keys.back()); // keep the end key as is
+	return result;
+}
+
+// split recursively in the middle to guarantee roughly equal splits across different parts of key space
+static void downsampleSplit(const Standalone<VectorRef<KeyRef>>& splits,
+                            Standalone<VectorRef<KeyRef>>& out,
+                            int startIdx,
+                            int endIdx,
+                            int remaining) {
+	ASSERT(endIdx - startIdx >= remaining);
+	ASSERT(remaining >= 0);
+	if (remaining == 0) {
+		return;
+	}
+	if (endIdx - startIdx == remaining) {
+		out.append(out.arena(), splits.begin() + startIdx, remaining);
+	} else {
+		int mid = (startIdx + endIdx) / 2;
+		int startCount = (remaining - 1) / 2;
+		int endCount = remaining - startCount - 1;
+		// ensure no infinite recursion
+		ASSERT(mid != endIdx);
+		ASSERT(mid + 1 != startIdx);
+		downsampleSplit(splits, out, startIdx, mid, startCount);
+		out.push_back(out.arena(), splits[mid]);
+		downsampleSplit(splits, out, mid + 1, endIdx, endCount);
+	}
+}
+
 ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmData,
                                                 KeyRange range,
                                                 bool writeHot,
-                                                bool initialSplit) {
+                                                bool initialSplit,
+                                                Optional<int> maxSplitPoints = Optional<int>()) {
 	state BlobGranuleSplitPoints splitPoints;
 	try {
 		if (BM_DEBUG) {
@@ -712,10 +757,37 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 				}
 			}
 
-			// We only need to align the keys if there is a proposed split.
 			if (keys.size() > 2) {
-				BlobGranuleSplitPoints _splitPoints = wait(alignKeys(bmData, range, keys));
+				// We only need to align the keys if there is a proposed split.
+				state Standalone<VectorRef<KeyRef>> fullKeys = wait(nextFullKeys(bmData, keys));
+				BlobGranuleSplitPoints _splitPoints = wait(alignKeys(bmData, range, fullKeys));
 				splitPoints = _splitPoints;
+
+				// Enforce max split fanout for performance reasons. This mainly happens when a blob worker is behind.
+				if (maxSplitPoints.present() && splitPoints.keys.size() > maxSplitPoints.get()) {
+					// downsample full keys and re-align
+					CODE_PROBE(true, "downsampling granule split because fanout too high");
+					Standalone<VectorRef<KeyRef>> downsampledKeys;
+					downsampledKeys.arena().dependsOn(fullKeys.arena());
+					downsampledKeys.push_back(downsampledKeys.arena(), fullKeys.front());
+
+					// since we include start + end boundaries here, only need maxSplitPoints - 2 split boundaries to
+					// produce maxSplitPoints - 1 granules
+					downsampleSplit(fullKeys, downsampledKeys, 1, fullKeys.size() - 1, maxSplitPoints.get() - 2);
+
+					downsampledKeys.push_back(downsampledKeys.arena(), fullKeys.back());
+					ASSERT(downsampledKeys.size() == maxSplitPoints.get());
+					if (BM_DEBUG) {
+						fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n",
+						           range.begin.printable(),
+						           range.end.printable(),
+						           splitPoints.keys.size() - 1,
+						           maxSplitPoints.get() - 1);
+					}
+
+					wait(store(splitPoints, alignKeys(bmData, range, downsampledKeys)));
+					ASSERT(splitPoints.keys.size() <= maxSplitPoints.get());
+				}
 			} else {
 				splitPoints.keys = keys;
 			}
@@ -779,7 +851,6 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData,
 	}
 
 	int minGranulesAssigned = INT_MAX;
-	std::vector<UID> eligibleWorkers;
 
 	// because lowest number of granules worker(s) might not exactly have the lowest memory for various reasons, if we
 	// got blob_worker_full as the error last time, sometimes just pick a random worker that wasn't the last one we
@@ -787,50 +858,90 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData,
 	if (bmData->workerStats.size() >= 2 && previousFailure.present() &&
 	    previousFailure.get().second.code() == error_code_blob_worker_full && deterministicRandom()->coinflip()) {
 		CODE_PROBE(true, "randomly picking worker due to blob_worker_full");
-		eligibleWorkers.reserve(bmData->workerStats.size());
+		std::vector<UID> randomWorkers;
+		randomWorkers.reserve(bmData->workerStats.size());
 		for (auto& it : bmData->workerStats) {
 			if (it.first != previousFailure.get().first) {
-				eligibleWorkers.push_back(it.first);
+				randomWorkers.push_back(it.first);
 			}
 		}
-		ASSERT(!eligibleWorkers.empty());
-		int randomIdx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
+		ASSERT(!randomWorkers.empty());
+		int randomIdx = deterministicRandom()->randomInt(0, randomWorkers.size());
 		if (BM_DEBUG) {
 			fmt::print("picked worker {0} randomly since previous attempt got blob_worker_full\n",
-			           eligibleWorkers[randomIdx].toString().substr(0, 5));
+			           randomWorkers[randomIdx].toString().substr(0, 5));
 		}
 
-		return eligibleWorkers[randomIdx];
+		return randomWorkers[randomIdx];
 	}
 
+	// recent granules assigned
+	std::vector<int> medianCalc;
+	// UID, total granules assigned, recent granules assigned
+	std::vector<std::tuple<UID, int, int>> eligibleWorkers;
+
+	Optional<int> excludeIfRecentOver;
 	for (auto const& worker : bmData->workerStats) {
 		UID currId = worker.first;
-		int granulesAssigned = worker.second.numGranulesAssigned;
 
 		// if previous attempt failed and that worker is still present, ignore it
 		if (bmData->workerStats.size() >= 2 && previousFailure.present() && previousFailure.get().first == currId) {
 			continue;
 		}
 
+		eligibleWorkers.push_back({ currId, worker.second.numGranulesAssigned, worker.second.recentGranulesAssigned });
+		medianCalc.push_back(worker.second.recentGranulesAssigned);
+	}
+
+	if (SERVER_KNOBS->BLOB_MANAGER_ENABLE_MEDIAN_ASSIGNMENT_LIMITING && medianCalc.size() > 1 &&
+	    bmData->recentBWAssignments.size() >=
+	        SERVER_KNOBS->BLOB_MANAGER_MEDIAN_ASSIGNMENT_MIN_SAMPLES_PER_WORKER * bmData->workerStats.size()) {
+		CODE_PROBE(true, "blob manager enabling median assignment limiting");
+		// FIXME: make more efficient with quick select
+		std::sort(medianCalc.begin(), medianCalc.end());
+		// round down in case of even number of workers to be more conservative
+		int medianIdx = (medianCalc.size() - 1) / 2;
+		// protect against bad knob values
+		double multiplyFactor = std::max(1.0, SERVER_KNOBS->BLOB_MANAGER_MEDIAN_ASSIGNMENT_ALLOWANCE);
+		excludeIfRecentOver = std::max(1, (int)(multiplyFactor * medianCalc[medianIdx]));
+	}
+
+	std::vector<UID> finalEligibleWorkers;
+	bool anyOverLimit = false;
+	for (auto& it : eligibleWorkers) {
+		UID currId = std::get<0>(it);
+		int granulesAssigned = std::get<1>(it);
+		int recentGranulesAssigned = std::get<2>(it);
+
+		if (excludeIfRecentOver.present() && recentGranulesAssigned > excludeIfRecentOver.get()) {
+			anyOverLimit = true;
+			continue;
+		}
+
 		if (granulesAssigned <= minGranulesAssigned) {
 			if (granulesAssigned < minGranulesAssigned) {
-				eligibleWorkers.clear();
+				finalEligibleWorkers.clear();
 				minGranulesAssigned = granulesAssigned;
 			}
-			eligibleWorkers.emplace_back(currId);
+			finalEligibleWorkers.emplace_back(currId);
 		}
 	}
 
+	if (anyOverLimit) {
+		CODE_PROBE(true, "BM excluding BW due to median assignment algorithm");
+		++bmData->stats.granulesHitMedianLimit;
+	}
+
 	// pick a random worker out of the eligible workers
-	ASSERT(eligibleWorkers.size() > 0);
-	int idx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
+	ASSERT(finalEligibleWorkers.size() > 0);
+	int idx = deterministicRandom()->randomInt(0, finalEligibleWorkers.size());
 	if (BM_DEBUG) {
 		fmt::print("picked worker {0}, which has a minimal number ({1}) of granules assigned\n",
-		           eligibleWorkers[idx].toString().substr(0, 5),
+		           finalEligibleWorkers[idx].toString().substr(0, 5),
 		           minGranulesAssigned);
 	}
 
-	return eligibleWorkers[idx];
+	return finalEligibleWorkers[idx];
 }
 
 // circular dependency between handleRangeAssign and doRangeAssignment
@@ -866,6 +977,25 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 				fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
 			}
 			workerID = _workerId;
+
+			if (SERVER_KNOBS->BLOB_MANAGER_ENABLE_MEDIAN_ASSIGNMENT_LIMITING) {
+				// this worker is guaranteed to be in the map because we just picked it from the map in the most recent
+				// now()
+				bmData->recentBWAssignments.push_back(workerID.get());
+				bmData->workerStats[workerID.get()].recentGranulesAssigned++;
+
+				if (bmData->recentBWAssignments.size() >=
+				    SERVER_KNOBS->BLOB_MANAGER_MEDIAN_ASSIGNMENT_MAX_SAMPLES_PER_WORKER * bmData->workerStats.size()) {
+					UID workerIdToPop = bmData->recentBWAssignments.front();
+					bmData->recentBWAssignments.pop_front();
+					// worker could no longer exist now
+					auto it = bmData->workerStats.find(workerIdToPop);
+					if (it != bmData->workerStats.end()) {
+						it->second.recentGranulesAssigned--;
+					}
+				}
+			}
+
 			// We don't have to check for races with an overlapping assignment because it would insert over us in the
 			// actor map, cancelling this actor before it got here
 			bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
@@ -1137,6 +1267,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 		} else {
 			if (!forcePurging) {
+				// FIXME: not handling error propagation correctly here
 				bmData->assignsInProgress.insert(assignment.keyRange,
 				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 			}
@@ -1149,6 +1280,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 		bmData->workerAssignments.insert(assignment.keyRange, UID());
 		ASSERT(assignment.assign.get().type != AssignRequestType::Continue);
 		if (!forcePurging) {
+			// FIXME: not handling error propagation correctly here
 			bmData->assignsInProgress.insert(
 			    assignment.keyRange, doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
 		}
@@ -1609,32 +1741,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	}
 }
 
-// split recursively in the middle to guarantee roughly equal splits across different parts of key space
-static void downsampleSplit(const Standalone<VectorRef<KeyRef>>& splits,
-                            Standalone<VectorRef<KeyRef>>& out,
-                            int startIdx,
-                            int endIdx,
-                            int remaining) {
-	ASSERT(endIdx - startIdx >= remaining);
-	ASSERT(remaining >= 0);
-	if (remaining == 0) {
-		return;
-	}
-	if (endIdx - startIdx == remaining) {
-		out.append(out.arena(), splits.begin() + startIdx, remaining);
-	} else {
-		int mid = (startIdx + endIdx) / 2;
-		int startCount = (remaining - 1) / 2;
-		int endCount = remaining - startCount - 1;
-		// ensure no infinite recursion
-		ASSERT(mid != endIdx);
-		ASSERT(mid + 1 != startIdx);
-		downsampleSplit(splits, out, startIdx, mid, startCount);
-		out.push_back(out.arena(), splits[mid]);
-		downsampleSplit(splits, out, mid + 1, endIdx, endCount);
-	}
-}
-
 ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
                                           UID currentWorkerId,
                                           KeyRange granuleRange,
@@ -1674,17 +1780,19 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	ASSERT(splitFirst.keys.size() >= 2);
 	ASSERT(splitFirst.keys.front() == granuleRange.begin);
 	ASSERT(splitFirst.keys.back() == proposedSplitKey);
-	for (int i = 0; i < splitFirst.keys.size(); i++) {
-		newRanges.push_back_deep(newRanges.arena(), splitFirst.keys[i]);
+	Standalone<VectorRef<KeyRef>> splitFirstFullKeys = wait(nextFullKeys(bmData, splitFirst.keys));
+	for (int i = 0; i < splitFirstFullKeys.size(); i++) {
+		newRanges.push_back_deep(newRanges.arena(), splitFirstFullKeys[i]);
 	}
 
 	BlobGranuleSplitPoints splitSecond = wait(fSplitSecond);
 	ASSERT(splitSecond.keys.size() >= 2);
 	ASSERT(splitSecond.keys.front() == proposedSplitKey);
 	ASSERT(splitSecond.keys.back() == granuleRange.end);
+	Standalone<VectorRef<KeyRef>> splitSecondFullKeys = wait(nextFullKeys(bmData, splitSecond.keys));
 	// i=1 to skip proposedSplitKey, since above already added it
-	for (int i = 1; i < splitSecond.keys.size(); i++) {
-		newRanges.push_back_deep(newRanges.arena(), splitSecond.keys[i]);
+	for (int i = 1; i < splitSecondFullKeys.size(); i++) {
+		newRanges.push_back_deep(newRanges.arena(), splitSecondFullKeys[i]);
 	}
 
 	if (BM_DEBUG) {
@@ -1898,7 +2006,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 	// first get ranges to split
-	state BlobGranuleSplitPoints splitPoints = wait(splitRange(bmData, granuleRange, writeHot, false));
+	// +1 because this is boundaries, so N granules would have N+1 boundaries
+	state BlobGranuleSplitPoints splitPoints =
+	    wait(splitRange(bmData, granuleRange, writeHot, false, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 
 	ASSERT(splitPoints.keys.size() >= 2);
 	if (splitPoints.keys.size() == 2) {
@@ -1930,34 +2040,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		}
 
 		return Void();
-	}
-
-	// Enforce max split fanout for performance reasons. This mainly happens when a blob worker is behind.
-	if (splitPoints.keys.size() >=
-	    SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 2) { // +2 because this is boundaries, so N keys would have N+1 bounaries.
-		CODE_PROBE(true, "downsampling granule split because fanout too high");
-		Standalone<VectorRef<KeyRef>> coalescedRanges;
-		coalescedRanges.arena().dependsOn(splitPoints.keys.arena());
-		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.front());
-
-		// since we include start + end boundaries here, only need maxSplitFanout-1 split boundaries to produce
-		// maxSplitFanout granules
-		downsampleSplit(
-		    splitPoints.keys, coalescedRanges, 1, splitPoints.keys.size() - 1, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT - 1);
-
-		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.back());
-		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
-		if (BM_DEBUG) {
-			fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n",
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           splitPoints.keys.size() - 1,
-			           SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
-		}
-
-		// TODO probably do something better here?
-		wait(store(splitPoints, alignKeys(bmData, granuleRange, coalescedRanges)));
-		ASSERT(splitPoints.keys.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
 	ASSERT(granuleRange.begin == splitPoints.keys.front());
@@ -3150,6 +3232,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 							                                     rep.originalEpoch,
 							                                     rep.originalSeqno);
 						}
+						// also add to actor collection for error propagation
+						bmData->addActor.send(newEval.inProgress);
 						bmData->boundaryEvaluations.insert(rep.granuleRange, newEval);
 					}
 
@@ -5591,13 +5675,55 @@ ACTOR Future<Void> updateLastFlushVersion(Database db, Version flushVersion) {
 	return Void();
 }
 
+// Flush a blob range and retry for non-fatal errors
+ACTOR Future<Void> tryFlushRange(Reference<BlobManagerData> bmData, KeyRange range, Version logEndVersion) {
+	state int retryCount = 0;
+	loop {
+		try {
+			FlushGranuleRequest req(bmData->epoch, range, logEndVersion, false);
+			wait(success(doBlobGranuleRequests(bmData->db, range, req, &BlobWorkerInterface::flushGranuleRequest)));
+			return Void();
+		} catch (Error& e) {
+			if (e.code() != error_code_blob_granule_transaction_too_old) {
+				throw; // terminate for unretryable error
+			}
+
+			// check if the range is blobified and then decide retry or skip.
+			// it may take long time to flush the whole key range and some ranges may have been unblobified or purged.
+			// so we try to check that first when seeing non-fatal errors
+			bool knownRange = false;
+			for (auto& r : bmData->knownBlobRanges.intersectingRanges(range)) {
+				if (r.value()) {
+					knownRange = true;
+					break;
+				}
+			}
+			if (knownRange) {
+				TraceEvent(retryCount > 100 ? SevError : SevInfo, "BlobGranulesFlushRetry")
+				    .detail("Range", range)
+				    .detail("Version", logEndVersion);
+				CODE_PROBE(true, "Retry blob granule flush", probe::decoration::rare);
+				wait(delayJittered(1));
+				++retryCount;
+			} else {
+				TraceEvent("BlobGranulesFlushSkip").detail("Range", range).detail("Version", logEndVersion);
+				CODE_PROBE(true, "Skip blob granule flush", probe::decoration::rare);
+				return Void();
+			}
+		}
+	}
+}
+
 // Try to flush blob granules. Return the flushed version if it's successful.
 ACTOR Future<Version> maybeFlushGranules(Reference<BlobManagerData> bmData) {
 	state BlobGranuleBackupConfig config;
-	int64_t lastFlushTs = wait(config.lastFlushTs().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+	state int64_t lastFlushTs = wait(config.lastFlushTs().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 	bool shouldFlush = lastFlushTs == 0 || (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
 	if (!shouldFlush) {
-		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+		int64_t lastFlushVersion =
+		    wait(config.lastFlushVersion().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs).detail("LastFlushVer", lastFlushVersion);
+		bmData->stats.lastFlushVersion = lastFlushVersion;
 		return invalidVersion;
 	}
 
@@ -5621,9 +5747,7 @@ ACTOR Future<Version> maybeFlushGranules(Reference<BlobManagerData> bmData) {
 	TraceEvent("FlushingBlobGranules").detail("Ranges", flushRanges.size());
 	state std::vector<Future<Void>> futures;
 	for (auto& range : flushRanges) {
-		FlushGranuleRequest req(bmData->epoch, range, logEndVersion, false);
-		Future<Void> future =
-		    success(doBlobGranuleRequests(bmData->db, range, req, &BlobWorkerInterface::flushGranuleRequest));
+		Future<Void> future = tryFlushRange(bmData, range, logEndVersion);
 		futures.push_back(future);
 		if (futures.size() > SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE) {
 			wait(waitForAll(futures));
@@ -5656,7 +5780,7 @@ ACTOR Future<Void> truncateMutations(Reference<BlobManagerData> bmData, Version 
 	state std::string timestamp = BackupAgentBase::formatTime(epochs);
 	state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
 
-	if (truncVersion > 0) {
+	if (truncVersion > 0 && truncVersion < flushVersion) {
 		state std::string mlogsUrl =
 		    wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
@@ -5664,6 +5788,8 @@ ACTOR Future<Void> truncateMutations(Reference<BlobManagerData> bmData, Version 
 		bmData->stats.lastMLogTruncationVersion = truncVersion;
 		TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
 		CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+	} else {
+		TraceEvent("SkipTruncateMutations").detail("Version", truncVersion).detail("FlushVer", flushVersion);
 	}
 	return Void();
 }
@@ -5678,12 +5804,11 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	                                  bmData->dbInfo,
 	                                  manifestStore,
 	                                  bmData->epoch,
-	                                  bmData->manifestDumperSeqNo,
+	                                  bmData->manifestDumperSeqNo++,
 	                                  bmData->enableManifestEncryption));
 	bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 	bmData->stats.manifestSizeInBytes += bytes;
 	bmData->stats.lastManifestDumpTs = now();
-	bmData->manifestDumperSeqNo++;
 	bmData->manifestCompletitionTrigger.trigger();
 	return Void();
 }
@@ -5703,6 +5828,7 @@ ACTOR Future<Void> backupManifestLoop(Reference<BlobManagerData> bmData) {
 				TraceEvent("BackupManifestLoopExit").log();
 				bmData->stats.lastFlushVersion = 0;
 				bmData->stats.lastManifestDumpTs = 0;
+				bmData->stats.manifestSizeInBytes = 0;
 				return Void();
 			}
 			wait(backupManifest(bmData));

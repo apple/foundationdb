@@ -949,7 +949,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	loop {
 		try {
-			if (initialSnapshot && snapshot.size() > 1 && canStopEarly &&
+			if (initialSnapshot && snapshot.size() > 3 && canStopEarly &&
 			    (injectTooBig || bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();
@@ -964,8 +964,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				break;
 			}
 			// if we got transaction_too_old naturally, have lower threshold for re-evaluating (2xlimit)
-			if (initialSnapshot && snapshot.size() > 1 && e.code() == error_code_transaction_too_old &&
-			    (injectTooBig || bytesRead >= 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) && snapshot.size() > 3) {
+			if (initialSnapshot && snapshot.size() > 3 && e.code() == error_code_transaction_too_old &&
+			    (injectTooBig || bytesRead >= 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// idle this actor, while we tell the manager this is too big and to re-evaluate granules and revoke us
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) re-evaluating snapshot after {2} bytes ({3} limit) {4}\n",
@@ -5583,7 +5583,7 @@ bool blobWorkerTerminated(Reference<BlobWorkerData> self, IKeyValueStore* persis
 
 #define PERSIST_PREFIX "\xff\xff"
 static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
-static const KeyRef persistEncryptionAtRestModeKey = "encryptionAtRestMode"_sr;
+static const KeyRef persistEncryptionAtRestModeKey = PERSIST_PREFIX "encryptionAtRestMode"_sr;
 
 ACTOR Future<Void> checkUpdateEncryptionAtRestMode(Reference<BlobWorkerData> self,
                                                    Future<DatabaseConfiguration> configF) {

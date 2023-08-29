@@ -50,9 +50,12 @@ public:
 	virtual int64_t manualThrottleCount() const = 0;
 	virtual bool isAutoThrottlingEnabled() const = 0;
 
-	// Based on the busiest read and write tags in the provided storage queue info, update
-	// tag throttling limits.
+	// Based on the busiest read and write tags in the provided storage queue info, these methods
+	// update tag throttling limits. Unfortunately, the two effective interfaces of the two
+	// implementations of ITagThrottler (GlobalTagThrottler and TagThrottler) have diveraged over
+	// time. As a result, exactly one of the below methods is a noop for each implementation.
 	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
+	virtual void updateThrottling(Map<UID, StorageQueueInfo> const&) = 0;
 };
 
 class TagThrottler : public ITagThrottler {
@@ -73,13 +76,14 @@ public:
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+	void updateThrottling(Map<UID, StorageQueueInfo> const&) override {}
 };
 
 class GlobalTagThrottler : public ITagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
 public:
-	GlobalTagThrottler(Database db, UID id, int maxFallingBehind);
+	GlobalTagThrottler(Database db, UID id, int maxFallingBehind, double limitingThreshold);
 	~GlobalTagThrottler();
 
 	Future<Void> monitorThrottlingChanges() override;
@@ -92,7 +96,8 @@ public:
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
 
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override { return Void(); }
+	void updateThrottling(Map<UID, StorageQueueInfo> const&) override;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
 	TransactionTagMap<double> getProxyRates(int numProxies) override;
 

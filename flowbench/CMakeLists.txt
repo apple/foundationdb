@@ -5,11 +5,11 @@ fdb_find_sources(FLOWBENCH_SRCS)
 # There is no good way to incorporate the recommended googlebenchmark download + build
 # process with one that checks to see if googlebenchmark has already been downloaded
 # and built.
-if(EXISTS /opt/googlebenchmark-f91b6b AND CLANG)
+if(EXISTS /opt/googlebenchmark-f91b6b AND CLANG AND USE_LIBCXX)
   add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
   target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" /opt/googlebenchmark-f91b6b/include)
   target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b/lib64)
-elseif(EXISTS /opt/googlebenchmark-f91b6b-g++ AND NOT CLANG)
+elseif(EXISTS /opt/googlebenchmark-f91b6b-g++ AND NOT USE_LIBCXX)
   add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
   target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" /opt/googlebenchmark-f91b6b-g++/include)
   target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b-g++/lib64)

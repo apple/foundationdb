@@ -236,7 +236,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 		}
 
-		if (key == "storage_engine" || key == "log_engine") {
+		if (key == "storage_engine" || key == "log_engine" || key == "perpetual_storage_wiggle_engine") {
 			StringRef s = value;
 
 			// Parse as engine_name[:p=v]... to handle future storage engine params
@@ -2234,6 +2234,8 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 			tr.set(dataDistributionModeKey, wr.toValue());
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
+				// set DDMode to 2 is a security mode which disables data moves but allows auditStorage part
+				// DDMode=2 is set when shard location metadata inconsistency is detected
 				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
 				if (currentHealthyZoneValue.present() &&
 				    decodeHealthyZoneValue(currentHealthyZoneValue.get()).first == ignoreSSFailuresZoneString) {
@@ -2656,6 +2658,7 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
+                               KeyValueStoreType engineType,
                                double timeoutSeconds) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
@@ -2666,7 +2669,7 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 			wait(clusterInterface->onChange());
 		}
 		TraceEvent(SevVerbose, "ManagementAPIAuditStorageBegin").detail("AuditType", type).detail("Range", range);
-		TriggerAuditRequest req(type, range);
+		TriggerAuditRequest req(type, range, engineType);
 		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "ManagementAPIAuditStorageEnd")

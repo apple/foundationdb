@@ -464,6 +464,7 @@ void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* 
 // Drop a GetReadVersion request from a queue, by responding an error to the request.
 void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* stats) {
 	proxyGRVThresholdExceeded(&queue->front(), stats);
+	++stats->txnRequestOut;
 	queue->pop_front();
 }
 
@@ -833,8 +834,12 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 	state int64_t transactionCount = 0;
 	state int64_t batchTransactionCount = 0;
-	state GrvTransactionRateInfo normalRateInfo(10);
-	state GrvTransactionRateInfo batchRateInfo(0);
+	state GrvTransactionRateInfo normalRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
+	                                            SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
+	                                            /*rate=*/10);
+	state GrvTransactionRateInfo batchRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
+	                                           SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
+	                                           /*rate=*/0);
 
 	state Deque<GetReadVersionRequest> systemQueue;
 	state Deque<GetReadVersionRequest> defaultQueue;

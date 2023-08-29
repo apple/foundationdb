@@ -192,10 +192,23 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
 		state std::vector<UID> dest;
 		while (dest.empty()) {
-			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+			state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
-				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
+				state StorageServerInterface interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
 				if (g_simulator->protectedAddresses.count(interf.address()) == 0) {
+					// We need to avoid selecting a storage server that is already dead at this point, otherwise
+					// the test will hang. This is achieved by sending a GetStorageMetrics RPC. This is a necessary
+					// check for this test because DD has been disabled and the proper mechanism that removes bad
+					// storage servers are not taking place in the scope of this function.
+					state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = interf.getStorageMetrics.tryGetReply(
+					    GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
+
+					state ErrorOr<GetStorageMetricsReply> rep = wait(metricsRequest);
+					if (rep.isError()) {
+						// Delay 1s to avoid tight spin loop in case all options fail
+						wait(delay(1.0));
+						continue;
+					}
 					dest.push_back(interf.uniqueID);
 					addr = interf.address();
 				}

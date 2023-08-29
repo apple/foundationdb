@@ -37,6 +37,7 @@ struct KmsConnectorInterface {
 	RequestStream<struct KmsConnLookupEKsByKeyIdsReq> ekLookupByIds;
 	RequestStream<struct KmsConnLookupEKsByDomainIdsReq> ekLookupByDomainIds;
 	RequestStream<struct KmsConnBlobMetadataReq> blobMetadataReq;
+	RequestStream<struct KmsConnGetKMSStateReq> getKMSStateReq;
 
 	KmsConnectorInterface() {}
 
@@ -54,6 +55,8 @@ struct KmsConnectorInterface {
 			    RequestStream<struct KmsConnLookupEKsByDomainIdsReq>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			blobMetadataReq =
 			    RequestStream<struct KmsConnBlobMetadataReq>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			getKMSStateReq =
+			    RequestStream<struct KmsConnGetKMSStateReq>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
@@ -63,6 +66,7 @@ struct KmsConnectorInterface {
 		streams.push_back(ekLookupByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(ekLookupByDomainIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(blobMetadataReq.getReceiver(TaskPriority::Worker));
+		streams.push_back(getKMSStateReq.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -218,6 +222,32 @@ struct KmsConnBlobMetadataReq {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, domainIds, debugId, reply, arena);
+	}
+};
+
+struct KmsConnGetKMSStateRep {
+	constexpr static FileIdentifier file_identifier = 111862;
+	Arena arena;
+	VectorRef<StringRef> restKMSUrls;
+	bool kmsStable;
+
+	KmsConnGetKMSStateRep() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, restKMSUrls, kmsStable, arena);
+	}
+};
+
+struct KmsConnGetKMSStateReq {
+	constexpr static FileIdentifier file_identifier = 2349929;
+	ReplyPromise<KmsConnGetKMSStateRep> reply;
+
+	KmsConnGetKMSStateReq() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

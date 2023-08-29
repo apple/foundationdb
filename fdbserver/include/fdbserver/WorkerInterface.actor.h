@@ -1225,15 +1225,16 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
+                                 std::string folder,
+                                 Reference<GetEncryptCipherKeysMonitor> encryptionMonitor);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
     Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
-    Reference<IClusterConnectionRecord>
-        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+    Reference<IClusterConnectionRecord> connRecord,
+    Reference<GetEncryptCipherKeysMonitor> encryptionMonitor); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -1259,7 +1260,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo> const> db);
@@ -1310,7 +1312,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 }
 namespace oldTLog_6_2 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
@@ -1325,12 +1328,13 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog);
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 }
 
 typedef decltype(&tLog) TLogFn;
 
-extern bool isSimulatorProcessReliable();
+extern bool isSimulatorProcessUnreliable();
 
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
@@ -1348,7 +1352,7 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (!isSimulatorProcessReliable()) {
+			if (isSimulatorProcessUnreliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
@@ -1357,6 +1361,37 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 				e.detail("Context", context);
 			}
 			e.detail("OrigTime", orig).detail("OrigTrace", trace).log();
+			throw err;
+		}
+	}
+}
+
+ACTOR template <class T>
+Future<T> ioTimeoutErrorIfCleared(Future<T> what,
+                                  double time,
+                                  Reference<AsyncVar<bool>> condition,
+                                  const char* context = nullptr) {
+	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
+	// to not end until at least time after simulation is sped up.
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
+		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
+	}
+	Future<Void> end = lowPriorityDelayAfterCleared(condition, time);
+	choose {
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			Error err = io_timeout();
+			if (isSimulatorProcessUnreliable()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent e(SevError, "IoTimeoutError");
+			e.error(err);
+			if (context != nullptr) {
+				e.detail("Context", context);
+			}
+			e.log();
 			throw err;
 		}
 	}
@@ -1397,7 +1432,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (!isSimulatorProcessReliable()) {
+			if (isSimulatorProcessUnreliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");

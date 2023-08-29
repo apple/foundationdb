@@ -45,6 +45,7 @@ bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics
 	return res;
 }
 
+namespace {
 ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
 	printf("Issuing configuration change: %s\n", config.c_str());
 	state ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), config, force));
@@ -54,6 +55,7 @@ ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, boo
 	wait(delay(5.0)); // wait for read window
 	return true;
 }
+} // namespace
 
 // a wrapper for test protected method
 struct DDTeamCollectionTester : public DDTeamCollection {

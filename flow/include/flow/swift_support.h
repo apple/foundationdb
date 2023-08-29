@@ -59,11 +59,6 @@
 
 #define SWIFT_STRINGIFY(x) #x
 
-/// Specify that the declared type conforms to the given Swift protocol when the type is
-/// imported into Swift.
-#define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)                                                                    \
-	__attribute__((swift_attr(SWIFT_STRINGIFY(conforms_to : ModuleName.ProtocolName))))
-
 #define CONCAT2(id1, id2) id1##id2
 #define CONCAT3(id1, id2, id3) id1##id2##id3
 
@@ -106,7 +101,6 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p);
 #define SWIFT_CXX_IMPORT_UNSAFE
 #define SWIFT_CXX_IMPORT_OWNED
 #define SWIFT_SENDABLE
-#define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)
 #define SWIFT_NAME(x)
 #define CONCAT2(id1, id2) id1##id2
 #define CONCAT3(id1, id2, id3) id1##id2##id3

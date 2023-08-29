@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef WITH_ROCKSDB
 #include "fdbserver/RocksDBLogForwarder.h"
 
 #include "flow/network.h"
@@ -146,4 +146,4 @@ void RocksDBLogForwarder::Logv(const InfoLogLevel log_level, const char* format,
 	}
 }
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // WITH_ROCKSDB

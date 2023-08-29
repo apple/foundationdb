@@ -309,6 +309,8 @@ void configureGenerator(const char* text,
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
+		                   // TODO(zhewu): update fdbcli command documentation.
+		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
 		                   "tenant_mode=",
 		                   "blob_granules_enabled=",

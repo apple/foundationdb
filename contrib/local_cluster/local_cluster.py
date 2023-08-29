@@ -76,6 +76,7 @@ def main():
         raise RuntimeError(f"Must spawn more than 1 process, got {args.num_processes}")
 
     lib.fdb_process.set_fdbserver_path(args.fdbserver_path)
+    lib.fdb_process.set_fdbcli_path(args.fdbcli_path)
 
     asyncio.get_event_loop().run_until_complete(
         run_fdbservers(args.num_processes, args.work_dir, args.cluster_file, args.port)
