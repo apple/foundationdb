@@ -49,9 +49,6 @@ Key persistUpdatesKey(const UID& id, const Version version) {
     return wr.toValue();
 }
 
-// Value persistUpdatesValue(const VerUpdateRef& update) {
-//     return ObjectWriter::toValue(update, IncludeVersion());
-// }
 
 Key persistMoveInShardKey(const UID& id) {
     BinaryWriter wr(Unversioned());
