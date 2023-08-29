@@ -107,16 +107,19 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 
 		wait(excludeIncludeServer(cx, ssToExcludeInclude));
 
-		wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, "ssd-rocksdb-v1"));
+		wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-rocksdb-v1"));
 
+		// We probablistically validate that resetting perpetual_storage_wiggle_engine to none works as expected.
 		if (deterministicRandom()->coinflip()) {
 			TraceEvent("Test_ClearPerpetualStorageWiggleEngine").log();
 			bool change = wait(IssueConfigurationChange(cx, "perpetual_storage_wiggle_engine=none", true));
 			TraceEvent("Test_ClearPerpetualStorageWiggleEngineDone").detail("Success", change);
 			ASSERT(change);
 
+			// Next, we run exclude and then include `ssToWiggle`. Because perpetual_storage_wiggle_engine is set to
+			// none, the engine for `ssToWiggle` should be `storage_engine`.
 			wait(excludeIncludeServer(cx, ssToWiggle));
-			wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, "ssd-2"));
+			wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-2"));
 		}
 		return Void();
 	}
