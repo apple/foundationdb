@@ -1828,9 +1828,8 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
-		if (testConfig.excludedStorageEngineType(result) ||
-		    std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
-		        std::end(SIMULATION_STORAGE_ENGINE)) {
+		if (std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
+		    std::end(SIMULATION_STORAGE_ENGINE)) {
 
 			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
 			ASSERT(false);
@@ -2829,12 +2828,7 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	    // NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
-	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
-	    // override will not take effect until the test starts. Here, we do an additional check
-	    // for this special simulation test.
-	    std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
