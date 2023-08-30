@@ -104,7 +104,7 @@ enum class DDAuditContext : uint8_t {
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
-	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0),
+	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
 	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
 
 	AuditStorageState coreState;
@@ -1983,6 +1983,8 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit
 			// Silently exit
+		} else if (e.code() == error_code_audit_storage_task_outdated) {
+			// Silently exit
 		} else if (e.code() == error_code_audit_storage_cancelled) {
 			// If this audit is cancelled, the place where cancelling
 			// this audit does removeAuditFromAuditMap
@@ -2956,7 +2958,7 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 		    .detail("AuditType", auditType);
-		if (e.code() == error_code_audit_storage_cancelled) {
+		if (e.code() == error_code_audit_storage_cancelled || e.code() == error_code_audit_storage_task_outdated) {
 			throw e;
 		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
@@ -3040,7 +3042,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			throw e; // handled by scheduleAuditStorageShardOnServer
 		}
 		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
-		    e.code() == error_code_audit_storage_cancelled) {
+		    e.code() == error_code_audit_storage_cancelled || e.code() == error_code_audit_storage_task_outdated) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
@@ -3314,10 +3316,9 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 		    .detail("AuditType", audit->coreState.getType());
-		if (e.code() == error_code_audit_storage_error) {
-			throw audit_storage_error();
-		} else if (e.code() == error_code_audit_storage_cancelled) {
-			throw audit_storage_cancelled();
+		if (e.code() == error_code_audit_storage_error || e.code() == error_code_audit_storage_cancelled ||
+		    e.code() == error_code_audit_storage_task_outdated) {
+			throw e;
 		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
 		} else {
