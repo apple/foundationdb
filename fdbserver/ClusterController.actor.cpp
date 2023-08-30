@@ -194,11 +194,120 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 	}
 };
 
+bool ClusterControllerData::transactionSystemContainsDegradedServers() {
+	const ServerDBInfo& dbi = db.serverInfo->get();
+	const Reference<ClusterRecoveryData> recoveryData = db.recoveryData;
+	auto transactionWorkerInList = [&dbi, &recoveryData](const std::unordered_set<NetworkAddress>& serverList,
+	                                                     bool skipSatellite,
+	                                                     bool skipRemote) -> bool {
+		for (const auto& server : serverList) {
+			if (dbi.master.addresses().contains(server)) {
+				return true;
+			}
+
+			// Getting the current log system config to check if any TLogs are degraded. recoveryData->logSystem has the
+			// most up to date log system and we should use it whenever available.
+			auto logSystemConfig = (recoveryData.isValid() && recoveryData->logSystem.isValid())
+			                           ? recoveryData->logSystem->getLogSystemConfig()
+			                           : dbi.logSystemConfig;
+			for (const auto& logSet : logSystemConfig.tLogs) {
+				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
+					continue;
+				}
+
+				if (skipRemote && !logSet.isLocal) {
+					continue;
+				}
+
+				if (!logSet.isLocal) {
+					// Only check log routers in the remote region.
+					for (const auto& logRouter : logSet.logRouters) {
+						if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
+							return true;
+						}
+					}
+				} else {
+					for (const auto& tlog : logSet.tLogs) {
+						if (tlog.present() && tlog.interf().addresses().contains(server)) {
+							return true;
+						}
+					}
+				}
+			}
+
+			if (recoveryData.isValid() && recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				// During recovery, TLogs may not be able to pull data from previous generation TLogs due to gray
+				// failures. In this case, we rely on the latest recruitment information and see if any newly recruited
+				// TLogs are degraded.
+				for (const auto& tlog : recoveryData->primaryRecruitment.tLogs) {
+					if (tlog.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				if (!skipSatellite) {
+					for (const auto& satelliteLog : recoveryData->primaryRecruitment.satelliteTLogs) {
+						if (satelliteLog.addresses().contains(server)) {
+							return true;
+						}
+					}
+				}
+			}
+
+			for (const auto& proxy : dbi.client.grvProxies) {
+				if (proxy.addresses().contains(server)) {
+					return true;
+				}
+			}
+
+			for (const auto& proxy : dbi.client.commitProxies) {
+				if (proxy.addresses().contains(server)) {
+					return true;
+				}
+			}
+
+			for (const auto& resolver : dbi.resolvers) {
+				if (resolver.addresses().contains(server)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+
+	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
+	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+	// stable.
+	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
+	       transactionWorkerInList(degradationInfo.disconnectedServers,
+	                               /*skipSatellite=*/false,
+	                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
+}
+
+bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
+	if (db.config.usableRegions <= 1) {
+		return false;
+	}
+
+	for (const auto& excludedServer : degradationInfo.degradedServers) {
+		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+			return true;
+		}
+	}
+
+	for (const auto& excludedServer : degradationInfo.disconnectedServers) {
+		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators) {
 	state MasterInterface iMaster;
-	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
 
@@ -248,18 +357,18 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			                              // the "first" recovery after more than a second of normal operation
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
-			recoveryData = makeReference<ClusterRecoveryData>(cluster,
-			                                                  db->serverInfo,
-			                                                  db->serverInfo->get().master,
-			                                                  db->serverInfo->get().masterLifetime,
-			                                                  coordinators,
-			                                                  db->serverInfo->get().clusterInterface,
-			                                                  LiteralStringRef(""),
-			                                                  addActor,
-			                                                  db->forceRecovery);
+			db->recoveryData = makeReference<ClusterRecoveryData>(cluster,
+			                                                      db->serverInfo,
+			                                                      db->serverInfo->get().master,
+			                                                      db->serverInfo->get().masterLifetime,
+			                                                      coordinators,
+			                                                      db->serverInfo->get().clusterInterface,
+			                                                      LiteralStringRef(""),
+			                                                      addActor,
+			                                                      db->forceRecovery);
 
-			collection = actorCollection(recoveryData->addActor.getFuture());
-			recoveryCore = clusterRecoveryCore(recoveryData);
+			collection = actorCollection(db->recoveryData->addActor.getFuture());
+			recoveryCore = clusterRecoveryCore(db->recoveryData);
 
 			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
 			// really don't want to have to start over
@@ -279,10 +388,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				when(wait(db->serverInfo->onChange())) {}
 				when(BackupWorkerDoneRequest req =
 				         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
-					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
-						recoveryData->registrationTrigger.trigger();
+					if (db->recoveryData->logSystem.isValid() && db->recoveryData->logSystem->removeBackupWorker(req)) {
+						db->recoveryData->registrationTrigger.trigger();
 					}
-					++recoveryData->backupWorkerDoneRequests;
+					++db->recoveryData->backupWorkerDoneRequests;
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
@@ -297,7 +406,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			}
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/false));
+			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/false));
 			ASSERT(addActor.isEmpty());
 
 			wait(spinDelay);
@@ -311,7 +420,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, true /* exThrown */));
+			wait(cleanupRecoveryActorCollection(db->recoveryData, true /* exThrown */));
 			ASSERT(addActor.isEmpty());
 
 			TEST(err.code() == error_code_tlog_failed); // Terminated due to tLog failure
@@ -2445,11 +2554,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 			// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
 			// recovered.
+			bool hasRecoveredServer = false;
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
 				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
 				    self->degradationInfo.disconnectedServers.find(*it) ==
 				        self->degradationInfo.disconnectedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
+					hasRecoveredServer = true;
 				} else {
 					++it;
 				}
@@ -2506,6 +2617,12 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
 					}
 				}
+			}
+
+			if (hasRecoveredServer) {
+				// The best transaction system might have changed after a server is recovered. Check outstanding request
+				// and check if a better transaction system exists.
+				checkOutstandingRequests(self);
 			}
 
 			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
