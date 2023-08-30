@@ -3553,16 +3553,21 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					logData->logRouterPopToVersion = recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
-					// Force gray failure monitoring during recovery.
-					self->enablePrimaryTxnSystemHealthCheck->set(true);
+
+					if (SERVER_KNOBS->GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING) {
+						// Force gray failure monitoring during recovery.
+						self->enablePrimaryTxnSystemHealthCheck->set(true);
+					}
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, recoverAt, true) ||
 					     logData->removed || logData->stopCommit.onTrigger());
 					self->enablePrimaryTxnSystemHealthCheck->set(false);
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 
-					// Force gray failure monitoring during recovery.
-					self->enablePrimaryTxnSystemHealthCheck->set(true);
+					if (SERVER_KNOBS->GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING) {
+						// Force gray failure monitoring during recovery.
+						self->enablePrimaryTxnSystemHealthCheck->set(true);
+					}
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, recoverAt, false) ||
 					     logData->removed || logData->stopCommit.onTrigger());
