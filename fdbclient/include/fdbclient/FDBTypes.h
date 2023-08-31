@@ -1613,7 +1613,7 @@ struct DatabaseSharedState {
 	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
-const static std::regex wiggleLocalityValidation("\\w+:\\w+(;\\w:\\w)*");
+const static std::regex wiggleLocalityValidation("(\\w+:\\w+)(;\\w+:\\w+)*");
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	if (locality == "0") { 
 		return true;
