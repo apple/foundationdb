@@ -292,6 +292,7 @@ struct BlobRestoreWorkload : TestWorkload {
 						for (auto& r : rows) {
 							data.push_back_deep(data.arena(), r);
 						}
+						fmt::print("Read trunk {} size {}\n", chunks[i].keyRange.toString(), rows.size());
 					}
 					break;
 				} catch (Error& e) {
@@ -314,7 +315,14 @@ struct BlobRestoreWorkload : TestWorkload {
 					break;
 				}
 			}
-
+			while (i < src.size()) {
+				fmt::print("  src {} = {}\n", src[i].key.printable(), src[i].value.printable());
+				i++;
+			}
+			while (i < dest.size()) {
+				fmt::print("  dest {} = {}\n", dest[i].key.printable(), dest[i].value.printable());
+				i++;
+			}
 			TraceEvent(SevError, "TestFailure")
 			    .detail("Reason", "Size Mismatch")
 			    .detail("Src", dest.size())
