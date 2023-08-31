@@ -252,3 +252,15 @@ KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
 	}
 	return it->second;
 }
+
+
+TEST_CASE("/PerpetualStorageWiggleLocality/Validation") {
+	ASSERT(isValidPerpetualStorageWiggleLocality("aaa:bbb"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("aaa:bbb;ccc:ddd"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("0"));
+
+	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;"));
+	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;ccc"));
+
+	return Void();
+}

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
@@ -1610,10 +1611,12 @@ struct DatabaseSharedState {
 	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
+const static std::regex wiggleLocalityValidation("\\w+:\\w+(;\\w:\\w)*");
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
-	int pos = locality.find(':');
-	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
-	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
+	if (locality == "0") { 
+		return true;
+	}
+	return std::regex_match(locality, wiggleLocalityValidation);
 }
 
 // matches what's in fdb_c.h
