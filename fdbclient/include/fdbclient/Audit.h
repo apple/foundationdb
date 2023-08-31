@@ -39,6 +39,7 @@ enum class AuditType : uint8_t {
 	ValidateReplica = 2,
 	ValidateLocationMetadata = 3,
 	ValidateStorageServerShard = 4,
+	ValidateRiskyReplica = 5, // background task, cannot be issued from fdbcli
 };
 
 struct AuditStorageState {
@@ -54,7 +55,7 @@ struct AuditStorageState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, auditServerId, range, type, phase, error, ddId);
+		serializer(ar, id, auditServerId, range, type, phase, error, ddId, engineType, selectiveRanges);
 	}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -84,6 +85,7 @@ struct AuditStorageState {
 	// New dd will issue new requests to SSes to continue the remaining work
 	UID auditServerId; // UID of SS who is working on this audit task
 	KeyRange range;
+	std::vector<KeyRange> selectiveRanges; // dedicated to ValidateRiskyReplica type
 	uint8_t type;
 	uint8_t phase;
 	KeyValueStoreType engineType;

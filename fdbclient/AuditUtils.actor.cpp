@@ -669,7 +669,7 @@ ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
                                                      UID auditId,
                                                      KeyRange auditRange) {
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateLocationMetadata);
+	       auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRiskyReplica);
 	state KeyRange rangeToRead = auditRange;
 	state Key rangeToReadBegin = auditRange.begin;
 	state int retryCount = 0;
