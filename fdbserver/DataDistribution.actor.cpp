@@ -105,7 +105,8 @@ struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
-	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
+	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID),
+	    finished(false) {}
 
 	AuditStorageState coreState;
 	ActorCollection actors;
@@ -120,6 +121,7 @@ struct DDAudit {
 	AsyncVar<int> remainingBudgetForAuditTasks;
 	DDAuditContext context;
 	std::unordered_map<UID, bool> serverProgressFinishMap; // dedicated to ssshard
+	AsyncVar<bool> finished;
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -334,6 +336,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self,
                               KeyRange auditRange,
                               AuditType auditType,
                               KeyValueStoreType auditStorageEngineType);
+ACTOR Future<UID> launchPriorityBasedAudit(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
@@ -1802,6 +1805,129 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
+ACTOR Future<UID> launchPriorityBasedAudit(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges) {
+	state MoveKeyLockInfo lockInfo;
+	lockInfo.myOwner = self->lock.myOwner;
+	lockInfo.prevOwner = self->lock.prevOwner;
+	lockInfo.prevWrite = self->lock.prevWrite;
+	state UID auditID;
+	try {
+		TraceEvent(SevInfo, "DDAuditStorageLaunchBackgroundStarts", self->ddId)
+		    .detail("RequestedRange", describe(auditRanges));
+		wait(self->auditStorageInitialized.getFuture());
+		if (existAuditInAuditMapForType(self, AuditType::ValidateRiskyReplica)) {
+			TraceEvent(SevInfo, "DDAuditStorageLaunchExist", self->ddId)
+			    .detail("RequestedRange", describe(auditRanges));
+			throw audit_storage_exceeded_request_limit();
+		} else {
+			state AuditStorageState auditState;
+			auditState.setType(AuditType::ValidateRiskyReplica);
+			auditState.engineType = KeyValueStoreType::END;
+			auditState.selectiveRanges = auditRanges;
+			auditState.setPhase(AuditPhase::Running);
+			auditState.ddId = self->ddId; // persist ddId to new ddAudit metadata
+			TraceEvent(SevVerbose, "DDAuditStorageLaunchBackgroundPersistNewAuditIDBefore", self->ddId)
+			    .detail("Range", auditState.range)
+			    .detail("SelectiveRanges", describe(auditState.selectiveRanges));
+			UID auditID_ = wait(persistNewAuditState(
+			    self->txnProcessor->context(), auditState, lockInfo, self->context->isDDEnabled()));
+			self->addActor.send(clearAuditMetadataForType(self->txnProcessor->context(),
+			                                              auditState.getType(),
+			                                              auditID_,
+			                                              SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT));
+			TraceEvent(SevInfo, "DDAuditStorageLaunchBackgroundPersistNewAuditID", self->ddId)
+			    .detail("AuditID", auditID_)
+			    .detail("Range", auditState.range)
+			    .detail("SelectiveRanges", describe(auditState.selectiveRanges));
+			auditState.id = auditID_;
+			auditID = auditID_;
+			ASSERT(self->audits.contains(AuditType::ValidateRiskyReplica) &&
+			       self->audits[AuditType::ValidateRiskyReplica].contains(auditID));
+			runAuditStorage(self, auditState, 0, DDAuditContext::LAUNCH);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevInfo, "DDAuditStorageLaunchBackgroundError", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("RequestedRange", describe(auditRanges));
+		throw e;
+	}
+	return auditID;
+}
+
+ACTOR Future<Void> priorityBasedAuditStorage(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges) {
+	state UID auditID;
+	state double beginTime = now();
+	state int retryCount = 0;
+	try {
+		loop {
+			try {
+				wait(store(auditID, launchPriorityBasedAudit(self, auditRanges)));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled || e.code() == error_code_persist_new_audit_metadata_error) {
+					throw e;
+				}
+				retryCount++;
+				TraceEvent(SevInfo, "DDPriorityBasedAuditStorageError", self->ddId)
+				    .errorUnsuppressed(e)
+				    .detail("RetryCount", retryCount)
+				    .detail("SelectiveRanges", describe(auditRanges));
+				if (e.code() == error_code_audit_storage_exceeded_request_limit) {
+					throw e;
+				} else if (retryCount > 30) {
+					throw audit_storage_failed();
+				} else {
+					wait(delay(1.0));
+				}
+			}
+		}
+		state double launchAuditCompleteTime = now();
+
+		// wait for completion
+		ASSERT(auditID.isValid());
+		if (auditExistInAuditMap(self, AuditType::ValidateRiskyReplica, auditID)) {
+			state std::shared_ptr<DDAudit> audit = getAuditFromAuditMap(self, AuditType::ValidateRiskyReplica, auditID);
+			loop {
+				wait(audit->finished.onChange());
+				if (audit->finished.get()) {
+					if (audit->coreState.getPhase() == AuditPhase::Error) {
+						throw audit_storage_error();
+					} else if (audit->coreState.getPhase() == AuditPhase::Failed) {
+						throw audit_storage_failed();
+					} else if (audit->coreState.getPhase() == AuditPhase::Complete) {
+						break;
+					} else {
+						UNREACHABLE();
+					}
+				}
+			}
+		}
+		state double endTime = now();
+		TraceEvent(SevInfo, "DDPriorityBasedAuditStorageComplete", self->ddId)
+		    .suppressFor(5.0)
+		    .detail("ActualRunningTime", endTime - beginTime)
+		    .detail("LaunchAuditTime", launchAuditCompleteTime - beginTime)
+		    .detail("RunAuditTime", endTime - launchAuditCompleteTime);
+
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevInfo, "DDPriorityBasedAuditStorageError", self->ddId).errorUnsuppressed(e);
+		if (e.code() == error_code_audit_storage_error || e.code() == error_code_audit_storage_exceeded_request_limit ||
+		    e.code() == error_code_persist_new_audit_metadata_error) {
+			throw e;
+		} else {
+			throw audit_storage_failed();
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared_ptr<DDAudit> audit) {
 	ASSERT(audit->coreState.getType() == AuditType::ValidateStorageServerShard);
 	state ActorCollection actors(true);
@@ -1974,6 +2100,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount);
+		audit->finished = true;
 		removeAuditFromAuditMap(self, audit->coreState.getType(),
 		                        audit->coreState.id); // remove audit
 
@@ -2035,6 +2162,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				                       "AuditStorageCoreError",
 				                       lockInfo,
 				                       self->context->isDDEnabled()));
+				audit->finished = true;
 				TraceEvent(SevWarn, "DDAuditStorageCoreSetAuditFailed", self->ddId)
 				    .detail("Context", audit->getDDAuditContext())
 				    .detail("AuditID", auditID)
@@ -2107,6 +2235,8 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self,
                               KeyRange auditRange,
                               AuditType auditType,
                               KeyValueStoreType auditStorageEngineType) {
+	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	       auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateStorageServerShard);
 	state MoveKeyLockInfo lockInfo;
 	lockInfo.myOwner = self->lock.myOwner;
 	lockInfo.prevOwner = self->lock.prevOwner;
