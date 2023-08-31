@@ -27,7 +27,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
 #include <climits>
-#include <boost/algorithm/string.hpp>
 
 namespace {
 
@@ -37,60 +36,6 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 	auto it = m.find(k);
 	ASSERT(it != m.end());
 	return it->second;
-}
-
-std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
-    const std::string& localityKeyValues) {
-	// parsing format is like "datahall:0"
-	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValues));
-
-	std::vector<std::pair<Optional<Value>, Optional<Value>>> parsedLocalities;
-
-	std::vector<std::string> splitLocalityKeyValues;
-	boost::split(splitLocalityKeyValues, localityKeyValues, [](char c) { return c == ';'; });
-
-	for (const auto& localityKeyValue : splitLocalityKeyValues) {
-		ASSERT(!localityKeyValue.empty());
-
-		// get key and value from perpetual_storage_wiggle_locality.
-		int split = localityKeyValue.find(':');
-		auto key = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
-		auto value = Optional<Value>(
-		    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
-		parsedLocalities.push_back(std::make_pair(key, value));
-	}
-
-	return parsedLocalities;
-}
-
-TEST_CASE("/DataDistribution/StorageWiggler/ParsePerpetualStorageWiggleLocality") {
-	{
-		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:bbb");
-		ASSERT(localityKeyValues.size() == 1);
-		ASSERT(localityKeyValues[0].first.get() == "aaa");
-		ASSERT(localityKeyValues[0].second.get() == "bbb");
-	}
-
-	{
-		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:bbb;ccc:ddd");
-		ASSERT(localityKeyValues.size() == 2);
-		ASSERT(localityKeyValues[0].first.get() == "aaa");
-		ASSERT(localityKeyValues[0].second.get() == "bbb");
-		ASSERT(localityKeyValues[1].first.get() == "ccc");
-		ASSERT(localityKeyValues[1].second.get() == "ddd");
-	}
-
-	{
-		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:111;bbb:222;ccc:3dd");
-		ASSERT(localityKeyValues.size() == 3);
-		ASSERT(localityKeyValues[0].first.get() == "aaa");
-		ASSERT(localityKeyValues[0].second.get() == "111");
-		ASSERT(localityKeyValues[1].first.get() == "bbb");
-		ASSERT(localityKeyValues[1].second.get() == "222");
-		ASSERT(localityKeyValues[2].first.get() == "ccc");
-		ASSERT(localityKeyValues[2].second.get() == "3dd");
-	}
-	return Void();
 }
 
 } // namespace
