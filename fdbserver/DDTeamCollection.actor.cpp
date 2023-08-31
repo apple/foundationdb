@@ -28,6 +28,8 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
+#include <climits>
+#include <boost/algorithm/string.hpp>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -41,17 +43,57 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 	return it->second;
 }
 
-void ParsePerpetualStorageWiggleLocality(const std::string& localityKeyValue,
-                                         Optional<Value>* localityKey,
-                                         Optional<Value>* localityValue) {
+std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(const std::string& localityKeyValues) {
 	// parsing format is like "datahall:0"
-	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
+	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValues));
 
-	// get key and value from perpetual_storage_wiggle_locality.
-	int split = localityKeyValue.find(':');
-	*localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
-	*localityValue =
-	    Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+	std::vector<std::pair<Optional<Value>, Optional<Value>>> parsedLocalities;
+
+	std::vector<std::string> splitLocalityKeyValues;
+	boost::split(splitLocalityKeyValues, localityKeyValues, [](char c){ return c == ';';});
+
+	for (const auto& localityKeyValue : splitLocalityKeyValues) {
+		ASSERT(!localityKeyValue.empty());
+
+		// get key and value from perpetual_storage_wiggle_locality.
+		int split = localityKeyValue.find(':');
+		auto key = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
+		auto value =
+		    Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+		parsedLocalities.push_back(std::make_pair(key, value));
+	}
+
+	return parsedLocalities;
+}
+
+TEST_CASE("/DataDistribution/StorageWiggler/ParsePerpetualStorageWiggleLocality") {
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:bbb");
+		ASSERT(localityKeyValues.size() == 1);
+		ASSERT(localityKeyValues[0].first.get() == "aaa");
+		ASSERT(localityKeyValues[0].second.get() == "bbb");
+	}
+
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:bbb;ccc:ddd");
+		ASSERT(localityKeyValues.size() == 2);
+		ASSERT(localityKeyValues[0].first.get() == "aaa");
+		ASSERT(localityKeyValues[0].second.get() == "bbb");
+		ASSERT(localityKeyValues[1].first.get() == "ccc");
+		ASSERT(localityKeyValues[1].second.get() == "ddd");
+	}
+	
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:111;bbb:222;ccc:3dd");
+		ASSERT(localityKeyValues.size() == 3);
+		ASSERT(localityKeyValues[0].first.get() == "aaa");
+		ASSERT(localityKeyValues[0].second.get() == "111");
+		ASSERT(localityKeyValues[1].first.get() == "bbb");
+		ASSERT(localityKeyValues[1].second.get() == "222");
+		ASSERT(localityKeyValues[2].first.get() == "ccc");
+		ASSERT(localityKeyValues[2].second.get() == "3dd");
+	}
+	return Void();
 }
 
 } // namespace
@@ -2447,11 +2489,10 @@ public:
 				if (self->configuration.perpetualStorageWiggleLocality == "0") {
 					isr.storeType = self->configuration.perpetualStoreType;
 				} else {
-					Optional<Value> localityKey;
-					Optional<Value> localityValue;
-					ParsePerpetualStorageWiggleLocality(
-					    self->configuration.perpetualStorageWiggleLocality, &localityKey, &localityValue);
-					if (candidateWorker.worker.locality.get(localityKey.get()) == localityValue) {
+					std::vector<std::pair<Optional<Value>, Optional<Value>>> localityKeyValues = ParsePerpetualStorageWiggleLocality(
+					    self->configuration.perpetualStorageWiggleLocality);
+					ASSERT(localityKeyValues.size() == 1);
+					if (candidateWorker.worker.locality.get(localityKeyValues[0].first.get()) == localityKeyValues[0].second) {
 						isr.storeType = self->configuration.perpetualStoreType;
 					}
 				}
@@ -3967,16 +4008,17 @@ Future<Void> DDTeamCollection::monitorHealthyTeams() {
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {
-	Optional<Value> localityKey;
-	Optional<Value> localityValue;
+	std::vector<std::pair<Optional<Value>, Optional<Value>>> localityFilter;
 
 	// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
 	// then recruit a new DD, we only need to read current configuration once
 	if (configuration.perpetualStorageWiggleLocality != "0") {
-		ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality, &localityKey, &localityValue);
+		localityFilter = ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality);
+		ASSERT(localityFilter.size() == 1);
+		return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityFilter[0].first, localityFilter[0].second, this);
 	}
 
-	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityKey, localityValue, this);
+	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, Optional<Value>(), Optional<Value>(), this);
 }
 
 Future<Void> DDTeamCollection::readStorageWiggleMap() {
