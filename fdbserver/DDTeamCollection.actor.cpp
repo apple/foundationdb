@@ -2460,9 +2460,11 @@ public:
 				} else {
 					std::vector<std::pair<Optional<Value>, Optional<Value>>> localityKeyValues = ParsePerpetualStorageWiggleLocality(
 					    self->configuration.perpetualStorageWiggleLocality);
-					ASSERT(localityKeyValues.size() == 1);
-					if (candidateWorker.worker.locality.get(localityKeyValues[0].first.get()) == localityKeyValues[0].second) {
-						isr.storeType = self->configuration.perpetualStoreType;
+					for (const auto& [localityKey, localityValue] : localityKeyValues) {
+						if (candidateWorker.worker.locality.get(localityKey.get()) == localityValue) {
+							isr.storeType = self->configuration.perpetualStoreType;
+							break;
+						}
 					}
 				}
 			}
@@ -3010,8 +3012,7 @@ public:
 	}
 
 	ACTOR static Future<UID> getNextWigglingServerID(Reference<StorageWiggler> wiggler,
-	                                                 Optional<Value> localityKey = Optional<Value>(),
-	                                                 Optional<Value> localityValue = Optional<Value>(),
+													 std::vector<std::pair<Optional<Value>, Optional<Value>>> localityKeyValues = std::vector<std::pair<Optional<Value>, Optional<Value>>>(),
 	                                                 DDTeamCollection* teamCollection = nullptr) {
 		ASSERT(wiggler->teamCollection == teamCollection);
 		loop {
@@ -3024,13 +3025,15 @@ public:
 			}
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
-			if (localityKey.present()) {
+			if (!localityKeyValues.empty()) {
 				// Whether the selected server matches the locality
 				auto server = teamCollection->server_info.at(id.get());
 
-				// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
-				if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
-					return id.get();
+				for (const auto& [localityKey, localityValue] : localityKeyValues){
+					// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
+					if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
+						return id.get();
+					}
 				}
 
 				if (wiggler->empty()) {
@@ -3991,17 +3994,14 @@ Future<Void> DDTeamCollection::monitorHealthyTeams() {
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {
-	std::vector<std::pair<Optional<Value>, Optional<Value>>> localityFilter;
+	std::vector<std::pair<Optional<Value>, Optional<Value>>> localityKeyValues;
 
 	// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
 	// then recruit a new DD, we only need to read current configuration once
 	if (configuration.perpetualStorageWiggleLocality != "0") {
-		localityFilter = ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality);
-		ASSERT(localityFilter.size() == 1);
-		return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityFilter[0].first, localityFilter[0].second, this);
+		localityKeyValues = ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality);
 	}
-
-	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, Optional<Value>(), Optional<Value>(), this);
+	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityKeyValues, this);
 }
 
 Future<Void> DDTeamCollection::readStorageWiggleMap() {
@@ -6777,7 +6777,7 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 	ASSERT(!wiggler->getNextServerId(true).present());
 	ASSERT(wiggler->getNextServerId(collection->reachTSSPairTarget()) == UID(1, 0));
 	UID id = wait(
-	    DDTeamCollectionImpl::getNextWigglingServerID(wiggler, Optional<Value>(), Optional<Value>(), collection.get()));
+	    DDTeamCollectionImpl::getNextWigglingServerID(wiggler, {}, collection.get()));
 	ASSERT(now() - startTime < SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0);
 	ASSERT(id == UID(2, 0));
 	return Void();
