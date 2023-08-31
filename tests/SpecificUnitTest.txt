@@ -5,5 +5,4 @@ runSetup=false
 
     testName=UnitTests
     maxTestCases=0
-    testsMatching=/DataDistribution/StorageWiggler/ParsePerpetualStorageWiggleLocality
-    # testsMatching=/PerpetualStorageWiggleLocality/Validation
+    testsMatching=/status/json/builder
