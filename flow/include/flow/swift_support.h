@@ -33,11 +33,11 @@
 /// This annotation bridges immortal C++ singleton types
 /// that are always accessed via a pointer or a reference in C++ as immortal class types in Swift.
 #define SWIFT_CXX_IMMORTAL_SINGLETON_TYPE                                                                              \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))                     \
 	__attribute__((swift_attr("release:immortal")))
 
 #define SWIFT_CXX_REF                                                                                                  \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:addref")))                          \
+	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:addref")))                       \
 	__attribute__((swift_attr("release:delref")))
 
 /// Ignore that a type seems to be an unsafe projection, and import it regardless.
