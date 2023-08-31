@@ -133,7 +133,8 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				}
 			}
 
-			if (recoveryData.isValid() && recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			if (SERVER_KNOBS->GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING && recoveryData.isValid() &&
+			    recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				// During recovery, TLogs may not be able to pull data from previous generation TLogs due to gray
 				// failures. In this case, we rely on the latest recruitment information and see if any newly recruited
 				// TLogs are degraded.
