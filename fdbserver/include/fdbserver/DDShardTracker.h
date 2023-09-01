@@ -42,6 +42,7 @@ struct DataDistributionTrackerInitParams {
 	PromiseStream<RelocateShard> const& output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<PriorityBasedAudit> priorityBasedAudit;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
@@ -71,6 +72,8 @@ public:
 
 	// PhysicalShard Tracker
 	Reference<PhysicalShardCollection> physicalShardCollection;
+
+	Reference<PriorityBasedAudit> priorityBasedAudit;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;

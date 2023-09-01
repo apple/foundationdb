@@ -105,8 +105,7 @@ struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
-	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID),
-	    finished(false) {}
+	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
 
 	AuditStorageState coreState;
 	ActorCollection actors;
@@ -121,7 +120,6 @@ struct DDAudit {
 	AsyncVar<int> remainingBudgetForAuditTasks;
 	DDAuditContext context;
 	std::unordered_map<UID, bool> serverProgressFinishMap; // dedicated to ssshard
-	AsyncVar<bool> finished;
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -324,6 +322,7 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 }
 
 struct DataDistributor;
+ACTOR Future<Void> priorityBasedAuditStorage(Reference<DataDistributor> self);
 void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditStates,
                      int retryCount,
@@ -336,7 +335,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self,
                               KeyRange auditRange,
                               AuditType auditType,
                               KeyValueStoreType auditStorageEngineType);
-ACTOR Future<UID> launchPriorityBasedAudit(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges);
+ACTOR Future<UID> launchAuditRangeBatch(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
@@ -389,6 +388,7 @@ public:
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<PriorityBasedAudit> priorityBasedAudit;
 
 	Promise<Void> initialized;
 
@@ -1046,6 +1046,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
+			self->priorityBasedAudit = makeReference<PriorityBasedAudit>(
+			    SERVER_KNOBS->PRIORITY_BASED_AUDIT_QUEUE_MAX_SIZE, SERVER_KNOBS->PRIORITY_BASED_AUDIT_RANGE_BATCH_SIZE);
 			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
@@ -1079,6 +1081,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .output = self->relocationProducer,
 			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
 			                                       .physicalShardCollection = self->physicalShardCollection,
+			                                       .priorityBasedAudit = self->priorityBasedAudit,
 			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
 			                                       .shards = &shards,
 			                                       .trackerCancelled = &self->context->trackerCancelled,
@@ -1207,6 +1210,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
+
+			actors.push_back(priorityBasedAuditStorage(self));
 
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);
@@ -1805,19 +1810,20 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
-ACTOR Future<UID> launchPriorityBasedAudit(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges) {
+// Given a batch of ranges, launch an DDAudit for them
+ACTOR Future<UID> launchAuditRangeBatch(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges) {
 	state MoveKeyLockInfo lockInfo;
 	lockInfo.myOwner = self->lock.myOwner;
 	lockInfo.prevOwner = self->lock.prevOwner;
 	lockInfo.prevWrite = self->lock.prevWrite;
 	state UID auditID;
 	try {
-		TraceEvent(SevInfo, "DDAuditStorageLaunchBackgroundStarts", self->ddId)
-		    .detail("RequestedRange", describe(auditRanges));
+		TraceEvent(SevInfo, "DDLaunchAuditRangeBatchStarts", self->ddId)
+		    .detail("RequestedRanges", describe(auditRanges));
 		wait(self->auditStorageInitialized.getFuture());
 		if (existAuditInAuditMapForType(self, AuditType::ValidateRiskyReplica)) {
-			TraceEvent(SevInfo, "DDAuditStorageLaunchExist", self->ddId)
-			    .detail("RequestedRange", describe(auditRanges));
+			TraceEvent(SevInfo, "DDLaunchAuditRangeBatchExist", self->ddId)
+			    .detail("RequestedRanges", describe(auditRanges));
 			throw audit_storage_exceeded_request_limit();
 		} else {
 			state AuditStorageState auditState;
@@ -1826,55 +1832,58 @@ ACTOR Future<UID> launchPriorityBasedAudit(Reference<DataDistributor> self, std:
 			auditState.selectiveRanges = auditRanges;
 			auditState.setPhase(AuditPhase::Running);
 			auditState.ddId = self->ddId; // persist ddId to new ddAudit metadata
-			TraceEvent(SevVerbose, "DDAuditStorageLaunchBackgroundPersistNewAuditIDBefore", self->ddId)
+			TraceEvent(SevVerbose, "DDLaunchAuditRangeBatchPersistNewAuditIDBefore", self->ddId)
 			    .detail("Range", auditState.range)
-			    .detail("SelectiveRanges", describe(auditState.selectiveRanges));
+			    .detail("RequestedRanges", describe(auditState.selectiveRanges));
 			UID auditID_ = wait(persistNewAuditState(
 			    self->txnProcessor->context(), auditState, lockInfo, self->context->isDDEnabled()));
 			self->addActor.send(clearAuditMetadataForType(self->txnProcessor->context(),
 			                                              auditState.getType(),
 			                                              auditID_,
 			                                              SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT));
-			TraceEvent(SevInfo, "DDAuditStorageLaunchBackgroundPersistNewAuditID", self->ddId)
+			TraceEvent(SevInfo, "DDLaunchAuditRangeBatchPersistNewAuditID", self->ddId)
 			    .detail("AuditID", auditID_)
 			    .detail("Range", auditState.range)
-			    .detail("SelectiveRanges", describe(auditState.selectiveRanges));
+			    .detail("RequestedRange", describe(auditState.selectiveRanges));
 			auditState.id = auditID_;
 			auditID = auditID_;
-			ASSERT(self->audits.contains(AuditType::ValidateRiskyReplica) &&
-			       self->audits[AuditType::ValidateRiskyReplica].contains(auditID));
+			ASSERT(!self->audits.contains(AuditType::ValidateRiskyReplica) ||
+			       !self->audits[AuditType::ValidateRiskyReplica].contains(auditID));
 			runAuditStorage(self, auditState, 0, DDAuditContext::LAUNCH);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "DDAuditStorageLaunchBackgroundError", self->ddId)
+		TraceEvent(SevInfo, "DDLaunchAuditRangeBatchError", self->ddId)
 		    .errorUnsuppressed(e)
-		    .detail("RequestedRange", describe(auditRanges));
+		    .detail("RequestedRanges", describe(auditRanges));
 		throw e;
 	}
 	return auditID;
 }
 
-ACTOR Future<Void> priorityBasedAuditStorage(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges) {
-	state UID auditID;
-	state double beginTime = now();
-	state int retryCount = 0;
+// Given a batch of ranges, audit them
+ACTOR Future<Void> runPriorityBasedAuditStorage(Reference<DataDistributor> self, std::vector<KeyRange> auditRanges) {
 	try {
+		// Step 1: launch audit for ranges
+		state UID auditId;
+		state int retryCount = 0;
+		state double beginTime = now();
 		loop {
 			try {
-				wait(store(auditID, launchPriorityBasedAudit(self, auditRanges)));
+				wait(store(auditId, launchAuditRangeBatch(self, auditRanges)));
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled || e.code() == error_code_persist_new_audit_metadata_error) {
+				if (e.code() == error_code_actor_cancelled || e.code() == error_code_persist_new_audit_metadata_error ||
+				    e.code() == error_code_not_implemented) {
 					throw e;
 				}
 				retryCount++;
 				TraceEvent(SevInfo, "DDPriorityBasedAuditStorageError", self->ddId)
 				    .errorUnsuppressed(e)
 				    .detail("RetryCount", retryCount)
-				    .detail("SelectiveRanges", describe(auditRanges));
+				    .detail("SelectiveRanges", auditRanges.size());
 				if (e.code() == error_code_audit_storage_exceeded_request_limit) {
 					throw e;
 				} else if (retryCount > 30) {
@@ -1885,46 +1894,99 @@ ACTOR Future<Void> priorityBasedAuditStorage(Reference<DataDistributor> self, st
 			}
 		}
 		state double launchAuditCompleteTime = now();
+		TraceEvent(SevInfo, "DDPriorityBasedAuditStorageAuditLaunched", self->ddId)
+		    .detail("AuditID", auditId)
+		    .detail("RemainingQueueSize", self->priorityBasedAudit->getQueueSize())
+		    .detail("SelectiveRangesCount", auditRanges.size())
+		    .detail("SelectiveRanges", describe(auditRanges));
 
-		// wait for completion
-		ASSERT(auditID.isValid());
-		if (auditExistInAuditMap(self, AuditType::ValidateRiskyReplica, auditID)) {
-			state std::shared_ptr<DDAudit> audit = getAuditFromAuditMap(self, AuditType::ValidateRiskyReplica, auditID);
-			loop {
-				wait(audit->finished.onChange());
-				if (audit->finished.get()) {
-					if (audit->coreState.getPhase() == AuditPhase::Error) {
-						throw audit_storage_error();
-					} else if (audit->coreState.getPhase() == AuditPhase::Failed) {
-						throw audit_storage_failed();
-					} else if (audit->coreState.getPhase() == AuditPhase::Complete) {
-						break;
-					} else {
-						UNREACHABLE();
-					}
+		// Step 2: wait for audit completion
+		ASSERT(auditId.isValid());
+		loop {
+			try {
+				AuditStorageState auditState =
+				    wait(getAuditState(self->txnProcessor->context(), AuditType::ValidateRiskyReplica, auditId));
+				ASSERT(auditState.getPhase() != AuditPhase::Invalid);
+				if (auditState.getPhase() != AuditPhase::Running) {
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_key_not_found) {
+					break;
+				} else {
+					throw e;
 				}
 			}
+			wait(delay(5.0));
+			TraceEvent(SevDebug, "DDPriorityBasedAuditStorageCheckAuditState", self->ddId)
+			    .detail("AuditID", auditId)
+			    .detail("SelectiveRangesCount", auditRanges.size())
+			    .detail("SelectiveRanges", describe(auditRanges));
 		}
 		state double endTime = now();
 		TraceEvent(SevInfo, "DDPriorityBasedAuditStorageComplete", self->ddId)
-		    .suppressFor(5.0)
-		    .detail("ActualRunningTime", endTime - beginTime)
+		    .detail("AuditID", auditId)
+		    .detail("CompleteRangesCountThisRound", auditRanges.size())
+		    .detail("RemainingQueueSize", self->priorityBasedAudit->getQueueSize())
+		    .detail("CurrentTrackerSpeed", self->priorityBasedAudit->getauditShardRiskyTrackerRate())
+		    .detail("RunningTime", endTime - beginTime)
 		    .detail("LaunchAuditTime", launchAuditCompleteTime - beginTime)
-		    .detail("RunAuditTime", endTime - launchAuditCompleteTime);
+		    .detail("RunAuditTime", endTime - launchAuditCompleteTime)
+		    .detail("SelectiveRanges", describe(auditRanges));
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
 		TraceEvent(SevInfo, "DDPriorityBasedAuditStorageError", self->ddId).errorUnsuppressed(e);
-		if (e.code() == error_code_audit_storage_error || e.code() == error_code_audit_storage_exceeded_request_limit ||
-		    e.code() == error_code_persist_new_audit_metadata_error) {
-			throw e;
-		} else {
-			throw audit_storage_failed();
+		throw e;
+	}
+	return Void();
+}
+
+// Auditing most risky shards
+// Guarantee that if do audit for t time, take a rest for t*PRIORITY_BASED_AUDIT_REST_FACTOR time
+ACTOR Future<Void> priorityBasedAuditStorage(Reference<DataDistributor> self) {
+	loop {
+		state double beginTime = now();
+		try {
+			TraceEvent(SevDebug, "DDPriorityBasedAuditStorageNewRound", self->ddId);
+			state std::vector<KeyRange> auditRanges =
+			    self->priorityBasedAudit->getRiskyRanges(SERVER_KNOBS->PRIORITY_BASED_AUDIT_RANGE_BATCH_SIZE);
+			if (auditRanges.empty()) {
+				TraceEvent(SevDebug, "DDPriorityBasedAuditStorageEmptyRangeToCheck", self->ddId);
+				wait(delay(5.0)); // retry later
+				continue;
+			}
+			wait(runPriorityBasedAuditStorage(self, auditRanges));
+			wait(delay(std::min(SERVER_KNOBS->PRIORITY_BASED_AUDIT_MIN_REST_TIME_PER_ROUND,
+			                    (now() - beginTime) * SERVER_KNOBS->PRIORITY_BASED_AUDIT_REST_FACTOR)));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			if (e.code() == error_code_audit_storage_error) {
+				TraceEvent(SevError, "DDPriorityBasedAuditStorageInconsistencyDetected", self->ddId)
+				    .errorUnsuppressed(e);
+				throw e;
+			} else if (e.code() == error_code_persist_new_audit_metadata_error) {
+				TraceEvent(SevWarn, "DDPriorityBasedAuditStorageNormalError", self->ddId).errorUnsuppressed(e);
+				break; // expected to be movekey_conflict, silently exit
+			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
+				// we issue an audit when the existing one completes
+				// this is an unexpected case
+				TraceEvent(SevWarnAlways, "DDPriorityBasedAuditStorageUnexpectedError", self->ddId)
+				    .errorUnsuppressed(e);
+				throw audit_storage_failed(); // this will trigger DD restart
+			} else if (e.code() == error_code_not_implemented) {
+				TraceEvent(SevError, "DDPriorityBasedAuditStorageUnexpectedError", self->ddId).errorUnsuppressed(e);
+				UNREACHABLE();
+			} else {
+				TraceEvent(SevInfo, "DDPriorityBasedAuditStorageNormalError", self->ddId).errorUnsuppressed(e);
+				wait(delay((now() - beginTime) * SERVER_KNOBS->PRIORITY_BASED_AUDIT_REST_FACTOR));
+			}
 		}
 	}
-
 	return Void();
 }
 
@@ -1998,7 +2060,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
 		loadAndDispatchAudit(self, audit);
-		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
+		TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDAuditStorageCoreScheduled",
+		           self->ddId)
 		    .detail("Context", audit->getDDAuditContext())
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", audit->coreState.range)
@@ -2006,9 +2070,12 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount);
 		wait(audit->actors.getResult()); // goto exception handler if any actor is failed
-		TraceEvent(SevInfo, "DDAuditStorageCoreAllActorsComplete", self->ddId)
+		TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDAuditStorageCoreAllActorsComplete",
+		           self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", audit->coreState.range)
+		    .detail("SelectiveRanges", describe(audit->coreState.selectiveRanges))
 		    .detail("AuditType", audit->coreState.getType())
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount)
@@ -2020,7 +2087,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			audit->coreState.setPhase(AuditPhase::Error);
 		} else if (audit->auditStorageAnyChildFailed) {
 			audit->auditStorageAnyChildFailed = false;
-			TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+			TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+			           "DDAuditStorageCoreRetry",
+			           self->ddId)
 			    .detail("Reason", "AuditStorageAnyChildFailed")
 			    .detail("AuditID", auditID)
 			    .detail("RetryCount", audit->retryCount)
@@ -2036,7 +2105,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				                                                        audit->coreState.id,
 				                                                        audit->coreState.range));
 				if (!allFinish) {
-					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+					           "DDAuditStorageCoreRetry",
+					           self->ddId)
 					    .detail("Reason", "AuditReplicaNotFinish")
 					    .detail("UnfinishedRange", audit->coreState.range)
 					    .detail("AuditID", auditID)
@@ -2052,7 +2123,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 					                                           audit->coreState.id,
 					                                           audit->coreState.selectiveRanges[rangeIdx]));
 					if (!allFinish) {
-						TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+						TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+						           "DDAuditStorageCoreRetry",
+						           self->ddId)
 						    .detail("Reason", "AuditSelectiveReplicaNotFinish")
 						    .detail("UnfinishedRange", audit->coreState.selectiveRanges[rangeIdx])
 						    .detail("AuditID", auditID)
@@ -2065,7 +2138,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				bool allFinish = wait(checkAuditProgressCompleteByRange(
 				    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, allKeys));
 				if (!allFinish) {
-					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+					           "DDAuditStorageCoreRetry",
+					           self->ddId)
 					    .detail("Reason", "AuditLocationMetadataNotFinish")
 					    .detail("AuditID", auditID)
 					    .detail("RetryCount", audit->retryCount)
@@ -2075,7 +2150,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			} else {
 				bool allFinish = wait(checkAuditProgressCompleteForSSShard(self->txnProcessor->context(), audit));
 				if (!allFinish) {
-					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+					           "DDAuditStorageCoreRetry",
+					           self->ddId)
 					    .detail("Reason", "AuditSSShardNotFinish")
 					    .detail("AuditID", auditID)
 					    .detail("RetryCount", audit->retryCount)
@@ -2100,7 +2177,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount);
-		audit->finished = true;
 		removeAuditFromAuditMap(self, audit->coreState.getType(),
 		                        audit->coreState.id); // remove audit
 
@@ -2109,15 +2185,20 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditID", auditID)
 		    .detail("AuditType", auditType)
 		    .detail("Range", audit->coreState.range)
+		    .detail("SelectiveRanges", describe(audit->coreState.selectiveRanges))
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
-		    .detail("RetryCount", audit->retryCount);
+		    .detail("RetryCount", audit->retryCount)
+		    .detail("DDDoAuditTasksIssued", audit->overallIssuedDoAuditCount)
+		    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount)
+		    .detail("DDDoAuditTasksSkipped", audit->overallSkippedDoAuditCount);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			// If this audit is cancelled, the place where cancelling
 			// this audit does removeAuditFromAuditMap
 			throw e;
 		}
-		TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
+		TraceEvent(
+		    auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("Context", audit->getDDAuditContext())
 		    .detail("AuditID", auditID)
@@ -2162,7 +2243,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				                       "AuditStorageCoreError",
 				                       lockInfo,
 				                       self->context->isDDEnabled()));
-				audit->finished = true;
 				TraceEvent(SevWarn, "DDAuditStorageCoreSetAuditFailed", self->ddId)
 				    .detail("Context", audit->getDDAuditContext())
 				    .detail("AuditID", auditID)
@@ -2212,14 +2292,20 @@ void runAuditStorage(Reference<DataDistributor> self,
 	// Validate input auditState
 	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
-	    auditState.getType() != AuditType::ValidateStorageServerShard) {
+	    auditState.getType() != AuditType::ValidateStorageServerShard &&
+	    auditState.getType() != AuditType::ValidateRiskyReplica) {
 		throw not_implemented();
 	}
-	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
+	TraceEvent(
+	    auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo, "DDRunAuditStorage", self->ddId)
 	    .detail("AuditState", auditState.toString())
 	    .detail("Context", context);
 	ASSERT(auditState.id.isValid());
-	ASSERT(!auditState.range.empty());
+	if (auditState.getType() == AuditType::ValidateRiskyReplica) {
+		ASSERT(!auditState.selectiveRanges.empty());
+	} else {
+		ASSERT(!auditState.range.empty());
+	}
 	ASSERT(auditState.getPhase() == AuditPhase::Running);
 	auditState.ddId = self->ddId; // make sure any existing audit state claims the current DD
 	std::shared_ptr<DDAudit> audit = std::make_shared<DDAudit>(auditState);
@@ -2474,7 +2560,9 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 // The entry of starting a series of audit workers
 // Decide which dispatch impl according to audit type
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
-	TraceEvent(SevInfo, "DDLoadAndDispatchAudit", self->ddId)
+	TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+	           "DDLoadAndDispatchAudit",
+	           self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("AuditRange", audit->coreState.range);
@@ -2731,7 +2819,9 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::sh
 	ranges.insert(ranges.end(), audit->coreState.selectiveRanges.begin(), audit->coreState.selectiveRanges.end());
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateRiskyReplica);
-	TraceEvent(SevInfo, "DDDispatchAuditStorageBegin", self->ddId)
+	TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+	           "DDDispatchAuditStorageBegin",
+	           self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", audit->coreState.range)
 	    .detail("SelectiveRanges", describe(audit->coreState.selectiveRanges))
@@ -2750,7 +2840,9 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::sh
 				    getAuditStateByRange(self->txnProcessor->context(), auditType, audit->coreState.id, currentRange));
 				ASSERT(!auditStates.empty());
 				begin = auditStates.back().range.end;
-				TraceEvent(SevInfo, "DDDispatchAuditStorageDispatch", self->ddId)
+				TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+				           "DDDispatchAuditStorageDispatch",
+				           self->ddId)
 				    .detail("AuditID", audit->coreState.id)
 				    .detail("Range", audit->coreState.range)
 				    .detail("SelectiveRanges", describe(audit->coreState.selectiveRanges))
@@ -2781,7 +2873,9 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::sh
 				wait(delay(0.1));
 			}
 		}
-		TraceEvent(SevInfo, "DDDispatchAuditStorageEnd", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDDispatchAuditStorageEnd",
+		           self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", audit->coreState.range)
 		    .detail("SelectiveRanges", describe(audit->coreState.selectiveRanges))
@@ -2832,7 +2926,7 @@ ACTOR Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent("AuditStorageErrorGetStorageType").errorUnsuppressed(e);
+		TraceEvent(SevWarn, "AuditStorageErrorGetStorageType").errorUnsuppressed(e);
 		res.clear();
 	}
 
@@ -2848,7 +2942,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateRiskyReplica);
-	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
+	TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+	           "DDScheduleAuditOnRangeBegin",
+	           self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditRange", audit->coreState.range)
 	    .detail("RangeToSchedule", rangeToSchedule)
@@ -2865,7 +2961,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			currentRangeToSchedule = Standalone(KeyRangeRef(currentRangeToScheduleBegin, rangeToSchedule.end));
 			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
 			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRangeToSchedule));
-			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRange", self->ddId)
+			TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+			           "DDScheduleAuditOnCurrentRange",
+			           self->ddId)
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("AuditType", auditType)
 			    .detail("RangeToSchedule", rangeToSchedule)
@@ -2879,7 +2977,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 				// For each task, check the progress, and create task request for the unfinished range
 				state KeyRange taskRange = rangeLocations[rangeLocationIndex].range;
-				TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTask", self->ddId)
+				TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+				           "DDScheduleAuditOnCurrentRangeTask",
+				           self->ddId)
 				    .detail("AuditID", audit->coreState.id)
 				    .detail("AuditType", auditType)
 				    .detail("RangeToSchedule", rangeToSchedule)
@@ -2893,7 +2993,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					                              auditType,
 					                              audit->coreState.id,
 					                              KeyRangeRef(taskRangeBegin, taskRange.end)));
-					TraceEvent(SevInfo, "DDScheduleAuditOnRangeSubTask", self->ddId)
+					TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+					           "DDScheduleAuditOnRangeSubTask",
+					           self->ddId)
 					    .detail("AuditID", audit->coreState.id)
 					    .detail("AuditType", auditType)
 					    .detail("AuditRange", audit->coreState.range)
@@ -2927,7 +3029,10 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						// Different audit types have different settings
 						if (auditType == AuditType::ValidateHA) {
 							if (rangeLocations[rangeLocationIndex].servers.size() < 2) {
-								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+								TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose
+								                                                                         : SevInfo,
+								           "DDScheduleAuditOnRangeEnd",
+								           self->ddId)
 								    .detail("Reason", "Single DC, ignore")
 								    .detail("AuditID", audit->coreState.id)
 								    .detail("AuditRange", audit->coreState.range)
@@ -2946,10 +3051,14 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								req.targetServers.push_back(it->second[idx].id());
 								storageServersToCheck.push_back(it->second[idx]);
 							}
-						} else if (auditType == AuditType::ValidateReplica) {
+						} else if (auditType == AuditType::ValidateReplica ||
+						           auditType == AuditType::ValidateRiskyReplica) {
 							auto it = rangeLocations[rangeLocationIndex].servers.begin(); // always compare primary DC
 							if (it->second.size() == 1) {
-								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+								TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose
+								                                                                         : SevInfo,
+								           "DDScheduleAuditOnRangeEnd",
+								           self->ddId)
 								    .detail("Reason", "Single replica, ignore")
 								    .detail("AuditID", audit->coreState.id)
 								    .detail("AuditRange", audit->coreState.range)
@@ -2978,7 +3087,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						}
 						audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() - 1);
 						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
-						TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+						TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose
+						                                                                         : SevDebug,
+						           "RemainingBudgetForAuditTasks")
 						    .detail("Loc", "scheduleAuditOnRange1")
 						    .detail("Ops", "Decrease")
 						    .detail("Val", audit->remainingBudgetForAuditTasks.get())
@@ -3009,7 +3120,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 								ASSERT(audit->remainingBudgetForAuditTasks.get() <=
 								       SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-								TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+								TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose
+								                                                                         : SevDebug,
+								           "RemainingBudgetForAuditTasks")
 								    .detail("Loc", "scheduleAuditOnRange")
 								    .detail("Ops", "Increase")
 								    .detail("Val", audit->remainingBudgetForAuditTasks.get())
@@ -3027,25 +3140,33 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					}
 
 					taskRangeBegin = auditStates.back().range.end;
-					TraceEvent(SevInfo, "DDScheduleAuditOnRangeSubTaskAssigned", self->ddId)
+					TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+					           "DDScheduleAuditOnRangeSubTaskAssigned",
+					           self->ddId)
 					    .detail("TaskRange", taskRange)
 					    .detail("NextTaskRangeBegin", taskRangeBegin)
 					    .detail("BreakRangeEnd", taskRange.end);
 				}
-				TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTaskAssigned", self->ddId);
+				TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+				           "DDScheduleAuditOnCurrentRangeTaskAssigned",
+				           self->ddId);
 				++assignedRangeTasks;
 				wait(delay(0.1));
 			}
 			// Proceed to the next range if getSourceServerInterfacesForRange is partially read
 			currentRangeToScheduleBegin = rangeLocations.back().range.end;
-			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeAssigned", self->ddId)
+			TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+			           "DDScheduleAuditOnCurrentRangeAssigned",
+			           self->ddId)
 			    .detail("AssignedRangeTasks", assignedRangeTasks)
 			    .detail("NextCurrentRangeToScheduleBegin", currentRangeToScheduleBegin)
 			    .detail("BreakRangeEnd", rangeToSchedule.end)
 			    .detail("RangeToSchedule", rangeToSchedule);
 		}
 
-		TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDScheduleAuditOnRangeEnd",
+		           self->ddId)
 		    .detail("Reason", "End")
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditRange", audit->coreState.range)
@@ -3058,7 +3179,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "DDScheduleAuditOnRangeError", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDScheduleAuditOnRangeError",
+		           self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditRange", audit->coreState.range)
@@ -3085,7 +3208,9 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		res.ddId = self->ddId;
 		wait(persistAuditStateByRange(self->txnProcessor->context(), res));
 		audit->overallSkippedDoAuditCount++;
-		TraceEvent(SevInfo, "DDSkipAuditOnRangeComplete", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDSkipAuditOnRangeComplete",
+		           self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditRange", audit->coreState.range)
 		    .detail("AuditType", auditType)
@@ -3095,7 +3220,8 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+		           "RemainingBudgetForAuditTasks")
 		    .detail("Loc", "skipAuditOnRange")
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
@@ -3104,7 +3230,9 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "DDSkipAuditOnRangeError", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDSkipAuditOnRangeError",
+		           self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditRange", audit->coreState.range)
@@ -3115,7 +3243,8 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
 		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+		           "RemainingBudgetForAuditTasks")
 		    .detail("Loc", "skipAuditOnRange")
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
@@ -3141,7 +3270,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	state AuditType auditType = req.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateStorageServerShard || auditType == AuditType::ValidateRiskyReplica);
-	TraceEvent(SevInfo, "DDDoAuditOnStorageServerBegin", self->ddId)
+	TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+	           "DDDoAuditOnStorageServerBegin",
+	           self->ddId)
 	    .detail("AuditID", req.id)
 	    .detail("Range", req.range)
 	    .detail("AuditType", auditType)
@@ -3161,7 +3292,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			throw vResult.getError();
 		}
 		audit->overallCompleteDoAuditCount++;
-		TraceEvent(SevInfo, "DDDoAuditOnStorageServerResult", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDDoAuditOnStorageServerResult",
+		           self->ddId)
 		    .detail("AuditID", req.id)
 		    .detail("Range", req.range)
 		    .detail("AuditType", auditType)
@@ -3173,7 +3306,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+		           "RemainingBudgetForAuditTasks")
 		    .detail("Loc", "doAuditOnStorageServer")
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
@@ -3182,7 +3316,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", self->ddId)
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "DDDoAuditOnStorageServerError",
+		           self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", req.id)
 		    .detail("Range", req.range)
@@ -3195,7 +3331,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+		TraceEvent(audit->coreState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+		           "RemainingBudgetForAuditTasks")
 		    .detail("Loc", "doAuditOnStorageServerError")
 		    .detail("Ops", "Increase")
 		    .detail("Val", audit->remainingBudgetForAuditTasks.get())

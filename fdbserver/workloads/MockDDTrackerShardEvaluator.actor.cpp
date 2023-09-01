@@ -94,6 +94,8 @@ public:
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
+		Reference<PriorityBasedAudit> priorityBasedAudit = makeReference<PriorityBasedAudit>(
+		    SERVER_KNOBS->PRIORITY_BASED_AUDIT_QUEUE_MAX_SIZE, SERVER_KNOBS->PRIORITY_BASED_AUDIT_RANGE_BATCH_SIZE);
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(
@@ -103,6 +105,7 @@ public:
 		                                       .output = output,
 		                                       .shardsAffectedByTeamFailure = ddcx.shardsAffectedByTeamFailure,
 		                                       .physicalShardCollection = physicalShardCollection,
+		                                       .priorityBasedAudit = priorityBasedAudit,
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,

@@ -45,6 +45,8 @@ void clearAuditProgressMetadata(Transaction* tr, AuditType auditType, UID auditI
 		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
 	} else if (auditType == AuditType::ValidateLocationMetadata) {
 		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
+	} else if (auditType == AuditType::ValidateRiskyReplica) {
+		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
 	} else {
 		UNREACHABLE();
 	}
@@ -54,7 +56,7 @@ void clearAuditProgressMetadata(Transaction* tr, AuditType auditType, UID auditI
 ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 	state bool res = false;
 	state Transaction tr(cx);
-	TraceEvent(SevDebug, "AuditUtilStorageServerRemovedStart").detail("StorageServer", ssid);
+	TraceEvent(SevDebug, "AuditUtilCheckStorageServerRemovedStart").detail("StorageServer", ssid);
 
 	loop {
 		try {
@@ -74,14 +76,16 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 		}
 	}
 
-	TraceEvent(SevDebug, "AuditUtilStorageServerRemovedEnd").detail("StorageServer", ssid).detail("Removed", res);
+	TraceEvent(SevDebug, "AuditUtilCheckStorageServerRemovedEnd").detail("StorageServer", ssid).detail("Removed", res);
 	return res;
 }
 
 ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId) {
 	try {
 		state Transaction tr(cx);
-		TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataStart", auditId)
+		TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+		           "AuditUtilCancelAuditMetadataStart",
+		           auditId)
 		    .detail("AuditKey", auditKey(auditType, auditId));
 		loop {
 			try {
@@ -99,11 +103,15 @@ ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID aud
 				tr.set(auditKey(toCancelState.getType(), toCancelState.id), auditStorageStateValue(toCancelState));
 				clearAuditProgressMetadata(&tr, toCancelState.getType(), toCancelState.id);
 				wait(tr.commit());
-				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataEnd", auditId)
+				TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+				           "AuditUtilCancelAuditMetadataEnd",
+				           auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataError", auditId)
+				TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+				           "AuditUtilCancelAuditMetadataError",
+				           auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
 				wait(tr.onError(e));
 			}
@@ -194,7 +202,8 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
                                              int numFinishAuditToKeep) {
 	state Transaction tr(cx);
 	state int numFinishAuditCleaned = 0; // We regard "Complete" and "Failed" audits as finish audits
-	TraceEvent(SevDebug, "AuditUtilClearAuditMetadataForTypeStart")
+	TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+	           "AuditUtilClearAuditMetadataForTypeStart")
 	    .detail("AuditType", auditType)
 	    .detail("MaxAuditIdToClear", maxAuditIdToClear);
 
@@ -243,7 +252,8 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 					// For a zombie audit, it is in running state
 				}
 				wait(tr.commit());
-				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataForTypeEnd")
+				TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+				           "AuditUtilClearAuditMetadataForTypeEnd")
 				    .detail("AuditType", auditType)
 				    .detail("NumCleanedFinishAudits", numFinishAuditCleaned);
 				break;
@@ -253,7 +263,8 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditUtilClearAuditMetadataForTypeError")
+		TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "AuditUtilClearAuditMetadataForTypeError")
 		    .detail("AuditType", auditType)
 		    .errorUnsuppressed(e);
 		// We do not want audit cleanup effects DD
@@ -291,7 +302,7 @@ ACTOR static Future<Void> checkMoveKeysLockForAudit(Transaction* tr,
 			UID lastWriter = deterministicRandom()->randomUniqueID();
 			wrLastWrite << lastWriter;
 			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
-			TraceEvent("AuditUtilCheckMoveKeysLock")
+			TraceEvent(SevVerbose, "AuditUtilCheckMoveKeysLock")
 			    .detail("PrevOwner", lock.prevOwner.toString())
 			    .detail("PrevWrite", lock.prevWrite.toString())
 			    .detail("MyOwner", lock.myOwner.toString())
@@ -309,7 +320,7 @@ ACTOR static Future<Void> checkMoveKeysLockForAudit(Transaction* tr,
 		}
 		return Void();
 	} else {
-		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner")
+		TraceEvent(SevVerbose, "AuditUtilConflictWithNewOwner")
 		    .detail("CurrentOwner", currentOwner.toString())
 		    .detail("PrevOwner", lock.prevOwner.toString())
 		    .detail("PrevWrite", lock.prevWrite.toString())
@@ -326,7 +337,9 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 	state Transaction tr(cx);
 	state UID auditId;
 	state AuditStorageState latestExistingAuditState;
-	TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateStart", auditId);
+	TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+	           "AuditUtilPersistedNewAuditStateStart",
+	           auditId);
 	try {
 		loop {
 			try {
@@ -362,18 +375,24 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 				    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 				tr.set(auditKey(auditState.getType(), auditId), auditStorageStateValue(auditState));
 				wait(tr.commit());
-				TraceEvent(SevDebug, "AuditUtilPersistedNewAuditState", auditId)
+				TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+				           "AuditUtilPersistedNewAuditState",
+				           auditId)
 				    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateError", auditId)
+				TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+				           "AuditUtilPersistedNewAuditStateError",
+				           auditId)
 				    .errorUnsuppressed(e)
 				    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 				wait(tr.onError(e));
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
+		TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevWarn,
+		           "AuditUtilPersistedNewAuditStateUnretriableError",
+		           auditId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 		ASSERT_WE_THINK(e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict);
@@ -420,7 +439,9 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
-			TraceEvent(SevDebug, "AuditUtilPersistAuditState", auditState.id)
+			TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+			           "AuditUtilPersistAuditState",
+			           auditState.id)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
 			    .detail("AuditPhase", auditPhase)
@@ -428,7 +449,9 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			    .detail("Context", context);
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilPersistAuditStateError", auditState.id)
+			TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+			           "AuditUtilPersistAuditStateError",
+			           auditState.id)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
@@ -453,13 +476,14 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
-			TraceEvent(SevDebug, "AuditUtilReadAuditState", id)
+			TraceEvent(type == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug, "AuditUtilReadAuditState", id)
 			    .detail("AuditID", id)
 			    .detail("AuditType", type)
 			    .detail("AuditKey", auditKey(type, id));
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilReadAuditStateError", id)
+			TraceEvent(
+			    type == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug, "AuditUtilReadAuditStateError", id)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", id)
 			    .detail("AuditType", type)
@@ -510,7 +534,8 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilPersistAuditStateByRangeError")
+			TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+			           "AuditUtilPersistAuditStateByRangeError")
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
@@ -542,7 +567,10 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 			auditStates = res_;
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
+			TraceEvent(type == AuditType::ValidateRiskyReplica ? SevVerbose : SevDebug,
+			           "AuditUtilGetAuditStateForRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId);
 			wait(tr.onError(e));
 		}
 	}
@@ -708,7 +736,7 @@ ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
 			}
 		}
 	}
-	TraceEvent(SevInfo, "AuditUtilCheckAuditProgressFinish")
+	TraceEvent(auditType == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo, "AuditUtilCheckAuditProgressFinish")
 	    .detail("AuditID", auditId)
 	    .detail("AuditRange", auditRange)
 	    .detail("AuditType", auditType);
@@ -838,7 +866,9 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 							tr.clear(auditKey(auditState.getType(), auditState.id));
 							clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
 							numFinishAuditsCleared++;
-							TraceEvent(SevInfo, "AuditUtilMetadataCleared", dataDistributorId)
+							TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+							           "AuditUtilMetadataCleared",
+							           dataDistributorId)
 							    .detail("AuditID", auditState.id)
 							    .detail("AuditType", auditState.getType())
 							    .detail("AuditRange", auditState.range);
@@ -850,14 +880,18 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 							// since it has been cleared for Complete audits
 							tr.clear(auditKey(auditState.getType(), auditState.id));
 							numFinishAuditsCleared++;
-							TraceEvent(SevInfo, "AuditUtilMetadataCleared", dataDistributorId)
+							TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+							           "AuditUtilMetadataCleared",
+							           dataDistributorId)
 							    .detail("AuditID", auditState.id)
 							    .detail("AuditType", auditState.getType())
 							    .detail("AuditRange", auditState.range);
 						}
 					} else if (auditState.getPhase() == AuditPhase::Running) {
 						auditStatesToResume.push_back(auditState);
-						TraceEvent(SevInfo, "AuditUtilMetadataAddedToResume", dataDistributorId)
+						TraceEvent(auditState.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+						           "AuditUtilMetadataAddedToResume",
+						           dataDistributorId)
 						    .detail("AuditID", auditState.id)
 						    .detail("AuditType", auditState.getType())
 						    .detail("AuditRange", auditState.range);

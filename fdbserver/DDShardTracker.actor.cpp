@@ -211,7 +211,8 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
-	DisabledTraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
+	TraceEvent(SevInfo, "TrackShardMetricsStarting", self()->distributorId)
+	    .suppressFor(5.0)
 	    .detail("Keys", keys)
 	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
 	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
@@ -245,7 +246,8 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
-					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
+					TraceEvent("ShardSizeUpdate", self()->distributorId)
+					    .suppressFor(5.0)
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.first.get().bytes)
 					    .detail("WriteBandwidth", metrics.first.get().bytesWrittenPerKSecond)
@@ -301,7 +303,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
-			DisabledTraceEvent(SevDebug, "TrackShardError", self()->distributorId).detail("Keys", keys);
+			TraceEvent(SevInfo, "TrackShardError", self()->distributorId).suppressFor(5.0).detail("Keys", keys);
 			// The above loop use Database cx, but those error should only be thrown in a code using transaction.
 			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
@@ -332,6 +334,62 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			self->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
+	}
+}
+
+ACTOR Future<Void> riskyShardTracker(DataDistributionTracker* self) {
+	loop {
+		try {
+			// Build priority queue
+			std::priority_queue<std::pair<PriorityBasedAudit::AuditShardRiskyScore, int>> priorityQueue;
+			int i = 0;
+			int numShard = 0;
+			int numShardSkipped = 0;
+			auto ranges = self->shards->intersectingRanges(allKeys);
+			for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+				numShard++;
+				if (!r->value().stats.isValid() || !r->value().stats->get().present()) {
+					TraceEvent(SevInfo, "DDAuditRiskyShardTrackerSkipShardForNoStats", self->distributorId)
+					    .suppressFor(5.0)
+					    .detail("Range", r->range())
+					    .detail("IsValid", r->value().stats.isValid());
+					continue;
+				}
+				PriorityBasedAudit::AuditShardRiskyScore score = PriorityBasedAudit::AuditShardRiskyScore(
+				    r->range(), r->value().stats->get().get().metrics.bytesWrittenPerKSecond);
+				if (!score.isRisky()) {
+					numShardSkipped++;
+					continue; // ignore any range that is not risky
+				}
+				priorityQueue.push(std::pair<PriorityBasedAudit::AuditShardRiskyScore, int>(score, i));
+				i++;
+			}
+			int maxNumShardToSend = self->priorityBasedAudit->getauditShardRiskyTrackerRate();
+			// Get result from priority queue
+			std::vector<KeyRange> res;
+			while (priorityQueue.size() > 0 && res.size() < maxNumShardToSend) {
+				KeyRange rangeToAdd = priorityQueue.top().first.range;
+				ASSERT(!rangeToAdd.empty());
+				bool succeed = self->priorityBasedAudit->add(rangeToAdd);
+				if (!succeed) {
+					TraceEvent(SevInfo, "DDAuditRiskyShardTrackerQueueFull", self->distributorId).suppressFor(5.0);
+					break;
+				}
+				priorityQueue.pop();
+			}
+			TraceEvent(SevInfo, "DDAuditRiskyShardTrackerStats", self->distributorId)
+			    .detail("QueueSize", self->priorityBasedAudit->getQueueSize())
+			    .detail("NumShard", numShard)
+			    .detail("NumShardSkipped", numShardSkipped)
+			    .detail("MaxNumShardToSend", maxNumShardToSend);
+			// Wait until the next round
+			self->priorityBasedAudit->updateAuditSpeed();
+			wait(delay(SERVER_KNOBS->PRIORITY_BASED_AUDIT_TRACKER_PERIOD));
+		} catch (Error& e) {
+			TraceEvent(SevError, "DDAuditRiskyShardTrackerError", self->distributorId).error(e);
+			self->output.sendError(e); // Propagate failure to dataDistributionTracker
+			throw e;
+		}
 	}
 }
 
@@ -1460,9 +1518,9 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
   : IDDShardTracker(), db(params.db), distributorId(params.distributorId), shards(params.shards), actors(false),
     systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
-    physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
-    anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
-    ddTenantCache(params.ddTenantCache) {}
+    physicalShardCollection(params.physicalShardCollection), priorityBasedAudit(params.priorityBasedAudit),
+    readyToStart(params.readyToStart), anyZeroHealthyTeams(params.anyZeroHealthyTeams),
+    trackerCancelled(params.trackerCancelled), ddTenantCache(params.ddTenantCache) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
@@ -1476,6 +1534,9 @@ struct DataDistributionTrackerImpl {
 	ACTOR static Future<Void> run(DataDistributionTracker* self, Reference<InitialDataDistribution> initData) {
 		state Future<Void> loggingTrigger = Void();
 		state Future<Void> readHotDetect = readHotDetector(self);
+		if (SERVER_KNOBS->PRIORITY_BASED_AUDIT_TRACKER_PERIOD > 0) {
+			state Future<Void> riskyShardDetect = riskyShardTracker(self);
+		}
 		state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 
 		try {

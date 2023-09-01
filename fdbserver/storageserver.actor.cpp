@@ -5432,11 +5432,14 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 }
 
 ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest req) {
-	ASSERT(req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica);
+	ASSERT(req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica ||
+	       req.getType() == AuditType::ValidateRiskyReplica);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
-	TraceEvent(SevInfo, "SSAuditStorageShardReplicaBegin", data->thisServerID)
+	TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+	           "SSAuditStorageShardReplicaBegin",
+	           data->thisServerID)
 	    .detail("AuditID", req.id)
 	    .detail("AuditRange", req.range)
 	    .detail("AuditType", req.type)
@@ -5466,7 +5469,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 			try {
 				readBytes = 0;
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
-				TraceEvent(SevDebug, "SSAuditStorageShardReplicaNewRoundBegin", data->thisServerID)
+				TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+				           "SSAuditStorageShardReplicaNewRoundBegin",
+				           data->thisServerID)
 				    .suppressFor(10.0)
 				    .detail("AuditID", req.id)
 				    .detail("AuditRange", req.range)
@@ -5691,7 +5696,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 					}
 				}
 
-				TraceEvent(SevInfo, "SSAuditStorageStatisticValidateReplica", data->thisServerID)
+				TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+				           "SSAuditStorageStatisticValidateReplica",
+				           data->thisServerID)
 				    .suppressFor(30.0)
 				    .detail("AuditID", req.id)
 				    .detail("AuditRange", req.range)
@@ -5736,7 +5743,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							throw audit_storage_cancelled();
 						}
 						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
-						TraceEvent(SevInfo, "SSAuditStorageShardReplicaProgressPersist", data->thisServerID)
+						TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+						           "SSAuditStorageShardReplicaProgressPersist",
+						           data->thisServerID)
 						    .suppressFor(10.0)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
@@ -5747,7 +5756,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 					// Expand persisted complete range
 					if (complete) {
 						req.reply.send(res);
-						TraceEvent(SevInfo, "SSAuditStorageShardReplicaComplete", data->thisServerID)
+						TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+						           "SSAuditStorageShardReplicaComplete",
+						           data->thisServerID)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("AuditServer", data->thisServerID)
@@ -5757,7 +5768,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("ValidatedBytes", validatedBytes);
 						break;
 					} else {
-						TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
+						TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+						           "SSAuditStorageShardReplicaPartialDone",
+						           data->thisServerID)
 						    .suppressFor(10.0)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
@@ -5778,7 +5791,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		if (e.code() == error_code_actor_cancelled) {
 			return Void(); // sliently exit
 		}
-		TraceEvent(SevInfo, "SSAuditStorageShardReplicaFailed", data->thisServerID)
+		TraceEvent(req.getType() == AuditType::ValidateRiskyReplica ? SevVerbose : SevInfo,
+		           "SSAuditStorageShardReplicaFailed",
+		           data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
@@ -13488,6 +13503,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
 					self->actors.add(auditStorageServerShardQ(self, req));
+				} else if (req.getType() == AuditType::ValidateRiskyReplica) {
+					self->actors.add(auditStorageShardReplicaQ(self, req));
 				} else {
 					req.reply.sendError(not_implemented());
 				}

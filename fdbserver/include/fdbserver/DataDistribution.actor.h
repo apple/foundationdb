@@ -25,6 +25,7 @@
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TCInfo.h"
@@ -273,6 +274,89 @@ struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+};
+
+class PriorityBasedAudit : public ReferenceCounted<PriorityBasedAudit> {
+public:
+	PriorityBasedAudit(int64_t maxQueueSize, int auditShardRiskyTrackerRate)
+	  : maxQueueSize(maxQueueSize), auditShardRiskyTrackerRate(auditShardRiskyTrackerRate) {}
+	struct AuditShardRiskyScore {
+		int64_t score;
+		KeyRange range;
+
+		inline bool operator>(const AuditShardRiskyScore& rhs) const { return score > rhs.score; }
+		inline bool operator<(const AuditShardRiskyScore& rhs) const { return score < rhs.score; }
+		inline bool operator>=(const AuditShardRiskyScore& rhs) const { return score >= rhs.score; }
+		inline bool operator<=(const AuditShardRiskyScore& rhs) const { return score <= rhs.score; }
+		inline bool operator==(const AuditShardRiskyScore& rhs) const { return score == rhs.score; }
+		inline bool operator!=(const AuditShardRiskyScore& rhs) const { return score != rhs.score; }
+		inline bool isValid() { return !range.empty(); }
+		inline bool isRisky() { return score > 0; }
+
+		AuditShardRiskyScore() : score(0) {}
+		AuditShardRiskyScore(KeyRange range, int64_t score) : range(range), score(score) {}
+	};
+	// Used by DDTracker
+	// Auto merge when add
+	bool add(KeyRange range) { // return true if success, false if reject
+		std::vector<KeyRange> remainRanges = { range };
+		for (const auto& existRange : queue) {
+			if (remainRanges.empty()) {
+				return true;
+			}
+			std::vector<KeyRange> newRemainRanges;
+			for (const auto& remainRange : remainRanges) {
+				std::vector<KeyRangeRef> complementRanges = remainRange - existRange;
+				if (complementRanges.empty()) {
+					continue;
+				}
+				for (const auto& complementRange : complementRanges) {
+					newRemainRanges.push_back(complementRange);
+				}
+			}
+			remainRanges = newRemainRanges;
+		}
+		for (const auto& remainRange : remainRanges) {
+			if (queue.size() >= maxQueueSize) {
+				return false; // drop if queue is full
+			}
+			queue.push_back(remainRange);
+		}
+		return true;
+	}
+	// Used by DD
+	std::vector<KeyRange> getRiskyRanges(int num) {
+		std::vector<KeyRange> res;
+		int i = 0;
+		while (i < num && !queue.empty()) {
+			res.push_back(queue.front());
+			queue.pop_front();
+			i++;
+		}
+		return coalesceRangeList(res);
+	}
+	inline int getauditShardRiskyTrackerRate() { return auditShardRiskyTrackerRate; }
+	void updateAuditSpeed() {
+		int oldSpeed = auditShardRiskyTrackerRate;
+		if (queue.size() > maxQueueSize * 0.7) {
+			// queue is too long, then slow down
+			auditShardRiskyTrackerRate = std::max(1.0, auditShardRiskyTrackerRate / 1.5);
+		} else if (queue.size() < SERVER_KNOBS->PRIORITY_BASED_AUDIT_RANGE_BATCH_SIZE) {
+			// queue is too short, then speed up
+			auditShardRiskyTrackerRate = auditShardRiskyTrackerRate * 1.05;
+		}
+		TraceEvent(SevInfo, "DDAuditRiskyShardTrackerUpdateSpeed")
+		    .detail("QueueSize", queue.size())
+		    .detail("OldSpeed", oldSpeed)
+		    .detail("NewSpeed", auditShardRiskyTrackerRate);
+	}
+	inline void clearAll() { queue.clear(); }
+	inline int64_t getQueueSize() { return queue.size(); }
+
+private:
+	std::deque<KeyRange> queue;
+	int64_t maxQueueSize;
+	int auditShardRiskyTrackerRate;
 };
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
