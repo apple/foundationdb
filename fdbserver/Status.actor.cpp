@@ -2827,14 +2827,11 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 	return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Database cx,
                                                     JsonBuilderArray* messages,
                                                     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx =
-	    openDBOnServer(db,
-	                   TaskPriority::DefaultEndpoint); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -3303,7 +3300,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			                                         &status_incomplete_reasons,
 			                                         storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
+			futures2.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
