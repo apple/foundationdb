@@ -424,6 +424,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                        65535 ); if( randomize && BUGGIFY )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
 	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
+	init( ROCKSDB_COMPACTION_THREAD_PRIORITY,                      0 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          2 );
 	init( ROCKSDB_READ_PARALLELISM,                isSimulated? 2: 4 );
 	init( ROCKSDB_CHECKPOINT_READER_PARALLELISM,                   4 );
@@ -541,6 +542,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
 	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
 	init (ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                           6 ); // RocksDB default.
+	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
+	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
+	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
+	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                     1 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -565,11 +570,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TAG_THROTTLE_RATE_WINDOW,                              2.0 );
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
 	init( TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET,                1000.0 );
-	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
+	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 ); if ( randomize && BUGGIFY ) START_TRANSACTION_MAX_QUEUE_SIZE = 1000;
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 	init( TENANT_ID_REQUEST_MAX_QUEUE_SIZE,                      1e6 );
 	init( BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE,                  1e5 ); if ( randomize && BUGGIFY ) BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE = 100;
 	init( COMMIT_PROXY_LIVENESS_TIMEOUT,                        20.0 );
+	init( COMMIT_PROXY_MAX_LIVENESS_TIMEOUT,                   600.0 ); if ( randomize && BUGGIFY ) COMMIT_PROXY_MAX_LIVENESS_TIMEOUT = 20.0;
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,                0.001 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_MIN = 0.1;
@@ -996,6 +1002,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
+	init( GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING,         true );
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 	init( STORAGE_DISK_CLEANUP_MAX_RETRIES,                       10 );
 	init( STORAGE_DISK_CLEANUP_RETRY_INTERVAL,  isSimulated ? 2 : 30 );
@@ -1177,6 +1184,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
 	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
+	init( BLOB_MANAGER_ENABLE_MEDIAN_ASSIGNMENT_LIMITING,       true ); if( randomize && BUGGIFY ) BLOB_MANAGER_ENABLE_MEDIAN_ASSIGNMENT_LIMITING = false;
+	init( BLOB_MANAGER_MEDIAN_ASSIGNMENT_ALLOWANCE,              2.0 ); if( randomize && BUGGIFY ) BLOB_MANAGER_MEDIAN_ASSIGNMENT_ALLOWANCE = (1.0 + deterministicRandom()->random01() * 2);
+	init( BLOB_MANAGER_MEDIAN_ASSIGNMENT_MIN_SAMPLES_PER_WORKER,   3 );
+	init( BLOB_MANAGER_MEDIAN_ASSIGNMENT_MAX_SAMPLES_PER_WORKER,  10 );
 	init( BLOB_MANIFEST_BACKUP,                                false );
 	init( BLOB_MANIFEST_BACKUP_INTERVAL,  isSimulated ?  5.0 : 600.0 );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,     isSimulated ?  1.0 : 5.0 );

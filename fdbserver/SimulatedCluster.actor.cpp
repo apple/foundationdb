@@ -1828,6 +1828,13 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
+		if (testConfig.excludedStorageEngineType(result) ||
+		    std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
+		        std::end(SIMULATION_STORAGE_ENGINE)) {
+
+			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
+			ASSERT(false);
+		}
 	} else {
 		constexpr auto NUM_RETRIES = 1000;
 		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
@@ -2786,11 +2793,11 @@ using namespace std::literals;
 
 } // namespace
 
-ACTOR void setupAndRun(std::string dataFolder,
-                       const char* testFile,
-                       bool rebooting,
-                       bool restoring,
-                       std::string whitelistBinPaths) {
+ACTOR void simulationSetupAndRun(std::string dataFolder,
+                                 const char* testFile,
+                                 bool rebooting,
+                                 bool restoring,
+                                 std::string whitelistBinPaths) {
 	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
@@ -2822,7 +2829,12 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	    // NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
+	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
+	    // override will not take effect until the test starts. Here, we do an additional check
+	    // for this special simulation test.
+	    std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
