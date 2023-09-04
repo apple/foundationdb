@@ -154,6 +154,7 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
+                               KeyValueStoreType engineType,
                                double timeoutSeconds);
 // Cancel an audit given type and id
 ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,

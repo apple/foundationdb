@@ -22,12 +22,18 @@
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
+#include <string>
+#include <cstdint>
+
+#include "fdbclient/DatabaseConfiguration.h"
+#include "flow/Optional.h"
+
 // The function at present is only called through "fdbserver -r simulation"
-void setupAndRun(std::string const& dataFolder,
-                 const char* const& testFile,
-                 bool const& rebooting,
-                 bool const& restoring,
-                 std::string const& whitelistBinPath);
+void simulationSetupAndRun(std::string const& dataFolder,
+                           const char* const& testFile,
+                           bool const& rebooting,
+                           bool const& restoring,
+                           std::string const& whitelistBinPath);
 
 enum class SimulationStorageEngine : uint8_t {
 	SSD = 0,

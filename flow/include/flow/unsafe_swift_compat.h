@@ -26,7 +26,7 @@
 /// Please take extreme care when applying this annotation to C++ types, as this annotation
 /// can lead to use-after-frees or memory leaks very easily.
 #define UNSAFE_SWIFT_CXX_IMMORTAL_REF                                                                                  \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))                     \
 	__attribute__((swift_attr("release:immortal")))
 
 #endif // FLOW_UNSAFE_SWIFT_COMPAT_H

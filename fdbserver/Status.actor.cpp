@@ -392,7 +392,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 			tempList.address = it->first;
 			bool excludedServer = true;
 			bool excludedLocality = true;
-			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
+			if (configuration.present() && !configuration.get().isExcludedServer(tempList, LocalityData()))
 				excludedServer = false;
 			if (locality.count(it->first) && configuration.present() &&
 			    !configuration.get().isMachineExcluded(locality[it->first]))
@@ -1086,8 +1086,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			statusObj["roles"] = roles.getStatusForAddress(address);
 
 			if (configuration.present()) {
-				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses()) ||
-				                        configuration.get().isExcludedLocality(workerItr->interf.locality);
+				statusObj["excluded"] =
+				    configuration.get().isExcludedServer(workerItr->interf.addresses(), workerItr->interf.locality);
 			}
 
 			statusObj["class_type"] = workerItr->processClass.toString();
@@ -2080,7 +2080,7 @@ static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
 	std::map<Key, std::set<StringRef>> dcId_zone;
 	for (auto const& worker : workers) {
 		if (worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign &&
-		    !configuration.isExcludedServer(worker.interf.addresses())) {
+		    !configuration.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 			allZones.insert(worker.interf.locality.zoneId().get());
 			if (worker.interf.locality.dcId().present()) {
 				dcId_zone[worker.interf.locality.dcId().get()].insert(worker.interf.locality.zoneId().get());
@@ -2882,14 +2882,11 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 	return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Database cx,
                                                     JsonBuilderArray* messages,
                                                     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx =
-	    openDBOnServer(db,
-	                   TaskPriority::DefaultEndpoint); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -3358,7 +3355,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			                                         &status_incomplete_reasons,
 			                                         storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
+			futures2.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
@@ -3393,9 +3390,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
-			std::vector<NetworkAddress> addresses =
-			    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
-			coordinatorAddresses = std::move(addresses);
+			ErrorOr<std::vector<NetworkAddress>> addresses =
+			    wait(errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0)));
+			if (addresses.present()) {
+				coordinatorAddresses = std::move(addresses.get());
+			} else {
+				messages.push_back(
+				    JsonString::makeMessage("fetch_coordinator_addresses", "Fetching coordinator addresses timed out"));
+			}
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -3573,14 +3575,25 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
 
 		if (configuration.present() && configuration.get().blobGranulesEnabled) {
-			JsonBuilderObject blobGranuelsStatus = wait(
+			ErrorOr<JsonBuilderObject> blobGranulesStatus = wait(errorOr(
 			    timeoutError(blobGranulesStatusFetcher(
 			                     cx, db->get().blobManager, blobWorkers, address_workers, &status_incomplete_reasons),
-			                 2.0));
-			statusObj["blob_granules"] = blobGranuelsStatus;
-			JsonBuilderObject blobRestoreStatus =
-			    wait(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0));
-			statusObj["blob_restore"] = blobRestoreStatus;
+			                 2.0)));
+			if (blobGranulesStatus.present()) {
+				statusObj["blob_granules"] = blobGranulesStatus.get();
+			} else {
+				messages.push_back(JsonString::makeMessage("fetch_blob_granule_status_timed_out",
+				                                           "Fetch BlobGranule status timed out."));
+			}
+
+			ErrorOr<JsonBuilderObject> blobRestoreStatus =
+			    wait(errorOr(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0)));
+			if (blobRestoreStatus.present()) {
+				statusObj["blob_restore"] = blobRestoreStatus.get();
+			} else {
+				messages.push_back(JsonString::makeMessage("fetch_blob_restore_status_timed_out",
+				                                           "Fetch BlobRestore status timed out."));
+			}
 		}
 
 		JsonBuilderArray incompatibleConnectionsArray;

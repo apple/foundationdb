@@ -8,7 +8,14 @@ allowDefaultTenant = false
 disableTss = true
 
 [[knobs]]
+# This knob is commented out since the knob override is done *after* the simulation system is set up. However,
+# this is not going to completely work:
+# The purpose of setting the knob to true was to enable the shard rocksdb storage engine
+# The shard rocksdb storage engine is set up before this knob is overridden
+# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
+# so for this PhysicalShardMove test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
+
 # enable_dd_physical_shard = true
 # min_byte_sampling_probability = 0.99
 # rocksdb_read_range_reuse_iterators = false

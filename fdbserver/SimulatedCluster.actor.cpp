@@ -1706,7 +1706,10 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		// If encryptModes are not specified, give encryption higher chance to be enabled.
 		// The good thing is testing with encryption on doesn't loss test coverage for most of the other features.
 		available = std::vector<bool>(EncryptionAtRestMode::END, true);
-		probability = { 0.25, 0.5, 0.25 };
+		// Enabling encryption require the use of Redwood storage engine, but we don't want to test with Redwood with
+		// high probability in simulation. Setting total probability of encryption being enabled to be close to 1/6,
+		// since we have 6 storage engine type currently.
+		probability = { 0.85, 0.1, 0.05 };
 		// Only Redwood support encryption. Disable encryption if Redwood is not available.
 		if ((testConfig.storageEngineType.present() &&
 		     testConfig.storageEngineType != SimulationStorageEngine::REDWOOD) ||
@@ -1813,7 +1816,8 @@ std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStora
 		str += std::to_string(static_cast<uint32_t>(e));
 		str += ',';
 	}
-	str.pop_back();
+	if (!excluded.empty())
+		str.pop_back();
 	return str;
 }
 
@@ -1821,13 +1825,16 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	StringRef reason;
 	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
 
-	if (isEncryptionEnabled) {
-		// Only storage engine supporting encryption is Redwood.
-		reason = "EncryptionEnabled"_sr;
-		result = SimulationStorageEngine::REDWOOD;
-	} else if (testConfig.storageEngineType.present()) {
+	if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
+		if (testConfig.excludedStorageEngineType(result) ||
+		    std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
+		        std::end(SIMULATION_STORAGE_ENGINE)) {
+
+			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
+			ASSERT(false);
+		}
 	} else {
 		constexpr auto NUM_RETRIES = 1000;
 		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
@@ -1840,6 +1847,12 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		if (result == SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE) {
 			UNREACHABLE();
 		}
+	}
+
+	if (isEncryptionEnabled) {
+		// Only storage engine supporting encryption is Redwood.
+		reason = "EncryptionEnabled"_sr;
+		result = SimulationStorageEngine::REDWOOD;
 	}
 
 	TraceEvent(SevInfo, "SimulationStorageEngine")
@@ -2780,11 +2793,11 @@ using namespace std::literals;
 
 } // namespace
 
-ACTOR void setupAndRun(std::string dataFolder,
-                       const char* testFile,
-                       bool rebooting,
-                       bool restoring,
-                       std::string whitelistBinPaths) {
+ACTOR void simulationSetupAndRun(std::string dataFolder,
+                                 const char* testFile,
+                                 bool rebooting,
+                                 bool restoring,
+                                 std::string whitelistBinPaths) {
 	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
@@ -2816,7 +2829,12 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	    // NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
+	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
+	    // override will not take effect until the test starts. Here, we do an additional check
+	    // for this special simulation test.
+	    std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 

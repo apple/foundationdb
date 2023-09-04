@@ -186,13 +186,12 @@ std::string guessRegionFromDomain(std::string domain) {
 		const char* service = knownServices[i];
 
 		std::size_t p = domain.find(service);
-
 		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {
 			// eg. 127.0.0.1, example.com, s3-service.example.com, mys3.example.com
 			continue;
 		}
 
-		StringRef h(domain.c_str() + p);
+		StringRef h = StringRef(domain).substr(p);
 
 		if (!h.startsWith("oss-"_sr)) {
 			h.eat(service); // ignore s3 service
@@ -849,6 +848,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	req->data.headers = headers;
 	req->data.headers["Host"] = bstore->host;
 	req->data.headers["Accept"] = "application/xml";
+
+	// Avoid to send request with an empty resouce.
+	if (resource.empty()) {
+		resource = "/";
+	}
 
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
@@ -1878,6 +1882,18 @@ TEST_CASE("/backup/s3/v4headers") {
 		ASSERT(headers["Host"] == "s3.us-west-2.amazonaws.com");
 		ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
 	}
+
+	return Void();
+}
+
+TEST_CASE("/backup/s3/guess_region") {
+	std::string url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sa=1";
+
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+	ASSERT(s3->getRegion() == "us-west-2");
 
 	return Void();
 }

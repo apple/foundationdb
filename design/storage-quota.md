@@ -13,7 +13,7 @@ The storage used by tenants is estimated using the `getEstimatedRangeSizeBytes()
 `(size(key) + size(value)) / ((size(key) + 100) * 250)`.
 
 ### Tuple Layer
-TODO: Update after https://github.com/apple/foundationdb/pull/9241
+The storage quotas are stored under `TenantMedataSpecification` with suffix `storageQuota/`, which translates to `\xff/tenant/storageQuota/`.
 
 ### fdbcli
 The easiest way for an external client to interact with tag quotas is through `fdbcli`. To get the quota of a particular tenant group, run the following command:
@@ -53,4 +53,4 @@ In addition to the simulation test, the feature has also been tested on real FDB
 
 ### Visibility
 
-The data distributor produces a trace event every `SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL` seconds for each tenant group. This trace event has the type `StorageUsageUpdated`, and logs the quota as well as the current storage usage (in bytes) for the tenant group.
+The data distributor produces a trace event every `SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL` seconds for each tenant group. This trace event has the type `StorageQuotaUsageUpdated` (previously called `StorageUsageUpdated`), and logs the quota as well as the current storage usage (in bytes) for the tenant group.

@@ -108,17 +108,24 @@ struct ValidateStorage : TestWorkload {
 	                                             KeyRange auditRange = allKeys) {
 		// Send audit request until the cluster accepts the request
 		state UID auditId;
+		std::vector<KeyValueStoreType> storageEngineCollection = { KeyValueStoreType::SSD_ROCKSDB_V1,
+			                                                       KeyValueStoreType::SSD_SHARDED_ROCKSDB,
+			                                                       KeyValueStoreType::SSD_BTREE_V2,
+			                                                       KeyValueStoreType::END };
+		state KeyValueStoreType storageEngine = deterministicRandom()->randomChoice(storageEngineCollection);
 		loop {
 			try {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
 				                                 auditRange,
 				                                 type,
+				                                 storageEngine,
 				                                 /*timeoutSecond=*/300));
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", type)
+				    .detail("AuditStorageEngine", storageEngine)
 				    .detail("AuditRange", auditRange);
 				break;
 			} catch (Error& e) {
@@ -126,6 +133,7 @@ struct ValidateStorage : TestWorkload {
 				    .errorUnsuppressed(e)
 				    .detail("Context", context)
 				    .detail("AuditType", type)
+				    .detail("AuditStorageEngine", storageEngine)
 				    .detail("AuditRange", auditRange);
 				if (auditRange.empty() && e.code() == error_code_audit_storage_failed) {
 					break;
