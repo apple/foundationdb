@@ -976,6 +976,7 @@ struct KeyValueStoreType {
 		MEMORY_RADIXTREE = 4,
 		SSD_ROCKSDB_V1 = 5,
 		SSD_SHARDED_ROCKSDB = 6,
+		NONE = 7,
 		END
 	};
 
@@ -1000,6 +1001,9 @@ struct KeyValueStoreType {
 	// This is a many-to-one mapping as there are aliases for some storage engines
 	static KeyValueStoreType fromString(const std::string& str);
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
+
+	// Whether the storage type is a valid storage type.
+	bool isValid() const { return type != NONE && type != END; }
 
 private:
 	uint32_t type;
