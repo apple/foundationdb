@@ -36,7 +36,7 @@ Aws::Auth::AWSCredentials getAwsCredentials() {
 		Aws::InitAPI(options);
 		TraceEvent("AWSSDKInitSuccessful");
 	}
-	Aws::Auth::FDBAWSCredentialsProviderChain credProvider;
+	FDBAWSCredentialsProviderChain credProvider;
 	Aws::Auth::AWSCredentials creds = credProvider.GetAWSCredentials();
 	return creds;
 }

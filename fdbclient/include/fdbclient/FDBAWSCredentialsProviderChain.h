@@ -23,7 +23,7 @@
 #include "aws/core/Aws.h"
 #include "aws/core/auth/AWSCredentialsProviderChain.h"
 
-class FDBAWSCredentialsProviderChain : public AWSCredentialsProviderChain {
+class FDBAWSCredentialsProviderChain : public Aws::Auth::AWSCredentialsProviderChain {
 public:
 	FDBAWSCredentialsProviderChain();
 };
