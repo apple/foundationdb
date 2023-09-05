@@ -255,6 +255,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	Promise<UID> removeFailedServer;
 
 	// WIGGLING if an address is under storage wiggling.
@@ -441,6 +442,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	                                         Version addedVersion);
 
 	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
+
+	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
+	// average load of each storage server is less than smallLoadThreshold, return 1 always.
+	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
@@ -630,7 +635,8 @@ public:
 	                 Reference<AsyncVar<bool>> processingWiggle,
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
-	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount);
+	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount,
+	                 PromiseStream<Promise<int64_t>> getAverageShardBytes);
 
 	~DDTeamCollection();
 
