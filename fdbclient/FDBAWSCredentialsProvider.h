@@ -25,6 +25,10 @@
 #include "aws/core/Aws.h"
 #include "aws/core/auth/AWSCredentialsProviderChain.h"
 
+#include "fdbclient/FDBAWSCredentialsProvider.h"
+#include "fdbclient/FDBAWSCredentialsProviderChain.h"
+#include "flow/Tracing.h"
+
 // Singleton
 namespace FDBAWSCredentialsProvider {
 bool doneInit = false;
@@ -38,7 +42,7 @@ static Aws::Auth::AWSCredentials getAwsCredentials() {
 		Aws::InitAPI(options);
 		TraceEvent("AWSSDKInitSuccessful");
 	}
-	Aws::Auth::DefaultAWSCredentialsProviderChain credProvider;
+	FDBAWSCredentialsProviderChain credProvider;
 	Aws::Auth::AWSCredentials creds = credProvider.GetAWSCredentials();
 	return creds;
 }
