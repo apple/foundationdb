@@ -57,7 +57,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define ENABLE_DEBUG_MG true
+#define ENABLE_DEBUG_MG false
 
 template <typename... T>
 static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
