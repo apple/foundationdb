@@ -54,6 +54,9 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
+#include <boost/multiprecision/cpp_int.hpp>
+
+static_assert(sizeof(boost::multiprecision::uint128_t) == 16, "Nonce size error");
 
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
