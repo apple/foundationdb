@@ -2,6 +2,23 @@
 Release Notes
 #############
 
+7.3.17
+======
+* Same as 7.3.16 release with AVX enabled.
+
+7.3.16
+======
+* Released with AVX disabled.
+* Added location_metadata fdbcli to query shard locations and assignements. `<PR #10428> (https://github.com/apple/foundationdb/pull/10428)`
+* Gray failure degraded/disconnected peer recovery. `<PR #10541> (https://github.com/apple/foundationdb/pull/10541)`
+* Add getlocation and getall fdbcli debug commands. `<PR #10588> (https://github.com/apple/foundationdb/pull/10588)`
+* Support auditing replica and metadata. `<PR #10631> (https://github.com/apple/foundationdb/pull/10631)`
+* Add DD Security Mode. `(PR #10660) <https://github.com/apple/foundationdb/pull/10660>`
+* Remove SS entries from RateKeeper once it is down. `(PR #10681) <https://github.com/apple/foundationdb/pull/10681/files>`
+* Add "checkall" debug command for fdbcli. `(PR #10691) <https://github.com/apple/foundationdb/pull/10691>`
+* Gray failure detection during TLog recovery. `(PR #10800) <https://github.com/apple/foundationdb/pull/10800>`
+* Support manual compaction for Sharded RocksDB. `(PR #10815) <https://github.com/apple/foundationdb/pull/10838>`
+
 7.3.0
 =====
 
