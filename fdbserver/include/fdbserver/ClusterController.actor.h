@@ -348,7 +348,22 @@ public:
 		std::set<Optional<Standalone<StringRef>>> includeDCs(req.includeDCs.begin(), req.includeDCs.end());
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 
-		for (auto& it : id_worker)
+		for (auto& it : id_worker) {
+			TraceEvent(SevVerbose, "RecruitStorageTry")
+			    .detail("Worker", it.second.details.interf.address())
+			    .detail("WorkerAvailable", workerAvailable(it.second, false))
+			    .detail("RecoverDiskFiles", it.second.details.recoveredDiskFiles)
+			    .detail("NotExcludedMachine", !excludedMachines.count(it.second.details.interf.locality.zoneId()))
+			    .detail("IncludeDC",
+			            (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())))
+			    .detail("NotExcludedAddress", !addressExcluded(excludedAddresses, it.second.details.interf.address()))
+			    .detail("NotExcludedAddress2",
+			            (!it.second.details.interf.secondaryAddress().present() ||
+			             !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())))
+			    .detail("MachineFitnessMatch",
+			            it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <=
+			                ProcessClass::UnsetFit)
+			    .detail("MachineFitness", it.second.details.processClass.machineClassFitness(ProcessClass::Storage));
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
 			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
@@ -358,6 +373,7 @@ public:
 			    it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::UnsetFit) {
 				return it.second.details;
 			}
+		}
 
 		if (req.criticalRecruitment) {
 			ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;

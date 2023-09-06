@@ -940,6 +940,33 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
+			} else if (configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
+				// Perpetual storage wiggle is used to migrate storage. Check that the matched storage servers are
+				// correctly migrated.
+				if (wiggleLocalityKeyValue == "0" ||
+				    (storageServers[i].locality.get(wiggleLocalityKey).present() &&
+				     storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue)) {
+					if (keyValueStoreType.get() != configuration.perpetualStoreType) {
+						TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
+						    .detail("ServerID", storageServers[i].id())
+						    .detail("StoreType", keyValueStoreType.get().toString())
+						    .detail("DesiredType", configuration.perpetualStoreType.toString())
+						    .detail("IsPerpetualStoreType", true);
+						self->testFailure("Storage server has wrong key-value store type");
+						return true;
+					}
+				} else if ((!storageServers[i].isTss() &&
+				            keyValueStoreType.get() != configuration.storageServerStoreType) ||
+				           (storageServers[i].isTss() &&
+				            keyValueStoreType.get() != configuration.testingStorageServerStoreType)) {
+					TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
+					    .detail("ServerID", storageServers[i].id())
+					    .detail("StoreType", keyValueStoreType.get().toString())
+					    .detail("DesiredType", configuration.perpetualStoreType.toString())
+					    .detail("IsPerpetualStoreType", false);
+					self->testFailure("Storage server has wrong key-value store type");
+					return true;
+				}
 			} else if (((!storageServers[i].isTss() &&
 			             keyValueStoreType.get() != configuration.storageServerStoreType) ||
 			            (storageServers[i].isTss() &&
@@ -950,7 +977,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 				    .detail("ServerID", storageServers[i].id())
 				    .detail("StoreType", keyValueStoreType.get().toString())
-				    .detail("DesiredType", configuration.storageServerStoreType.toString());
+				    .detail("DesiredType", configuration.storageServerStoreType.toString())
+				    .detail("IsPerpetualStoreType", false);
 				self->testFailure("Storage server has wrong key-value store type");
 				return true;
 			}
