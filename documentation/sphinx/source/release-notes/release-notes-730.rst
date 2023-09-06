@@ -17,7 +17,7 @@ Release Notes
 * Remove SS entries from RateKeeper once it is down. `(PR #10681) <https://github.com/apple/foundationdb/pull/10681/files>`
 * Add "checkall" debug command for fdbcli. `(PR #10691) <https://github.com/apple/foundationdb/pull/10691>`
 * Gray failure detection during TLog recovery. `(PR #10800) <https://github.com/apple/foundationdb/pull/10800>`
-* Support manual compaction for Sharded RocksDB. `(PR #10815) <https://github.com/apple/foundationdb/pull/10838>`
+* Added the support of manual compaction for Sharded RocksDB. `(PR #10815) <https://github.com/apple/foundationdb/pull/10838>`
 
 7.3.0
 =====
