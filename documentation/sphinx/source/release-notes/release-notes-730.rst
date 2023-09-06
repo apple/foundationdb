@@ -10,7 +10,7 @@ Release Notes
 ======
 * Released with AVX disabled.
 * Added location_metadata fdbcli to query shard locations and assignements. `<PR #10428> (https://github.com/apple/foundationdb/pull/10428)`
-* Gray failure degraded/disconnected peer recovery. `<PR #10541> (https://github.com/apple/foundationdb/pull/10541)`
+* Added degraded/disconnected peer recovery in gray failure. `<PR #10541> (https://github.com/apple/foundationdb/pull/10541)`
 * Add getlocation and getall fdbcli debug commands. `<PR #10588> (https://github.com/apple/foundationdb/pull/10588)`
 * Support auditing replica and metadata. `<PR #10631> (https://github.com/apple/foundationdb/pull/10631)`
 * Add DD Security Mode. `(PR #10660) <https://github.com/apple/foundationdb/pull/10660>`
