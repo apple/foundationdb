@@ -444,6 +444,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,              5 );
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
+	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
+	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             200 ); // Keeps 2GB log per storage server.
 	// Temporary knob to enable trace events which prints details about all the backup keys update(write/clear) operations.
 	// Caution: To be enabled only under supervision.
 	init( SS_BACKUP_KEYS_OP_LOGS,                              false );
