@@ -12,7 +12,7 @@ Release Notes
 * Added location_metadata fdbcli to query shard locations and assignements. `<PR #10428> (https://github.com/apple/foundationdb/pull/10428)`
 * Added degraded/disconnected peer recovery in gray failure. `<PR #10541> (https://github.com/apple/foundationdb/pull/10541)`
 * Add getlocation and getall fdbcli debug commands. `<PR #10588> (https://github.com/apple/foundationdb/pull/10588)`
-* Support auditing replica and metadata. `<PR #10631> (https://github.com/apple/foundationdb/pull/10631)`
+* Added replica and metadata audit support. `<PR #10631> (https://github.com/apple/foundationdb/pull/10631)`
 * Add DD Security Mode. `(PR #10660) <https://github.com/apple/foundationdb/pull/10660>`
 * Remove SS entries from RateKeeper once it is down. `(PR #10681) <https://github.com/apple/foundationdb/pull/10681/files>`
 * Add "checkall" debug command for fdbcli. `(PR #10691) <https://github.com/apple/foundationdb/pull/10691>`
