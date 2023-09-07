@@ -3013,7 +3013,27 @@ public:
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
-			self->wigglingId = res.begin()->first;
+
+			Optional<Value> localityKey;
+			Optional<Value> localityValue;
+			if (self->configuration.perpetualStorageWiggleLocality != "0") {
+				ParsePerpetualStorageWiggleLocality(
+				    self->configuration.perpetualStorageWiggleLocality, &localityKey, &localityValue);
+			}
+
+			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
+			if (localityKey.present()) {
+				if (self->server_info.count(res.begin()->first)) {
+					auto server = self->server_info.at(res.begin()->first);
+
+					// Update the wigglingId only if it matches the locality.
+					if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
+						self->wigglingId = res.begin()->first;
+					}
+				}
+			} else {
+				self->wigglingId = res.begin()->first;
+			}
 		}
 		return Void();
 	}
