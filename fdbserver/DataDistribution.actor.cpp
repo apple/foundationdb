@@ -780,7 +780,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount);
+			    getUnhealthyRelocationCount,
+			    getAverageShardBytes);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
@@ -801,7 +802,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    processingWiggle,
 				                                    getShardMetrics,
 				                                    removeFailedServer,
-				                                    getUnhealthyRelocationCount);
+				                                    getUnhealthyRelocationCount,
+				                                    getAverageShardBytes);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(

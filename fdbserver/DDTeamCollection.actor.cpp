@@ -1983,6 +1983,36 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
+		state bool takeRest = true;
+		state Promise<int64_t> avgShardBytes;
+		while (takeRest) {
+			// a minimal delay to avoid excluding and including SS too fast
+			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+
+			avgShardBytes.reset();
+			self->getAverageShardBytes.send(avgShardBytes);
+			int64_t avgBytes = wait(avgShardBytes.getFuture());
+			double ratio = self->loadBytesBalanceRatio(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
+			bool imbalance = ratio < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
+
+			// there must not have other teams to place wiggled data
+			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
+			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
+
+			// log the extra delay and change the wiggler state
+			if (takeRest && self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+				TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
+				    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+				    .detail("BytesBalanceRatio", ratio)
+				    .detail("ServerSize", self->server_info.size())
+				    .detail("MachineSize", self->machine_info.size())
+				    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
 	                                                         AsyncVar<bool>* stopSignal,
 	                                                         FutureStream<Void> finishStorageWiggleSignal) {
@@ -1990,22 +2020,9 @@ public:
 			choose {
 				when(wait(stopSignal->onChange())) {}
 				when(waitNext(finishStorageWiggleSignal)) {
-					state bool takeRest = true; // delay to avoid delete and update ServerList too frequently
-					while (takeRest) {
-						wait(delayJittered(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
-						// there must not have other teams to place wiggled data
-						takeRest =
-						    teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
-						    teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-						if (takeRest &&
-						    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-							TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
-							    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-							    .detail("ServerSize", teamCollection->server_info.size())
-							    .detail("MachineSize", teamCollection->machine_info.size())
-							    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
-						}
-					}
+					// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
+					// utilize the disk of other active SS
+					wait(perpetualStorageWiggleRest(teamCollection));
 					wait(updateNextWigglingStorageID(teamCollection));
 				}
 			}
@@ -3474,6 +3491,38 @@ Future<Void> DDTeamCollection::keyValueStoreTypeTracker(TCServerInfo* server) {
 	return DDTeamCollectionImpl::keyValueStoreTypeTracker(this, server);
 }
 
+double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const {
+	double minLoadBytes = std::numeric_limits<double>::max();
+	double totalLoadBytes = 0;
+	int count = 0;
+	for (auto& [id, s] : server_info) {
+		// If a healthy SS don't have storage metrics, skip this round
+		if (server_status.get(s->getId()).isUnhealthy() || !s->metricsPresent()) {
+			TraceEvent(SevDebug, "LoadBytesBalanceRatioNoMetrics").detail("Server", id);
+			return 0;
+		}
+
+		double load = s->loadBytes();
+		totalLoadBytes += load;
+		++count;
+		minLoadBytes = std::min(minLoadBytes, load);
+	}
+
+	TraceEvent(SevDebug, "LoadBytesBalanceRatioMetrics")
+	    .detail("TotalLoad", totalLoadBytes)
+	    .detail("MinLoadBytes", minLoadBytes)
+	    .detail("SmallLoadThreshold", smallLoadThreshold)
+	    .detail("Count", count);
+
+	// avoid division-by-zero
+	double avgLoad = totalLoadBytes / count;
+	if (totalLoadBytes == 0 || avgLoad < smallLoadThreshold) {
+		return 1;
+	}
+
+	return minLoadBytes / avgLoad;
+}
+
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
                                                            Database cx,
                                                            ServerStatus* status,
@@ -3613,7 +3662,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    Reference<AsyncVar<bool>> processingWiggle,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
-                                   PromiseStream<Promise<int>> getUnhealthyRelocationCount)
+                                   PromiseStream<Promise<int>> getUnhealthyRelocationCount,
+                                   PromiseStream<Promise<int64_t>> getAverageShardBytes)
   : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
@@ -3627,7 +3677,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(getShardMetrics),
-    getUnhealthyRelocationCount(getUnhealthyRelocationCount), removeFailedServer(removeFailedServer),
+    getUnhealthyRelocationCount(getUnhealthyRelocationCount), getAverageShardBytes(getAverageShardBytes),
+    removeFailedServer(removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
@@ -5200,7 +5251,8 @@ class DDTeamCollectionUnitTest {
 		                                                           makeReference<AsyncVar<bool>>(false),
 		                                                           PromiseStream<GetMetricsRequest>(),
 		                                                           Promise<UID>(),
-		                                                           PromiseStream<Promise<int>>()));
+		                                                           PromiseStream<Promise<int>>(),
+		                                                           PromiseStream<Promise<int64_t>>()));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -5244,7 +5296,8 @@ class DDTeamCollectionUnitTest {
 		                                                           makeReference<AsyncVar<bool>>(false),
 		                                                           PromiseStream<GetMetricsRequest>(),
 		                                                           Promise<UID>(),
-		                                                           PromiseStream<Promise<int>>()));
+		                                                           PromiseStream<Promise<int>>(),
+		                                                           PromiseStream<Promise<int64_t>>()));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
