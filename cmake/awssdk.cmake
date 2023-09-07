@@ -48,6 +48,14 @@ ExternalProject_Add(awssdk_project
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/zlib/lib/libz.a"
 )
 
+add_library(awssdk_cpp_identity STATIC IMPORTED)
+add_dependencies(awssdk_cpp_identity awssdk_project)
+set_target_properties(awssdk_cpp_identity PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-identity-management.a")
+
+add_library(awssdk_cpp_sts STATIC IMPORTED)
+add_dependencies(awssdk_cpp_sts awssdk_project)
+set_target_properties(awssdk_cpp_sts PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-sts.a")
+
 add_library(awssdk_core STATIC IMPORTED)
 add_dependencies(awssdk_core awssdk_project)
 set_target_properties(awssdk_core PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-core.a")
@@ -101,14 +109,6 @@ add_library(awssdk_c_common STATIC IMPORTED)
 add_dependencies(awssdk_c_common awssdk_project)
 set_target_properties(awssdk_c_common PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-common.a")
 
-add_library(awssdk_cpp_sts STATIC IMPORTED)
-add_dependencies(awssdk_cpp_sts awssdk_project)
-set_target_properties(awssdk_cpp_sts PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-sts.a")
-
-add_library(awssdk_cpp_identity STATIC IMPORTED)
-add_dependencies(awssdk_cpp_identity awssdk_project)
-set_target_properties(awssdk_cpp_identity PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-identity-management.a")
-
 add_library(curl STATIC IMPORTED)
 add_dependencies(curl awssdk_project)
 set_property(TARGET curl PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/curl/lib/libcurl.a")
@@ -120,4 +120,4 @@ set_property(TARGET zlib PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}
 # link them all together in one interface target
 add_library(awssdk_target INTERFACE)
 target_include_directories(awssdk_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/include)
-target_link_libraries(awssdk_target INTERFACE awssdk_core awssdk_crt awssdk_c_s3 awssdk_c_auth awssdk_c_eventstream awssdk_c_http awssdk_c_mqtt awssdk_c_sdkutils awssdk_c_io awssdk_checksums awssdk_c_compression awssdk_c_cal awssdk_c_common awssdk_cpp_sts awssdk_cpp_identity curl zlib)
+target_link_libraries(awssdk_target INTERFACE awssdk_cpp_identity awssdk_cpp_sts awssdk_core awssdk_crt awssdk_c_s3 awssdk_c_auth awssdk_c_eventstream awssdk_c_http awssdk_c_mqtt awssdk_c_sdkutils awssdk_c_io awssdk_checksums awssdk_c_compression awssdk_c_cal awssdk_c_common curl zlib)
