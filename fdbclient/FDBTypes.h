@@ -907,7 +907,7 @@ struct KeyValueStoreType {
 			                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
 			                                              { "memory", MEMORY },
 			                                              { "memory-radixtree-beta", MEMORY_RADIXTREE },
-														  { "none", NONE } };
+			                                              { "none", NONE } };
 		auto it = names.find(str);
 		if (it == names.end()) {
 			throw unknown_storage_engine();
