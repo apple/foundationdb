@@ -4121,6 +4121,7 @@ int main(int argc, char* argv[]) {
 		case ProgramExe::AGENT:
 			if (!initCluster())
 				return FDB_EXIT_ERROR;
+			fileBackupAgentProxy = proxy;
 			f = stopAfter(runAgent(db));
 			break;
 		case ProgramExe::BACKUP:

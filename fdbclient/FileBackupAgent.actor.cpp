@@ -46,6 +46,8 @@
 FDB_DEFINE_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_DEFINE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 
+Optional<std::string> fileBackupAgentProxy = Optional<std::string>();
+
 #define SevFRTestInfo SevVerbose
 // #define SevFRTestInfo SevInfo
 
@@ -583,6 +585,11 @@ private:
 	Key lastKey;
 	Key lastValue;
 };
+
+static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackupContainer> _bc) {
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(_bc->getURL(), fileBackupAgentProxy, {});
+	return bc;
+}
 
 Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf) {
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
@@ -1223,11 +1230,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
-		if (!bc) {
+		Reference<IBackupContainer> _bc = wait(backup.backupContainer().getD(cx));
+		if (!_bc) {
 			return Void();
 		}
-
+		state Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
 		state bool done = false;
 		state int64_t nrKeys = 0;
 
@@ -2018,7 +2025,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 				if (!bc) {
 					// Backup container must be present if we're still here
 					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
-					bc = _bc;
+					bc = getBackupContainerWithProxy(_bc);
 				}
 
 				Version currentVersion = tr->getReadVersion().get();
@@ -2545,7 +2552,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 				if (!bc) {
 					// Backup container must be present if we're still here
-					wait(store(bc, config.backupContainer().getOrThrow(tr)));
+					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+					bc = getBackupContainerWithProxy(_bc);
 				}
 
 				BackupConfig::RangeFileMapT::PairsType rangeresults =
@@ -3028,7 +3036,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				bc = restore.sourceContainer().getOrThrow(tr);
+				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
+				bc = getBackupContainerWithProxy(_bc);
 				restoreRanges = restore.getRestoreRangesOrDefault(tr);
 				addPrefix = restore.addPrefix().getD(tr);
 				removePrefix = restore.removePrefix().getD(tr);
@@ -3439,7 +3448,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
-				bc = _bc;
+				bc = getBackupContainerWithProxy(_bc);
 
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
 
@@ -4107,7 +4116,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				restore.fileBlockCount().clear(tr);
 				restore.fileCount().clear(tr);
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
-				bc = _bc;
+				bc = getBackupContainerWithProxy(_bc);
 
 				wait(tr->commit());
 				break;
@@ -4517,7 +4526,7 @@ public:
 					if (pContainer != nullptr) {
 						Reference<IBackupContainer> c =
 						    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
-						*pContainer = c;
+						*pContainer = fileBackup::getBackupContainerWithProxy(c);
 					}
 
 					if (pUID != nullptr) {
@@ -5000,9 +5009,9 @@ public:
 						state Reference<IBackupContainer> bc;
 						state TimestampedVersion latestRestorable;
 
-						wait(
-						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(bc, config.backupContainer().getOrThrow(tr)));
+						wait(store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))));
+						Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+						bc = fileBackup::getBackupContainerWithProxy(_bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
 
@@ -5143,9 +5152,10 @@ public:
 					state Optional<Version> latestRestorableVersion;
 					state Version recentReadVersion;
 
-					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
-					     store(bc, config.backupContainer().getOrThrow(tr)) &&
-					     store(recentReadVersion, tr->getReadVersion()));
+					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)));
+					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+					bc = fileBackup::getBackupContainerWithProxy(_bc);
+					wait(store(recentReadVersion, tr->getReadVersion()));
 
 					bool snapshotProgress = false;
 
@@ -5525,7 +5535,8 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> _bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> bc = fileBackup::getBackupContainerWithProxy(_bc);
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();
