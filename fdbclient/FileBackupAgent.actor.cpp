@@ -5007,13 +5007,12 @@ public:
 
 					if (backupState != EBackupState::STATE_NEVERRAN) {
 						state Reference<IBackupContainer> bc;
-						state Reference<IBackupContainer> _bc;
 						state TimestampedVersion latestRestorable;
 
 						wait(
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
-						    store(_bc, config.backupContainer().getOrThrow(tr)));
-						bc = fileBackup::getBackupContainerWithProxy(_bc);
+						    store(bc, config.backupContainer().getOrThrow(tr)));
+						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
 
@@ -5151,14 +5150,13 @@ public:
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state Reference<IBackupContainer> bc;
-					state Reference<IBackupContainer> _bc;
 					state Optional<Version> latestRestorableVersion;
 					state Version recentReadVersion;
 
 					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
-					     store(_bc, config.backupContainer().getOrThrow(tr)) &&
+					     store(bc, config.backupContainer().getOrThrow(tr)) &&
 					     store(recentReadVersion, tr->getReadVersion()));
-					bc = fileBackup::getBackupContainerWithProxy(_bc);
+					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
 
