@@ -279,6 +279,10 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr, "ERROR: A cluster cannot change its encryption_at_rest state after database creation.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::INVALID_STORAGE_TYPE:
+		fprintf(stderr, "ERROR: Invalid storage type for storage or TLog.\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
