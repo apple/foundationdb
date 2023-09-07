@@ -780,7 +780,6 @@
              "ssd-2",
              "ssd-redwood-1",
              "ssd-rocksdb-v1",
-             "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
