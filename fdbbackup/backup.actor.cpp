@@ -222,6 +222,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
