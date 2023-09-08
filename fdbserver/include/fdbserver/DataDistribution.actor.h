@@ -340,10 +340,12 @@ public:
 		int oldSpeed = auditShardRiskyTrackerRate;
 		if (queue.size() > maxQueueSize * 0.7) {
 			// queue is too long, then slow down
-			auditShardRiskyTrackerRate = std::max(1.0, auditShardRiskyTrackerRate / 1.5);
+			auditShardRiskyTrackerRate = std::max(
+			    1.0, auditShardRiskyTrackerRate * 1.0 / SERVER_KNOBS->PRIORITY_BASED_AUDIT_TRACKER_SLOWDOWN_FACTOR);
 		} else if (queue.size() < SERVER_KNOBS->PRIORITY_BASED_AUDIT_RANGE_BATCH_SIZE) {
 			// queue is too short, then speed up
-			auditShardRiskyTrackerRate = auditShardRiskyTrackerRate * 1.05;
+			auditShardRiskyTrackerRate =
+			    auditShardRiskyTrackerRate * SERVER_KNOBS->PRIORITY_BASED_AUDIT_TRACKER_SPEEDUP_FACTOR;
 		}
 		TraceEvent(SevInfo, "DDAuditRiskyShardTrackerUpdateSpeed")
 		    .detail("QueueSize", queue.size())

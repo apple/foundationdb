@@ -1917,7 +1917,7 @@ ACTOR Future<Void> runPriorityBasedAuditStorage(Reference<DataDistributor> self,
 					throw e;
 				}
 			}
-			wait(delay(5.0));
+			wait(delay(SERVER_KNOBS->PRIORITY_BASED_AUDIT_POLLING_TIME));
 			TraceEvent(SevDebug, "DDPriorityBasedAuditStorageCheckAuditState", self->ddId)
 			    .detail("AuditID", auditId)
 			    .detail("SelectiveRangesCount", auditRanges.size())
