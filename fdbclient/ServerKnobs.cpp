@@ -905,7 +905,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_BASED_AUDIT_MIN_REST_TIME_PER_ROUND,         60.0 );
 	init( PRIORITY_BASED_AUDIT_POLLING_TIME,                    10.0 ); if ( isSimulated ) PRIORITY_BASED_AUDIT_POLLING_TIME = 5.0;
 	init( PRIORITY_BASED_AUDIT_QUEUE_MAX_SIZE,                   100 ); if ( isSimulated ) PRIORITY_BASED_AUDIT_QUEUE_MAX_SIZE = 10;
-	init( PRIORITY_BASED_AUDIT_TRACKER_PERIOD,                 300.0 ); if ( isSimulated ) PRIORITY_BASED_AUDIT_TRACKER_PERIOD = 30.0;
+	init( PRIORITY_BASED_AUDIT_TRACKER_PERIOD,                 120.0 ); if ( isSimulated ) PRIORITY_BASED_AUDIT_TRACKER_PERIOD = 30.0;
 	init( PRIORITY_BASED_AUDIT_TRACKER_SPEEDUP_FACTOR,          1.05 );
 	init( PRIORITY_BASED_AUDIT_TRACKER_SLOWDOWN_FACTOR,          1.5 );
 	init( LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT,               true );

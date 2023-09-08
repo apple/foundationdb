@@ -296,6 +296,7 @@ public:
 		AuditShardRiskyScore() : score(0) {}
 		AuditShardRiskyScore(KeyRange range, int64_t score) : range(range), score(score) {}
 	};
+
 	// Used by DDTracker
 	// Auto merge when add
 	bool add(KeyRange range) { // return true if success, false if reject
@@ -314,7 +315,8 @@ public:
 					newRemainRanges.push_back(complementRange);
 				}
 			}
-			remainRanges = newRemainRanges;
+			remainRanges.clear();
+			remainRanges.insert(remainRanges.begin(), newRemainRanges.begin(), newRemainRanges.end());
 		}
 		for (const auto& remainRange : remainRanges) {
 			if (queue.size() >= maxQueueSize) {
@@ -324,6 +326,7 @@ public:
 		}
 		return true;
 	}
+
 	// Used by DD
 	std::vector<KeyRange> getRiskyRanges(int num) {
 		std::vector<KeyRange> res;
@@ -335,7 +338,7 @@ public:
 		}
 		return coalesceRangeList(res);
 	}
-	inline int getauditShardRiskyTrackerRate() { return auditShardRiskyTrackerRate; }
+
 	void updateAuditSpeed() {
 		int oldSpeed = auditShardRiskyTrackerRate;
 		if (queue.size() > maxQueueSize * 0.7) {
@@ -352,6 +355,8 @@ public:
 		    .detail("OldSpeed", oldSpeed)
 		    .detail("NewSpeed", auditShardRiskyTrackerRate);
 	}
+
+	inline int getauditShardRiskyTrackerRate() { return auditShardRiskyTrackerRate; }
 	inline void clearAll() { queue.clear(); }
 	inline int64_t getQueueSize() { return queue.size(); }
 

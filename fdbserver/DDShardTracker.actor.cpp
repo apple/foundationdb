@@ -343,11 +343,11 @@ ACTOR Future<Void> riskyShardTracker(DataDistributionTracker* self) {
 			// Build priority queue
 			std::priority_queue<std::pair<PriorityBasedAudit::AuditShardRiskyScore, int>> priorityQueue;
 			int i = 0;
-			int numShard = 0;
-			int numShardSkipped = 0;
+			int numShardTotal = 0;
+			int numNoRiskyShard = 0;
 			auto ranges = self->shards->intersectingRanges(allKeys);
 			for (auto r = ranges.begin(); r != ranges.end(); ++r) {
-				numShard++;
+				numShardTotal++;
 				if (!r->value().stats.isValid() || !r->value().stats->get().present()) {
 					TraceEvent(SevInfo, "DDAuditRiskyShardTrackerSkipShardForNoStats", self->distributorId)
 					    .suppressFor(5.0)
@@ -358,16 +358,16 @@ ACTOR Future<Void> riskyShardTracker(DataDistributionTracker* self) {
 				PriorityBasedAudit::AuditShardRiskyScore score = PriorityBasedAudit::AuditShardRiskyScore(
 				    r->range(), r->value().stats->get().get().metrics.bytesWrittenPerKSecond);
 				if (!score.isRisky()) {
-					numShardSkipped++;
+					numNoRiskyShard++;
 					continue; // ignore any range that is not risky
 				}
 				priorityQueue.push(std::pair<PriorityBasedAudit::AuditShardRiskyScore, int>(score, i));
 				i++;
 			}
-			int maxNumShardToSend = self->priorityBasedAudit->getauditShardRiskyTrackerRate();
+			int maxNumShardCanAddToQueue = self->priorityBasedAudit->getauditShardRiskyTrackerRate();
 			// Get result from priority queue
-			std::vector<KeyRange> res;
-			while (priorityQueue.size() > 0 && res.size() < maxNumShardToSend) {
+			int numAddedShard = 0;
+			while (priorityQueue.size() > 0 && numAddedShard < maxNumShardCanAddToQueue) {
 				KeyRange rangeToAdd = priorityQueue.top().first.range;
 				ASSERT(!rangeToAdd.empty());
 				bool succeed = self->priorityBasedAudit->add(rangeToAdd);
@@ -376,12 +376,14 @@ ACTOR Future<Void> riskyShardTracker(DataDistributionTracker* self) {
 					break;
 				}
 				priorityQueue.pop();
+				numAddedShard++;
 			}
 			TraceEvent(SevInfo, "DDAuditRiskyShardTrackerStats", self->distributorId)
 			    .detail("QueueSize", self->priorityBasedAudit->getQueueSize())
-			    .detail("NumShard", numShard)
-			    .detail("NumShardSkipped", numShardSkipped)
-			    .detail("MaxNumShardToSend", maxNumShardToSend);
+			    .detail("NumShardTotal", numShardTotal)
+			    .detail("NumShardIgnored", numNoRiskyShard)
+			    .detail("NumShardAddedToQueue", numAddedShard)
+			    .detail("MaxNumShardCanAddToQueue", maxNumShardCanAddToQueue);
 			// Wait until the next round
 			self->priorityBasedAudit->updateAuditSpeed();
 			wait(delay(SERVER_KNOBS->PRIORITY_BASED_AUDIT_TRACKER_PERIOD));
