@@ -350,10 +350,13 @@ public:
 			auditShardRiskyTrackerRate =
 			    auditShardRiskyTrackerRate * SERVER_KNOBS->PRIORITY_BASED_AUDIT_TRACKER_SPEEDUP_FACTOR;
 		}
-		TraceEvent(SevInfo, "DDAuditRiskyShardTrackerUpdateSpeed")
-		    .detail("QueueSize", queue.size())
-		    .detail("OldSpeed", oldSpeed)
-		    .detail("NewSpeed", auditShardRiskyTrackerRate);
+		if (auditShardRiskyTrackerRate != oldSpeed) {
+			TraceEvent(SevInfo, "DDAuditRiskyShardTrackerUpdateSpeed")
+			    .detail("QueueSize", queue.size())
+			    .detail("OldSpeed", oldSpeed)
+			    .detail("NewSpeed", auditShardRiskyTrackerRate);
+		}
+		return;
 	}
 
 	inline int getauditShardRiskyTrackerRate() { return auditShardRiskyTrackerRate; }
