@@ -56,6 +56,8 @@ FDB_DECLARE_BOOLEAN_PARAM(DeleteData);
 FDB_DECLARE_BOOLEAN_PARAM(SetValidation);
 FDB_DECLARE_BOOLEAN_PARAM(PartialBackup);
 
+extern Optional<std::string> fileBackupAgentProxy;
+
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related

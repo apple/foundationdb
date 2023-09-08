@@ -222,6 +222,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -4121,6 +4122,7 @@ int main(int argc, char* argv[]) {
 		case ProgramExe::AGENT:
 			if (!initCluster())
 				return FDB_EXIT_ERROR;
+			fileBackupAgentProxy = proxy;
 			f = stopAfter(runAgent(db));
 			break;
 		case ProgramExe::BACKUP:
