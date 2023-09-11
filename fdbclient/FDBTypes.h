@@ -857,6 +857,7 @@ struct KeyValueStoreType {
 		SSD_REDWOOD_V1 = 3,
 		MEMORY_RADIXTREE = 4,
 		SSD_ROCKSDB_V1 = 5,
+		NONE = 7,
 		END
 	};
 
@@ -887,6 +888,8 @@ struct KeyValueStoreType {
 			return "memory";
 		case MEMORY_RADIXTREE:
 			return "memory-radixtree-beta";
+		case NONE:
+			return "none";
 		default:
 			return "unknown";
 		}
@@ -903,13 +906,17 @@ struct KeyValueStoreType {
 			                                              { "ssd-redwood-1-experimental", SSD_REDWOOD_V1 },
 			                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
 			                                              { "memory", MEMORY },
-			                                              { "memory-radixtree-beta", MEMORY_RADIXTREE } };
+			                                              { "memory-radixtree-beta", MEMORY_RADIXTREE },
+			                                              { "none", NONE } };
 		auto it = names.find(str);
 		if (it == names.end()) {
 			throw unknown_storage_engine();
 		}
 		return it->second;
 	}
+
+	// Whether the storage type is a valid storage type.
+	bool isValid() const { return type != NONE && type != END; }
 
 private:
 	uint32_t type;

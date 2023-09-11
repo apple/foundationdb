@@ -101,6 +101,26 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		TraceEvent("Test_ConfigChangeDone").detail("Success", change);
 		ASSERT(change);
 
+		wait(excludeIncludeServer(cx, ssToExcludeInclude));
+
+		wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-rocksdb-v1"));
+
+		// We probablistically validate that resetting perpetual_storage_wiggle_engine to none works as expected.
+		if (deterministicRandom()->coinflip()) {
+			TraceEvent("Test_ClearPerpetualStorageWiggleEngine").log();
+			bool change = wait(IssueConfigurationChange(cx, "perpetual_storage_wiggle_engine=none", true));
+			TraceEvent("Test_ClearPerpetualStorageWiggleEngineDone").detail("Success", change);
+			ASSERT(change);
+
+			// Next, we run exclude and then include `ssToWiggle`. Because perpetual_storage_wiggle_engine is set to
+			// none, the engine for `ssToWiggle` should be `storage_engine`.
+			wait(excludeIncludeServer(cx, ssToWiggle));
+			wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-2"));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> excludeIncludeServer(Database cx, StorageServerInterface ssToExcludeInclude) {
 		// Now, let's exclude `ssToExcludeInclude` process and include it again. The new SS created on this process
 		// should always uses `storage_engine` config, which is `ssd-2`.
 		state std::vector<AddressExclusion> servers;
@@ -128,13 +148,13 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
 		TraceEvent("Test_IncludeServerDone").log();
 
-		wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle));
 		return Void();
 	}
 
 	ACTOR static Future<Void> validateDatabase(Database cx,
 	                                           StorageServerInterface ssToExcludeInclude,
-	                                           StorageServerInterface ssToWiggle) {
+	                                           StorageServerInterface ssToWiggle,
+	                                           std::string wiggleStorageType) {
 		// Wait until `ssToExcludeInclude` to be recruited as storage server again.
 		state int missingTargetCount = 0;
 		loop {
@@ -187,7 +207,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 					if (ssInterface.address() == ssToWiggle.address()) {
 						// If `ssToWiggle` exists, we wait until it is migrate to `perpetual_storage_wiggle_engine`.
 						containWiggleStorage = true;
-						if (keyValueStoreType.get().toString() == "ssd-rocksdb-v1") {
+						if (keyValueStoreType.get().toString() == wiggleStorageType) {
 							doneCheckingWiggleStorage = true;
 						}
 					}
