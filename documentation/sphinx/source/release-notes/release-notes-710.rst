@@ -4,6 +4,23 @@
 Release Notes
 #############
 
+7.1.39
+======
+* Same as 7.1.38 release with AVX enabled.
+
+7.1.38
+======
+* Released with AVX disabled.
+* Added locality check on reading perpetualStorageWiggleIDPrefix key when DD restarts. `(PR #10864) <https://github.com/apple/foundationdb/pull/10864>`_
+* Added perpetual wiggle wait based on data balance of the cluster. `(PR #10865) <https://github.com/apple/foundationdb/pull/10865>`_
+* Added rocksdb options to delete old rocksdb logs. `(PR #10872) <https://github.com/apple/foundationdb/pull/10872>`_
+* Added knob to guard the gray failure rejection during TLog recovery. `(PR #10852) <https://github.com/apple/foundationdb/pull/10852>`_
+* Added knob RESOLVE_PREFER_IPV4_ADDR to prefer IPv4 addresses. `(PR #10826) <https://github.com/apple/foundationdb/pull/10826>`_
+* Added perpetual_storage_wiggle_engine config to support storage migration with perpetual wiggle. `(PR #10790) <https://github.com/apple/foundationdb/pull/10790>`_
+* Fixed the return code for perpetual wiggle configure command. `(PR #10795) <https://github.com/apple/foundationdb/pull/10795>`_
+* Fixed a compatibility issue of s3 backup. `(PR #10774) <https://github.com/apple/foundationdb/pull/10774>`_
+* Added proxy to backup agent via global variable. `(PR #10875) <https://github.com/apple/foundationdb/pull/10875>`_
+
 7.1.37
 ======
 * Same as 7.1.36 release with AVX enabled.
