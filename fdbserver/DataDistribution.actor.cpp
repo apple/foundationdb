@@ -3131,7 +3131,7 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				}
 
 				// Log statistic
-				TraceEvent(SevInfo, "DDDoAuditLocationMetadataMetadata", self->ddId)
+				TraceEvent(SevInfo, "DDDoAuditLocationMetadataStatistic", self->ddId)
 				    .suppressFor(30.0)
 				    .detail("AuditType", audit->coreState.getType())
 				    .detail("AuditId", audit->coreState.id)

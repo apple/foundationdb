@@ -54,7 +54,7 @@ struct AuditStorageState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, auditServerId, range, type, phase, error, ddId);
+		serializer(ar, id, auditServerId, range, type, phase, error, ddId, engineType);
 	}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
