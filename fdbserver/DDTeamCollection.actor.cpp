@@ -3036,22 +3036,25 @@ public:
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
 
-			Optional<Value> localityKey;
-			Optional<Value> localityValue;
+			std::vector<std::pair<Optional<Value>, Optional<Value>>> localityKeyValues;
 			if (self->configuration.perpetualStorageWiggleLocality != "0") {
-				ParsePerpetualStorageWiggleLocality(
-				    self->configuration.perpetualStorageWiggleLocality, &localityKey, &localityValue);
+				localityKeyValues =
+				    ParsePerpetualStorageWiggleLocality(self->configuration.perpetualStorageWiggleLocality);
 			}
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
-			if (localityKey.present()) {
+                        if (!localityKeyValues.empty()) {
 				if (self->server_info.count(res.begin()->first)) {
 					auto server = self->server_info.at(res.begin()->first);
+					for (const auto& [localityKey, localityValue] : localityKeyValues) {
+						// Update the wigglingId only if it matches the locality.
+						if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
+							self->wigglingId = res.begin()->first;
+							break;
+						}
+					}
 
-					// Update the wigglingId only if it matches the locality.
-					if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
-						self->wigglingId = res.begin()->first;
-					} else {
+					if (!self->wigglingId.present()) {
 						wait(self->eraseStorageWiggleMap(&metadataMap, res.begin()->first));
 					}
 				}
