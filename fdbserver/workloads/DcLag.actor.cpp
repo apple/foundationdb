@@ -75,8 +75,8 @@ struct DcLagWorkload : TestWorkload {
 		std::vector<IPAddress> ips; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && g_simulator->remoteDcId.present() &&
-			    process->locality.dcId().get() == g_simulator->remoteDcId.get()) {
+			if (process->locality.dcId().present() && 
+			    process->locality.dcId() == g_simulator->remoteDcId) {
 				ips.push_back(ip);
 			}
 		}
