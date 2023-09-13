@@ -144,7 +144,12 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 		state int numCompleteServers = 0;
 		state int numOngoingServers = 0;
 		state int numErrorServers = 0;
+		state int numTSSes = 0;
 		for (; i < interfs.size(); i++) {
+			if (interfs[i].isTss()) {
+				numTSSes++;
+				continue;
+			}
 			AuditPhase serverPhase = wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
 			if (serverPhase == AuditPhase::Running) {
 				numOngoingServers++;
@@ -159,6 +164,7 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 		printf("CompleteServers: %d\n", numCompleteServers);
 		printf("OngoingServers: %d\n", numOngoingServers);
 		printf("ErrorServers: %d\n", numErrorServers);
+		printf("IgnoredTSSes: %d\n", numTSSes);
 	} else {
 		printf("AuditType not implemented\n");
 	}
