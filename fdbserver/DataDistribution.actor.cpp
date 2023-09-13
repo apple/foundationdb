@@ -119,7 +119,7 @@ struct DDAudit {
 	int64_t overallSkippedDoAuditCount;
 	AsyncVar<int> remainingBudgetForAuditTasks;
 	DDAuditContext context;
-	std::unordered_map<UID, bool> serverProgressFinishMap; // dedicated to ssshard
+	std::unordered_set<UID> serversFinishedSSShardAudit; // dedicated to ssshard
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -322,12 +322,11 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 }
 
 struct DataDistributor;
-void runAuditStorage(
-    Reference<DataDistributor> self,
-    AuditStorageState auditStates,
-    int retryCount,
-    DDAuditContext context,
-    Optional<std::unordered_map<UID, bool>> serverProgressFinishMap = Optional<std::unordered_map<UID, bool>>());
+void runAuditStorage(Reference<DataDistributor> self,
+                     AuditStorageState auditStates,
+                     int retryCount,
+                     DDAuditContext context,
+                     Optional<std::unordered_set<UID>> serversFinishedSSShardAudit = Optional<std::unordered_set<UID>>());
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
@@ -1819,12 +1818,12 @@ ACTOR Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared
 	    .detail("InitBudget", remainingBudget->get());
 	for (; i < interfs.size(); i++) {
 		serverId = interfs[i].uniqueID;
-		if (audit->serverProgressFinishMap.contains(serverId) && audit->serverProgressFinishMap[serverId]) {
+		if (audit->serversFinishedSSShardAudit.contains(serverId)) {
 			TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardSkipCheck").detail("ServerId", serverId);
-			continue; // skip if already complete
+			continue; // Skip if already complete
 		}
 		if (interfs[i].isTss()) {
-			continue; // we do not test TSS
+			continue; // SSShard audit does not test TSS
 		}
 		ASSERT(remainingBudget->get() >= 0);
 		while (remainingBudget->get() == 0) {
@@ -1845,12 +1844,13 @@ ACTOR Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared
 	}
 	wait(actors.getResult());
 	for (const auto& [serverId, finish] : res) {
-		audit->serverProgressFinishMap[serverId] = finish;
 		TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardRes")
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("ServerId", serverId)
 		    .detail("Finish", finish);
-		if (!finish) {
+		if (finish) {
+			audit->serversFinishedSSShardAudit.insert(serverId);
+		} else {
 			allFinish = false;
 		}
 	}
@@ -2014,7 +2014,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			                        audit->coreState.id); // remove audit
 			if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 				runAuditStorage(
-				    self, audit->coreState, audit->retryCount, DDAuditContext::RETRY, audit->serverProgressFinishMap);
+				    self, audit->coreState, audit->retryCount, DDAuditContext::RETRY, audit->serversFinishedSSShardAudit);
 			} else {
 				runAuditStorage(self, audit->coreState, audit->retryCount, DDAuditContext::RETRY);
 			}
@@ -2072,7 +2072,7 @@ void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditState,
                      int retryCount,
                      DDAuditContext context,
-                     Optional<std::unordered_map<UID, bool>> serverProgressFinishMap) {
+                     Optional<std::unordered_set<UID>> serversFinishedSSShardAudit) {
 	// Validate input auditState
 	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
@@ -2089,8 +2089,8 @@ void runAuditStorage(Reference<DataDistributor> self,
 	std::shared_ptr<DDAudit> audit = std::make_shared<DDAudit>(auditState);
 	audit->retryCount = retryCount;
 	audit->setDDAuditContext(context);
-	if (serverProgressFinishMap.present()) {
-		audit->serverProgressFinishMap = serverProgressFinishMap.get();
+	if (serversFinishedSSShardAudit.present()) {
+		audit->serversFinishedSSShardAudit = serversFinishedSSShardAudit.get();
 	}
 	addAuditToAuditMap(self, audit);
 	audit->setAuditRunActor(auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), audit->retryCount));

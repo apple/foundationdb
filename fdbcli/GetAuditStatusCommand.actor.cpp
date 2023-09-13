@@ -148,7 +148,7 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 		for (; i < interfs.size(); i++) {
 			if (interfs[i].isTss()) {
 				numTSSes++;
-				continue;
+				continue; // SSShard audit does not test TSS
 			}
 			AuditPhase serverPhase = wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
 			if (serverPhase == AuditPhase::Running) {
