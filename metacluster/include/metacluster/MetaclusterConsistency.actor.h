@@ -260,7 +260,8 @@ private:
 					ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
 					ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 				} else if (entry.tenantName != metaclusterEntry.tenantName) {
-					ASSERT(metaclusterEntry.renameDestination.present() && entry.tenantName == metaclusterEntry.renameDestination.get());
+					ASSERT(metaclusterEntry.renameDestination.present() &&
+					       entry.tenantName == metaclusterEntry.renameDestination.get());
 				}
 				if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
 				    metaclusterEntry.tenantState != TenantState::REMOVING) {
