@@ -322,11 +322,12 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 }
 
 struct DataDistributor;
-void runAuditStorage(Reference<DataDistributor> self,
-                     AuditStorageState auditStates,
-                     int retryCount,
-                     DDAuditContext context,
-                     Optional<std::unordered_set<UID>> serversFinishedSSShardAudit = Optional<std::unordered_set<UID>>());
+void runAuditStorage(
+    Reference<DataDistributor> self,
+    AuditStorageState auditStates,
+    int retryCount,
+    DDAuditContext context,
+    Optional<std::unordered_set<UID>> serversFinishedSSShardAudit = Optional<std::unordered_set<UID>>());
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
@@ -2013,8 +2014,11 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit
 			if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-				runAuditStorage(
-				    self, audit->coreState, audit->retryCount, DDAuditContext::RETRY, audit->serversFinishedSSShardAudit);
+				runAuditStorage(self,
+				                audit->coreState,
+				                audit->retryCount,
+				                DDAuditContext::RETRY,
+				                audit->serversFinishedSSShardAudit);
 			} else {
 				runAuditStorage(self, audit->coreState, audit->retryCount, DDAuditContext::RETRY);
 			}
