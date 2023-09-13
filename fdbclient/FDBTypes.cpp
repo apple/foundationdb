@@ -261,13 +261,14 @@ TEST_CASE("/PerpetualStorageWiggleLocality/Validation") {
 
 	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;"));
 	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;ccc"));
+	ASSERT(!isValidPerpetualStorageWiggleLocality(""));
 
 	return Void();
 }
 
 std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
     const std::string& localityKeyValues) {
-	// parsing format is like "datahall:0"
+	// parsing format is like "datahall:0<;locality:filter>"
 	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValues));
 
 	std::vector<std::pair<Optional<Value>, Optional<Value>>> parsedLocalities;

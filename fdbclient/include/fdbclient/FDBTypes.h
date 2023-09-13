@@ -1620,9 +1620,12 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	return std::regex_match(locality, wiggleLocalityValidation);
 }
 
+// Parses `perpetual_storage_wiggle_locality` database option.
 std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
     const std::string& localityKeyValues);
 
+// Whether the locality matches any locality filter in `localityKeyValues` (which is supposed to be parsed from
+// ParsePerpetualStorageWiggleLocality).
 bool localityMatchInList(const std::vector<std::pair<Optional<Value>, Optional<Value>>>& localityKeyValues,
                          const LocalityData& locality);
 
