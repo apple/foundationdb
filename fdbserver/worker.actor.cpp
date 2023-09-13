@@ -3827,6 +3827,9 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 	state IKeyValueStore* kvStore = openKVStore(storeType, filename, uid, 1 << 30);
 	wait(kvStore->init());
 
+	// sharded rocksdb needs to be initialized with a shard
+	wait(kvStore->addRange(allKeys, "shard"));
+
 	// Insert keys
 	state StringRef foo = "foo"_sr;
 	state StringRef bar = "bar"_sr;
