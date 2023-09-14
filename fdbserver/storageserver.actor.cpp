@@ -5674,7 +5674,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						errors.push_back(error);
 						continue; // check next remote server
 					} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-						ASSERT(missingKey);
+						if (!missingKey) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+							           data->thisServerID);
+						}
 						std::string error =
 						    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
 						           remoteServer.uniqueID.first(),
