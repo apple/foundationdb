@@ -38,6 +38,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FileIdentifier.h"
+#include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
@@ -3796,6 +3797,86 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 
 	return Void();
 }
+
+namespace {
+KeyValueStoreType randomStoreType() {
+	int type = deterministicRandom()->randomInt(0, (int)KeyValueStoreType::END);
+	if (type == KeyValueStoreType::NONE) {
+		type = KeyValueStoreType::SSD_BTREE_V2;
+	}
+#ifndef WITH_ROCKSDB
+	if (type == KeyValueStoreType::SSD_ROCKSDB_V1 || type == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+		type = KeyValueStoreType::SSD_BTREE_V2;
+	}
+#endif
+	return KeyValueStoreType((KeyValueStoreType::StoreType)type);
+}
+
+// Test the engine can clear in-flight commits
+TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
+	state const std::string testDir = "engine-basic-test";
+	platform::eraseDirectoryRecursive(testDir);
+	platform::createDirectory(testDir);
+
+	KeyValueStoreType storeType = randomStoreType();
+	ASSERT(storeType.isValid());
+	fmt::print("Testing engine with store type {}\n", storeType.toString());
+
+	UID uid = deterministicRandom()->randomUniqueID();
+	std::string filename = filenameFromId(storeType, testDir, "", uid);
+	state IKeyValueStore* kvStore = openKVStore(storeType, filename, uid, 1 << 30);
+	wait(kvStore->init());
+
+	// sharded rocksdb needs to be initialized with a shard
+	wait(kvStore->addRange(allKeys, "shard"));
+
+	// Insert keys
+	state StringRef foo = "foo"_sr;
+	state StringRef bar = "bar"_sr;
+	kvStore->set({ foo, foo });
+	kvStore->set({ keyAfter(foo), keyAfter(foo) });
+	kvStore->set({ bar, bar });
+	kvStore->set({ keyAfter(bar), keyAfter(bar) });
+
+	// Note there is no wait() here.  We want to test that the commit is still in flight
+	state Future<Void> commit1 = kvStore->commit(false);
+
+	// Clear keys, so that only keyAfter(foo) will be present
+	kvStore->clear(KeyRangeRef(bar, keyAfter(foo)));
+
+	// Wait for the commit to finish and check that the keys are gone
+	wait(commit1);
+	wait(kvStore->commit(false));
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(bar));
+		ASSERT(!val.present());
+	}
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(keyAfter(bar)));
+		ASSERT(!val.present());
+	}
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(foo));
+		ASSERT(!val.present());
+	}
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(keyAfter(foo)));
+		ASSERT(val.present() and val.get() == keyAfter(foo));
+	}
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	fmt::print("Waiting for engine to close\n");
+	wait(closed);
+
+	platform::eraseDirectoryRecursive(testDir);
+	return Void();
+}
+} // anonymous namespace
 
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
