@@ -95,13 +95,8 @@ struct DDAudit {
 	int64_t overallCompleteDoAuditCount;
 	int64_t overallSkippedDoAuditCount;
 	AsyncVar<int> remainingBudgetForAuditTasks;
-<<<<<<< HEAD
 	uint8_t context;
-	std::unordered_map<UID, bool> serverProgressFinishMap; // dedicated to ssshard
-=======
-	DDAuditContext context;
 	std::unordered_set<UID> serversFinishedSSShardAudit; // dedicated to ssshard
->>>>>>> 29a2f63f8 (Fix SSShard Audit (#10896))
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
