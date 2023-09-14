@@ -1520,11 +1520,20 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
+			Optional<std::string> blobstoreProxy;
+
+			// If no proxy is passed down to the openContainer method, try to fallback to the
+			// fileBackupAgentProxy which is a global variable and will be set for the backup_agent.
+			if (proxy.present()) {
+				blobstoreProxy = proxy.get();
+			} else if (fileBackupAgentProxy.present()) {
+				blobstoreProxy = fileBackupAgentProxy.get();
+			}
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
 			S3BlobStoreEndpoint::ParametersT backupParams;
 			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, proxy, &resource, &lastOpenError, &backupParams);
+			    S3BlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
 
 			if (resource.empty())
 				throw backup_invalid_url();
