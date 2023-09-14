@@ -928,6 +928,9 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	const UID actionId = deterministicRandom()->randomUniqueID();
 	const Severity stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
 	int64_t maxShardSize = self->maxShardSize->get().get();
+	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
+		maxShardSize = SERVER_KNOBS->MAX_LARGE_SHARD_BYTES;
+	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
 	auto nextIter = self->shards->rangeContaining(keys.begin);
@@ -1116,6 +1119,10 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
+
+	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
+		shardBounds.max.bytes = SERVER_KNOBS->MAX_LARGE_SHARD_BYTES;
+	}
 
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;

@@ -203,6 +203,9 @@ public:
 	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
 
+	bool ALLOW_LARGE_SHARD;
+	int MAX_LARGE_SHARD_BYTES;
+
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].

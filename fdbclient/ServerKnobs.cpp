@@ -178,6 +178,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_DEST_CPU_PERCENT, 		  					   100.0 );
 	init( DD_TEAM_PIVOT_UPDATE_DELAY,                            5.0 );
 
+	init( ALLOW_LARGE_SHARD,                                    true );
+	init( MAX_LARGE_SHARD_BYTES,                          1000000000 ); // 1G
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); if( isSimulated )   DD_PHYSICAL_SHARD_MOVE_PROBABILITY = 0.5;
