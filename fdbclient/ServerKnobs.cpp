@@ -290,6 +290,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                      10 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 1000;
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
+	init( DD_DECREMENT_STORAGE_QUEUE_AWARE_SHARD_DELAY_TIME,   300.0 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true

@@ -180,9 +180,15 @@ public:
 		});
 	}
 
-	void incrementStorageQueueAwareShardToTeam(int64_t delta) override {
+	void incrementMovingStorageQueueAwareShardToTeam() override {
 		for (auto& team : teams) {
-			team->incrementStorageQueueAwareShardToTeam(delta);
+			team->incrementMovingStorageQueueAwareShardToTeam();
+		}
+	}
+
+	void decrementMovingStorageQueueAwareShardToTeam() override {
+		for (auto& team : teams) {
+			team->decrementMovingStorageQueueAwareShardToTeam();
 		}
 	}
 
@@ -1286,7 +1292,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 			if (RelocateData::isStorageQueueAwarePriority(rd.priority))
-				healthyDestinations.incrementStorageQueueAwareShardToTeam(+1);
+				healthyDestinations.incrementMovingStorageQueueAwareShardToTeam();
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1392,7 +1398,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				if (RelocateData::isStorageQueueAwarePriority(rd.priority))
-					healthyDestinations.incrementStorageQueueAwareShardToTeam(-1);
+					healthyDestinations.decrementMovingStorageQueueAwareShardToTeam();
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1427,7 +1433,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				if (RelocateData::isStorageQueueAwarePriority(rd.priority))
-					healthyDestinations.incrementStorageQueueAwareShardToTeam(-1);
+					healthyDestinations.decrementMovingStorageQueueAwareShardToTeam();
 				if (!signalledTransferComplete) {
 					// Update destination busyness map to allow further movement to them.
 					// signalling transferComplete calls completeDest() in complete(), so

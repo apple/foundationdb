@@ -67,6 +67,7 @@ public:
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
+	PromiseStream<Void> decrementMovingInStorageQueueAwareShard;
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,
@@ -85,7 +86,8 @@ public:
 	Future<Void> updateStoreType();
 	KeyValueStoreType getStoreType() const { return storeType; }
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
-	void incrementStorageQueueAwareShardToServer(int64_t bytes) { storageQueueAwareShardNum += bytes; }
+	void incrementMovingStorageQueueAwareShardToServer() { storageQueueAwareShardNum++; }
+	void decrementMovingStorageQueueAwareShardToServer() { decrementMovingInStorageQueueAwareShard.send(Void()); }
 	int64_t getStorageQueueAwareShardNum() const { return storageQueueAwareShardNum; }
 	int64_t getStorageQueueSize() const;
 	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
@@ -110,6 +112,7 @@ public:
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
+	Future<Void> decrementMovingInStorageQueueAwareShardHandler();
 
 	~TCServerInfo();
 };
@@ -197,7 +200,9 @@ public:
 
 	int64_t getDataInFlightToTeam() const override;
 
-	void incrementStorageQueueAwareShardToTeam(int64_t delta) override;
+	void incrementMovingStorageQueueAwareShardToTeam() override;
+
+	void decrementMovingStorageQueueAwareShardToTeam() override;
 
 	int64_t getStorageQueueAwareShardPerServerNumMax() const override;
 

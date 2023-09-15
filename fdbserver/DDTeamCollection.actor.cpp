@@ -1020,6 +1020,8 @@ public:
 		state ServerStatus status(false, false, false, server->getLastKnownInterface().locality);
 		state bool lastIsUnhealthy = false;
 		state Future<Void> metricsTracker = server->serverMetricsPolling();
+		state Future<Void> decrementMovingInStorageQueueAwareShardHandler =
+		    server->decrementMovingInStorageQueueAwareShardHandler();
 
 		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 

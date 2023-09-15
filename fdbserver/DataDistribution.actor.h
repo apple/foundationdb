@@ -46,7 +46,8 @@ struct IDataDistributionTeam {
 	virtual std::vector<UID> const& getServerIDs() const = 0;
 	virtual void addDataInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
-	virtual void incrementStorageQueueAwareShardToTeam(int64_t delta) = 0;
+	virtual void incrementMovingStorageQueueAwareShardToTeam() = 0;
+	virtual void decrementMovingStorageQueueAwareShardToTeam() = 0;
 	virtual int64_t getStorageQueueAwareShardPerServerNumMax() const = 0;
 	virtual int64_t getLongestStorageQueueSize() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;

@@ -232,6 +232,7 @@ public:
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
+	double DD_DECREMENT_STORAGE_QUEUE_AWARE_SHARD_DELAY_TIME;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
