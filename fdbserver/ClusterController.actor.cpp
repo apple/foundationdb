@@ -1512,6 +1512,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->cx,
 			                                                                  workers,
 			                                                                  workerIssues,
+			                                                                  self->storageStatusInfos,
 			                                                                  &self->db.clientStatus,
 			                                                                  coordinators,
 			                                                                  incompatibleConnections,
@@ -1663,6 +1664,45 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
+		}
+	}
+}
+
+// Monitors storage metadata changes and updates to storage servers.
+ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                           IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state std::vector<StorageServerMetaInfo> servers;
+	loop {
+		try {
+			servers.clear();
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+			servers.reserve(serverList.size());
+			// TODO: this can issue many point reads if the serverList is large.
+			// A better approach is to use getRange() for the metadata.
+			for (const auto ss : serverList) {
+				servers.push_back(StorageServerMetaInfo(decodeServerListValue(ss.value)));
+			}
+			state std::vector<Future<Void>> futures(servers.size());
+			for (int i = 0; i < servers.size(); ++i) {
+				futures[i] = store(servers[i].metadata, metadataMap.get(tr, servers[i].id()));
+				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
+			}
+			state Future<Void> watchFuture = tr->watch(serverMetadataChangeKey);
+			wait(waitForAll(futures));
+			wait(tr->commit());
+
+			self->storageStatusInfos = std::move(servers);
+			wait(watchFuture);
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -3062,6 +3102,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
+	self.addActor.send(monitorStorageMetadata(&self));
 	self.addActor.send(monitorGlobalConfig(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));

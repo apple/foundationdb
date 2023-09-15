@@ -690,6 +690,7 @@ UID decodeTssQuarantineKey(KeyRef const& key) {
 
 const KeyRangeRef tssMismatchKeys("\xff/tssMismatch/"_sr, "\xff/tssMismatch0"_sr);
 
+const KeyRef serverMetadataChangeKey = "\xff\x02/serverMetadataChanges"_sr;
 const KeyRangeRef serverMetadataKeys("\xff/serverMetadata/"_sr, "\xff/serverMetadata0"_sr);
 
 const KeyRangeRef serverTagKeys("\xff/serverTag/"_sr, "\xff/serverTag0"_sr);
