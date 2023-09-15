@@ -110,18 +110,6 @@ public:
 			lastUpdate = now();
 		}
 	}
-
-	ACTOR static Future<Void> decrementMovingInStorageQueueAwareShardHandler(TCServerInfo* server) {
-		loop {
-			choose {
-				when(waitNext(server->decrementMovingInStorageQueueAwareShard.getFuture())) {
-					wait(delay(SERVER_KNOBS->DD_DECREMENT_STORAGE_QUEUE_AWARE_SHARD_DELAY_TIME));
-					wait(updateServerMetrics(server)); // Keep metrics updated before decrement the counter
-					server->movingInStorageQueueAwareShardCounter--;
-				}
-			}
-		}
-	}
 };
 
 class TCTeamInfoImpl {
@@ -182,10 +170,6 @@ Future<Void> TCServerInfo::updateServerMetrics(Reference<TCServerInfo> server) {
 
 Future<Void> TCServerInfo::serverMetricsPolling() {
 	return TCServerInfoImpl::serverMetricsPolling(this);
-}
-
-Future<Void> TCServerInfo::decrementMovingInStorageQueueAwareShardHandler() {
-	return TCServerInfoImpl::decrementMovingInStorageQueueAwareShardHandler(this);
 }
 
 void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {
@@ -374,27 +358,6 @@ int64_t TCTeamInfo::getDataInFlightToTeam() const {
 		dataInFlight += server->getDataInFlightToServer();
 	}
 	return dataInFlight;
-}
-
-void TCTeamInfo::incrementMovingStorageQueueAwareShardToTeam() {
-	for (int i = 0; i < servers.size(); i++)
-		servers[i]->incrementMovingStorageQueueAwareShardToServer();
-}
-
-void TCTeamInfo::decrementMovingStorageQueueAwareShardToTeam() {
-	for (int i = 0; i < servers.size(); i++)
-		servers[i]->decrementMovingStorageQueueAwareShardToServer();
-}
-
-int64_t TCTeamInfo::getMovingInStorageQueueAwareShardCounterMax() const {
-	int64_t storageQueueAwareShardNumMax = 0;
-	for (auto const& server : servers) {
-		int64_t shardNum = server->getMovingInStorageQueueAwareShardCounter();
-		if (shardNum > storageQueueAwareShardNumMax) {
-			storageQueueAwareShardNumMax = shardNum;
-		}
-	}
-	return storageQueueAwareShardNumMax;
 }
 
 int64_t TCTeamInfo::getLongestStorageQueueSize() const {

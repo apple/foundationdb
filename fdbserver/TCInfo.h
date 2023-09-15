@@ -45,7 +45,6 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	KeyValueStoreType storeType; // Storage engine type
 
 	int64_t dataInFlightToServer;
-	int64_t movingInStorageQueueAwareShardCounter;
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
 
@@ -67,7 +66,6 @@ public:
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
-	PromiseStream<Void> decrementMovingInStorageQueueAwareShard;
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,
@@ -86,9 +84,6 @@ public:
 	Future<Void> updateStoreType();
 	KeyValueStoreType getStoreType() const { return storeType; }
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
-	void incrementMovingStorageQueueAwareShardToServer() { movingInStorageQueueAwareShardCounter++; }
-	void decrementMovingStorageQueueAwareShardToServer() { decrementMovingInStorageQueueAwareShard.send(Void()); }
-	int64_t getMovingInStorageQueueAwareShardCounter() const { return movingInStorageQueueAwareShardCounter; }
 	int64_t getStorageQueueSize() const;
 	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
 	void cancel();
@@ -112,7 +107,6 @@ public:
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
-	Future<Void> decrementMovingInStorageQueueAwareShardHandler();
 
 	~TCServerInfo();
 };
@@ -199,12 +193,6 @@ public:
 	void addDataInFlightToTeam(int64_t delta) override;
 
 	int64_t getDataInFlightToTeam() const override;
-
-	void incrementMovingStorageQueueAwareShardToTeam() override;
-
-	void decrementMovingStorageQueueAwareShardToTeam() override;
-
-	int64_t getMovingInStorageQueueAwareShardCounterMax() const override;
 
 	int64_t getLongestStorageQueueSize() const override;
 

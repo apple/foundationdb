@@ -180,18 +180,6 @@ public:
 		});
 	}
 
-	void incrementMovingStorageQueueAwareShardToTeam() override {
-		for (auto& team : teams) {
-			team->incrementMovingStorageQueueAwareShardToTeam();
-		}
-	}
-
-	void decrementMovingStorageQueueAwareShardToTeam() override {
-		for (auto& team : teams) {
-			team->decrementMovingStorageQueueAwareShardToTeam();
-		}
-	}
-
 	int64_t getLongestStorageQueueSize() const override {
 		int64_t maxQueueSize = 0;
 		for (const auto& team : teams) {
@@ -202,14 +190,6 @@ public:
 			maxQueueSize = std::max(maxQueueSize, queueSize);
 		}
 		return maxQueueSize;
-	}
-
-	int64_t getMovingInStorageQueueAwareShardCounterMax() const override {
-		int64_t shardNumMax = 0;
-		for (const auto& team : teams) {
-			shardNumMax = std::max(shardNumMax, team->getMovingInStorageQueueAwareShardCounterMax());
-		}
-		return shardNumMax;
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -334,13 +314,22 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
 		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+	else if (relocation.priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE)
+		return std::max(1.0,
+		                WORK_FULL_UTILIZATION / singleRegionTeamSize /
+		                    SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER /
+		                    SERVER_KNOBS->RELOCATION_PARALLELISM_FACTOR_HOT_SHARD);
 	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
 		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
-int getDestWorkFactor() {
+int getDestWorkFactor(bool forRedistributedHotShard) {
 	// Work of moving a shard is even across destination servers
-	return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	int res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	if (forRedistributedHotShard) {
+		res = std::max(1.0, res / SERVER_KNOBS->RELOCATION_PARALLELISM_FACTOR_HOT_SHARD);
+	}
+	return res;
 }
 
 // Data movement's resource control: Do not overload servers used for the RelocateData
@@ -390,7 +379,7 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
 		return true;
 	}
-	int workFactor = getDestWorkFactor();
+	int workFactor = getDestWorkFactor(priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE);
 	for (auto& team : candidateTeams) {
 		for (UID id : team.first->getServerIDs()) {
 			if (!busymapDest[id].canLaunch(priority, workFactor)) {
@@ -413,7 +402,8 @@ void launchDest(RelocateData& relocation,
                 const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
                 std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.completeDests.empty());
-	int destWorkFactor = getDestWorkFactor();
+	int destWorkFactor =
+	    getDestWorkFactor(relocation.priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE);
 	for (auto& team : candidateTeams) {
 		for (UID id : team.first->getServerIDs()) {
 			relocation.completeDests.push_back(id);
@@ -423,7 +413,8 @@ void launchDest(RelocateData& relocation,
 }
 
 void completeDest(const RelocateData& relocation, std::map<UID, Busyness>& destBusymap) {
-	int destWorkFactor = getDestWorkFactor();
+	int destWorkFactor =
+	    getDestWorkFactor(relocation.priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE);
 	for (UID id : relocation.completeDests) {
 		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
 	}
@@ -1291,8 +1282,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
-			if (RelocateData::isStorageQueueAwarePriority(rd.priority))
-				healthyDestinations.incrementMovingStorageQueueAwareShardToTeam();
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1397,8 +1386,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				}
 
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				if (RelocateData::isStorageQueueAwarePriority(rd.priority))
-					healthyDestinations.decrementMovingStorageQueueAwareShardToTeam();
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1432,8 +1419,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			} else {
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				if (RelocateData::isStorageQueueAwarePriority(rd.priority))
-					healthyDestinations.decrementMovingStorageQueueAwareShardToTeam();
 				if (!signalledTransferComplete) {
 					// Update destination busyness map to allow further movement to them.
 					// signalling transferComplete calls completeDest() in complete(), so
