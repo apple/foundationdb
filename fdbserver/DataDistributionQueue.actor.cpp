@@ -187,11 +187,15 @@ public:
 	}
 
 	int64_t getLongestStorageQueueSize() const override {
-		int64_t queueSize = 0;
+		int64_t maxQueueSize = 0;
 		for (const auto& team : teams) {
-			queueSize = std::max(queueSize, team->getLongestStorageQueueSize());
+			int64_t queueSize = team->getLongestStorageQueueSize();
+			if (queueSize == -1) {
+				return -1;
+			}
+			maxQueueSize = std::max(maxQueueSize, queueSize);
 		}
-		return queueSize;
+		return maxQueueSize;
 	}
 
 	int64_t getStorageQueueAwareShardPerServerNumMax() const override {

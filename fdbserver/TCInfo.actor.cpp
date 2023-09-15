@@ -384,6 +384,8 @@ int64_t TCTeamInfo::getLongestStorageQueueSize() const {
 			if (storageQueueSize > longestQueueSize) {
 				longestQueueSize = storageQueueSize;
 			}
+		} else if (server->ssVersionTooFarBehind.get() == true) {
+			return -1;
 		}
 	}
 	return longestQueueSize;
