@@ -48,7 +48,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual void incrementMovingStorageQueueAwareShardToTeam() = 0;
 	virtual void decrementMovingStorageQueueAwareShardToTeam() = 0;
-	virtual int64_t getStorageQueueAwareShardPerServerNumMax() const = 0;
+	virtual int64_t getMovingInStorageQueueAwareShardCounterMax() const = 0;
 	virtual int64_t getLongestStorageQueueSize() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;

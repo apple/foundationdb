@@ -117,7 +117,7 @@ public:
 				when(waitNext(server->decrementMovingInStorageQueueAwareShard.getFuture())) {
 					wait(delay(SERVER_KNOBS->DD_DECREMENT_STORAGE_QUEUE_AWARE_SHARD_DELAY_TIME));
 					wait(updateServerMetrics(server)); // Keep metrics updated before decrement the counter
-					server->storageQueueAwareShardNum--;
+					server->movingInStorageQueueAwareShardCounter--;
 				}
 			}
 		}
@@ -386,10 +386,10 @@ void TCTeamInfo::decrementMovingStorageQueueAwareShardToTeam() {
 		servers[i]->decrementMovingStorageQueueAwareShardToServer();
 }
 
-int64_t TCTeamInfo::getStorageQueueAwareShardPerServerNumMax() const {
+int64_t TCTeamInfo::getMovingInStorageQueueAwareShardCounterMax() const {
 	int64_t storageQueueAwareShardNumMax = 0;
 	for (auto const& server : servers) {
-		int64_t shardNum = server->getStorageQueueAwareShardNum();
+		int64_t shardNum = server->getMovingInStorageQueueAwareShardCounter();
 		if (shardNum > storageQueueAwareShardNumMax) {
 			storageQueueAwareShardNumMax = shardNum;
 		}

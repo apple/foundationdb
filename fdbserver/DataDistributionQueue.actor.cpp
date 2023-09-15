@@ -204,10 +204,10 @@ public:
 		return maxQueueSize;
 	}
 
-	int64_t getStorageQueueAwareShardPerServerNumMax() const override {
+	int64_t getMovingInStorageQueueAwareShardCounterMax() const override {
 		int64_t shardNumMax = 0;
 		for (const auto& team : teams) {
-			shardNumMax = std::max(shardNumMax, team->getStorageQueueAwareShardPerServerNumMax());
+			shardNumMax = std::max(shardNumMax, team->getMovingInStorageQueueAwareShardCounterMax());
 		}
 		return shardNumMax;
 	}
