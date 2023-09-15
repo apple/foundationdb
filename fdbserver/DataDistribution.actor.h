@@ -80,6 +80,7 @@ struct IDataDistributionTeam {
 struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
+	bool storageQueueAware;
 	bool preferLowerUtilization;
 	bool teamMustHaveShards;
 	double inflightPenalty;
@@ -93,15 +94,16 @@ struct GetTeamRequest {
 	               bool preferLowerUtilization,
 	               bool teamMustHaveShards,
 	               double inflightPenalty = 1.0)
-	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), storageQueueAware(false),
+	    preferLowerUtilization(preferLowerUtilization), teamMustHaveShards(teamMustHaveShards),
+	    inflightPenalty(inflightPenalty) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;
 
-		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << " inflightPenalty:" << inflightPenalty << ";";
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest << "StorageQueueAware"
+		   << storageQueueAware << " PreferLowerUtilization:" << preferLowerUtilization
+		   << " teamMustHaveShards:" << teamMustHaveShards << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";

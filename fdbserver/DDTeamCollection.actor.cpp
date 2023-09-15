@@ -265,6 +265,14 @@ public:
 					    (!req.preferLowerUtilization ||
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
+						if (req.storageQueueAware) {
+							int64_t storageQueueSize = self->teams[currentIndex]->getLongestStorageQueueSize();
+							if (storageQueueSize == -1) {
+								continue; // this SS may not healthy, skip
+							} else if (storageQueueSize > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+								continue; // this SS storage queue is too long, skip
+							}
+						}
 						if ((!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 						     (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) &&
 						    (!req.teamMustHaveShards ||
@@ -308,6 +316,15 @@ public:
 					            self->shardsAffectedByTeamFailure->hasShards(
 					                ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));
 
+					if (req.storageQueueAware) {
+						int64_t storageQueueSize = dest->getLongestStorageQueueSize();
+						if (storageQueueSize == -1) {
+							ok = false; // this SS may not healthy, skip
+						} else if (storageQueueSize > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+							ok = false; // this SS storage queue is too long, skip
+						}
+					}
+
 					if (ok)
 						randomTeams.push_back(dest);
 					else
@@ -326,6 +343,14 @@ public:
 
 				for (int i = 0; i < randomTeams.size(); i++) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
+					if (req.storageQueueAware) {
+						int64_t storageQueueSize = randomTeams[i]->getLongestStorageQueueSize();
+						if (storageQueueSize == -1) {
+							continue; // this SS may not healthy, skip
+						} else if (storageQueueSize > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+							continue; // this SS storage queue is too long, skip
+						}
+					}
 					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
 
@@ -374,11 +399,16 @@ public:
 			// 	self->traceAllInfo(true);
 			// }
 
-			req.reply.send(std::make_pair(bestOption, foundSrc));
+			if (req.storageQueueAware && !bestOption.present()) {
+				req.storageQueueAware = false;
+				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
+			} else {
+				req.reply.send(std::make_pair(bestOption, foundSrc));
+			}
 
 			return Void();
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() != error_code_actor_cancelled && req.reply.canBeSet())
 				req.reply.sendError(e);
 			throw;
 		}

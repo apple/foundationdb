@@ -79,10 +79,6 @@ struct RelocateData {
 		return priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD || priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD;
 	}
 
-	static bool isStorageQueueAwarePriority(int priority) {
-		return priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE;
-	}
-
 	bool operator>(const RelocateData& rhs) const {
 		return priority != rhs.priority
 		           ? priority > rhs.priority
@@ -314,22 +310,13 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
 		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
-	else if (relocation.priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE)
-		return std::max(1.0,
-		                WORK_FULL_UTILIZATION / singleRegionTeamSize /
-		                    SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER /
-		                    SERVER_KNOBS->RELOCATION_PARALLELISM_FACTOR_HOT_SHARD);
 	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
 		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
-int getDestWorkFactor(bool forRedistributedHotShard) {
+int getDestWorkFactor() {
 	// Work of moving a shard is even across destination servers
-	int res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
-	if (forRedistributedHotShard) {
-		res = std::max(1.0, res / SERVER_KNOBS->RELOCATION_PARALLELISM_FACTOR_HOT_SHARD);
-	}
-	return res;
+	return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
 }
 
 // Data movement's resource control: Do not overload servers used for the RelocateData
@@ -379,7 +366,7 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
 		return true;
 	}
-	int workFactor = getDestWorkFactor(priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE);
+	int workFactor = getDestWorkFactor();
 	for (auto& team : candidateTeams) {
 		for (UID id : team.first->getServerIDs()) {
 			if (!busymapDest[id].canLaunch(priority, workFactor)) {
@@ -402,8 +389,7 @@ void launchDest(RelocateData& relocation,
                 const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
                 std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.completeDests.empty());
-	int destWorkFactor =
-	    getDestWorkFactor(relocation.priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE);
+	int destWorkFactor = getDestWorkFactor();
 	for (auto& team : candidateTeams) {
 		for (UID id : team.first->getServerIDs()) {
 			relocation.completeDests.push_back(id);
@@ -413,8 +399,7 @@ void launchDest(RelocateData& relocation,
 }
 
 void completeDest(const RelocateData& relocation, std::map<UID, Busyness>& destBusymap) {
-	int destWorkFactor =
-	    getDestWorkFactor(relocation.priority == SERVER_KNOBS->PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE);
+	int destWorkFactor = getDestWorkFactor();
 	for (UID id : relocation.completeDests) {
 		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
 	}
@@ -1155,6 +1140,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
+					if (SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION) {
+						req.storageQueueAware = true;
+					}
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
