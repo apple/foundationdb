@@ -6785,7 +6785,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 					Optional<CommitResult> commitResult = wait(determineCommitStatus(
 					    trState,
 					    req.transaction.read_snapshot,
-					    req.transaction.read_snapshot + 5e6 /* Based on MAX_WRITE_TRANSACTION_LIFE_VERSIONS */,
+					    req.transaction.read_snapshot + CLIENT_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS,
 					    req.idempotencyId));
 					if (commitResult.present()) {
 						Standalone<StringRef> ret = makeString(10);
