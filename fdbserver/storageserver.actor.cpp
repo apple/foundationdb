@@ -8669,8 +8669,13 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				StorageBytes sb = self->storage.getStorageBytes();
-				self->metrics.getStorageMetrics(
-				    req, sb, self->counters.bytesInput.getRate(), self->versionLag, self->lastUpdate);
+				self->metrics.getStorageMetrics(req,
+				                                sb,
+				                                self->counters.bytesInput.getRate(),
+				                                self->versionLag,
+				                                self->lastUpdate,
+				                                self->counters.bytesDurable.getValue(),
+				                                self->counters.bytesInput.getValue());
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 				if (!self->isReadable(req.keys)) {

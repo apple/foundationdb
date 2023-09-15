@@ -162,6 +162,7 @@ public:
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
+	int PRIORITY_STORAGE_QUEUE_AWARE_REDISTRIBUTE;
 
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
