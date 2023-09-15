@@ -962,7 +962,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		else
 			event.detail("RemoteHost", bstore->host);
 
-		event.detail("Verb", verb).detail("Resource", resource).detail("ThisTry", thisTry).detail("Proxy", bstore->proxyHost.orDefault(""));
+		event.detail("Verb", verb)
+		    .detail("Resource", resource)
+		    .detail("ThisTry", thisTry)
+		    .detail("Proxy", bstore->proxyHost.orDefault(""));
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
 		// limit.
