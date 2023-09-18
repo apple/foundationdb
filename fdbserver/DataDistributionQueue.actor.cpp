@@ -1140,9 +1140,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
-					if (SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION) {
-						req.storageQueueAware = true;
-					}
+					req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.

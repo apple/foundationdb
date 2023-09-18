@@ -364,10 +364,7 @@ int64_t TCTeamInfo::getLongestStorageQueueSize() const {
 	int64_t longestQueueSize = 0;
 	for (const auto& server : servers) {
 		if (server->metricsPresent()) {
-			int64_t storageQueueSize = server->getStorageQueueSize();
-			if (storageQueueSize > longestQueueSize) {
-				longestQueueSize = storageQueueSize;
-			}
+			longestQueueSize = std::max(longestQueueSize, server->getStorageQueueSize());
 		} else if (server->ssVersionTooFarBehind.get() == true) {
 			return -1;
 		}

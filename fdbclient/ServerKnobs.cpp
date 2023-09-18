@@ -289,7 +289,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                      10 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 1000;
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
-	init( ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION,            true );
+	init( ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION,           false );
 	init( DD_TARGET_STORAGE_QUEUE_SIZE,                         TARGET_BYTES_PER_STORAGE_SERVER/3 );
 
 	// TeamRemover

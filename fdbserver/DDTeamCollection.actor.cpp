@@ -343,14 +343,6 @@ public:
 
 				for (int i = 0; i < randomTeams.size(); i++) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
-					if (req.storageQueueAware) {
-						int64_t storageQueueSize = randomTeams[i]->getLongestStorageQueueSize();
-						if (storageQueueSize == -1) {
-							continue; // this SS may not healthy, skip
-						} else if (storageQueueSize > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
-							continue; // this SS storage queue is too long, skip
-						}
-					}
 					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
 
