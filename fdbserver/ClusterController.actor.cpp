@@ -1686,18 +1686,26 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			servers.reserve(serverList.size());
-			// TODO: this can issue many point reads if the serverList is large.
-			// A better approach is to use getRange() for the metadata.
 			for (const auto ss : serverList) {
 				servers.push_back(StorageServerMetaInfo(decodeServerListValue(ss.value)));
 			}
-			state std::vector<Future<Void>> futures(servers.size());
-			for (int i = 0; i < servers.size(); ++i) {
-				futures[i] = store(servers[i].metadata, metadataMap.get(tr, servers[i].id()));
-				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
+
+			state RangeResult serverMetadata = wait(tr->getRange(serverMetadataKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverMetadata.more && serverMetadata.size() < CLIENT_KNOBS->TOO_MANY);
+			std::map<UID, StorageMetadataType> idMetadata;
+			for (const auto& sm : serverMetadata) {
+				const UID id = decodeServerMetadataKey(sm.key);
+				idMetadata[id] = decodeServerMetadataValue(sm.value);
 			}
+			for (auto& s : servers) {
+				if (idMetadata.count(s.id())) {
+					s.metadata = idMetadata[s.id()];
+				} else {
+					TraceEvent(SevWarn, "StorageServerMetadataMissing", self->id).detail("ServerID", s.id());
+				}
+			}
+
 			state Future<Void> watchFuture = tr->watch(serverMetadataChangeKey);
-			wait(waitForAll(futures));
 			wait(tr->commit());
 
 			self->storageStatusInfos = std::move(servers);
