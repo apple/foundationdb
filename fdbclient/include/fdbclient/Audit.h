@@ -95,14 +95,14 @@ struct AuditStorageRequest {
 
 	AuditStorageRequest() = default;
 	AuditStorageRequest(UID id, KeyRange range, AuditType type)
-	  : id(id), range(range), type(static_cast<uint8_t>(type)) {}
+	  : id(id), range(range), type(static_cast<uint8_t>(type)), engineType(KeyValueStoreType::END) {}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, type, targetServers, reply, ddId);
+		serializer(ar, id, range, type, targetServers, reply, ddId, engineType);
 	}
 
 	UID id;
@@ -110,6 +110,7 @@ struct AuditStorageRequest {
 	KeyRange range;
 	uint8_t type;
 	std::vector<UID> targetServers;
+	KeyValueStoreType engineType;
 	ReplyPromise<AuditStorageState> reply;
 };
 

@@ -5439,12 +5439,16 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	TraceEvent(SevInfo, "SSAuditStorageShardReplicaBegin", data->thisServerID)
 	    .detail("AuditID", req.id)
 	    .detail("AuditRange", req.range)
-	    .detail("AuditType", req.type)
-	    .detail("TargetServers", describe(req.targetServers));
+	    .detail("AuditType", req.type);
 
 	state AuditStorageState res(req.id, req.getType()); // we will set range of audit later
 	state std::vector<Optional<Value>> serverListValues;
 	state std::vector<Future<ErrorOr<GetKeyValuesReply>>> fs;
+	state std::vector<StorageServerInterface> storageServerInterfaces;
+	state std::vector<Future<ErrorOr<KeyValueStoreType>>> storageTypeFutures;
+	state std::unordered_map<UID, KeyValueStoreType> storageTypeMap;
+	state std::vector<UID> checkedServerIds;
+	state std::vector<Future<Void>> actors;
 	state std::vector<std::string> errors;
 	state Version version;
 	state Transaction tr(data->cx);
@@ -5455,6 +5459,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int64_t readBytes = 0;
 	state int64_t numValidatedKeys = 0;
+	state int64_t numSkippedReplica = 0;
 	state int64_t validatedBytes = 0;
 	state bool complete = false;
 	state int64_t checkTimes = 0;
@@ -5471,143 +5476,249 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 				    .detail("AuditID", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditType", req.type)
+				    .detail("AuditEngineType", req.engineType)
 				    .detail("ReadRangeBegin", rangeToReadBegin)
 				    .detail("ReadRangeEnd", req.range.end);
 				serverListValues.clear();
 				errors.clear();
 				fs.clear();
+				checkedServerIds.clear();
+				actors.clear();
+				storageTypeFutures.clear();
+				storageTypeMap.clear();
+				storageServerInterfaces.clear();
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
+				// Get SSList and decide version and range to compare
+				state RangeResult keyServerResult;
+				state RangeResult UIDtoTagMap;
+				actors.push_back(store(version, tr.getReadVersion()));
+				actors.push_back(store(keyServerResult,
+				                       krmGetRanges(&tr,
+				                                    keyServersPrefix,
+				                                    rangeToRead,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				actors.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
+				wait(waitForAll(actors));
+				if (UIDtoTagMap.more || UIDtoTagMap.size() >= CLIENT_KNOBS->TOO_MANY) {
+					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+					           "SSAuditStorageShardReplicaReadKeyServersReadTagError",
+					           data->thisServerID);
+					throw audit_storage_cancelled();
+				}
+				std::vector<UID> src;
+				std::vector<UID> dest;
+				UID srcID;
+				UID destID;
+				decodeKeyServersValue(UIDtoTagMap, keyServerResult[0].value, src, dest, srcID, destID);
+				state std::vector<UID> targetServers(src.size() + dest.size());
+				std::merge(src.begin(), src.end(), dest.begin(), dest.end(), targetServers.begin());
+				claimRange = Standalone(KeyRangeRef(keyServerResult[0].key, keyServerResult[1].key));
+				readBytes = readBytes + keyServerResult.logicalSize();
+
 				// Get SS interfaces
 				std::vector<Future<Optional<Value>>> serverListEntries;
-				for (const UID& id : req.targetServers) {
-					if (id != data->thisServerID) {
-						serverListEntries.push_back(tr.get(serverListKeyFor(id)));
-					}
+				for (const UID& id : targetServers) {
+					serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 				}
 				wait(store(serverListValues, getAll(serverListEntries)));
-
-				// Decide version to compare
-				wait(store(version, tr.getReadVersion()));
-
-				// Read remote servers
+				// getAll should keep the order from serverListEntries to serverListValues
 				for (const auto& v : serverListValues) {
 					if (!v.present()) {
-						TraceEvent(SevWarn, "SSAuditStorageShardReplicaRemoteServerNotFound", data->thisServerID)
+						TraceEvent(SevWarn, "SSAuditStorageShardReplicaServerNotFound", data->thisServerID)
 						    .detail("AuditID", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("AuditType", req.type);
 						throw audit_storage_failed();
 					}
-					StorageServerInterface remoteServer = decodeServerListValue(v.get());
+					storageServerInterfaces.push_back(decodeServerListValue(v.get()));
+				}
 
+				if (req.engineType != KeyValueStoreType::END) {
+					// Get SS engine types
+					for (int i = 0; i < storageServerInterfaces.size(); i++) {
+						ReplyPromise<KeyValueStoreType> typeReply;
+						storageTypeFutures.push_back(
+						    storageServerInterfaces[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+					}
+					wait(waitForAll(storageTypeFutures));
+					for (int i = 0; i < storageServerInterfaces.size(); i++) {
+						ErrorOr<KeyValueStoreType> reply = storageTypeFutures[i].get();
+						if (!reply.present()) {
+							TraceEvent(SevWarn, "SSAuditStorageShardReplicaFailedToGetStorageType")
+							    .error(reply.getError())
+							    .detail("StorageServer", storageServerInterfaces[i].id())
+							    .detail("IsTSS", storageServerInterfaces[i].isTss() ? "True" : "False");
+						} else {
+							storageTypeMap[storageServerInterfaces[i].id()] = reply.get();
+						}
+					}
+				}
+
+				// Read data from the SSes
+				// serverListValues and storageServerInterfaces have the same order
+				for (int i = 0; i < serverListValues.size(); i++) {
+					if (!serverListValues[i].present()) {
+						TraceEvent(SevWarn, "SSAuditStorageShardReplicaServerNotFound", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("AuditRange", req.range)
+						    .detail("AuditType", req.type);
+						throw audit_storage_failed();
+					}
+					StorageServerInterface server = storageServerInterfaces[i];
+					if (req.engineType != KeyValueStoreType::END && storageTypeMap.contains(server.id()) &&
+					    storageTypeMap[server.id()] != req.engineType) {
+						numSkippedReplica++;
+						continue;
+					}
 					GetKeyValuesRequest req;
-					req.begin = firstGreaterOrEqual(rangeToRead.begin);
-					req.end = firstGreaterOrEqual(rangeToRead.end);
+					req.begin = firstGreaterOrEqual(claimRange.begin);
+					req.end = firstGreaterOrEqual(claimRange.end);
 					req.limit = limit;
 					req.limitBytes = limitBytes;
 					req.version = version;
 					req.tags = TagSet();
-					fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+					fs.push_back(server.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+					checkedServerIds.push_back(server.uniqueID);
 				}
 
-				// Read local server
-				GetKeyValuesRequest localReq;
-				localReq.begin = firstGreaterOrEqual(rangeToRead.begin);
-				localReq.end = firstGreaterOrEqual(rangeToRead.end);
-				localReq.limit = limit;
-				localReq.limitBytes = limitBytes;
-				localReq.version = version;
-				localReq.tags = TagSet();
-				data->actors.add(getKeyValuesQ(data, localReq));
-				fs.push_back(errorOr(localReq.reply.getFuture()));
-				std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
-				// Note: getAll() must keep the order of fs
-
-				// Check read result
-				for (int i = 0; i < reps.size(); ++i) {
-					if (reps[i].isError()) {
-						TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
-						    .errorUnsuppressed(reps[i].getError())
-						    .detail("AuditID", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditType", req.type)
-						    .detail("ReplyIndex", i)
-						    .detail("RangeRead", rangeToRead);
-						throw reps[i].getError();
-					}
-					if (reps[i].get().error.present()) {
-						TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
-						    .errorUnsuppressed(reps[i].get().error.get())
-						    .detail("AuditID", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("AuditType", req.type)
-						    .detail("ReplyIndex", i)
-						    .detail("RangeRead", rangeToRead);
-						throw reps[i].get().error.get();
-					}
-					readBytes = readBytes + reps[i].get().data.expectedSize();
-					validatedBytes = validatedBytes + reps[i].get().data.expectedSize();
-					// If any of reps finishes read, we think we complete
-					// Even some rep does not finish read, this unfinished rep has more key than
-					// the complete rep, which will lead to missKey inconsistency in
-					// this round of check
-					if (!reps[i].get().more) {
+				bool toCheck = true;
+				if (checkedServerIds.size() <= 1) {
+					toCheck = false;
+					if (claimRange.end == req.range.end) {
 						complete = true;
 					}
 				}
-
-				// Validation
-				claimRange = rangeToRead;
-				const GetKeyValuesReply& local = reps.back().get();
-				if (serverListValues.size() != reps.size() - 1) {
-					TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-					           "SSAuditStorageShardReplicaRepsLengthWrong",
-					           data->thisServerID)
-					    .detail("ServerListValuesSize", serverListValues.size())
-					    .detail("RepsSize", reps.size());
-					throw audit_storage_cancelled();
-				}
-				// Compare local and each remote one by one
-				// The last one of reps is local, so skip it
-				for (int repIdx = 0; repIdx < reps.size() - 1; repIdx++) {
-					const GetKeyValuesReply& remote = reps[repIdx].get();
-					// serverListValues and reps should be same order
-					if (!serverListValues[repIdx].present()) { // if not, already throw audit_storage_failed
+				if (toCheck) {
+					std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
+					// Note: getAll() must keep the order of fs
+					if (reps.size() != checkedServerIds.size()) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageShardReplicaRepIdxNotPresent",
-						           data->thisServerID)
-						    .detail("RepIdx", repIdx);
+						           "SSAuditStorageShardReplicaCheckedServerListError",
+						           data->thisServerID);
 						throw audit_storage_cancelled();
 					}
-					const StorageServerInterface& remoteServer = decodeServerListValue(serverListValues[repIdx].get());
-					Key lastKey = rangeToRead.begin;
-					const int end = std::min(local.data.size(), remote.data.size());
-					bool missingKey = local.data.size() != remote.data.size();
-					// Compare each key one by one
-					std::string error;
-					int i = 0;
-					for (; i < end; ++i) {
-						KeyValueRef remoteKV = remote.data[i];
-						KeyValueRef localKV = local.data[i];
-						if (!req.range.contains(remoteKV.key) || !req.range.contains(localKV.key)) {
-							TraceEvent(SevWarn, "SSAuditStorageShardReplicaKeyOutOfRange", data->thisServerID)
+
+					// Check read result
+					for (int i = 0; i < reps.size(); ++i) {
+						if (reps[i].isError()) {
+							TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
+							    .errorUnsuppressed(reps[i].getError())
+							    .detail("AuditID", req.id)
 							    .detail("AuditRange", req.range)
-							    .detail("RemoteServer", remoteServer.toString())
-							    .detail("LocalKey", localKV.key)
-							    .detail("RemoteKey", remoteKV.key);
-							throw wrong_shard_server();
+							    .detail("AuditType", req.type)
+							    .detail("ReplyIndex", i)
+							    .detail("RangeRead", rangeToRead)
+							    .detail("ClaimRange", claimRange);
+							throw reps[i].getError();
 						}
-						// Check if mismatch
-						if (remoteKV.key != localKV.key) {
-							error = format("Key Mismatch: local server (%016llx): %s, remote server(%016llx) %s",
-							               data->thisServerID.first(),
-							               Traceable<StringRef>::toString(localKV.key).c_str(),
-							               remoteServer.uniqueID.first(),
-							               Traceable<StringRef>::toString(remoteKV.key).c_str());
+						if (reps[i].get().error.present()) {
+							TraceEvent(SevWarn, "SSAuditStorageShardReplicaGetKeyValuesError", data->thisServerID)
+							    .errorUnsuppressed(reps[i].get().error.get())
+							    .detail("AuditID", req.id)
+							    .detail("AuditRange", req.range)
+							    .detail("AuditType", req.type)
+							    .detail("ReplyIndex", i)
+							    .detail("RangeRead", rangeToRead)
+							    .detail("ClaimRange", claimRange);
+							throw reps[i].get().error.get();
+						}
+						readBytes = readBytes + reps[i].get().data.expectedSize();
+						validatedBytes = validatedBytes + reps[i].get().data.expectedSize();
+						// If any of reps finishes read, we think we complete
+						// Even some rep does not finish read, this unfinished rep has more key than
+						// the complete rep, which will lead to missKey inconsistency in
+						// this round of check
+						if (!reps[i].get().more && claimRange.end == req.range.end) {
+							complete = true;
+						}
+					}
+
+					// Audit consistency of values read from SSes
+					const GetKeyValuesReply& reference = reps.back().get();
+					const UID& referenceServerId = checkedServerIds.back();
+					// Compare the last one with each of others one by one
+					// checkedServerIds and reps have the same order
+					for (int repIdx = 0; repIdx < reps.size() - 1; repIdx++) {
+						const GetKeyValuesReply& replication = reps[repIdx].get();
+						// serverListValues and reps should be same order
+						if (!serverListValues[repIdx].present()) { // if not, already throw audit_storage_failed
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageShardReplicaRepIdxNotPresent",
+							           data->thisServerID)
+							    .detail("RepIdx", repIdx);
+							throw audit_storage_cancelled();
+						}
+						const UID& replicationServerId = checkedServerIds[repIdx];
+						Key lastKey = claimRange.begin;
+						bool missingKey = reference.data.size() != replication.data.size();
+						// Compare each key one by one
+						std::string error;
+						int i = 0;
+						for (; i < std::min(reference.data.size(), replication.data.size()); i++) {
+							KeyValueRef replicationKV = replication.data[i];
+							KeyValueRef referenceKV = reference.data[i];
+							// Check if mismatch between reference and replication values
+							if (replicationKV.key != referenceKV.key) {
+								error = format(
+								    "Key Mismatch: reference server (%016llx): %s, replication server(%016llx) %s",
+								    referenceServerId.first(),
+								    Traceable<StringRef>::toString(referenceKV.key).c_str(),
+								    replicationServerId.first(),
+								    Traceable<StringRef>::toString(replicationKV.key).c_str());
+								TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+								    .detail("AuditId", req.id)
+								    .detail("AuditRange", req.range)
+								    .detail("ErrorMessage", error)
+								    .detail("Version", version)
+								    .detail("ClaimRange", claimRange);
+								errors.push_back(error);
+								break;
+							} else if (replicationKV.value != referenceKV.value) {
+								error = format("Value Mismatch for Key %s: reference server (%016llx): %s, replication "
+								               "server(%016llx) %s",
+								               Traceable<StringRef>::toString(referenceKV.key).c_str(),
+								               referenceServerId.first(),
+								               Traceable<StringRef>::toString(referenceKV.value).c_str(),
+								               replicationServerId.first(),
+								               Traceable<StringRef>::toString(replicationKV.value).c_str());
+								TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+								    .detail("AuditId", req.id)
+								    .detail("AuditRange", req.range)
+								    .detail("ErrorMessage", error)
+								    .detail("Version", version)
+								    .detail("ClaimRange", claimRange);
+								errors.push_back(error);
+								break;
+							} else {
+								TraceEvent(SevVerbose, "SSAuditStorageShardReplicaValidatedKey", data->thisServerID)
+								    .detail("Key", referenceKV.key);
+							}
+							++numValidatedKeys;
+							lastKey = referenceKV.key;
+						}
+						KeyRange completeRange = Standalone(KeyRangeRef(claimRange.begin, keyAfter(lastKey)));
+						claimRange = claimRange & completeRange;
+						if (!error.empty()) { // if key or value mismatch detected
+							continue; // check next replication server
+						}
+						if (!reference.more && !replication.more && reference.data.size() == replication.data.size()) {
+							continue; // reference and replication are consistent, then check next replication server
+						} else if (i >= reference.data.size() && !reference.more && i < replication.data.size()) {
+							if (!missingKey) {
+								TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+								           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+								           data->thisServerID);
+							}
+							std::string error = format(
+							    "Missing key(s) in reference server (%lld), next key: %s, replication server(%016llx) ",
+							    referenceServerId.first(),
+							    Traceable<StringRef>::toString(replication.data[i].key).c_str(),
+							    replicationServerId.first());
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 							    .detail("AuditId", req.id)
 							    .detail("AuditRange", req.range)
@@ -5615,15 +5726,18 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							    .detail("Version", version)
 							    .detail("ClaimRange", claimRange);
 							errors.push_back(error);
-							break;
-						} else if (remoteKV.value != localKV.value) {
-							error = format(
-							    "Value Mismatch for Key %s: local server (%016llx): %s, remote server(%016llx) %s",
-							    Traceable<StringRef>::toString(localKV.key).c_str(),
-							    data->thisServerID.first(),
-							    Traceable<StringRef>::toString(localKV.value).c_str(),
-							    remoteServer.uniqueID.first(),
-							    Traceable<StringRef>::toString(remoteKV.value).c_str());
+							continue; // check next replication server
+						} else if (i >= replication.data.size() && !replication.more && i < reference.data.size()) {
+							if (!missingKey) {
+								TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+								           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+								           data->thisServerID);
+							}
+							std::string error = format(
+							    "Missing key(s) in replication server (%lld), next key: %s, reference server(%016llx)",
+							    replicationServerId.first(),
+							    Traceable<StringRef>::toString(reference.data[i].key).c_str(),
+							    referenceServerId.first());
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 							    .detail("AuditId", req.id)
 							    .detail("AuditRange", req.range)
@@ -5631,79 +5745,25 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							    .detail("Version", version)
 							    .detail("ClaimRange", claimRange);
 							errors.push_back(error);
-							break;
+							continue; // check next replication server
 						} else {
-							TraceEvent(SevVerbose, "SSAuditStorageShardReplicaValidatedKey", data->thisServerID)
-							    .detail("Key", localKV.key);
+							// there should not be reachable
+							// to be conservative, we defer this part to be checked in the next round
+							// claimRange is the guard to achieve this
 						}
-						++numValidatedKeys;
-						lastKey = localKV.key;
 					}
-					KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
-					if (completeRange.empty() || claimRange.begin != completeRange.begin) {
-						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-						           "SSAuditStorageShardReplicaCompleteRangeUnexpected",
-						           data->thisServerID)
-						    .detail("ClaimRange", claimRange)
-						    .detail("CompleteRange", completeRange);
-						throw audit_storage_cancelled();
-					}
-					claimRange = claimRange & completeRange;
-					if (!error.empty()) { // if key or value mismatch detected
-						continue; // check next remote server
-					}
-					if (!local.more && !remote.more && local.data.size() == remote.data.size()) {
-						continue; // check next remote server
-					} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
-						if (!missingKey) {
-							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
-							           data->thisServerID);
-						}
-						std::string error =
-						    format("Missing key(s) form local server (%lld), next key: %s, remote server(%016llx) ",
-						           data->thisServerID.first(),
-						           Traceable<StringRef>::toString(remote.data[i].key).c_str(),
-						           remoteServer.uniqueID.first());
-						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("ErrorMessage", error)
-						    .detail("Version", version)
-						    .detail("ClaimRange", claimRange);
-						errors.push_back(error);
-						continue; // check next remote server
-					} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-						if (!missingKey) {
-							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
-							           data->thisServerID);
-						}
-						std::string error =
-						    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
-						           remoteServer.uniqueID.first(),
-						           data->thisServerID.first(),
-						           Traceable<StringRef>::toString(local.data[i].key).c_str());
-						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
-						    .detail("AuditId", req.id)
-						    .detail("AuditRange", req.range)
-						    .detail("ErrorMessage", error)
-						    .detail("Version", version)
-						    .detail("ClaimRange", claimRange);
-						errors.push_back(error);
-						continue; // check next remote server
-					}
+					TraceEvent(SevInfo, "SSAuditStorageStatisticValidateReplica", data->thisServerID)
+					    .suppressFor(30.0)
+					    .detail("AuditID", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("AuditType", req.type)
+					    .detail("AuditEngineType", req.engineType)
+					    .detail("CheckTimes", checkTimes)
+					    .detail("NumValidatedKeys", numValidatedKeys)
+					    .detail("CurrentValidatedInclusiveRange", claimRange)
+					    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end))
+					    .detail("NumSkippedReplica", numSkippedReplica);
 				}
-
-				TraceEvent(SevInfo, "SSAuditStorageStatisticValidateReplica", data->thisServerID)
-				    .suppressFor(30.0)
-				    .detail("AuditID", req.id)
-				    .detail("AuditRange", req.range)
-				    .detail("AuditType", req.type)
-				    .detail("CheckTimes", checkTimes)
-				    .detail("NumValidatedKeys", numValidatedKeys)
-				    .detail("CurrentValidatedInclusiveRange", claimRange)
-				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
 
 				// Return result
 				if (!errors.empty()) {
@@ -5754,11 +5814,13 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						TraceEvent(SevInfo, "SSAuditStorageShardReplicaComplete", data->thisServerID)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
+						    .detail("AuditEngineType", req.engineType)
 						    .detail("AuditServer", data->thisServerID)
 						    .detail("CompleteRange", res.range)
 						    .detail("CheckTimes", checkTimes)
 						    .detail("NumValidatedKeys", numValidatedKeys)
-						    .detail("ValidatedBytes", validatedBytes);
+						    .detail("ValidatedBytes", validatedBytes)
+						    .detail("NumSkippedReplica", numSkippedReplica);
 						break;
 					} else {
 						TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
@@ -5766,7 +5828,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("AuditServer", data->thisServerID)
-						    .detail("CompleteRange", res.range);
+						    .detail("AuditEngineType", req.engineType)
+						    .detail("CompleteRange", res.range)
+						    .detail("NumSkippedReplica", numSkippedReplica);
 						rangeToReadBegin = claimRange.end;
 					}
 				}
@@ -5786,7 +5850,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
-		    .detail("AuditServer", data->thisServerID);
+		    .detail("AuditServer", data->thisServerID)
+		    .detail("NumSkippedReplica", numSkippedReplica);
 		if (e.code() == error_code_audit_storage_cancelled) {
 			req.reply.sendError(audit_storage_cancelled());
 		} else if (e.code() == error_code_audit_storage_task_outdated) {

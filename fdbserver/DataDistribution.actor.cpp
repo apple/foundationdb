@@ -104,7 +104,7 @@ enum class DDAuditContext : uint8_t {
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
-	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
+	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0),
 	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
 
 	AuditStorageState coreState;
@@ -116,7 +116,6 @@ struct DDAudit {
 	bool cancelled; // use to cancel any actor beyond auditActor
 	int64_t overallIssuedDoAuditCount;
 	int64_t overallCompleteDoAuditCount;
-	int64_t overallSkippedDoAuditCount;
 	AsyncVar<int> remainingBudgetForAuditTasks;
 	DDAuditContext context;
 	std::unordered_set<UID> serversFinishedSSShardAudit; // dedicated to ssshard
@@ -356,9 +355,6 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           std::shared_ptr<DDAudit> audit,
                                           StorageServerInterface ssi,
                                           AuditStorageRequest req);
-ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
-                                    std::shared_ptr<DDAudit> audit,
-                                    KeyRange rangeToSkip);
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 public:
@@ -1893,8 +1889,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount)
 		    .detail("DDDoAuditTasksIssued", audit->overallIssuedDoAuditCount)
-		    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount)
-		    .detail("DDDoAuditTasksSkipped", audit->overallSkippedDoAuditCount);
+		    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount);
 
 		if (audit->foundError) {
 			audit->coreState.setPhase(AuditPhase::Error);
@@ -2662,41 +2657,6 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::sh
 	return Void();
 }
 
-ACTOR Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(
-    std::vector<StorageServerInterface> storageServers) {
-	state std::vector<Future<ErrorOr<KeyValueStoreType>>> storageTypeFutures;
-	state std::unordered_map<UID, KeyValueStoreType> res;
-
-	try {
-		for (int i = 0; i < storageServers.size(); i++) {
-			ReplyPromise<KeyValueStoreType> typeReply;
-			storageTypeFutures.push_back(
-			    storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
-		}
-		wait(waitForAll(storageTypeFutures));
-
-		for (int i = 0; i < storageServers.size(); i++) {
-			ErrorOr<KeyValueStoreType> reply = storageTypeFutures[i].get();
-			if (!reply.present()) {
-				TraceEvent(SevWarn, "AuditStorageFailedToGetStorageType")
-				    .error(reply.getError())
-				    .detail("StorageServer", storageServers[i].id())
-				    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False");
-			} else {
-				res[storageServers[i].id()] = reply.get();
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		}
-		TraceEvent("AuditStorageErrorGetStorageType").errorUnsuppressed(e);
-		res.clear();
-	}
-
-	return res;
-}
-
 // Partition the input range into multiple subranges according to the range ownership, and
 // schedule ha/replica audit tasks of each subrange on the server which owns the subrange
 // Automatically retry until complete or timed out
@@ -2777,56 +2737,8 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						ASSERT(phase == AuditPhase::Invalid);
 						state AuditStorageRequest req(
 						    audit->coreState.id, auditStates[auditStateIndex].range, auditType);
-						state StorageServerInterface targetServer;
-						state std::vector<StorageServerInterface> storageServersToCheck;
-						// Set req.targetServers and targetServer, which will be
-						// used to doAuditOnStorageServer
-						// Different audit types have different settings
-						if (auditType == AuditType::ValidateHA) {
-							if (rangeLocations[rangeLocationIndex].servers.size() < 2) {
-								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-								    .detail("Reason", "Single DC, ignore")
-								    .detail("AuditID", audit->coreState.id)
-								    .detail("AuditRange", audit->coreState.range)
-								    .detail("AuditType", auditType);
-								return Void();
-							}
-							// pick a server from primary DC
-							auto it = rangeLocations[rangeLocationIndex].servers.begin();
-							const int idx = deterministicRandom()->randomInt(0, it->second.size());
-							targetServer = it->second[idx];
-							storageServersToCheck.push_back(it->second[idx]);
-							++it;
-							// pick a server from each remote DC
-							for (; it != rangeLocations[rangeLocationIndex].servers.end(); ++it) {
-								const int idx = deterministicRandom()->randomInt(0, it->second.size());
-								req.targetServers.push_back(it->second[idx].id());
-								storageServersToCheck.push_back(it->second[idx]);
-							}
-						} else if (auditType == AuditType::ValidateReplica) {
-							auto it = rangeLocations[rangeLocationIndex].servers.begin(); // always compare primary DC
-							if (it->second.size() == 1) {
-								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-								    .detail("Reason", "Single replica, ignore")
-								    .detail("AuditID", audit->coreState.id)
-								    .detail("AuditRange", audit->coreState.range)
-								    .detail("AuditType", auditType);
-								return Void();
-							}
-							ASSERT(it->second.size() >= 2);
-							const int idx = deterministicRandom()->randomInt(0, it->second.size());
-							targetServer = it->second[idx];
-							storageServersToCheck.push_back(it->second[idx]);
-							for (int i = 0; i < it->second.size(); ++i) {
-								if (i == idx) {
-									continue;
-								}
-								req.targetServers.push_back(it->second[i].id());
-								storageServersToCheck.push_back(it->second[idx]);
-							}
-						} else {
-							UNREACHABLE();
-						}
+						req.ddId = self->ddId; // send this ddid to SS
+						req.engineType = audit->coreState.engineType;
 						// Set doAuditOnStorageServer
 						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 						while (audit->remainingBudgetForAuditTasks.get() == 0) {
@@ -2840,47 +2752,10 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						    .detail("Ops", "Decrease")
 						    .detail("Val", audit->remainingBudgetForAuditTasks.get())
 						    .detail("AuditType", auditType);
-
-						req.ddId = self->ddId; // send this ddid to SS
-						// Check if the shard is in any specified storage engine
-						// If yes, issue doAuditOnStorageServer
-						// Otherwise, persist progress complete
-						state bool anySpecifiedEngine = false;
-						if (audit->coreState.engineType == KeyValueStoreType::END) {
-							// Do not specify any storage engine, so check for all engine types
-							anySpecifiedEngine = true;
-						} else {
-							try {
-								std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
-								    wait(getStorageType(storageServersToCheck));
-								for (int j = 0; j < storageServersToCheck.size(); j++) {
-									auto ssStorageType = storageTypeMapping.find(storageServersToCheck[j].id());
-									if (ssStorageType != storageTypeMapping.end()) {
-										if (ssStorageType->second == audit->coreState.engineType) {
-											anySpecifiedEngine = true;
-											break;
-										}
-									}
-								}
-							} catch (Error& e) {
-								audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
-								ASSERT(audit->remainingBudgetForAuditTasks.get() <=
-								       SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-								TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-								    .detail("Loc", "scheduleAuditOnRange")
-								    .detail("Ops", "Increase")
-								    .detail("Val", audit->remainingBudgetForAuditTasks.get())
-								    .detail("AuditType", auditType);
-								throw e;
-							}
-						}
-						if (!anySpecifiedEngine) {
-							numSkippedShards++;
-							audit->actors.add(skipAuditOnRange(self, audit, auditStates[auditStateIndex].range));
-						} else {
-							issueDoAuditCount++;
-							audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
-						}
+						auto it = rangeLocations[rangeLocationIndex].servers.begin();
+						const int idx = deterministicRandom()->randomInt(0, it->second.size());
+						state StorageServerInterface targetServer = it->second[idx];
+						audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 					}
 
 					taskRangeBegin = auditStates.back().range.end;
@@ -2929,64 +2804,6 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	return Void();
 }
 
-ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
-                                    std::shared_ptr<DDAudit> audit,
-                                    KeyRange rangeToSkip) {
-	state AuditType auditType = audit->coreState.getType();
-	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica);
-	try {
-		audit->overallIssuedDoAuditCount++;
-		AuditStorageState res(audit->coreState.id, rangeToSkip, auditType);
-		res.setPhase(AuditPhase::Complete);
-		res.ddId = self->ddId;
-		wait(persistAuditStateByRange(self->txnProcessor->context(), res));
-		audit->overallSkippedDoAuditCount++;
-		TraceEvent(SevInfo, "DDSkipAuditOnRangeComplete", self->ddId)
-		    .detail("AuditID", audit->coreState.id)
-		    .detail("AuditRange", audit->coreState.range)
-		    .detail("AuditType", auditType)
-		    .detail("KeyValueStoreType", audit->coreState.engineType.toString())
-		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
-		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
-		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
-		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
-		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-		    .detail("Loc", "skipAuditOnRange")
-		    .detail("Ops", "Increase")
-		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
-		    .detail("AuditType", auditType);
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		}
-		TraceEvent(SevInfo, "DDSkipAuditOnRangeError", self->ddId)
-		    .errorUnsuppressed(e)
-		    .detail("AuditID", audit->coreState.id)
-		    .detail("AuditRange", audit->coreState.range)
-		    .detail("AuditType", auditType)
-		    .detail("KeyValueStoreType", audit->coreState.engineType.toString())
-		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
-		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
-		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
-		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
-		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
-		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-		    .detail("Loc", "skipAuditOnRange")
-		    .detail("Ops", "Increase")
-		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
-		    .detail("AuditType", auditType);
-		if (e.code() == error_code_audit_storage_cancelled || e.code() == error_code_audit_storage_task_outdated) {
-			throw e;
-		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-			throw audit_storage_failed();
-		} else {
-			audit->actors.add(scheduleAuditOnRange(self, audit, rangeToSkip));
-		}
-	}
-	return Void();
-}
-
 // Request SS to do the audit
 // This actor is the only interface to SS to do the audit for
 // all audit types
@@ -3005,8 +2822,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	    .detail("StorageServer", ssi.toString())
 	    .detail("TargetServers", describe(req.targetServers))
 	    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
-	    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
-	    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
+	    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
 
 	try {
 		audit->overallIssuedDoAuditCount++;
@@ -3024,8 +2840,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("StorageServer", ssi.toString())
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
-		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
-		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
+		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
@@ -3046,8 +2861,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("StorageServer", ssi.toString())
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
-		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount)
-		    .detail("DDDoAuditTaskSkip", audit->overallSkippedDoAuditCount);
+		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
 		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
 		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
