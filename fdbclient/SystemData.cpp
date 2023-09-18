@@ -693,6 +693,18 @@ const KeyRangeRef tssMismatchKeys("\xff/tssMismatch/"_sr, "\xff/tssMismatch0"_sr
 const KeyRef serverMetadataChangeKey = "\xff\x02/serverMetadataChanges"_sr;
 const KeyRangeRef serverMetadataKeys("\xff/serverMetadata/"_sr, "\xff/serverMetadata0"_sr);
 
+UID decodeServerMetadataKey(const KeyRef& key) {
+	// Key is packed by KeyBackedObjectMap::packKey
+	return TupleCodec<UID>::unpack(key.removePrefix(serverMetadataKeys.begin));
+}
+
+StorageMetadataType decodeServerMetadataValue(const KeyRef& value) {
+	StorageMetadataType type;
+	ObjectReader rd(value.begin(), IncludeVersion());
+	rd.deserialize(type);
+	return type;
+}
+
 const KeyRangeRef serverTagKeys("\xff/serverTag/"_sr, "\xff/serverTag0"_sr);
 
 const KeyRef serverTagPrefix = serverTagKeys.begin;
