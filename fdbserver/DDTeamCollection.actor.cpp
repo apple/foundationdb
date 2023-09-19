@@ -2406,11 +2406,8 @@ public:
 				} else {
 					std::vector<std::pair<Optional<Value>, Optional<Value>>> localityKeyValues =
 					    ParsePerpetualStorageWiggleLocality(self->configuration.perpetualStorageWiggleLocality);
-					for (const auto& [localityKey, localityValue] : localityKeyValues) {
-						if (candidateWorker.worker.locality.get(localityKey.get()) == localityValue) {
-							isr.storeType = self->configuration.perpetualStoreType;
-							break;
-						}
+					if (localityMatchInList(localityKeyValues, candidateWorker.worker.locality)) {
+						isr.storeType = self->configuration.perpetualStoreType;
 					}
 				}
 			}
@@ -2976,12 +2973,9 @@ public:
 			if (!localityKeyValues.empty()) {
 				// Whether the selected server matches the locality
 				auto server = teamCollection->server_info.at(id.get());
-
-				for (const auto& [localityKey, localityValue] : localityKeyValues) {
-					// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
-					if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
-						return id.get();
-					}
+				// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
+				if (localityMatchInList(localityKeyValues, server->getLastKnownInterface().locality)) {
+					return id.get();
 				}
 
 				if (wiggler->empty()) {
