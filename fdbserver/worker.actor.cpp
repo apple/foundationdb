@@ -3801,7 +3801,7 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 namespace {
 KeyValueStoreType randomStoreType() {
 	int type = deterministicRandom()->randomInt(0, (int)KeyValueStoreType::END);
-	if (type == KeyValueStoreType::NONE) {
+	if (type == KeyValueStoreType::NONE || type == KeyValueStoreType::SSD_REDWOOD_V1) {
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	}
 #ifndef WITH_ROCKSDB

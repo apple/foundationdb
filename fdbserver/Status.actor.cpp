@@ -114,12 +114,9 @@ extern const char* limitReasonDesc[];
 
 typedef std::map<std::string, TraceEventFields> EventMap;
 
-struct StorageServerStatusInfo : public StorageServerInterface {
-	Optional<StorageMetadataType> metadata;
+struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	EventMap eventMap;
-	StorageServerStatusInfo(const StorageServerInterface& interface,
-	                        Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
-	  : StorageServerInterface(interface), metadata(metadata) {}
+	StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
@@ -1979,43 +1976,6 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 	return results;
 }
 
-ACTOR
-static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetadata(Database cx,
-                                                                                    bool use_system_priority) {
-	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
-	                                                                                           IncludeVersion());
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state std::vector<StorageServerStatusInfo> servers;
-	loop {
-		try {
-			servers.clear();
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			if (use_system_priority) {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			}
-			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-			servers.reserve(serverList.size());
-			for (int i = 0; i < serverList.size(); i++) {
-				servers.push_back(StorageServerStatusInfo(decodeServerListValue(serverList[i].value)));
-			}
-			state std::vector<Future<Void>> futures(servers.size());
-			for (int i = 0; i < servers.size(); ++i) {
-				futures[i] = store(servers[i].metadata, metadataMap.get(tr, servers[i].id()));
-				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
-			}
-			wait(waitForAll(futures));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-	return servers;
-}
-
 namespace {
 
 const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics",
@@ -2027,11 +1987,14 @@ const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics",
 } // namespace
 
 ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
-    Database cx,
+    std::vector<StorageServerMetaInfo> storageMetadatas,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     WorkerDetails rkWorker) {
-	state std::vector<StorageServerStatusInfo> servers =
-	    wait(timeoutError(readStorageInterfaceAndMetadata(cx, true), 5.0));
+	state std::vector<StorageServerStatusInfo> servers;
+	servers.reserve(storageMetadatas.size());
+	for (const auto& meta : storageMetadatas) {
+		servers.push_back(StorageServerStatusInfo(meta));
+	}
 	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
 	wait(store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST)));
 	for (int i = 0; i < results.size(); ++i) {
@@ -3062,6 +3025,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Database cx,
     std::vector<WorkerDetails> workers,
     std::vector<ProcessIssues> workerIssues,
+    std::vector<StorageServerMetaInfo> storageMetadatas,
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
@@ -3326,7 +3290,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			state Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture =
-			    errorOr(getStorageServerStatusInfos(cx, address_workers, rkWorker));
+			    errorOr(getStorageServerStatusInfos(storageMetadatas, address_workers, rkWorker));
 			state Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
 			    errorOr(getTLogsAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
