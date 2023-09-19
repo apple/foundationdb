@@ -163,8 +163,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_1_LEFT,                                  800 );
 	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
-	init( PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG,                  940 );
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
+	init( PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG,                  960 );
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );

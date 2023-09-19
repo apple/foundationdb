@@ -1099,6 +1099,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 
+	if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+		TraceEvent(SevInfo, "DDRelocatorForManualShardSplit").detail("Range", rd.keys);
+	}
+
 	try {
 		if (now() - self->lastInterval < 1.0) {
 			relocateShardInterval.severity = SevDebug;
