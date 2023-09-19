@@ -176,14 +176,14 @@ public:
 		});
 	}
 
-	int64_t getLongestStorageQueueSize() const override {
+	Optional<int64_t> getLongestStorageQueueSize() const override {
 		int64_t maxQueueSize = 0;
 		for (const auto& team : teams) {
-			int64_t queueSize = team->getLongestStorageQueueSize();
-			if (queueSize == -1) {
-				return -1;
+			Optional<int64_t> queueSize = team->getLongestStorageQueueSize();
+			if (!queueSize.present()) {
+				return Optional<int64_t>();
 			}
-			maxQueueSize = std::max(maxQueueSize, queueSize);
+			maxQueueSize = std::max(maxQueueSize, queueSize.get());
 		}
 		return maxQueueSize;
 	}

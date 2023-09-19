@@ -194,7 +194,7 @@ public:
 
 	int64_t getDataInFlightToTeam() const override;
 
-	int64_t getLongestStorageQueueSize() const override;
+	Optional<int64_t> getLongestStorageQueueSize() const override;
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 

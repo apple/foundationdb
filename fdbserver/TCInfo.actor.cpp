@@ -360,13 +360,13 @@ int64_t TCTeamInfo::getDataInFlightToTeam() const {
 	return dataInFlight;
 }
 
-int64_t TCTeamInfo::getLongestStorageQueueSize() const {
+Optional<int64_t> TCTeamInfo::getLongestStorageQueueSize() const {
 	int64_t longestQueueSize = 0;
 	for (const auto& server : servers) {
 		if (server->metricsPresent()) {
 			longestQueueSize = std::max(longestQueueSize, server->getStorageQueueSize());
-		} else if (server->ssVersionTooFarBehind.get() == true) {
-			return -1;
+		} else {
+			return Optional<int64_t>();
 		}
 	}
 	return longestQueueSize;

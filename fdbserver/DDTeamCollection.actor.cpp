@@ -266,10 +266,11 @@ public:
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
 						if (req.storageQueueAware) {
-							int64_t storageQueueSize = self->teams[currentIndex]->getLongestStorageQueueSize();
-							if (storageQueueSize == -1) {
+							Optional<int64_t> storageQueueSize =
+							    self->teams[currentIndex]->getLongestStorageQueueSize();
+							if (!storageQueueSize.present()) {
 								continue; // this SS may not healthy, skip
-							} else if (storageQueueSize > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+							} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
 								continue; // this SS storage queue is too long, skip
 							}
 						}
@@ -317,10 +318,10 @@ public:
 					                ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));
 
 					if (req.storageQueueAware) {
-						int64_t storageQueueSize = dest->getLongestStorageQueueSize();
-						if (storageQueueSize == -1) {
+						Optional<int64_t> storageQueueSize = dest->getLongestStorageQueueSize();
+						if (!storageQueueSize.present()) {
 							ok = false; // this SS may not healthy, skip
-						} else if (storageQueueSize > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+						} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
 							ok = false; // this SS storage queue is too long, skip
 						}
 					}
