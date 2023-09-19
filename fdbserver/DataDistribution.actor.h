@@ -101,8 +101,8 @@ struct GetTeamRequest {
 	std::string getDesc() const {
 		std::stringstream ss;
 
-		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest << "StorageQueueAware"
-		   << storageQueueAware << " PreferLowerUtilization:" << preferLowerUtilization
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
+		   << " StorageQueueAware:" << storageQueueAware << " PreferLowerUtilization:" << preferLowerUtilization
 		   << " teamMustHaveShards:" << teamMustHaveShards << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
