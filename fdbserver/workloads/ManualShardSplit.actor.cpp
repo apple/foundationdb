@@ -58,9 +58,9 @@ struct ManualShardSplitWorkload : TestWorkload {
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
 
 		Version ver = wait(self->populateData(self, cx, &kvs));
-		KeyRange range = KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr);
-		std::vector<Key> splitPoints = { "TestKeyB"_sr };
-		wait(moveShard(cx->getConnectionRecord(), range, splitPoints));
+		state std::vector<Key> splitPoints = {};
+		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr), splitPoints));
+		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr), splitPoints));
 		return Void();
 	}
 
