@@ -1796,6 +1796,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 			choose {
 				when(RelocateShard rs = waitNext(self.input)) {
+					if (rs.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+						TraceEvent(SevInfo, "ShardRelocatorByManualSplit", self.distributorId).detail("Range", rs.keys);
+					}
 					bool wasEmpty = serversToLaunchFrom.empty();
 					self.queueRelocation(rs, serversToLaunchFrom);
 					if (wasEmpty && !serversToLaunchFrom.empty())

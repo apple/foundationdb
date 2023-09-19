@@ -1035,7 +1035,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 						it->value().shouldManualSplit->set(true);
 					} else {
 						// Trigger data move for this shard
-						
+						self.output.send(
+						    RelocateShard(it->range(), SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG));
 					}
 				}
 				req.reply.send(SplitShardReply());
