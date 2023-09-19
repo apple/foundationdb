@@ -154,14 +154,17 @@ struct DistributorExclusionSafetyCheckRequest {
 struct DistributorSplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 1384441;
 	std::vector<Key> splitPoints;
+	KeyRange range;
 	ReplyPromise<SplitShardReply> reply;
 
 	DistributorSplitRangeRequest() {}
 	explicit DistributorSplitRangeRequest(std::vector<Key> splitPoints) : splitPoints{ std::move(splitPoints) } {}
+	explicit DistributorSplitRangeRequest(KeyRange range, std::vector<Key> splitPoints)
+	  : splitPoints(splitPoints), range(range) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, splitPoints, reply);
+		serializer(ar, splitPoints, reply, range);
 	}
 };
 

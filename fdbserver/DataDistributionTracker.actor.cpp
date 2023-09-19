@@ -927,6 +927,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
@@ -966,6 +967,13 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 			}
 			when(GetMetricsListRequest req = waitNext(getShardMetricsList.getFuture())) {
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));
+			}
+			when(DistributorSplitRangeRequest req = waitNext(manualShardSplit.getFuture())) {
+				TraceEvent(SevInfo, "DDSplitRange", self.distributorId)
+				    .detail("Range", req.range)
+				    .detail("SplitPoints", describe(req.splitPoints));
+				req.reply.send(SplitShardReply());
+				// TODO
 			}
 			when(wait(self.sizeChanges.getResult())) {}
 		}

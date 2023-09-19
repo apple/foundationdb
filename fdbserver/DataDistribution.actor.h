@@ -253,6 +253,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,

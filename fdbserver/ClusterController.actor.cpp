@@ -2034,6 +2034,28 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 	}
 }
 
+ACTOR Future<Void> triggerMoveShards(ClusterControllerData* self, MoveShardRequest req) {
+	try {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		       !self->db.serverInfo->get().distributor.present()) {
+			wait(self->db.serverInfo->onChange());
+		}
+		DistributorSplitRangeRequest fReq(req.shard, req.splitPoints);
+		SplitShardReply rep = wait(self->db.serverInfo->get().distributor.get().distributorSplitRange.getReply(fReq));
+		req.reply.send(Void());
+	} catch (Error& e) {
+		req.reply.sendError(e);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> handleMoveShards(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	loop {
+		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
+		self->addActor.send(triggerMoveShards(self, req));
+	}
+}
+
 struct SingletonRecruitThrottler {
 	double lastRecruitStart;
 
@@ -2665,6 +2687,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
+	self.addActor.send(handleMoveShards(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));

@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'ManualShardSplit'
+useDB = true
+
+    [[test.workload]]
+    testName = 'ManualShardSplit'

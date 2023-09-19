@@ -241,6 +241,7 @@ set(FDBSERVER_SRCS
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
+  workloads/ManualShardSplit.actor.cpp
   workloads/Mako.actor.cpp
   workloads/MemoryKeyValueStore.cpp
   workloads/MemoryKeyValueStore.h

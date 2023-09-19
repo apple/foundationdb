@@ -516,6 +516,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> cons
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                    PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
                                     const DDEnabledState* ddEnabledState) {
 	state double lastLimited = 0;
 	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
@@ -734,6 +735,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            shardsAffectedByTeamFailure,
 			                                                            getShardMetrics,
 			                                                            getShardMetricsList,
+			                                                            manualShardSplit,
 			                                                            getAverageShardBytes.getFuture(),
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
@@ -1254,10 +1256,23 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
+ACTOR Future<Void> ddSplitRange(DistributorSplitRangeRequest req,
+                                PromiseStream<DistributorSplitRangeRequest> manualShardSplit) {
+	ErrorOr<SplitShardReply> result = wait(errorOr(
+	    brokenPromiseToNever(manualShardSplit.getReply(DistributorSplitRangeRequest(req.range, req.splitPoints)))));
+	if (result.isError()) {
+		req.reply.sendError(result.getError());
+	} else {
+		req.reply.send(result.get());
+	}
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Reference<DataDistributorData> self(new DataDistributorData(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
+	state PromiseStream<DistributorSplitRangeRequest> manualShardSplit;
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
@@ -1269,7 +1284,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 		self->addActor.send(cacheServerWatcher(&cx));
 		state Future<Void> distributor =
-		    reportErrorsExcept(dataDistribution(self, getShardMetricsList, &ddEnabledState),
+		    reportErrorsExcept(dataDistribution(self, getShardMetricsList, manualShardSplit, &ddEnabledState),
 		                       "DataDistribution",
 		                       di.id(),
 		                       &normalDataDistributorErrors());
@@ -1293,6 +1308,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
+			}
+			when(DistributorSplitRangeRequest splitRangeReq = waitNext(di.distributorSplitRange.getFuture())) {
+				actors.add(ddSplitRange(splitRangeReq, manualShardSplit));
 			}
 		}
 	} catch (Error& err) {

@@ -264,6 +264,7 @@ struct MoveShardRequest {
 	constexpr static FileIdentifier file_identifier = 2799592;
 
 	KeyRange shard;
+	std::vector<Key> splitPoints;
 	std::vector<NetworkAddress> addresses;
 	ReplyPromise<Void> reply;
 
@@ -271,9 +272,11 @@ struct MoveShardRequest {
 	MoveShardRequest(KeyRange shard, std::vector<NetworkAddress> addresses)
 	  : shard{ std::move(shard) }, addresses{ std::move(addresses) } {}
 
+	MoveShardRequest(KeyRange shard, std::vector<Key> splitPoints) : shard(shard), splitPoints(splitPoints) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, shard, addresses, reply);
+		serializer(ar, shard, addresses, reply, splitPoints);
 	}
 };
 
