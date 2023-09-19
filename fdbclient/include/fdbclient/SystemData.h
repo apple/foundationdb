@@ -219,6 +219,12 @@ extern const KeyRangeRef tssMismatchKeys;
 // Note: storageInterfaceUID is the one stated in the file name
 extern const KeyRangeRef serverMetadataKeys;
 
+// Any update to serverMetadataKeys will update this key to a random UID.
+extern const KeyRef serverMetadataChangeKey;
+
+UID decodeServerMetadataKey(const KeyRef&);
+StorageMetadataType decodeServerMetadataValue(const KeyRef&);
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.

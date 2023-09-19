@@ -260,6 +260,14 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 	StorageInfo() : tag(invalidTag) {}
 };
 
+struct StorageServerMetaInfo : public StorageServerInterface {
+	Optional<StorageMetadataType> metadata;
+
+	StorageServerMetaInfo(const StorageServerInterface& interface,
+	                      Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
+	  : StorageServerInterface(interface), metadata(metadata) {}
+};
+
 struct ServerCacheInfo {
 	std::vector<Tag> tags; // all tags in both primary and remote DC for the key-range
 	std::vector<Reference<StorageInfo>> src_info;
