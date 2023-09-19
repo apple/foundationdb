@@ -305,18 +305,29 @@ struct Busyness {
 
 // find the "workFactor" for this, were it launched now
 int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
+	int res = 0;
 	if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 	    relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
-		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
-		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		res = WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
-		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		res = WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+	if (relocation.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_LONG_SSQUEUE_MOVE),
+		               WORK_FULL_UTILIZATION);
+	}
+	return res;
 }
 
-int getDestWorkFactor() {
+int getDestWorkFactor(int priority) {
 	// Work of moving a shard is even across destination servers
-	return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	int res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	if (priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_LONG_SSQUEUE_MOVE),
+		               WORK_FULL_UTILIZATION);
+	}
+	return res;
 }
 
 // Data movement's resource control: Do not overload servers used for the RelocateData
@@ -366,7 +377,7 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
 		return true;
 	}
-	int workFactor = getDestWorkFactor();
+	int workFactor = getDestWorkFactor(priority);
 	for (auto& team : candidateTeams) {
 		for (UID id : team.first->getServerIDs()) {
 			if (!busymapDest[id].canLaunch(priority, workFactor)) {
@@ -389,7 +400,7 @@ void launchDest(RelocateData& relocation,
                 const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
                 std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.completeDests.empty());
-	int destWorkFactor = getDestWorkFactor();
+	int destWorkFactor = getDestWorkFactor(relocation.priority);
 	for (auto& team : candidateTeams) {
 		for (UID id : team.first->getServerIDs()) {
 			relocation.completeDests.push_back(id);
@@ -399,7 +410,7 @@ void launchDest(RelocateData& relocation,
 }
 
 void completeDest(const RelocateData& relocation, std::map<UID, Busyness>& destBusymap) {
-	int destWorkFactor = getDestWorkFactor();
+	int destWorkFactor = getDestWorkFactor(relocation.priority);
 	for (UID id : relocation.completeDests) {
 		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
 	}
