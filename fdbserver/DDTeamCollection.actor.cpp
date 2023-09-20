@@ -3007,10 +3007,9 @@ public:
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
 			if (!localityKeyValues.empty()) {
-				for (const auto& [localityKey, localityValue] : localityKeyValues) {
-					if (self->server_info.count(res.begin()->first)) {
-						auto server = self->server_info.at(res.begin()->first);
-
+				if (self->server_info.count(res.begin()->first)) {
+					auto server = self->server_info.at(res.begin()->first);
+					for (const auto& [localityKey, localityValue] : localityKeyValues) {
 						// Update the wigglingId only if it matches the locality.
 						if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
 							self->wigglingId = res.begin()->first;
