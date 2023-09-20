@@ -126,7 +126,12 @@ foreach(ft flow flow_sampling flowlinktest)
     endif()
 endforeach()
 
-add_executable(acac acac.cpp)
+if(OPEN_FOR_IDE)
+	# AcAC requires actor transpiler
+    add_library(acac OBJECT acac.cpp)
+else()
+    add_executable(acac acac.cpp)
+endif()
 target_link_libraries(acac PUBLIC flow boost_target_program_options)
 
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
