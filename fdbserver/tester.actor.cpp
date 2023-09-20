@@ -352,7 +352,7 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
-	std::cout << "Create: " << testName.toString() << "\n";
+
 	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());

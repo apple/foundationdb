@@ -2040,7 +2040,7 @@ ACTOR Future<Void> triggerMoveShards(ClusterControllerData* self, MoveShardReque
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
-		DistributorSplitRangeRequest fReq(req.shard, req.splitPoints);
+		DistributorSplitRangeRequest fReq({ req.shard.begin, req.shard.end });
 		SplitShardReply rep = wait(self->db.serverInfo->get().distributor.get().distributorSplitRange.getReply(fReq));
 		req.reply.send(Void());
 	} catch (Error& e) {

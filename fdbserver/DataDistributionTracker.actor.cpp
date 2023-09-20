@@ -1017,18 +1017,28 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));
 			}
 			when(DistributorSplitRangeRequest req = waitNext(manualShardSplit.getFuture())) {
-				TraceEvent(SevInfo, "DDSplitRange", self.distributorId)
-				    .detail("Range", req.range)
-				    .detail("SplitPoints", describe(req.splitPoints));
-				for (auto it : self.shards.intersectingRanges(req.range)) {
+				if (req.splitPoints.size() != 2) {
+					TraceEvent(SevWarn, "DDSplitRangeWrongInputSize", self.distributorId)
+					    .detail("SplitPoints", req.splitPoints);
+					req.reply.sendError(not_implemented());
+					continue;
+				} else if (req.splitPoints[0] == req.splitPoints[1]) {
+					TraceEvent(SevWarn, "DDSplitRangeEmptyInputRange", self.distributorId)
+					    .detail("SplitPoints", req.splitPoints);
+					req.reply.sendError(not_implemented());
+					continue;
+				}
+				TraceEvent(SevInfo, "DDSplitRangeStart", self.distributorId).detail("SplitPoints", req.splitPoints);
+				KeyRange inputRange = req.splitPoints[0] < req.splitPoints[1]
+				                          ? KeyRangeRef(req.splitPoints[0], req.splitPoints[1])
+				                          : KeyRangeRef(req.splitPoints[1], req.splitPoints[0]);
+				for (auto it : self.shards.intersectingRanges(inputRange)) {
 					bool triggerManualSplitShard = false;
-					if (it->range().begin < req.range.begin && req.range.begin < it->range().end) {
-						triggerManualSplitShard = true;
-						it->value().manualSplitPoints->push_back(req.range.begin);
-					}
-					if (it->range().begin < req.range.end && req.range.end < it->range().end) {
-						triggerManualSplitShard = true;
-						it->value().manualSplitPoints->push_back(req.range.end);
+					for (const auto& splitPoint : req.splitPoints) {
+						if (it->range().begin < splitPoint && splitPoint < it->range().end) {
+							triggerManualSplitShard = true;
+							it->value().manualSplitPoints->push_back(splitPoint);
+						}
 					}
 					if (triggerManualSplitShard) {
 						// Trigger split for this shard

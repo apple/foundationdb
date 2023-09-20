@@ -1,5 +1,5 @@
 /*
- * redistribute.actor.cpp
+ * RedistributeCommand.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,18 +18,8 @@
  * limitations under the License.
  */
 
-#include <cinttypes>
-
 #include "fdbcli/fdbcli.actor.h"
-
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/IClientApi.h"
-
-#include "fdbclient/Knobs.h"
-#include "flow/Arena.h"
-#include "flow/FastRef.h"
-#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -40,7 +30,7 @@ ACTOR Future<bool> redistributeCommandActor(Reference<IClusterConnectionRecord> 
 	if (tokens.size() == 3) {
 		Key begin = tokens[1];
 		Key end = tokens[2];
-		wait(moveShard(clusterFile, KeyRangeRef(begin, end), {}));
+		wait(moveShard(clusterFile, KeyRangeRef(begin, end)));
 	} else {
 		printUsage(tokens[0]);
 		result = false;

@@ -20,15 +20,9 @@
 
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/QuietDatabase.h"
-#include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
-#include "flow/flow.h"
-#include <cstdint>
-#include <limits>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ManualShardSplitWorkload : TestWorkload {
@@ -58,9 +52,8 @@ struct ManualShardSplitWorkload : TestWorkload {
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
 
 		Version ver = wait(self->populateData(self, cx, &kvs));
-		state std::vector<Key> splitPoints = {};
-		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr), splitPoints));
-		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr), splitPoints));
+		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr)));
+		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr)));
 		return Void();
 	}
 

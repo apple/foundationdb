@@ -2342,18 +2342,16 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile,
-                             KeyRange range,
-                             std::vector<Key> splitPoints) {
+ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile, KeyRange range) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
 	loop {
 		choose {
-			when(wait(clusterInterface->get().present()
-			              ? brokenPromiseToNever(
-			                    clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range, splitPoints)))
-			              : Never())) {
+			when(wait(
+			    clusterInterface->get().present()
+			        ? brokenPromiseToNever(clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range)))
+			        : Never())) {
 				return Void();
 			}
 			when(wait(clusterInterface->onChange())) {}

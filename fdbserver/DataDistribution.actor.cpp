@@ -1258,8 +1258,8 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 
 ACTOR Future<Void> ddSplitRange(DistributorSplitRangeRequest req,
                                 PromiseStream<DistributorSplitRangeRequest> manualShardSplit) {
-	ErrorOr<SplitShardReply> result = wait(errorOr(
-	    brokenPromiseToNever(manualShardSplit.getReply(DistributorSplitRangeRequest(req.range, req.splitPoints)))));
+	ErrorOr<SplitShardReply> result =
+	    wait(errorOr(brokenPromiseToNever(manualShardSplit.getReply(DistributorSplitRangeRequest(req.splitPoints)))));
 	if (result.isError()) {
 		req.reply.sendError(result.getError());
 	} else {

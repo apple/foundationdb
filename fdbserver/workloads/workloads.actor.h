@@ -108,7 +108,6 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	static Reference<TestWorkload> create(std::string const& name, WorkloadContext const& wcx) {
 		auto it = factories().find(name);
 		if (it == factories().end()) {
-			std::cout << "factory does not find the name\n";
 			return {}; // or throw?
 		}
 		return it->second->create(wcx);
