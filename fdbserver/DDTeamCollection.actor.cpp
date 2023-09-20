@@ -3037,7 +3037,7 @@ public:
 			}
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
-                        if (!localityKeyValues.empty()) {
+			if (!localityKeyValues.empty()) {
 				if (self->server_info.count(res.begin()->first)) {
 					auto server = self->server_info.at(res.begin()->first);
 					for (const auto& [localityKey, localityValue] : localityKeyValues) {
