@@ -95,6 +95,8 @@ def collect_syms(f):
         elif toc is not None:
             sym = parse_row(words, toc, ["Value"])
             name = sym["Name"]
+            if not name:
+                continue
             if name in syms_set:
                 continue
             syms_set.add(name)
@@ -115,6 +117,7 @@ def collect_syms(f):
     # Also collected demangled names
     if syms:
         out, _ = run(["c++filt"], "\n".join((sym["Name"] for sym in syms)))
+        out = out.rstrip("\n")  # Some c++filts append newlines at the end
         for i, name in enumerate(out.split("\n")):
             syms[i]["Demangled Name"] = name
 
