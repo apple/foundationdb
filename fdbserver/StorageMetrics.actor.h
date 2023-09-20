@@ -435,7 +435,9 @@ struct StorageServerMetrics {
 	                       StorageBytes sb,
 	                       double bytesInputRate,
 	                       int64_t versionLag,
-	                       double lastUpdate) const {
+	                       double lastUpdate,
+	                       int64_t bytesDurable,
+	                       int64_t bytesInput) const {
 		GetStorageMetricsReply rep;
 
 		// SOMEDAY: make bytes dynamic with hard disk space
@@ -464,6 +466,8 @@ struct StorageServerMetrics {
 
 		rep.versionLag = versionLag;
 		rep.lastUpdate = lastUpdate;
+		rep.bytesDurable = bytesDurable;
+		rep.bytesInput = bytesInput;
 
 		req.reply.send(rep);
 	}

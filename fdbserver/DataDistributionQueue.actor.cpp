@@ -176,6 +176,18 @@ public:
 		});
 	}
 
+	Optional<int64_t> getLongestStorageQueueSize() const override {
+		int64_t maxQueueSize = 0;
+		for (const auto& team : teams) {
+			Optional<int64_t> queueSize = team->getLongestStorageQueueSize();
+			if (!queueSize.present()) {
+				return Optional<int64_t>();
+			}
+			maxQueueSize = std::max(maxQueueSize, queueSize.get());
+		}
+		return maxQueueSize;
+	}
+
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (const auto& team : teams) {
@@ -1128,6 +1140,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
+					req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.

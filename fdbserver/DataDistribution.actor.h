@@ -46,6 +46,7 @@ struct IDataDistributionTeam {
 	virtual std::vector<UID> const& getServerIDs() const = 0;
 	virtual void addDataInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
+	virtual Optional<int64_t> getLongestStorageQueueSize() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
@@ -79,6 +80,7 @@ struct IDataDistributionTeam {
 struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
+	bool storageQueueAware;
 	bool preferLowerUtilization;
 	bool teamMustHaveShards;
 	double inflightPenalty;
@@ -92,15 +94,16 @@ struct GetTeamRequest {
 	               bool preferLowerUtilization,
 	               bool teamMustHaveShards,
 	               double inflightPenalty = 1.0)
-	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), storageQueueAware(false),
+	    preferLowerUtilization(preferLowerUtilization), teamMustHaveShards(teamMustHaveShards),
+	    inflightPenalty(inflightPenalty) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << " inflightPenalty:" << inflightPenalty << ";";
+		   << " StorageQueueAware:" << storageQueueAware << " PreferLowerUtilization:" << preferLowerUtilization
+		   << " teamMustHaveShards:" << teamMustHaveShards << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
