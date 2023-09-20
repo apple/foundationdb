@@ -185,6 +185,9 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
                                     bool printWarning = false,
                                     bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// redistributed command
+ACTOR Future<bool> redistributeCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                            std::vector<StringRef> tokens);
 // profile command
 ACTOR Future<bool> profileCommandActor(Database db,
                                        Reference<ITransaction> tr,

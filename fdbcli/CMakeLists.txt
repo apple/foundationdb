@@ -20,6 +20,7 @@ set(FDBCLI_SRCS
   LockCommand.actor.cpp
   ChangeFeedCommand.actor.cpp
   MaintenanceCommand.actor.cpp
+  RedistributeCommand.actor.cpp
   ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
