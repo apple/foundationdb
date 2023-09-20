@@ -28,9 +28,9 @@
 TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	for (uint8_t et = 0; et < EncodingType::MAX_ENCODING_TYPE; et++) {
-		constexpr int PAGE_SIZE = 8 * 1024;
+		constexpr int _PAGE_SIZE = 8 * 1024;
 		EncodingType encodingType = (EncodingType)et;
-		Reference<ArenaPage> page = makeReference<ArenaPage>(PAGE_SIZE, PAGE_SIZE);
+		Reference<ArenaPage> page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
 		page->init(encodingType, PageType::BTreeNode, 1);
 		deterministicRandom()->randomBytes(page->mutateData(), page->dataSize());
 		PhysicalPageID pageID = deterministicRandom()->randomUInt32();
