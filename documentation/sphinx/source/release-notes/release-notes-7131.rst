@@ -193,4 +193,10 @@ Change Log
 * https://github.com/apple/foundationdb/pull/10608 
 * https://github.com/apple/foundationdb/pull/10587 
 * https://github.com/apple/foundationdb/pull/10634 
-* https://github.com/apple/foundationdb/pull/10649 
+* https://github.com/apple/foundationdb/pull/10649
+
+
+Earlier release notes
+---------------------
+
+* :doc:`71.3.0 (API Version 710300) </release-notes/release-notes-7130>`

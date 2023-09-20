@@ -71,6 +71,6 @@ Change Log
 Earlier release notes
 ---------------------
 
-* :doc:`71.3.0 (API Version 700) </release-notes/release-notes-7130>`
-* :doc:`71.3.1 (API Version 700) </release-notes/release-notes-7131>`
-* :doc:`71.3.2 (API Version 700) </release-notes/release-notes-7132>`
+* :doc:`71.3.2 (API Version 710300) </release-notes/release-notes-7132>`
+* :doc:`71.3.1 (API Version 710300) </release-notes/release-notes-7131>`
+* :doc:`71.3.0 (API Version 710300) </release-notes/release-notes-7130>`
