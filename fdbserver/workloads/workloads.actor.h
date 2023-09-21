@@ -107,9 +107,8 @@ struct KVWorkload : TestWorkload {
 struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	static Reference<TestWorkload> create(std::string const& name, WorkloadContext const& wcx) {
 		auto it = factories().find(name);
-		if (it == factories().end()) {
+		if (it == factories().end())
 			return {}; // or throw?
-		}
 		return it->second->create(wcx);
 	}
 	static std::map<std::string, Reference<IWorkloadFactory>>& factories() {

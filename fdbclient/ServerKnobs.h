@@ -128,7 +128,7 @@ public:
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
-	double RELOCATION_WORK_AMPLIFIER_FOR_LONG_SSQUEUE_MOVE;
+	double RELOCATION_WORK_AMPLIFIER_FOR_MANUAL_SHARD_SPLIT;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -162,7 +162,7 @@ public:
 	int PRIORITY_TEAM_1_LEFT;
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
-	int PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG; // Priority when a server has a long storage queue
+	int PRIORITY_MANUAL_SHARD_SPLIT; // Priority when a server has a long storage queue
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution

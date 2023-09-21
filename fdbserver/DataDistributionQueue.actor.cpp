@@ -313,8 +313,8 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 		res = WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
 		res = WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
-	if (relocation.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
-		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_LONG_SSQUEUE_MOVE),
+	if (relocation.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
+		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_MANUAL_SHARD_SPLIT),
 		               WORK_FULL_UTILIZATION);
 	}
 	return res;
@@ -323,8 +323,8 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 int getDestWorkFactor(int priority) {
 	// Work of moving a shard is even across destination servers
 	int res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
-	if (priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
-		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_LONG_SSQUEUE_MOVE),
+	if (priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
+		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_MANUAL_SHARD_SPLIT),
 		               WORK_FULL_UTILIZATION);
 	}
 	return res;
@@ -960,7 +960,7 @@ struct DDQueueData {
 		for (; it != combined.end(); it++) {
 			RelocateData rd(*it);
 
-			if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+			if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 				TraceEvent(SevInfo, "ManualShardSplitLaunchCombinedWork").detail("Range", rd.keys);
 			}
 
@@ -982,7 +982,7 @@ struct DDQueueData {
 
 			if (overlappingInFlight) {
 				// logRelocation( rd, "SkippingOverlappingInFlight" );
-				if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+				if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 					TraceEvent(SevWarn, "ManualShardSplitSkipForOverlappingInFlight").detail("Range", rd.keys);
 				}
 				continue;
@@ -1004,7 +1004,7 @@ struct DDQueueData {
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 			if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 				// logRelocation( rd, "SkippingQueuedRelocation" );
-				if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+				if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 					TraceEvent(SevWarn, "ManualShardSplitSkipForCannotLaunchSrc").detail("Range", rd.keys);
 				}
 				continue;
@@ -1109,7 +1109,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 
-	if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+	if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 		TraceEvent(SevInfo, "ManualShardSplitDDRelocatorStart").detail("Range", rd.keys);
 	}
 
@@ -1423,7 +1423,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					self->bytesWritten += metrics.bytes;
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
-					if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 						TraceEvent(SevInfo, "ManualShardSplitDDRelocatorComplete").detail("Range", rd.keys);
 					}
 					return Void();
@@ -1431,7 +1431,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					throw error;
 				}
 			} else {
-				if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+				if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 					TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError")
 					    .errorUnsuppressed(error)
 					    .detail("Range", rd.keys);
@@ -1449,7 +1449,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			}
 		}
 	} catch (Error& e) {
-		if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+		if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 			TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError").errorUnsuppressed(e).detail("Range", rd.keys);
 		}
 		TraceEvent(relocateShardInterval.end(), distributorId)
@@ -1821,7 +1821,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 			choose {
 				when(RelocateShard rs = waitNext(self.input)) {
-					if (rs.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					if (rs.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 						TraceEvent(SevInfo, "ManualShardSplitStart", self.distributorId).detail("Range", rs.keys);
 					}
 					bool wasEmpty = serversToLaunchFrom.empty();
@@ -1835,7 +1835,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					launchQueuedWorkTimeout = Never();
 				}
 				when(RelocateData results = waitNext(self.fetchSourceServersComplete.getFuture())) {
-					if (results.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					if (results.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 						TraceEvent(SevInfo, "ManualShardSplitFetchSourceComplete").detail("Range", results.keys);
 					}
 					// This when is triggered by queueRelocation() which is triggered by sending self.input
@@ -1843,7 +1843,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					launchData = results;
 				}
 				when(RelocateData done = waitNext(self.dataTransferComplete.getFuture())) {
-					if (done.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					if (done.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 						TraceEvent(SevInfo, "ManualShardSplitDataTransferComplete").detail("Range", done.keys);
 					}
 					complete(done, self.busymap, self.destBusymap);
@@ -1852,7 +1852,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					serversToLaunchFrom.insert(done.src.begin(), done.src.end());
 				}
 				when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
-					if (done.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					if (done.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 						TraceEvent(SevInfo, "ManualShardSplitRelocationComplete").detail("Range", done.keys);
 					}
 					self.activeRelocations--;

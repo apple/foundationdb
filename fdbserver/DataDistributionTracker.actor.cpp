@@ -534,8 +534,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	}
 
 	if (numShards > 1) {
-		int priority =
-		    doManualSplit ? SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG : SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
+		int priority = doManualSplit ? SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT : SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
 		int skipRange = deterministicRandom()->randomInt(0, numShards);
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
@@ -1045,8 +1044,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 						it->value().shouldManualSplit->set(true);
 					} else {
 						// Trigger data move for this shard
-						self.output.send(
-						    RelocateShard(it->range(), SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG));
+						self.output.send(RelocateShard(it->range(), SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT));
 					}
 				}
 				req.reply.send(SplitShardReply());
