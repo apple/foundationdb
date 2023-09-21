@@ -4119,6 +4119,7 @@ int main(int argc, char* argv[]) {
 		    .detail("CommandLine", commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("MemoryLimit", memLimit)
+		    .detail("Proxy", proxy.orDefault(""))
 		    .trackLatest("ProgramStart");
 
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
