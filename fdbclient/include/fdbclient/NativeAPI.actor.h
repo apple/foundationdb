@@ -334,6 +334,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	bool hasTenant(ResolveDefaultTenant ResolveDefaultTenant = ResolveDefaultTenant::True);
 	int64_t tenantId() const { return tenant_.present() ? tenant_.get()->id() : TenantInfo::INVALID_TENANT; }
 
+	void addClearCost();
+
 	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
 	Future<Version> getReadVersion(uint32_t flags);
 
