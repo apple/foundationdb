@@ -1,5 +1,3 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
@@ -59,7 +57,6 @@ Change Log
 * https://github.com/apple/foundationdb/pull/10797
 * https://github.com/apple/foundationdb/pull/10789
 * https://github.com/apple/foundationdb/pull/10847
-* https://github.com/apple/foundationdb/pull/10860
 
 
 Earlier release notes
