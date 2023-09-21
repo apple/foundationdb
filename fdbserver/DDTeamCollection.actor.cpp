@@ -3090,7 +3090,6 @@ public:
 				if (!serverInterfaceValue.present()) {
 					TraceEvent("UpdateStorageMetadataNoOp", self->getDistributorId())
 					    .detail("Server", server->getId())
-					    .detail("IsTss", isTss)
 					    .detail("Reason", "Absent server list item");
 					return Never();
 				}
