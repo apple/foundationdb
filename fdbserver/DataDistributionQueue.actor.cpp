@@ -960,6 +960,10 @@ struct DDQueueData {
 		for (; it != combined.end(); it++) {
 			RelocateData rd(*it);
 
+			if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+				TraceEvent(SevInfo, "ManualShardSplitLaunchCombinedWork").detail("Range", rd.keys);
+			}
+
 			// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
@@ -978,6 +982,9 @@ struct DDQueueData {
 
 			if (overlappingInFlight) {
 				// logRelocation( rd, "SkippingOverlappingInFlight" );
+				if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					TraceEvent(SevWarn, "ManualShardSplitSkipForOverlappingInFlight").detail("Range", rd.keys);
+				}
 				continue;
 			}
 
@@ -997,6 +1004,9 @@ struct DDQueueData {
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 			if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 				// logRelocation( rd, "SkippingQueuedRelocation" );
+				if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					TraceEvent(SevWarn, "ManualShardSplitSkipForCannotLaunchSrc").detail("Range", rd.keys);
+				}
 				continue;
 			}
 
@@ -1100,7 +1110,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	state std::vector<UID> destIds;
 
 	if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
-		TraceEvent(SevInfo, "DDRelocatorForManualShardSplit").detail("Range", rd.keys);
+		TraceEvent(SevInfo, "ManualShardSplitDDRelocatorStart").detail("Range", rd.keys);
 	}
 
 	try {
@@ -1413,11 +1423,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					self->bytesWritten += metrics.bytes;
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
+					if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+						TraceEvent(SevInfo, "ManualShardSplitDDRelocatorComplete").detail("Range", rd.keys);
+					}
 					return Void();
 				} else {
 					throw error;
 				}
 			} else {
+				if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+					TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError")
+					    .errorUnsuppressed(error)
+					    .detail("Range", rd.keys);
+				}
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				if (!signalledTransferComplete) {
@@ -1431,6 +1449,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			}
 		}
 	} catch (Error& e) {
+		if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+			TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError").errorUnsuppressed(e).detail("Range", rd.keys);
+		}
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(e)
 		    .detail("Duration", now() - startTime);
@@ -1801,7 +1822,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 			choose {
 				when(RelocateShard rs = waitNext(self.input)) {
 					if (rs.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
-						TraceEvent(SevInfo, "ShardRelocatorByManualSplit", self.distributorId).detail("Range", rs.keys);
+						TraceEvent(SevInfo, "ManualShardSplitStart", self.distributorId).detail("Range", rs.keys);
 					}
 					bool wasEmpty = serversToLaunchFrom.empty();
 					self.queueRelocation(rs, serversToLaunchFrom);
@@ -1814,17 +1835,26 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					launchQueuedWorkTimeout = Never();
 				}
 				when(RelocateData results = waitNext(self.fetchSourceServersComplete.getFuture())) {
+					if (results.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+						TraceEvent(SevInfo, "ManualShardSplitFetchSourceComplete").detail("Range", results.keys);
+					}
 					// This when is triggered by queueRelocation() which is triggered by sending self.input
 					self.completeSourceFetch(results);
 					launchData = results;
 				}
 				when(RelocateData done = waitNext(self.dataTransferComplete.getFuture())) {
+					if (done.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+						TraceEvent(SevInfo, "ManualShardSplitDataTransferComplete").detail("Range", done.keys);
+					}
 					complete(done, self.busymap, self.destBusymap);
 					if (serversToLaunchFrom.empty() && !done.src.empty())
 						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
 					serversToLaunchFrom.insert(done.src.begin(), done.src.end());
 				}
 				when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
+					if (done.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG) {
+						TraceEvent(SevInfo, "ManualShardSplitRelocationComplete").detail("Range", done.keys);
+					}
 					self.activeRelocations--;
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);
