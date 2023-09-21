@@ -32,7 +32,6 @@
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/Traceable.h"
-#include <iostream>
 
 enum { invalid_error_code = 0xffff };
 

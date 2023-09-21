@@ -87,7 +87,7 @@ enum class ActorContextDumpType : uint8_t {
 
 ## Future Developments
 
-* Since AcAC has the information about the current actor, `ActorIdentifier` can be introduced to the `Error` class. It is then possible for the receipt to know the sender of the error.
+* Since AcAC has the information about the current actor, `ActorIdentifier` can be introduced to the `Error` class. It is then possible for the recipient to know the sender of the error.
   The reason this feature is not implemented is that, for some unknown reason, adding any field to the `Error` class would cause
   * All binding tests fail
   * Random failure on the `fdbserver`
