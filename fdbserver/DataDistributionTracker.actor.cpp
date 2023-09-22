@@ -735,7 +735,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		// Force to split
 		shouldSplit = true;
 		shouldMerge = false;
-		manualSplitKeys.insert(manualSplitKeys.end(), manualSplitPoints->begin(), manualSplitPoints->end());
+		manualSplitKeys = *manualSplitPoints;
 		manualSplitPoints->clear();
 	}
 
