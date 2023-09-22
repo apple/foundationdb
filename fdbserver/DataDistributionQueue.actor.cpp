@@ -305,29 +305,23 @@ struct Busyness {
 
 // find the "workFactor" for this, were it launched now
 int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
-	int res = 0;
 	if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 	    relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
-		res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
-		res = WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
-		res = WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
-	if (relocation.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_MANUAL_SHARD_SPLIT),
-		               WORK_FULL_UTILIZATION);
-	}
-	return res;
+		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
 int getDestWorkFactor(int priority) {
-	// Work of moving a shard is even across destination servers
-	int res = WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	if (priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-		res = std::min(static_cast<int>(res * SERVER_KNOBS->RELOCATION_WORK_AMPLIFIER_FOR_MANUAL_SHARD_SPLIT),
-		               WORK_FULL_UTILIZATION);
+		// We do not want many shards from manual split are moved to the same dest
+		return WORK_FULL_UTILIZATION / SERVER_KNOBS->MANUAL_SPLIT_RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	} else {
+		// Work of moving a shard is even across destination servers
+		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	}
-	return res;
 }
 
 // Data movement's resource control: Do not overload servers used for the RelocateData

@@ -1745,8 +1745,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "redistribute")) {
 					bool _result = wait(makeInterruptable(redistributeCommandActor(ccf, tokens)));
-					if (!_result)
+					if (!_result) {
 						is_error = true;
+					}
 					continue;
 				}
 
