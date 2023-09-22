@@ -62,6 +62,7 @@ supported_protocol_versions = frozenset(
         PROTOCOL_VERSION_7_0,
         PROTOCOL_VERSION_7_1,
         PROTOCOL_VERSION_7_2,
+        PROTOCOL_VERSION_7_3,
         PROTOCOL_VERSION_7_4,
     ]
 )
