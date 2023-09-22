@@ -2997,8 +2997,12 @@ public:
 
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
+		state StorageWiggleData wiggleState;
+		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+		    wiggleState.wigglingStorageServer(PrimaryRegion(self->primary));
 		state std::vector<std::pair<UID, StorageWiggleValue>> res =
 		    wait(readStorageWiggleValues(self->dbContext(), self->primary, false));
+
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -3017,7 +3021,12 @@ public:
 						// Update the wigglingId only if it matches the locality.
 						if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
 							self->wigglingId = res.begin()->first;
+							break;
 						}
+					}
+
+					if (!self->wigglingId.present()) {
+						wait(self->eraseStorageWiggleMap(&metadataMap, res.begin()->first));
 					}
 				}
 			} else {
