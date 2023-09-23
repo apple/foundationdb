@@ -34,7 +34,7 @@ ACTOR Future<bool> redistributeCommandActor(Reference<IClusterConnectionRecord> 
 			printUsage(tokens[0]);
 			result = false;
 		}
-		wait(moveShard(clusterFile, KeyRangeRef(begin, end), /*timeoutSeconds=*/30));
+		wait(redistribute(clusterFile, KeyRangeRef(begin, end), /*timeoutSeconds=*/30));
 	} else {
 		printUsage(tokens[0]);
 		result = false;

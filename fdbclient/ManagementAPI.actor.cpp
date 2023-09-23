@@ -2342,13 +2342,20 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, double timeoutSeconds) {
+ACTOR Future<Void> redistribute(Reference<IClusterConnectionRecord> clusterFile,
+                                KeyRange range,
+                                double timeoutSeconds) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-	while (!clusterInterface->get().present()) {
-		wait(clusterInterface->onChange());
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		wait(timeoutError(clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range)), timeoutSeconds));
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "RedistributeFailedToTrigger").errorUnsuppressed(e).detail("InputRange", range);
+		throw manual_shard_split_failed();
 	}
-	wait(timeoutError(clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range)), timeoutSeconds));
 	return Void();
 }
 

@@ -493,7 +493,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 			splitKeys.push_back_deep(splitKeys.arena(), manualSplitKey);
 		}
 		splitKeys.push_back_deep(splitKeys.arena(), keys.end);
-		TraceEvent e(SevInfo, "ManualShardSplit", self->distributorId);
+		TraceEvent e(SevInfo, "ManualShardSplitShardSplitterStart", self->distributorId);
 		e.setMaxEventLength(20000);
 		e.detail("Begin", keys.begin);
 		e.detail("End", keys.end);
@@ -1017,17 +1017,20 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 			}
 			when(DistributorSplitRangeRequest req = waitNext(manualShardSplit.getFuture())) {
 				if (req.splitPoints.size() != 2) {
-					TraceEvent(SevWarn, "DDSplitRangeWrongInputSize", self.distributorId)
+					TraceEvent(SevWarn, "ManualShardSplitDDFailedToTrigger", self.distributorId)
+					    .detail("Reason", "Wrong number of split points")
 					    .detail("SplitPoints", req.splitPoints);
-					req.reply.sendError(not_implemented());
+					req.reply.sendError(manual_shard_split_failed());
 					continue;
 				} else if (req.splitPoints[0] == req.splitPoints[1]) {
-					TraceEvent(SevWarn, "DDSplitRangeEmptyInputRange", self.distributorId)
+					TraceEvent(SevWarn, "ManualShardSplitDDFailedToTrigger", self.distributorId)
+					    .detail("Reason", "Two split points are same")
 					    .detail("SplitPoints", req.splitPoints);
-					req.reply.sendError(not_implemented());
+					req.reply.sendError(manual_shard_split_failed());
 					continue;
 				}
-				TraceEvent(SevInfo, "DDSplitRangeStart", self.distributorId).detail("SplitPoints", req.splitPoints);
+				TraceEvent(SevInfo, "ManualShardSplitDDStart", self.distributorId)
+				    .detail("SplitPoints", req.splitPoints);
 				KeyRange inputRange = req.splitPoints[0] < req.splitPoints[1]
 				                          ? KeyRangeRef(req.splitPoints[0], req.splitPoints[1])
 				                          : KeyRangeRef(req.splitPoints[1], req.splitPoints[0]);
@@ -1042,9 +1045,13 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 					if (triggerManualSplitShard) {
 						// Trigger split for this shard
 						it->value().shouldManualSplit->set(true);
+						TraceEvent(SevInfo, "ManualShardSplitDDTriggerShardSplit", self.distributorId)
+						    .detail("Shard", it->range());
 					} else {
 						// Trigger data move for this shard
 						self.output.send(RelocateShard(it->range(), SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT));
+						TraceEvent(SevInfo, "ManualShardSplitDDTriggerShardMove", self.distributorId)
+						    .detail("Shard", it->range());
 					}
 				}
 				req.reply.send(SplitShardReply());

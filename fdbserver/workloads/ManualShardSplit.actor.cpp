@@ -55,12 +55,11 @@ struct ManualShardSplitWorkload : TestWorkload {
 		TraceEvent("ManualShardSplitPopulateDataDone");
 		loop {
 			try {
-				wait(moveShard(
+				wait(redistribute(
 				    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr), /*timeoutSeconds=*/30));
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_dd_not_initialized || e.code() == error_code_timed_out ||
-				    e.code() == error_code_broken_promise) {
+				if (e.code() == error_code_manual_shard_split_failed) {
 					wait(delay(1.0));
 					continue;
 				} else {
@@ -70,12 +69,11 @@ struct ManualShardSplitWorkload : TestWorkload {
 		}
 		loop {
 			try {
-				wait(moveShard(
+				wait(redistribute(
 				    cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr), /*timeoutSeconds=*/30));
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_dd_not_initialized || e.code() == error_code_timed_out ||
-				    e.code() == error_code_broken_promise) {
+				if (e.code() == error_code_manual_shard_split_failed) {
 					wait(delay(1.0));
 					continue;
 				} else {

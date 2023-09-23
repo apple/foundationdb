@@ -828,6 +828,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 			self->initialized = true;
+
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
@@ -1259,14 +1260,21 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 }
 
 ACTOR Future<Void> ddSplitRange(DistributorSplitRangeRequest req,
-                                PromiseStream<DistributorSplitRangeRequest> manualShardSplit) {
+                                PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
+                                UID ddId) {
 	try {
+		TraceEvent(SevInfo, "ManualShardSplitDDReceived", ddId).detail("InputSplitPoints", req.splitPoints);
 		SplitShardReply res = wait(manualShardSplit.getReply(DistributorSplitRangeRequest(req.splitPoints)));
 		req.reply.send(res);
+		TraceEvent(SevInfo, "ManualShardSplitDDTriggered", ddId).detail("InputSplitPoints", req.splitPoints);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
+		TraceEvent(SevWarn, "ManualShardSplitDDFailedToTrigger", ddId)
+		    .errorUnsuppressed(e)
+		    .detail("Reason", "DDSplitRangeError")
+		    .detail("InputSplitPoints", req.splitPoints);
 		req.reply.sendError(e);
 	}
 	return Void();
@@ -1315,9 +1323,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 			when(DistributorSplitRangeRequest splitRangeReq = waitNext(di.distributorSplitRange.getFuture())) {
 				if (self->initialized) {
-					actors.add(ddSplitRange(splitRangeReq, manualShardSplit));
+					actors.add(ddSplitRange(splitRangeReq, manualShardSplit, di.id()));
 				} else {
-					splitRangeReq.reply.sendError(dd_not_initialized());
+					splitRangeReq.reply.sendError(manual_shard_split_failed());
+					TraceEvent(SevWarn, "ManualShardSplitDDFailedToTrigger", di.id())
+					    .detail("Reason", "DDNotInitialized")
+					    .detail("InputSplitPoints", splitRangeReq.splitPoints);
 				}
 			}
 		}

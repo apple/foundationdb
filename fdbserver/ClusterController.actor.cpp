@@ -2040,13 +2040,18 @@ ACTOR Future<Void> triggerMoveShards(ClusterControllerData* self, MoveShardReque
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
+		TraceEvent(SevInfo, "ManualShardSplitCCReceived", self->id).detail("InputRange", req.shard);
 		DistributorSplitRangeRequest fReq({ req.shard.begin, req.shard.end });
 		SplitShardReply rep = wait(self->db.serverInfo->get().distributor.get().distributorSplitRange.getReply(fReq));
 		req.reply.send(Void());
+		TraceEvent(SevInfo, "ManualShardSplitCCTriggered", self->id).detail("InputRange", req.shard);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
+		TraceEvent(SevWarn, "ManualShardSplitCCFailedToTrigger", self->id)
+		    .errorUnsuppressed(e)
+		    .detail("InputRange", req.shard);
 		req.reply.sendError(e);
 	}
 	return Void();

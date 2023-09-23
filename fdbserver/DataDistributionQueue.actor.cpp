@@ -977,7 +977,9 @@ struct DDQueueData {
 			if (overlappingInFlight) {
 				// logRelocation( rd, "SkippingOverlappingInFlight" );
 				if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-					TraceEvent(SevWarn, "ManualShardSplitSkipForOverlappingInFlight").detail("Range", rd.keys);
+					TraceEvent(SevWarn, "ManualShardSplitDDQueueSkipRange")
+					    .detail("Range", rd.keys)
+					    .detail("Reason", "OverlappingInFlight");
 				}
 				continue;
 			}
@@ -999,7 +1001,9 @@ struct DDQueueData {
 			if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 				// logRelocation( rd, "SkippingQueuedRelocation" );
 				if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-					TraceEvent(SevWarn, "ManualShardSplitSkipForCannotLaunchSrc").detail("Range", rd.keys);
+					TraceEvent(SevWarn, "ManualShardSplitDDQueueSkipRange")
+					    .detail("Range", rd.keys)
+					    .detail("Reason", "CannotLaunchSrc");
 				}
 				continue;
 			}
@@ -1816,7 +1820,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 			choose {
 				when(RelocateShard rs = waitNext(self.input)) {
 					if (rs.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-						TraceEvent(SevInfo, "ManualShardSplitStart", self.distributorId).detail("Range", rs.keys);
+						TraceEvent(SevInfo, "ManualShardSplitDDQueueStart", self.distributorId)
+						    .detail("Range", rs.keys);
 					}
 					bool wasEmpty = serversToLaunchFrom.empty();
 					self.queueRelocation(rs, serversToLaunchFrom);
@@ -1830,7 +1835,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(RelocateData results = waitNext(self.fetchSourceServersComplete.getFuture())) {
 					if (results.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-						TraceEvent(SevInfo, "ManualShardSplitFetchSourceComplete").detail("Range", results.keys);
+						TraceEvent(SevInfo, "ManualShardSplitDDQueueFetchSourceComplete").detail("Range", results.keys);
 					}
 					// This when is triggered by queueRelocation() which is triggered by sending self.input
 					self.completeSourceFetch(results);
@@ -1838,7 +1843,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(RelocateData done = waitNext(self.dataTransferComplete.getFuture())) {
 					if (done.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-						TraceEvent(SevInfo, "ManualShardSplitDataTransferComplete").detail("Range", done.keys);
+						TraceEvent(SevInfo, "ManualShardSplitDDQueueDataTransferComplete").detail("Range", done.keys);
 					}
 					complete(done, self.busymap, self.destBusymap);
 					if (serversToLaunchFrom.empty() && !done.src.empty())
@@ -1847,7 +1852,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
 					if (done.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-						TraceEvent(SevInfo, "ManualShardSplitRelocationComplete").detail("Range", done.keys);
+						TraceEvent(SevInfo, "ManualShardSplitDDQueueRelocationComplete").detail("Range", done.keys);
 					}
 					self.activeRelocations--;
 					self.finishRelocation(done.priority, done.healthPriority);
