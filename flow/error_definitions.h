@@ -95,6 +95,7 @@ ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported o
 ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
 ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
+ERROR( dd_not_initialized, 1075, "Data distribution has not initialized")
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
 
 ERROR( broken_promise, 1100, "Broken promise" )

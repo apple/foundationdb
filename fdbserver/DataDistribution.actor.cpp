@@ -483,13 +483,15 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	Reference<EventCacheHolder> movingDataEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightRemoteEventHolder;
+	bool initialized;
 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), teamCollection(nullptr),
 	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
-	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
+	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
+	    initialized(false) {}
 };
 
 ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> const> db, double* lastLimited) {
@@ -825,7 +827,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
-
+			self->initialized = true;
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
@@ -1258,12 +1260,14 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 
 ACTOR Future<Void> ddSplitRange(DistributorSplitRangeRequest req,
                                 PromiseStream<DistributorSplitRangeRequest> manualShardSplit) {
-	ErrorOr<SplitShardReply> result =
-	    wait(errorOr(brokenPromiseToNever(manualShardSplit.getReply(DistributorSplitRangeRequest(req.splitPoints)))));
-	if (result.isError()) {
-		req.reply.sendError(result.getError());
-	} else {
-		req.reply.send(result.get());
+	try {
+		SplitShardReply res = wait(manualShardSplit.getReply(DistributorSplitRangeRequest(req.splitPoints)));
+		req.reply.send(res);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		req.reply.sendError(e);
 	}
 	return Void();
 }
@@ -1310,7 +1314,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
 			}
 			when(DistributorSplitRangeRequest splitRangeReq = waitNext(di.distributorSplitRange.getFuture())) {
-				actors.add(ddSplitRange(splitRangeReq, manualShardSplit));
+				if (self->initialized) {
+					actors.add(ddSplitRange(splitRangeReq, manualShardSplit));
+				} else {
+					splitRangeReq.reply.sendError(dd_not_initialized());
+				}
 			}
 		}
 	} catch (Error& err) {

@@ -2342,21 +2342,14 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile, KeyRange range) {
+ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, double timeoutSeconds) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-
-	loop {
-		choose {
-			when(wait(
-			    clusterInterface->get().present()
-			        ? brokenPromiseToNever(clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range)))
-			        : Never())) {
-				return Void();
-			}
-			when(wait(clusterInterface->onChange())) {}
-		}
+	while (!clusterInterface->get().present()) {
+		wait(clusterInterface->onChange());
 	}
+	wait(timeoutError(clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range)), timeoutSeconds));
+	return Void();
 }
 
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {

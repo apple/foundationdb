@@ -52,8 +52,38 @@ struct ManualShardSplitWorkload : TestWorkload {
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
 
 		Version ver = wait(self->populateData(self, cx, &kvs));
-		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr)));
-		wait(moveShard(cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr)));
+		TraceEvent("ManualShardSplitPopulateDataDone");
+		loop {
+			try {
+				wait(moveShard(
+				    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr), /*timeoutSeconds=*/30));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_dd_not_initialized || e.code() == error_code_timed_out ||
+				    e.code() == error_code_broken_promise) {
+					wait(delay(1.0));
+					continue;
+				} else {
+					throw e;
+				}
+			}
+		}
+		loop {
+			try {
+				wait(moveShard(
+				    cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr), /*timeoutSeconds=*/30));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_dd_not_initialized || e.code() == error_code_timed_out ||
+				    e.code() == error_code_broken_promise) {
+					wait(delay(1.0));
+					continue;
+				} else {
+					throw e;
+				}
+			}
+		}
+		TraceEvent("ManualShardSplitTestComplete");
 		return Void();
 	}
 

@@ -2044,6 +2044,9 @@ ACTOR Future<Void> triggerMoveShards(ClusterControllerData* self, MoveShardReque
 		SplitShardReply rep = wait(self->db.serverInfo->get().distributor.get().distributorSplitRange.getReply(fReq));
 		req.reply.send(Void());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		req.reply.sendError(e);
 	}
 	return Void();

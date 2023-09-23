@@ -30,7 +30,11 @@ ACTOR Future<bool> redistributeCommandActor(Reference<IClusterConnectionRecord> 
 	if (tokens.size() == 3) {
 		Key begin = tokens[1];
 		Key end = tokens[2];
-		wait(moveShard(clusterFile, KeyRangeRef(begin, end)));
+		if (begin == end) {
+			printUsage(tokens[0]);
+			result = false;
+		}
+		wait(moveShard(clusterFile, KeyRangeRef(begin, end), /*timeoutSeconds=*/30));
 	} else {
 		printUsage(tokens[0]);
 		result = false;
@@ -38,11 +42,12 @@ ACTOR Future<bool> redistributeCommandActor(Reference<IClusterConnectionRecord> 
 	return result;
 }
 
-CommandFactory RedistributeFactory("redistribute",
-                                   CommandHelp("redistribute [Begin] [End]",
-                                               "Redistribute data within the range<Begin, End> among the cluster.\n",
-                                               "Given an input range, say <b, d>, and we suppose the current FDB"
-                                               "internal shard boundary is [a, c), [c, d), [d, e),"
-                                               "our splitting algorithm splits the input range into [b, c) and [c, d)."
-                                               "Then the two ranges will be redistributed among the cluster.\n"));
+CommandFactory RedistributeFactory(
+    "redistribute",
+    CommandHelp("redistribute [Begin] [End]",
+                "Redistribute data of the range<Begin, End> among the cluster, where [Begin]!=[End]\n",
+                "Given an input range, say <b, d>, where b!=d and we suppose the current FDB"
+                "internal shard boundary is [a, c), [c, d), [d, e),"
+                "our splitting algorithm splits the input range into [b, c) and [c, d)."
+                "Then the two ranges will be redistributed among the cluster.\n"));
 } // namespace fdb_cli
