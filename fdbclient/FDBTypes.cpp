@@ -245,7 +245,7 @@ KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
 		                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
 		                                              { "ssd-sharded-rocksdb", SSD_SHARDED_ROCKSDB },
 		                                              { "memory", MEMORY },
-		                                              { "memory-radixtree", MEMORY_RADIXTREE } };
+		                                              { "memory-radixtree", MEMORY_RADIXTREE },
 		                                              { "none", NONE } };
 	auto it = names.find(str);
 	if (it == names.end()) {
