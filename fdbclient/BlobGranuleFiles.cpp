@@ -311,8 +311,9 @@ struct IndexBlockRef {
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeaderRef headerRef;
-		buffer =
-		    encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+		buffer = serializedBuff;
+		arena.dependsOn(serializedBuff.arena());
+		encryptor.encryptInplace(mutateString(buffer), buffer.size(), &headerRef);
 		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 		arena.dependsOn(serialized.arena());
 		encryptHeaderRef = serialized;
@@ -338,7 +339,8 @@ struct IndexBlockRef {
 		validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
-		decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
+		decrypted = StringRef(idxRef.buffer.begin(), idxRef.buffer.size());
+		decryptor.decryptInplace(mutateString(decrypted), decrypted.size(), headerRef);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -432,7 +434,7 @@ struct IndexBlobGranuleFileChunkRef {
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeaderRef headerRef;
-		chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+		encryptor.encryptInplace(mutateString(chunkRef.buffer), chunkRef.buffer.size(), &headerRef);
 		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 		arena.dependsOn(serialized.arena());
 		chunkRef.encryptHeaderRef = serialized;
@@ -462,7 +464,8 @@ struct IndexBlobGranuleFileChunkRef {
 		validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
-		decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
+		decrypted = StringRef(chunkRef.buffer.begin(), chunkRef.buffer.size());
+		decryptor.decryptInplace(mutateString(decrypted), decrypted.size(), headerRef);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -1837,9 +1840,6 @@ std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, s
 }
 
 namespace {
-const EncryptCipherDomainId encryptDomainId = deterministicRandom()->randomInt64(786, 7860);
-const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->randomUInt64();
-const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
 
 Standalone<StringRef> getBaseCipher() {
 	Standalone<StringRef> baseCipher = makeString(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1));
@@ -1847,9 +1847,14 @@ Standalone<StringRef> getBaseCipher() {
 	return baseCipher;
 }
 
-const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
+} // namespace
 
 BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
+	static const EncryptCipherDomainId encryptDomainId = deterministicRandom()->randomInt64(786, 7860);
+	static const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->randomUInt64();
+	static const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
+	static const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
+
 	BlobGranuleCipherKeysCtx cipherKeysCtx;
 	const EncryptCipherKeyCheckValue cipherKCV =
 	    Sha256KCV().computeKCV(encryptBaseCipher.begin(), encryptBaseCipher.size());
@@ -1871,8 +1876,6 @@ BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
 
 	return cipherKeysCtx;
 }
-
-} // namespace
 
 TEST_CASE("/blobgranule/files/applyDelta") {
 	printf("Testing blob granule delta applying\n");

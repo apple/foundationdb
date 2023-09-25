@@ -1199,6 +1199,9 @@ void printStatus(StatusObjectReader statusObj,
 									}
 								}
 								break;
+							case BlobRestorePhase::COPIED_DATA:
+								statusStr = fmt::format("Copied successfully at {}", tsShortStr);
+								break;
 							case BlobRestorePhase::APPLYING_MLOGS:
 								statusStr = fmt::format("Applying mutation logs. Started at {}", tsShortStr);
 								break;

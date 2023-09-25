@@ -94,11 +94,121 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 	}
 }
 
+bool ClusterControllerData::transactionSystemContainsDegradedServers() {
+	const ServerDBInfo& dbi = db.serverInfo->get();
+	const Reference<ClusterRecoveryData> recoveryData = db.recoveryData;
+	auto transactionWorkerInList = [&dbi, &recoveryData](const std::unordered_set<NetworkAddress>& serverList,
+	                                                     bool skipSatellite,
+	                                                     bool skipRemote) -> bool {
+		for (const auto& server : serverList) {
+			if (dbi.master.addresses().contains(server)) {
+				return true;
+			}
+
+			// Getting the current log system config to check if any TLogs are degraded. recoveryData->logSystem has the
+			// most up to date log system and we should use it whenever available.
+			auto logSystemConfig = (recoveryData.isValid() && recoveryData->logSystem.isValid())
+			                           ? recoveryData->logSystem->getLogSystemConfig()
+			                           : dbi.logSystemConfig;
+			for (const auto& logSet : logSystemConfig.tLogs) {
+				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
+					continue;
+				}
+
+				if (skipRemote && !logSet.isLocal) {
+					continue;
+				}
+
+				if (!logSet.isLocal) {
+					// Only check log routers in the remote region.
+					for (const auto& logRouter : logSet.logRouters) {
+						if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
+							return true;
+						}
+					}
+				} else {
+					for (const auto& tlog : logSet.tLogs) {
+						if (tlog.present() && tlog.interf().addresses().contains(server)) {
+							return true;
+						}
+					}
+				}
+			}
+
+			if (SERVER_KNOBS->GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING && recoveryData.isValid() &&
+			    recoveryData->recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				// During recovery, TLogs may not be able to pull data from previous generation TLogs due to gray
+				// failures. In this case, we rely on the latest recruitment information and see if any newly recruited
+				// TLogs are degraded.
+				for (const auto& tlog : recoveryData->primaryRecruitment.tLogs) {
+					if (tlog.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				if (!skipSatellite) {
+					for (const auto& satelliteLog : recoveryData->primaryRecruitment.satelliteTLogs) {
+						if (satelliteLog.addresses().contains(server)) {
+							return true;
+						}
+					}
+				}
+			}
+
+			for (const auto& proxy : dbi.client.grvProxies) {
+				if (proxy.addresses().contains(server)) {
+					return true;
+				}
+			}
+
+			for (const auto& proxy : dbi.client.commitProxies) {
+				if (proxy.addresses().contains(server)) {
+					return true;
+				}
+			}
+
+			for (const auto& resolver : dbi.resolvers) {
+				if (resolver.addresses().contains(server)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+
+	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
+	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+	// stable.
+	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
+	       transactionWorkerInList(degradationInfo.disconnectedServers,
+	                               /*skipSatellite=*/false,
+	                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
+}
+
+bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
+	if (db.config.usableRegions <= 1) {
+		return false;
+	}
+
+	for (const auto& excludedServer : degradationInfo.degradedServers) {
+		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+			return true;
+		}
+	}
+
+	for (const auto& excludedServer : degradationInfo.disconnectedServers) {
+		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators) {
 	state MasterInterface iMaster;
-	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
 
@@ -153,18 +263,18 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			                              // the "first" recovery after more than a second of normal operation
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
-			recoveryData = makeReference<ClusterRecoveryData>(cluster,
-			                                                  db->serverInfo,
-			                                                  db->serverInfo->get().master,
-			                                                  db->serverInfo->get().masterLifetime,
-			                                                  coordinators,
-			                                                  db->serverInfo->get().clusterInterface,
-			                                                  ""_sr,
-			                                                  addActor,
-			                                                  db->forceRecovery);
+			db->recoveryData = makeReference<ClusterRecoveryData>(cluster,
+			                                                      db->serverInfo,
+			                                                      db->serverInfo->get().master,
+			                                                      db->serverInfo->get().masterLifetime,
+			                                                      coordinators,
+			                                                      db->serverInfo->get().clusterInterface,
+			                                                      ""_sr,
+			                                                      addActor,
+			                                                      db->forceRecovery);
 
-			collection = actorCollection(recoveryData->addActor.getFuture());
-			recoveryCore = clusterRecoveryCore(recoveryData);
+			collection = actorCollection(db->recoveryData->addActor.getFuture());
+			recoveryCore = clusterRecoveryCore(db->recoveryData);
 
 			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
 			// really don't want to have to start over
@@ -184,10 +294,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				when(wait(db->serverInfo->onChange())) {}
 				when(BackupWorkerDoneRequest req =
 				         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
-					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
-						recoveryData->registrationTrigger.trigger();
+					if (db->recoveryData->logSystem.isValid() && db->recoveryData->logSystem->removeBackupWorker(req)) {
+						db->recoveryData->registrationTrigger.trigger();
 					}
-					++recoveryData->backupWorkerDoneRequests;
+					++db->recoveryData->backupWorkerDoneRequests;
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
@@ -202,7 +312,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			}
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/false));
+			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/false));
 			ASSERT(addActor.isEmpty());
 
 			wait(spinDelay);
@@ -216,7 +326,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/true));
+			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
@@ -424,7 +534,7 @@ ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* s
 	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
 	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
 	// and removing them from the cluster.
-	if (self->db.config.isExcludedServer(worker.interf.addresses())) {
+	if (self->db.config.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 		bestFitness = std::max(bestFitness, ProcessClass::ExcludeFit);
 	}
 	return bestFitness;
@@ -923,8 +1033,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 			self->gotFullyRecoveredConfig = true;
 			db->fullyRecoveredConfig = req.configuration.get();
 			for (auto& it : self->id_worker) {
-				bool isExcludedFromConfig =
-				    db->fullyRecoveredConfig.isExcludedServer(it.second.details.interf.addresses());
+				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(
+				    it.second.details.interf.addresses(), it.second.details.interf.locality);
 				if (it.second.priorityInfo.isExcluded != isExcludedFromConfig) {
 					it.second.priorityInfo.isExcluded = isExcludedFromConfig;
 					if (!it.second.reply.isSet()) {
@@ -1146,7 +1256,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		}
 
 		if (self->gotFullyRecoveredConfig) {
-			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses());
+			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses(), w.locality);
 		}
 	}
 
@@ -1404,6 +1514,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->cx,
 			                                                                  workers,
 			                                                                  workerIssues,
+			                                                                  self->storageStatusInfos,
 			                                                                  &self->db.clientStatus,
 			                                                                  coordinators,
 			                                                                  incompatibleConnections,
@@ -1555,6 +1666,53 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
+		}
+	}
+}
+
+// Monitors storage metadata changes and updates to storage servers.
+ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                           IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state std::vector<StorageServerMetaInfo> servers;
+	loop {
+		try {
+			servers.clear();
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+			servers.reserve(serverList.size());
+			for (const auto ss : serverList) {
+				servers.push_back(StorageServerMetaInfo(decodeServerListValue(ss.value)));
+			}
+
+			state RangeResult serverMetadata = wait(tr->getRange(serverMetadataKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverMetadata.more && serverMetadata.size() < CLIENT_KNOBS->TOO_MANY);
+			std::map<UID, StorageMetadataType> idMetadata;
+			for (const auto& sm : serverMetadata) {
+				const UID id = decodeServerMetadataKey(sm.key);
+				idMetadata[id] = decodeServerMetadataValue(sm.value);
+			}
+			for (auto& s : servers) {
+				if (idMetadata.count(s.id())) {
+					s.metadata = idMetadata[s.id()];
+				} else {
+					TraceEvent(SevWarn, "StorageServerMetadataMissing", self->id).detail("ServerID", s.id());
+				}
+			}
+
+			state Future<Void> watchFuture = tr->watch(serverMetadataChangeKey);
+			wait(tr->commit());
+
+			self->storageStatusInfos = std::move(servers);
+			wait(watchFuture);
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -1929,22 +2087,25 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		}
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageBegin", self->id)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type)
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
-		TriggerAuditRequest fReq(req.getType(), req.range);
+		TriggerAuditRequest fReq(req.getType(), req.range, req.engineType);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString());
 		req.reply.send(auditId);
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString());
 		req.reply.sendError(audit_storage_failed());
 	}
 
@@ -1987,7 +2148,8 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.getType());
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString());
 		if (req.cancel) {
 			ASSERT(req.id.isValid());
 			self->addActor.send(cancelAuditStorage(self, req));
@@ -2767,11 +2929,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 			// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
 			// recovered.
+			bool hasRecoveredServer = false;
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
 				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
 				    self->degradationInfo.disconnectedServers.find(*it) ==
 				        self->degradationInfo.disconnectedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
+					hasRecoveredServer = true;
 				} else {
 					++it;
 				}
@@ -2828,6 +2992,12 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
 					}
 				}
+			}
+
+			if (hasRecoveredServer) {
+				// The best transaction system might have changed after a server is recovered. Check outstanding request
+				// and check if a better transaction system exists.
+				checkOutstandingRequests(self);
 			}
 
 			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
@@ -2952,6 +3122,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
+	self.addActor.send(monitorStorageMetadata(&self));
 	self.addActor.send(monitorGlobalConfig(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
@@ -3016,7 +3187,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses(),
+				                                    worker.details.interf.locality)) {
 					continue;
 				}
 

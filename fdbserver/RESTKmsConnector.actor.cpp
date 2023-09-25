@@ -222,10 +222,14 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	RESTClient restClient;
 	ValidationTokenMap validationTokenMap;
 	PromiseStream<Future<Void>> addActor;
+	bool kmsStable;
+	Future<Void> kmsStabilityChecker;
 
 	RESTKmsConnectorCtx()
-	  : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
-	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
+	  : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0),
+	    kmsStable(true) {}
+	explicit RESTKmsConnectorCtx(const UID& id)
+	  : uid(id), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0), kmsStable(true) {}
 };
 
 std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::string& url, const std::string& suffix) {
@@ -1117,12 +1121,47 @@ ACTOR Future<Void> procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 	return Void();
 }
 
+// Check if KMS is table by checking request failure count from RESTClient metrics.
+// Will clear RESTClient metrics afterward, assuming it is the only user of the metrics.
+//
+// TODO(yiwu): make RESTClient periodically report and clear the stats.
+void updateKMSStability(Reference<RESTKmsConnectorCtx> self) {
+	bool stable = true;
+	for (auto& s : self->restClient.statsMap) {
+		if (s.second->requests_failed > 0) {
+			stable = false;
+		}
+		s.second->clear();
+	}
+	self->kmsStable = stable;
+}
+
+Future<Void> getKMSState(Reference<RESTKmsConnectorCtx> self, KmsConnGetKMSStateReq req) {
+	KmsConnGetKMSStateRep reply;
+	reply.kmsStable = self->kmsStable;
+
+	try {
+		reply.restKMSUrls.reserve(reply.arena, self->kmsUrlStore.kmsUrls.size());
+		for (const auto& url : self->kmsUrlStore.kmsUrls) {
+			reply.restKMSUrls.emplace_back(reply.arena, url.toString());
+		}
+		req.reply.send(reply);
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "RestKMSGetKMSStateFailed", self->uid).error(e);
+		throw e;
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> restConnectorCoreImpl(KmsConnectorInterface interf) {
 	state Reference<RESTKmsConnectorCtx> self = makeReference<RESTKmsConnectorCtx>(interf.id());
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	TraceEvent("RESTKmsConnectorInit", self->uid).log();
 
+	self->kmsStabilityChecker =
+	    recurring([self = self]() { updateKMSStability(self); }, SERVER_KNOBS->REST_KMS_STABILITY_CHECK_INTERVAL);
 	wait(discoverKmsUrls(self, RefreshPersistedUrls::False));
 	wait(procureValidationTokens(self));
 
@@ -1136,6 +1175,9 @@ ACTOR Future<Void> restConnectorCoreImpl(KmsConnectorInterface interf) {
 			}
 			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
 				self->addActor.send(fetchBlobMetadata(self, req));
+			}
+			when(KmsConnGetKMSStateReq req = waitNext(interf.getKMSStateReq.getFuture())) {
+				self->addActor.send(getKMSState(self, req));
 			}
 			when(wait(collection)) {
 				// this should throw an error, not complete

@@ -2,6 +2,60 @@
 Release Notes
 #############
 
+7.1.41
+======
+* Same as 7.1.40 release with AVX enabled.
+
+7.1.40
+======
+* Released with AVX disabled.
+* Removed storageWiggleID from storage metadata if the storage server is not wiggling. `(PR #10913) <https://github.com/apple/foundationdb/pull/10913>`_
+* Augmented storage team selection to be aware of storage queue sizes. `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_
+* Fixed the proxy setting for backup agents. `(PR #10903) <https://github.com/apple/foundationdb/pull/10903>`_
+* Added an option to set perpetual_storage_wiggle_engine to none. `(PR #10881) <https://github.com/apple/foundationdb/pull/10881>`_
+
+7.1.39
+======
+* Same as 7.1.38 release with AVX enabled.
+
+7.1.38
+======
+* Released with AVX disabled.
+* Added locality check on reading perpetualStorageWiggleIDPrefix key when DD restarts. `(PR #10864) <https://github.com/apple/foundationdb/pull/10864>`_
+* Added perpetual wiggle wait based on data balance of the cluster. `(PR #10865) <https://github.com/apple/foundationdb/pull/10865>`_
+* Added rocksdb options to delete old rocksdb logs. `(PR #10872) <https://github.com/apple/foundationdb/pull/10872>`_
+* Added knob to guard the gray failure rejection during TLog recovery. `(PR #10852) <https://github.com/apple/foundationdb/pull/10852>`_
+* Added knob RESOLVE_PREFER_IPV4_ADDR to prefer IPv4 addresses. `(PR #10826) <https://github.com/apple/foundationdb/pull/10826>`_
+* Added perpetual_storage_wiggle_engine config to support storage migration with perpetual wiggle. `(PR #10790) <https://github.com/apple/foundationdb/pull/10790>`_
+* Fixed the return code for perpetual wiggle configure command. `(PR #10795) <https://github.com/apple/foundationdb/pull/10795>`_
+* Fixed a compatibility issue of s3 backup. `(PR #10774) <https://github.com/apple/foundationdb/pull/10774>`_
+* Added proxy to backup agent via global variable. `(PR #10875) <https://github.com/apple/foundationdb/pull/10875>`_
+
+7.1.37
+======
+* Same as 7.1.36 release with AVX enabled.
+
+7.1.36
+======
+* Released with AVX disabled.
+* Added consistency check for rocksdb only `(PR #10751) <https://github.com/apple/foundationdb/pull/10751>`_
+* Fixed grv queue stats when requests are dropped `(PR #10753) <https://github.com/apple/foundationdb/pull/10753>`_
+
+7.1.35
+======
+* Same as 7.1.34 release with AVX enabled.
+
+7.1.34
+======
+* Released with AVX disabled.
+* Fixed a high GRV latency issue when many storage servers are recruited.  `(PR #10688) <https://github.com/apple/foundationdb/pull/10688>`_
+* Fixed a single key deletion bug when ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled. `(PR #10672) <https://github.com/apple/foundationdb/pull/10672>`_ and `(PR #10676) <https://github.com/apple/foundationdb/pull/10676>`_
+* Added degraded and disconnected peer recovery to gray failure detection. `(PR #10565) <https://github.com/apple/foundationdb/pull/10565>`_
+* Fixed RocksDB engine to avoid read timeout checks for eager reads and system keys. `(PR #10500) <https://github.com/apple/foundationdb/pull/10500>`_
+* Fixed backup to work with s3 compatible service.  `(PR #10369) <https://github.com/apple/foundationdb/pull/10369>`_
+* Fixed data loss during multiple range restores. `(PR #10424) <https://github.com/apple/foundationdb/pull/10424>`_
+* Updated RocksDB to version 8.1.1. `(PR #10268) <https://github.com/apple/foundationdb/pull/10268>`_
+
 7.1.33
 ======
 * Same as 7.1.32 release with AVX enabled.

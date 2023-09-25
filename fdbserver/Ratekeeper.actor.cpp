@@ -184,7 +184,50 @@ public:
 			// including cancellation
 			self->storageQueueInfo.erase(ssi.id());
 			self->storageServerInterfaces.erase(ssi.id());
+			self->healthMetrics.storageStats.erase(ssi.id());
 			throw;
+		}
+	}
+
+	// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
+	ACTOR static Future<Void> monitorStorageServerQueueSizeInSimulation(ActorWeakSelfRef<Ratekeeper> self) {
+		if (!g_network->isSimulated()) {
+			return Void();
+		}
+		state int threshold = SERVER_KNOBS->RATEKEEPER_MONITOR_SS_THRESHOLD;
+		state int cnt = 0;
+		state int maxCount = 5;
+		state Transaction tr(self->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
+				state int serverListSize = results.size();
+				state int interfaceSize = self->storageServerInterfaces.size();
+				state int metricSize = self->healthMetrics.storageStats.size();
+				if (interfaceSize - serverListSize > threshold || metricSize - serverListSize > threshold) {
+					cnt++;
+				} else {
+					cnt = 0;
+				}
+				if (cnt > maxCount) {
+					TraceEvent(SevError, "TooManySSInRK")
+					    .detail("Threshold", threshold)
+					    .detail("ServerListSize", serverListSize)
+					    .detail("InterfaceSize", interfaceSize)
+					    .detail("MetricSize", metricSize)
+					    .log();
+				}
+				// wait for monitorServerListChange to remove the interface
+				wait(delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY));
+				tr = Transaction(self->db);
+			} catch (Error& e) {
+				TraceEvent("RateKeeperFailedToReadSSList").log();
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -239,8 +282,9 @@ public:
 					}
 				} else {
 					storageServerTrackers.erase(id);
-
 					self->storageServerInterfaces.erase(id);
+					self->storageQueueInfo.erase(id); // remove the entry if an old storage server is absent
+					self->healthMetrics.storageStats.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
@@ -379,6 +423,7 @@ public:
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
 		self.addActor.send(self.monitorServerListChange(serverChanges));
 		self.addActor.send(RatekeeperImpl::trackEachStorageServer(pSelf, serverChanges.getFuture()));
+		self.addActor.send(monitorStorageServerQueueSizeInSimulation(pSelf));
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
@@ -663,7 +708,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
     maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
+		tagThrottler = std::make_unique<GlobalTagThrottler>(
+		    db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
@@ -850,6 +896,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 		ssReasons[ss.id] = ssLimitReason;
 	}
+
+	tagThrottler->updateThrottling(storageQueueInfo);
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for (auto ss = storageTpsLimitReverseIndex.begin();
@@ -1355,20 +1403,31 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	busiestWriteTags.clear();
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
-	double maxRate = 0, maxBusyness = 0;
+	double maxRate = 0;
+	std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKWriters;
 	for (const auto& [tag, cost] : tagCostEst) {
 		double rate = cost.getCostSum() / elapsed;
+		double busyness = static_cast<double>(maxCost.getCostSum()) / totalWriteCosts;
+		if (rate < SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
+			continue;
+		}
+		if (topKWriters.size() < SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED) {
+			topKWriters.emplace(tag, rate, busyness);
+		} else if (topKWriters.top().rate < rate) {
+			topKWriters.pop();
+			topKWriters.emplace(tag, rate, busyness);
+		}
+
 		if (rate > maxRate) {
 			busiestTag = tag;
 			maxRate = rate;
 			maxCost = cost;
 		}
 	}
-	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
-		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
-		ASSERT_GT(totalWriteCosts, 0);
-		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
-		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
+
+	while (!topKWriters.empty()) {
+		busiestWriteTags.push_back(std::move(topKWriters.top()));
+		topKWriters.pop();
 	}
 
 	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,

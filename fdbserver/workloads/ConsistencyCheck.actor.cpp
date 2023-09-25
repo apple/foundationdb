@@ -931,13 +931,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int j;
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 		state std::string wiggleLocalityKeyValue = configuration.perpetualStorageWiggleLocality;
-		state std::string wiggleLocalityKey;
-		state std::string wiggleLocalityValue;
-		if (wiggleLocalityKeyValue != "0") {
-			int split = wiggleLocalityKeyValue.find(':');
-			wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
-			wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
-		}
+		state std::vector<std::pair<Optional<Value>, Optional<Value>>> wiggleLocalityKeyValues =
+		    ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality);
 
 		// Check each pair of storage servers for an address match
 		for (i = 0; i < storageServers.size(); i++) {
@@ -949,17 +944,43 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
+			} else if (configuration.perpetualStoreType.isValid()) {
+				// Perpetual storage wiggle is used to migrate storage. Check that the matched storage servers are
+				// correctly migrated.
+				if (wiggleLocalityKeyValue == "0" ||
+				    localityMatchInList(wiggleLocalityKeyValues, storageServers[i].locality)) {
+					if (keyValueStoreType.get() != configuration.perpetualStoreType) {
+						TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
+						    .detail("ServerID", storageServers[i].id())
+						    .detail("StoreType", keyValueStoreType.get().toString())
+						    .detail("DesiredType", configuration.perpetualStoreType.toString())
+						    .detail("IsPerpetualStoreType", true);
+						self->testFailure("Storage server has wrong key-value store type");
+						return true;
+					}
+				} else if ((!storageServers[i].isTss() &&
+				            keyValueStoreType.get() != configuration.storageServerStoreType) ||
+				           (storageServers[i].isTss() &&
+				            keyValueStoreType.get() != configuration.testingStorageServerStoreType)) {
+					TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
+					    .detail("ServerID", storageServers[i].id())
+					    .detail("StoreType", keyValueStoreType.get().toString())
+					    .detail("DesiredType", configuration.perpetualStoreType.toString())
+					    .detail("IsPerpetualStoreType", false);
+					self->testFailure("Storage server has wrong key-value store type");
+					return true;
+				}
 			} else if (((!storageServers[i].isTss() &&
 			             keyValueStoreType.get() != configuration.storageServerStoreType) ||
 			            (storageServers[i].isTss() &&
 			             keyValueStoreType.get() != configuration.testingStorageServerStoreType)) &&
 			           (wiggleLocalityKeyValue == "0" ||
-			            (storageServers[i].locality.get(wiggleLocalityKey).present() &&
-			             storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue))) {
+			            localityMatchInList(wiggleLocalityKeyValues, storageServers[i].locality))) {
 				TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 				    .detail("ServerID", storageServers[i].id())
 				    .detail("StoreType", keyValueStoreType.get().toString())
-				    .detail("DesiredType", configuration.storageServerStoreType.toString());
+				    .detail("DesiredType", configuration.storageServerStoreType.toString())
+				    .detail("IsPerpetualStoreType", false);
 				self->testFailure("Storage server has wrong key-value store type");
 				return true;
 			}
@@ -1027,7 +1048,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		for (int i = 0; i < workers.size(); i++) {
 			NetworkAddress addr = workers[i].interf.stableAddress();
-			if (!configuration.isExcludedServer(workers[i].interf.addresses()) &&
+			if (!configuration.isExcludedServer(workers[i].interf.addresses(), workers[i].interf.locality) &&
 			    (workers[i].processClass == ProcessClass::StorageClass ||
 			     workers[i].processClass == ProcessClass::UnsetClass)) {
 				bool found = false;
@@ -1243,7 +1264,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (const auto& worker : workers) {
 			NetworkAddress addr = worker.interf.stableAddress();
 			bool inCCDc = worker.interf.locality.dcId() == ccDcId;
-			if (!configuration.isExcludedServer(worker.interf.addresses())) {
+			if (!configuration.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 				if (worker.processClass == ProcessClass::BlobWorkerClass) {
 					numBlobWorkerProcesses++;
 

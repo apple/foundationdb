@@ -22,12 +22,28 @@
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
+#include <string>
+#include <cstdint>
+
+#include "fdbclient/DatabaseConfiguration.h"
+#include "flow/Optional.h"
+
 // The function at present is only called through "fdbserver -r simulation"
-void setupAndRun(std::string const& dataFolder,
-                 const char* const& testFile,
-                 bool const& rebooting,
-                 bool const& restoring,
-                 std::string const& whitelistBinPath);
+void simulationSetupAndRun(std::string const& dataFolder,
+                           const char* const& testFile,
+                           bool const& rebooting,
+                           bool const& restoring,
+                           std::string const& whitelistBinPath);
+
+enum class SimulationStorageEngine : uint8_t {
+	SSD = 0,
+	MEMORY = 1,
+	RADIX_TREE = 2,
+	REDWOOD = 3,
+	ROCKSDB = 4,
+	SHARDED_ROCKSDB = 5,
+	SIMULATION_STORAGE_ENGINE_INVALID_VALUE
+};
 
 class BasicTestConfig {
 public:
@@ -37,8 +53,8 @@ public:
 	bool simpleConfig = false;
 	// set to true to force a single region config
 	bool singleRegion = false;
-	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType, machineCount,
-	    coordinators;
+	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, machineCount, coordinators;
+	Optional<SimulationStorageEngine> storageEngineType;
 	// ASAN uses more memory, so adding too many machines can cause OOMs. Tests can set this if they need to lower
 	// machineCount specifically for ASAN. Only has an effect if `machineCount` is set and this is an ASAN build.
 	Optional<int> asanMachineCount;

@@ -33,11 +33,11 @@
 /// This annotation bridges immortal C++ singleton types
 /// that are always accessed via a pointer or a reference in C++ as immortal class types in Swift.
 #define SWIFT_CXX_IMMORTAL_SINGLETON_TYPE                                                                              \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))                     \
 	__attribute__((swift_attr("release:immortal")))
 
 #define SWIFT_CXX_REF                                                                                                  \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:addref")))                          \
+	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:addref")))                       \
 	__attribute__((swift_attr("release:delref")))
 
 /// Ignore that a type seems to be an unsafe projection, and import it regardless.
@@ -58,11 +58,6 @@
 #define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
 
 #define SWIFT_STRINGIFY(x) #x
-
-/// Specify that the declared type conforms to the given Swift protocol when the type is
-/// imported into Swift.
-#define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)                                                                    \
-	__attribute__((swift_attr(SWIFT_STRINGIFY(conforms_to : ModuleName.ProtocolName))))
 
 #define CONCAT2(id1, id2) id1##id2
 #define CONCAT3(id1, id2, id3) id1##id2##id3
@@ -106,7 +101,6 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p);
 #define SWIFT_CXX_IMPORT_UNSAFE
 #define SWIFT_CXX_IMPORT_OWNED
 #define SWIFT_SENDABLE
-#define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)
 #define SWIFT_NAME(x)
 #define CONCAT2(id1, id2) id1##id2
 #define CONCAT3(id1, id2, id3) id1##id2##id3

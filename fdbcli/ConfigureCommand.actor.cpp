@@ -279,6 +279,10 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr, "ERROR: A cluster cannot change its encryption_at_rest state after database creation.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::INVALID_STORAGE_TYPE:
+		fprintf(stderr, "ERROR: Invalid storage type for storage or TLog.\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
@@ -309,6 +313,8 @@ void configureGenerator(const char* text,
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
+		                   // TODO(zhewu): update fdbcli command documentation.
+		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
 		                   "tenant_mode=",
 		                   "blob_granules_enabled=",

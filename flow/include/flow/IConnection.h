@@ -26,6 +26,7 @@
 
 #include <boost/asio/ip/tcp.hpp>
 
+#include "flow/Knobs.h"
 #include "flow/NetworkAddress.h"
 
 class Void;
@@ -179,12 +180,19 @@ public:
 	// If a DNS name can be resolved to both and IPv4 and IPv6 addresses, we want IPv6 addresses when running the
 	// clusters on IPv6.
 	// This function takes a vector of addresses and return a random one, preferring IPv6 over IPv4.
+	// To prefer IPv4 addresses instead, set knob RESOLVE_PREFER_IPV4_ADDR to true.
 	static NetworkAddress pickOneAddress(const std::vector<NetworkAddress>& addresses) {
 		std::vector<NetworkAddress> ipV6Addresses;
+		std::vector<NetworkAddress> ipV4Addresses;
 		for (const NetworkAddress& addr : addresses) {
 			if (addr.isV6()) {
 				ipV6Addresses.push_back(addr);
+			} else {
+				ipV4Addresses.push_back(addr);
 			}
+		}
+		if (ipV4Addresses.size() > 0 && FLOW_KNOBS->RESOLVE_PREFER_IPV4_ADDR) {
+			return ipV4Addresses[deterministicRandom()->randomInt(0, ipV4Addresses.size())];
 		}
 		if (ipV6Addresses.size() > 0) {
 			return ipV6Addresses[deterministicRandom()->randomInt(0, ipV6Addresses.size())];

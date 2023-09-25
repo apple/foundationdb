@@ -182,7 +182,7 @@ You can use the `SWIFT_CXX_REF` annotation for that. Right now `SWIFT_CXX_REF` d
 
 ```cpp
 #define SWIFT_CXX_REF_MASTERDATA   \
-    __attribute__((swift_attr("import_as_ref")))   \
+    __attribute__((swift_attr("import_reference")))   \
     __attribute__((swift_attr("retain:addrefMasterData")))   \
     __attribute__((swift_attr("release:delrefMasterData")))
 

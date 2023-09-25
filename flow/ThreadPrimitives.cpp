@@ -34,67 +34,16 @@
 
 extern std::string format(const char* form, ...);
 
-Event::Event() {
-#ifdef _WIN32
-	ev = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-#elif defined(__linux__) || defined(__FreeBSD__)
-	int result = sem_init(&sem, 0, 0);
-	if (result)
-		criticalError(FDB_EXIT_INIT_SEMAPHORE,
-		              "UnableToInitializeSemaphore",
-		              format("Could not initialize semaphore - %s", strerror(errno)).c_str());
-#elif defined(__APPLE__)
-	self = mach_task_self();
-	kern_return_t ret = semaphore_create(self, &sem, SYNC_POLICY_FIFO, 0);
-	if (ret != KERN_SUCCESS)
-		criticalError(FDB_EXIT_INIT_SEMAPHORE,
-		              "UnableToInitializeSemaphore",
-		              format("Could not initialize semaphore - %s", strerror(errno)).c_str());
-#else
-#error Port me!
-#endif
-}
+Event::Event() = default;
 
-Event::~Event() {
-#ifdef _WIN32
-	CloseHandle(ev);
-#elif defined(__linux__) || defined(__FreeBSD__)
-	sem_destroy(&sem);
-#elif defined(__APPLE__)
-	semaphore_destroy(self, sem);
-#else
-#error Port me!
-#endif
-}
+Event::~Event() = default;
 
 void Event::set() {
-#ifdef _WIN32
-	SetEvent(ev);
-#elif defined(__linux__) || defined(__FreeBSD__)
-	sem_post(&sem);
-#elif defined(__APPLE__)
-	semaphore_signal(sem);
-#else
-#error Port me!
-#endif
+	latch.count_down();
 }
 
 void Event::block() {
-#ifdef _WIN32
-	WaitForSingleObject(ev, INFINITE);
-#elif defined(__linux__) || defined(__FreeBSD__)
-	int ret;
-	do {
-		ret = sem_wait(&sem);
-	} while (ret != 0 && errno == EINTR);
-#elif defined(__APPLE__)
-	kern_return_t ret;
-	do {
-		ret = semaphore_wait(sem);
-	} while ((ret != KERN_SUCCESS) && (ret != KERN_TERMINATED));
-#else
-#error Port me!
-#endif
+	latch.wait();
 }
 
 // Mutex::impl is allocated from the heap so that its size doesn't need to be in the header.  Is there a better way?

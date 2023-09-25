@@ -236,18 +236,20 @@
 // typedef struct _Job* JobRef;
 
 /// A hook to take over global enqueuing.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(swift::Job* job);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift)
-void (*_Nullable swift_task_enqueueGlobal_hook)(swift::Job* job, swift_task_enqueueGlobal_original _Nonnull original);
+void (*_Nullable swift_task_enqueueGlobal_hook)(swift::Job* _Nonnull job,
+                                                swift_task_enqueueGlobal_original _Nonnull original);
 
 /// A hook to take over global enqueuing with delay.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(unsigned long long delay, swift::Job* job);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(unsigned long long delay,
+                                                                           swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift)
-void (*swift_task_enqueueGlobalWithDelay_hook)(unsigned long long delay,
-                                               swift::Job* _Nonnull job,
-                                               swift_task_enqueueGlobalWithDelay_original original);
+void (*_Nonnull swift_task_enqueueGlobalWithDelay_hook)(unsigned long long delay,
+                                                        swift::Job* _Nonnull job,
+                                                        swift_task_enqueueGlobalWithDelay_original _Nonnull original);
 
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(long long sec,
                                                                               long long nsec,
@@ -257,21 +259,24 @@ typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(lo
                                                                               swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift)
-void (*swift_task_enqueueGlobalWithDeadline_hook)(long long sec,
-                                                  long long nsec,
-                                                  long long tsec,
-                                                  long long tnsec,
-                                                  int clock,
-                                                  swift::Job* job,
-                                                  swift_task_enqueueGlobalWithDeadline_original original);
+void (*_Nonnull swift_task_enqueueGlobalWithDeadline_hook)(
+    long long sec,
+    long long nsec,
+    long long tsec,
+    long long tnsec,
+    int clock,
+    swift::Job* _Nonnull job,
+    swift_task_enqueueGlobalWithDeadline_original _Nonnull original);
 
 /// A hook to take over main executor enqueueing.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(swift::Job* job);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift)
-void (*swift_task_enqueueMainExecutor_hook)(swift::Job* _Nonnull job, swift_task_enqueueMainExecutor_original original);
+void (*_Nonnull swift_task_enqueueMainExecutor_hook)(swift::Job* _Nonnull job,
+                                                     swift_task_enqueueMainExecutor_original _Nonnull original);
 
-SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift) void swift_job_run(swift::Job* job, ExecutorRef executor);
+SWIFT_EXPORT_FROM(swift_Concurrency)
+SWIFT_CC(swift) void swift_job_run(swift::Job* _Nonnull job, ExecutorRef executor);
 
 // FIXME: why is adding this function causing TDB issues, even if it is not a Swift declared thing?
 //    <unknown>:0: error: symbol '_Z17s_job_run_genericP3Job' (_Z17s_job_run_genericP3Job) is in generated IR file, but
@@ -279,13 +284,15 @@ SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift) void swift_job_run(swift::J
 //    and include the project, and add '-Xfrontend -validate-tbd-against-ir=none' to squash the errors WORKAROUND:
 //    skipping TBD validation
 // This function exists so we can get the generic executor, and don't have to do that from Swift.
-void swift_job_run_generic(swift::Job* job);
+void swift_job_run_generic(swift::Job* _Nonnull job);
 
 SWIFT_CC(swift)
-void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
+void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
+                                  void (*_Nonnull)(swift::Job* _Nonnull) __attribute__((swiftcall)));
 
 SWIFT_CC(swift)
-void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
+void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
+                                  void (*_Nonnull)(swift::Job* _Nonnull) __attribute__((swiftcall)));
 
 inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* _Nonnull net) {
 #ifdef WITH_SWIFT

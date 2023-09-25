@@ -247,6 +247,9 @@ ACTOR Future<Void> simconnectorCoreImpl(KmsConnectorInterface interf) {
 			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
 				addActor.send(blobMetadataLookup(interf, req));
 			}
+			when(KmsConnGetKMSStateReq req = waitNext(interf.getKMSStateReq.getFuture())) {
+				req.reply.send(KmsConnGetKMSStateRep());
+			}
 			when(wait(collection)) {
 				// this should throw an error, not complete
 				ASSERT(false);

@@ -97,7 +97,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		std::vector<IPAddress> remoteIps; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && process->locality.dcId().get() == g_simulator->remoteDcId &&
+			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId &&
 			    !isCoordinator(coordinators, ip)) {
 				remoteIps.push_back(ip);
 			} else {

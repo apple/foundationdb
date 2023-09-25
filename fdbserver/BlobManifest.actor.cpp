@@ -57,7 +57,7 @@
 // Default manifest folder on external blob storage
 #define MANIFEST "manifest"
 
-#define ENABLE_DEBUG_PRINT true
+#define ENABLE_DEBUG_PRINT false
 template <typename... T>
 inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 	if (ENABLE_DEBUG_PRINT)
@@ -193,17 +193,16 @@ public:
 	// Delete all files of oldest manifest
 	ACTOR static Future<Void> deleteOldest(std::vector<BlobManifestFile> allFiles,
 	                                       Reference<BackupContainerFileSystem> container) {
-		if (allFiles.empty()) {
-			return Void();
-		}
+		ASSERT(!allFiles.empty());
 		state int64_t epoch = allFiles.back().epoch;
 		state int64_t seqNo = allFiles.back().seqNo;
+		std::vector<Future<Void>> futures;
 		for (auto& f : allFiles) {
 			if (f.epoch == epoch && f.seqNo == seqNo) {
-				wait(container->deleteFile(f.fileName));
+				futures.push_back(container->deleteFile(f.fileName));
 			}
 		}
-		TraceEvent("BlobManfiestDelete").detail("Epoch", epoch).detail("SeqNo", seqNo);
+		wait(waitForAll(futures));
 		return Void();
 	}
 

@@ -286,6 +286,8 @@ public:
 	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
 	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
 	virtual void unclogPair(const IPAddress& from, const IPAddress& to) = 0;
+	virtual void disconnectPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
+	virtual void reconnectPair(const IPAddress& from, const IPAddress& to) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
@@ -412,6 +414,7 @@ public:
 	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
 	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
 	std::set<IPAddress> httpServerIps;
+	int nextHTTPPort = 5000;
 	bool httpProtected = false;
 
 	flowGlobalType global(int id) const final;

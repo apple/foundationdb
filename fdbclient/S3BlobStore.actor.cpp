@@ -186,13 +186,12 @@ std::string guessRegionFromDomain(std::string domain) {
 		const char* service = knownServices[i];
 
 		std::size_t p = domain.find(service);
-
 		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {
 			// eg. 127.0.0.1, example.com, s3-service.example.com, mys3.example.com
 			continue;
 		}
 
-		StringRef h(domain.c_str() + p);
+		StringRef h = StringRef(domain).substr(p);
 
 		if (!h.startsWith("oss-"_sr)) {
 			h.eat(service); // ignore s3 service
@@ -737,7 +736,8 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			TraceEvent("S3BlobStoreEndpointReusingConnected")
 			    .suppressFor(60)
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			    .detail("ExpiresIn", rconn.expirationTime - now());
+			    .detail("ExpiresIn", rconn.expirationTime - now())
+			    .detail("Proxy", b->proxyHost.orDefault(""));
 			return rconn;
 		}
 		++b->blobStats->expiredConnections;
@@ -772,7 +772,8 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	TraceEvent("S3BlobStoreEndpointNewConnection")
 	    .suppressFor(60)
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
-	    .detail("ExpiresIn", b->knobs.max_connection_life);
+	    .detail("ExpiresIn", b->knobs.max_connection_life)
+	    .detail("Proxy", b->proxyHost.orDefault(""));
 
 	if (b->lookupKey || b->lookupSecret || b->knobs.sdk_auth)
 		wait(b->updateSecret());
@@ -849,6 +850,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	req->data.headers = headers;
 	req->data.headers["Host"] = bstore->host;
 	req->data.headers["Accept"] = "application/xml";
+
+	// Avoid to send request with an empty resouce.
+	if (resource.empty()) {
+		resource = "/";
+	}
 
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
@@ -1020,7 +1026,10 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		else
 			event.detail("RemoteHost", bstore->host);
 
-		event.detail("Verb", verb).detail("Resource", resource).detail("ThisTry", thisTry);
+		event.detail("Verb", verb)
+		    .detail("Resource", resource)
+		    .detail("ThisTry", thisTry)
+		    .detail("Proxy", bstore->proxyHost.orDefault(""));
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
 		// limit. Also skip incrementing the retry count for fast retries
@@ -1878,6 +1887,18 @@ TEST_CASE("/backup/s3/v4headers") {
 		ASSERT(headers["Host"] == "s3.us-west-2.amazonaws.com");
 		ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
 	}
+
+	return Void();
+}
+
+TEST_CASE("/backup/s3/guess_region") {
+	std::string url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sa=1";
+
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+	ASSERT(s3->getRegion() == "us-west-2");
 
 	return Void();
 }

@@ -851,6 +851,20 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle":0,
          "perpetual_storage_wiggle_locality":"0",
+         "perpetual_storage_wiggle_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta",
+             "none"
+         ]},
          "storage_migration_type": {
              "$enum":[
              "disabled",
@@ -1024,9 +1038,16 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "data_cluster_id" : 12346,
          "num_data_clusters":10
       },
-      "kms_is_healthy": true,
       "encryption_at_rest": {
          "ekp_is_healthy": true
+      },
+      "kms" : {
+         "kms_connector_type": "RESTKmsConnector",
+         "kms_is_healthy": true,
+         "kms_stable": true,
+         "kms_urls":[
+            "https://127.0.0.1:1234"
+         ]
       },
       "tenants":{
          "num_tenants":0,

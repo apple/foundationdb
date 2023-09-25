@@ -588,6 +588,10 @@ void initHelp() {
 	helpMap["getknob"] = CommandHelp(
 	    "getknob <KEY> [CONFIG_CLASS]", "gets the value of the specified knob", "CONFIG_CLASS is optional." ESCAPINGK);
 
+	helpMap["clearknob"] = CommandHelp("clearknob <KEY> [CONFIG_CLASS]",
+	                                   "clears the value of the specified knob in the configuration database",
+	                                   "CONFIG_CLASS is optional." ESCAPINGK);
+
 	helpMap["option"] = CommandHelp(
 	    "option <STATE> <OPTION> <ARG>",
 	    "enables or disables an option",
@@ -1618,9 +1622,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "getlocation")) {
-					Version _v = wait(makeInterruptable(
-					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
-					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens, _v)));
+					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1630,6 +1632,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					Version _v = wait(makeInterruptable(
 					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
 					bool _result = wait(makeInterruptable(getallCommandActor(localDb, tokens, _v)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "checkall")) {
+					bool _result = wait(makeInterruptable(checkallCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1877,6 +1886,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				state Optional<std::string> raw_desc;
 				if (tokencmp(tokens[0], "setknob")) {
 					if (tokens.size() > 4 || tokens.size() < 3) {
 						printUsage(tokens[0]);
@@ -1904,12 +1914,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						config_tr->set(t.pack(), tokens[2]);
 						if (!intrans) {
 							// prompt for description and add to txn
-							state Optional<std::string> raw_desc;
+							raw_desc.reset();
 							warn.cancel();
 							while (!raw_desc.present() || raw_desc.get().empty()) {
 								fprintf(stdout,
 								        "Please set a description for the change. Description must be non-empty\n");
-								state Optional<std::string> rawline_knob =
+								Optional<std::string> rawline_knob =
 								    wait(makeInterruptable(linenoise.read("description: ")));
 								raw_desc = rawline_knob;
 							}
@@ -1961,6 +1971,53 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							       Tuple::tupleToString(Tuple::unpack(v.get())).c_str());
 						else
 							printf("`%s' is not found\n", knob_class.c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "clearknob")) {
+					if (tokens.size() > 3 || tokens.size() < 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Config;
+							} else if (transtype == TransType::Db) {
+								fprintf(stderr, "ERROR: Cannot perform clearknob in database transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
+						Tuple t;
+						if (tokens.size() == 2) {
+							t.appendNull();
+						} else {
+							t.append(tokens[2]);
+						}
+						t.append(tokens[1]);
+						getTransaction(configDb, tenant, config_tr, options, intrans);
+
+						config_tr->clear(t.pack());
+						if (!intrans) {
+							// prompt for description and add to txn
+							raw_desc.reset();
+							warn.cancel();
+							while (!raw_desc.present() || raw_desc.get().empty()) {
+								fprintf(stdout,
+								        "Please set a description for the change. Description must be non-empty\n");
+								Optional<std::string> rawline_knob =
+								    wait(makeInterruptable(linenoise.read("description: ")));
+								raw_desc = rawline_knob;
+							}
+							std::string line = raw_desc.get();
+							config_tr->set("\xff\xff/description"_sr, line);
+							warn = checkStatus(
+							    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
+							wait(commitTransaction(config_tr));
+						} else {
+							isCommitDesc = true;
+						}
 					}
 					continue;
 				}

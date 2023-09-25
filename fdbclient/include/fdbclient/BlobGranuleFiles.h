@@ -70,4 +70,6 @@ Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data,
                                                           Optional<KeyRef> tenantPrefix,
                                                           Optional<BlobGranuleCipherKeysCtx> encryptionCtx);
 
+BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena);
+
 #endif

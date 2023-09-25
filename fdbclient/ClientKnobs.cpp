@@ -176,6 +176,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
 	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
+	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS, 5 * VERSIONS_PER_SECOND);  // Must be the same as SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
@@ -311,12 +312,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,   2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
-	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,        true );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
 	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
+	init( ENCRYPT_GET_CIPHER_KEY_LONG_REQUEST_THRESHOLD, 6.0);
 
 	init( REST_KMS_ALLOW_NOT_SECURE_CONNECTION,     false ); if ( randomize && BUGGIFY ) REST_KMS_ALLOW_NOT_SECURE_CONNECTION = !REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
 	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );

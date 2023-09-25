@@ -49,12 +49,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	const bool SPLIT_RECORDS = true;
 	const static int SPLIT_SIZE = 3;
 	double checkStorageQueueSeconds;
-	double queueMaxLength;
+	uint64_t queueMaxLength;
 
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		checkStorageQueueSeconds = getOption(options, "checkStorageQueueSeconds"_sr, 60.0);
-		queueMaxLength = getOption(options, "queueMaxLength"_sr, 100);
+		queueMaxLength = getOption(options, "queueMaxLength"_sr, UINT64_C(100));
 	}
 
 	// TODO: Currently this workload doesn't play well with MachineAttrition, but it probably should
@@ -460,7 +460,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 						if (role["role"].get_str() == "storage") {
 							role.get("query_queue_max", queryQueueMax);
 							CODE_PROBE(queryQueueMax > 0, " SS query queue is non-empty");
-							TraceEvent(SevDebug, "QueryQueueMax").detail("Value", queryQueueMax);
+							TraceEvent(SevDebug, "QueryQueueMax")
+							    .detail("Value", queryQueueMax)
+							    .detail("MaxLength", self->queueMaxLength);
 							ASSERT(queryQueueMax < self->queueMaxLength);
 						}
 					}

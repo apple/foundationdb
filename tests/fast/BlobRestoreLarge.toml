@@ -10,6 +10,7 @@ storageEngineExcludeTypes = [4, 5]
 bg_consistency_check_enabled = 0
 shard_encode_location_metadata = false
 bw_throttling_enabled = false
+blob_restore_skip_empty_ranges = false
 
 [[test]]
 testTitle = 'SetupBlob'

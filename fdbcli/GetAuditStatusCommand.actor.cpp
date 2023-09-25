@@ -30,6 +30,147 @@
 
 namespace fdb_cli {
 
+ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	state int64_t finishCount = 0;
+	state int64_t unfinishedCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByRange(cx, auditType, auditId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						printf("( Ongoing ) %s\n", auditStates[i].range.toString().c_str());
+						++unfinishedCount;
+					} else if (phase == AuditPhase::Error) {
+						printf("( Error   ) %s\n", auditStates[i].range.toString().c_str());
+						++finishCount;
+					} else {
+						++finishCount;
+						continue;
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryCount > 30) {
+					printf("Imcomplete check\n");
+					return Void();
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
+		}
+	}
+	printf("Finished range count: %ld\n", finishCount);
+	return Void();
+}
+
+ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			std::vector<StorageServerInterface> servers;
+			servers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++)
+				servers.push_back(decodeServerListValue(serverList[i].value));
+			return servers;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<AuditPhase> getAuditProgressByServer(Database cx,
+                                                  AuditType auditType,
+                                                  UID auditId,
+                                                  KeyRange auditRange,
+                                                  UID serverId) {
+	state KeyRange rangeToRead = auditRange;
+	state Key rangeToReadBegin = auditRange.begin;
+	state int retryCount = 0;
+	while (rangeToReadBegin < auditRange.end) {
+		loop {
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				state std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStateByServer(cx, auditType, auditId, serverId, rangeToRead));
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						return AuditPhase::Running;
+					} else if (phase == AuditPhase::Error) {
+						return AuditPhase::Error;
+					}
+				}
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryCount > 30) {
+					return AuditPhase::Invalid;
+				}
+				wait(delay(0.5));
+				retryCount++;
+			}
+		}
+	}
+	return AuditPhase::Complete;
+}
+
+ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
+	if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	    auditType == AuditType::ValidateLocationMetadata) {
+		wait(getAuditProgressByRange(cx, auditType, auditId, auditRange));
+	} else if (auditType == AuditType::ValidateStorageServerShard) {
+		state std::vector<Future<Void>> fs;
+		state std::unordered_map<UID, bool> res;
+		state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+		state int i = 0;
+		state int numCompleteServers = 0;
+		state int numOngoingServers = 0;
+		state int numErrorServers = 0;
+		state int numTSSes = 0;
+		for (; i < interfs.size(); i++) {
+			if (interfs[i].isTss()) {
+				numTSSes++;
+				continue; // SSShard audit does not test TSS
+			}
+			AuditPhase serverPhase = wait(getAuditProgressByServer(cx, auditType, auditId, allKeys, interfs[i].id()));
+			if (serverPhase == AuditPhase::Running) {
+				numOngoingServers++;
+			} else if (serverPhase == AuditPhase::Complete) {
+				numCompleteServers++;
+			} else if (serverPhase == AuditPhase::Error) {
+				numErrorServers++;
+			} else if (serverPhase == AuditPhase::Invalid) {
+				printf("SS %s partial progress fetched\n", interfs[i].id().toString().c_str());
+			}
+		}
+		printf("CompleteServers: %d\n", numCompleteServers);
+		printf("OngoingServers: %d\n", numOngoingServers);
+		printf("ErrorServers: %d\n", numErrorServers);
+		printf("IgnoredTSSes: %d\n", numTSSes);
+	} else {
+		printf("AuditType not implemented\n");
+	}
+	return Void();
+}
+
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2 || tokens.size() > 5) {
 		printUsage(tokens[0]);
@@ -58,6 +199,18 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		const UID id = UID::fromString(tokens[3].toString());
 		AuditStorageState res = wait(getAuditState(cx, type, id));
 		printf("Audit result is:\n%s", res.toString().c_str());
+	} else if (tokencmp(tokens[2], "progress")) {
+		if (tokens.size() != 4) {
+			printUsage(tokens[0]);
+			return false;
+		}
+		const UID id = UID::fromString(tokens[3].toString());
+		state AuditStorageState res = wait(getAuditState(cx, type, id));
+		if (res.getPhase() == AuditPhase::Running) {
+			wait(getAuditProgress(cx, res.getType(), res.id, res.range));
+		} else {
+			printf("Already complete\n");
+		}
 	} else if (tokencmp(tokens[2], "recent")) {
 		int count = CLIENT_KNOBS->TOO_MANY;
 		if (tokens.size() == 4) {
@@ -91,19 +244,16 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
-    CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard|checkmigration] [id|recent|phase] [ARGs]",
+    CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard] [id|recent|phase|progress] [ARGs]",
                 "Retrieve audit storage status",
                 "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
                 "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
                 "[running|complete|failed|error] count'\n"
-                "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, \n"
-                "and `checkmigration`. If specified, `Count' is how many\n"
-                "rows to audit. If not specified, check all rows in audit.\n"
-                "get_audit_status checkmigration prints out the number of data shards and physical shards."
-                "Results have the following format: if not `checkmigration`\n"
-                "  `[ID]: 000000000001000000000000, [Range]:  - 0xff, [Type]: 1, [Phase]: 2'\n"
-                "where `Type' is `1' for `ha' and `Phase' is `2' for `Complete'.\n"
+                "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
+                "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`. \n"
+                "If specified, `Count' is how many rows to audit.\n"
+                "If not specified, check all rows in audit.\n"
                 "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
                 "See also `audit_storage' command."));
 } // namespace fdb_cli

@@ -72,7 +72,8 @@ enum class ConfigurationResult {
 	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_IS_REGISTERED,
-	ENCRYPTION_AT_REST_MODE_ALREADY_SET
+	ENCRYPTION_AT_REST_MODE_ALREADY_SET,
+	INVALID_STORAGE_TYPE
 };
 
 enum class CoordinatorsResult {
@@ -479,6 +480,10 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						if (zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
 							return ConfigurationResult::NOT_ENOUGH_WORKERS;
 						}
+					}
+
+					if (!newConfig.storageServerStoreType.isValid() || !newConfig.tLogDataStoreType.isValid()) {
+						return ConfigurationResult::INVALID_STORAGE_TYPE;
 					}
 
 					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
