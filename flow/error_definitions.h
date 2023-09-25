@@ -96,6 +96,7 @@ ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
 ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
+ERROR( manual_shard_split_failed, 1083, "Manual shard split is failed to trigger")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

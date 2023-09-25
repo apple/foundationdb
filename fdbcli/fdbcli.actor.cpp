@@ -1743,6 +1743,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "redistribute")) {
+					bool _result = wait(makeInterruptable(redistributeCommandActor(ccf, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr, tokens, intrans)));

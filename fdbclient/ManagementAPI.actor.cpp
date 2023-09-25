@@ -2342,6 +2342,23 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
+ACTOR Future<Void> redistribute(Reference<IClusterConnectionRecord> clusterFile,
+                                KeyRange range,
+                                double timeoutSeconds) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		wait(timeoutError(clusterInterface->get().get().moveShard.getReply(MoveShardRequest(range)), timeoutSeconds));
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "RedistributeFailedToTrigger").errorUnsuppressed(e).detail("InputRange", range);
+		throw manual_shard_split_failed();
+	}
+	return Void();
+}
+
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	state ReadYourWritesTransaction tr(cx);
 

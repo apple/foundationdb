@@ -245,6 +245,8 @@ struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+	Reference<AsyncVar<bool>> shouldManualSplit;
+	std::shared_ptr<std::vector<Key>> manualSplitPoints;
 };
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
@@ -253,6 +255,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,

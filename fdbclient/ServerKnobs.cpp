@@ -135,6 +135,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
 	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
 	init( RELOCATION_PARALLELISM_PER_DEST_SERVER,                 10 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_DEST_SERVER = 1; // Note: if this is smaller than FETCH_KEYS_PARALLELISM, this will artificially reduce performance. The current default of 10 is probably too high but is set conservatively for now.
+	init( MANUAL_SPLIT_RELOCATION_PARALLELISM_PER_DEST_SERVER,     2 ); if( randomize && BUGGIFY ) MANUAL_SPLIT_RELOCATION_PARALLELISM_PER_DEST_SERVER = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
 	init( DD_REBALANCE_PARALLELISM,                               50 );
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
@@ -163,6 +164,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
+	init( PRIORITY_MANUAL_SHARD_SPLIT,                           960 );
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
