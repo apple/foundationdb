@@ -221,7 +221,7 @@ if (WITH_SWIFT)
     -Xcc -std=c++20 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
     )
 
-    add_dependencies(flow_swift_checked_continuation_header flow_actors boost_target)
+    add_dependencies(flow_swift_checked_continuation_header flow_actors boost_target ProtocolVersion)
     add_dependencies(flow_swift_header flow_swift_checked_continuation_header)
     add_dependencies(flow_swift flow_swift_header)
 
