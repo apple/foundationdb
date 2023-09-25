@@ -28,7 +28,7 @@
 class StatusClient {
 public:
 	enum StatusLevel { MINIMAL = 0, NORMAL = 1, DETAILED = 2, JSON = 3 };
-	static Future<StatusObject> statusFetcher(Database db);
+	static Future<StatusObject> statusFetcher(Database db, std::string statusField = "");
 };
 
 #endif

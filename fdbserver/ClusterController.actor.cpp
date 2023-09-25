@@ -1489,54 +1489,60 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				}
 			}
 
-			// Get status but trap errors to send back to client.
-			std::vector<WorkerDetails> workers;
-			std::vector<ProcessIssues> workerIssues;
-
-			for (auto& it : self->id_worker) {
-				workers.push_back(it.second.details);
-				if (it.second.issues.size()) {
-					workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
-				}
-			}
-
-			std::vector<NetworkAddress> incompatibleConnections;
-			for (auto it = self->db.incompatibleConnections.begin(); it != self->db.incompatibleConnections.end();) {
-				if (it->second < now()) {
-					it = self->db.incompatibleConnections.erase(it);
-				} else {
-					incompatibleConnections.push_back(it->first);
-					it++;
-				}
-			}
-
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
-			                                                                  self->cx,
-			                                                                  workers,
-			                                                                  workerIssues,
-			                                                                  self->storageStatusInfos,
-			                                                                  &self->db.clientStatus,
-			                                                                  coordinators,
-			                                                                  incompatibleConnections,
-			                                                                  self->datacenterVersionDifference,
-			                                                                  configBroadcaster,
-			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics)));
-
-			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
-				throw result.getError();
-
-			// Update last_request_time now because GetStatus is finished and the delay is to be measured between
-			// requests
-			last_request_time = now();
-
 			while (!requests_batch.empty()) {
-				if (result.isError())
-					requests_batch.back().reply.sendError(result.getError());
-				else
-					requests_batch.back().reply.send(result.get());
-				requests_batch.pop_back();
-				wait(yield());
+				state std::string requestedStatusJsonField = requests_batch.back().statusField;
+
+				// Get status but trap errors to send back to client.
+				std::vector<WorkerDetails> workers;
+				std::vector<ProcessIssues> workerIssues;
+
+				for (auto& it : self->id_worker) {
+					workers.push_back(it.second.details);
+					if (it.second.issues.size()) {
+						workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
+					}
+				}
+
+				std::vector<NetworkAddress> incompatibleConnections;
+				for (auto it = self->db.incompatibleConnections.begin();
+				     it != self->db.incompatibleConnections.end();) {
+					if (it->second < now()) {
+						it = self->db.incompatibleConnections.erase(it);
+					} else {
+						incompatibleConnections.push_back(it->first);
+						it++;
+					}
+				}
+
+				state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
+				                                                                  self->cx,
+				                                                                  workers,
+				                                                                  workerIssues,
+				                                                                  self->storageStatusInfos,
+				                                                                  &self->db.clientStatus,
+				                                                                  coordinators,
+				                                                                  incompatibleConnections,
+				                                                                  self->datacenterVersionDifference,
+				                                                                  configBroadcaster,
+				                                                                  self->db.metaclusterRegistration,
+				                                                                  self->db.metaclusterMetrics,
+				                                                                  requestedStatusJsonField)));
+
+				if (result.isError() && result.getError().code() == error_code_actor_cancelled)
+					throw result.getError();
+
+				// Update last_request_time now because GetStatus is finished and the delay is to be measured between
+				// requests
+				last_request_time = now();
+
+				while (!requests_batch.empty() && requests_batch.back().statusField == requestedStatusJsonField) {
+					if (result.isError())
+						requests_batch.back().reply.sendError(result.getError());
+					else
+						requests_batch.back().reply.send(result.get());
+					requests_batch.pop_back();
+					wait(yield());
+				}
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "StatusServerError").error(e);

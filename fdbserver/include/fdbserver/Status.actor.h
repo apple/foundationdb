@@ -55,7 +55,13 @@ Future<StatusReply> clusterGetStatus(
     Version const& datacenterVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
-    metacluster::MetaclusterMetrics const& metaclusterMetrics);
+    metacluster::MetaclusterMetrics const& metaclusterMetrics,
+    std::string const& requestedStatusJsonField);
+
+Future<StatusReply> clusterGetFaultToleranceStatus(Reference<AsyncVar<struct ServerDBInfo>> const& db,
+                                                   Database const& cx,
+                                                   std::vector<WorkerDetails> const& workers,
+                                                   ServerCoordinators const& coordinators);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
