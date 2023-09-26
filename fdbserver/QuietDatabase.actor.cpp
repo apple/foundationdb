@@ -1036,7 +1036,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<bool> storageServersRecruiting;
 	state Future<int64_t> versionOffset;
 	state Future<Version> dcLag;
-	state Version maxDcLag = 30e6;
+	state Version maxDcLag = 100e6;
 	state std::string traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str()).log();
 
