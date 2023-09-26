@@ -245,8 +245,8 @@ struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
-	Reference<AsyncVar<bool>> shouldManualSplit;
-	std::shared_ptr<std::vector<Key>> manualSplitPoints;
+	Reference<AsyncVar<Void>> manualSplitTrigger;
+	std::shared_ptr<std::set<Key>> manualSplitPoints;
 };
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,

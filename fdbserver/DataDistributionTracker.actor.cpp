@@ -478,30 +478,38 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
                                  ShardSizeBounds shardBounds,
-                                 std::vector<Key> manualSplitKeys) {
+                                 std::shared_ptr<std::set<Key>> manualSplitPoints) {
 	state StorageMetrics metrics = shardSize->get().get().metrics;
 	state BandwidthStatus bandwidthStatus = getBandwidthStatus(metrics);
-	state bool doManualSplit = !manualSplitKeys.empty();
+	state bool doManualSplit = !manualSplitPoints->empty();
 
 	// Split
 	TEST(true); // shard to be split
 
 	state Standalone<VectorRef<KeyRef>> splitKeys;
 	if (doManualSplit) {
-		splitKeys.push_back_deep(splitKeys.arena(), keys.begin);
-		for (const auto& manualSplitKey : manualSplitKeys) {
-			splitKeys.push_back_deep(splitKeys.arena(), manualSplitKey);
+		// Check if all split points are with in the shard
+		for (const auto& manualSplitKey : *manualSplitPoints) {
+			ASSERT_WE_THINK(manualSplitKey < keys.end && manualSplitKey > keys.begin);
 		}
-		splitKeys.push_back_deep(splitKeys.arena(), keys.end);
-		TraceEvent e(SevInfo, "ManualShardSplitShardSplitterStart", self->distributorId);
-		e.setMaxEventLength(20000);
-		e.detail("Begin", keys.begin);
-		e.detail("End", keys.end);
-		int i = 0;
-		for (const auto& splitKey : splitKeys) {
-			e.detail("SplitPoint" + std::to_string(i), printable(splitKey).c_str());
-			i++;
+		// Add two ends to the split points
+		manualSplitPoints->insert(keys.begin);
+		manualSplitPoints->insert(keys.end);
+		// Sort split points and add to splitKeys
+		std::vector<Key> manualSplitPointList;
+		for (const auto& manualSplitKey : *manualSplitPoints) {
+			manualSplitPointList.push_back(manualSplitKey);
 		}
+		std::sort(manualSplitPointList.begin(), manualSplitPointList.end(), std::less<Key>());
+		for (const auto& manualSplitPoint : manualSplitPointList) {
+			splitKeys.push_back_deep(splitKeys.arena(), manualSplitPoint);
+		}
+		TraceEvent(SevInfo, "ManualShardSplitReadSplitPointInShard", self->distributorId)
+		    .detail("Points", describe(*manualSplitPoints))
+		    .detail("Size", manualSplitPoints->size())
+		    .detail("Shard", keys);
+		// Cleanup
+		manualSplitPoints->clear();
 	} else {
 		StorageMetrics splitMetrics;
 		splitMetrics.bytes = shardBounds.max.bytes / 2;
@@ -714,10 +722,10 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
                                   KeyRange keys,
                                   Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
                                   Reference<HasBeenTrueFor> wantsToMerge,
-                                  Reference<AsyncVar<bool>> shouldManualSplit,
-                                  std::shared_ptr<std::vector<Key>> manualSplitPoints) {
+                                  Reference<AsyncVar<Void>> manualSplitTrigger,
+                                  std::shared_ptr<std::set<Key>> manualSplitPoints) {
 	Future<Void> onChange =
-	    shardSize->onChange() || yieldedFuture(self->maxShardSize->onChange()) || shouldManualSplit->onChange();
+	    shardSize->onChange() || yieldedFuture(self->maxShardSize->onChange()) || manualSplitTrigger->onChange();
 
 	// There are the bounds inside of which we are happy with the shard size.
 	// getShardSizeBounds() will allways have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
@@ -730,13 +738,10 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	                   (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin);
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow;
 
-	std::vector<Key> manualSplitKeys;
-	if (shouldManualSplit->get() == true) {
-		// Force to split
+	if (!manualSplitPoints->empty()) {
+		// Have points to split, then force to split
 		shouldSplit = true;
 		shouldMerge = false;
-		manualSplitKeys = *manualSplitPoints;
-		manualSplitPoints->clear();
 	}
 
 	// Every invocation must set this or clear it
@@ -770,7 +775,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, manualSplitKeys);
+		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, manualSplitPoints);
 	}
 
 	wait(onChange);
@@ -780,8 +785,8 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
                                 KeyRange keys,
                                 Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
-                                Reference<AsyncVar<bool>> shouldManualSplit,
-                                std::shared_ptr<std::vector<Key>> manualSplitPoints) {
+                                Reference<AsyncVar<Void>> manualSplitTrigger,
+                                std::shared_ptr<std::set<Key>> manualSplitPoints) {
 	wait(yieldedFuture(self()->readyToStart.getFuture()));
 
 	if (!shardSize->get().present())
@@ -807,7 +812,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	try {
 		loop {
 			// Use the current known size to check for (and start) splits and merges.
-			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge, shouldManualSplit, manualSplitPoints));
+			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge, manualSplitTrigger, manualSplitPoints));
 
 			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
 			// delay(0) mitigates the resulting SlowTask
@@ -832,8 +837,8 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		}
 
 		auto shardMetrics = makeReference<AsyncVar<Optional<ShardMetrics>>>();
-		auto shouldManualSplit = makeReference<AsyncVar<bool>>(false);
-		auto manualSplitPoints = std::make_shared<std::vector<Key>>();
+		auto manualSplitTrigger = makeReference<AsyncVar<Void>>();
+		auto manualSplitPoints = std::make_shared<std::set<Key>>();
 
 		// For the case where the new tracker will take over at the boundaries of current shard(s)
 		//  we can use the old size if it is available. This will be the case when merging shards.
@@ -849,10 +854,13 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 
 		ShardTrackedData data;
 		data.stats = shardMetrics;
-		data.shouldManualSplit = shouldManualSplit;
+		data.manualSplitTrigger = manualSplitTrigger;
 		data.manualSplitPoints = manualSplitPoints;
-		data.trackShard = shardTracker(
-		    DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, shouldManualSplit, manualSplitPoints);
+		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self),
+		                               ranges[i],
+		                               shardMetrics,
+		                               manualSplitTrigger,
+		                               manualSplitPoints);
 		data.trackBytes = trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		self->shards.insert(ranges[i], data);
 	}
@@ -1039,12 +1047,15 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 					for (const auto& splitPoint : req.splitPoints) {
 						if (it->range().begin < splitPoint && splitPoint < it->range().end) {
 							triggerManualSplitShard = true;
-							it->value().manualSplitPoints->push_back(splitPoint);
+							it->value().manualSplitPoints->insert(splitPoint);
+							TraceEvent(SevInfo, "ManualShardSplitAddSplitPointToShard", self.distributorId)
+							    .detail("Point", splitPoint)
+							    .detail("Shard", it->range());
 						}
 					}
 					if (triggerManualSplitShard) {
 						// Trigger split for this shard
-						it->value().shouldManualSplit->set(true);
+						it->value().manualSplitTrigger->trigger();
 						TraceEvent(SevInfo, "ManualShardSplitDDTriggerShardSplit", self.distributorId)
 						    .detail("Shard", it->range());
 					} else {
