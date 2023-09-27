@@ -140,6 +140,8 @@ class AsyncFileCached final : public IAsyncFile, public ReferenceCounted<AsyncFi
 	friend struct AFCPage;
 
 public:
+	virtual StringRef getClassName() override { return "AsyncFileCached"_sr; }
+
 	// Opens a file that uses the FDB in-memory page cache
 	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode) {
 		//TraceEvent("AsyncFileCachedOpen").detail("Filename", filename);

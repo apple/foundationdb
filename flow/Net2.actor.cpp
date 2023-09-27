@@ -123,7 +123,7 @@ class Connection;
 // Outlives main
 Net2* g_net2 = nullptr;
 
-thread_local INetwork* thread_network = 0;
+thread_local INetwork* thread_network = nullptr;
 
 class Net2 final : public INetwork, public INetworkConnections {
 

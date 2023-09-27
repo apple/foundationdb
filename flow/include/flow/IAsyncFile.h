@@ -65,6 +65,8 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
+	virtual StringRef getClassName() { return "IAsyncFile"_sr; }
+
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	virtual Future<int> read(void* data,
 	                         int length,

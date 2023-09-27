@@ -45,6 +45,8 @@
 class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
 public:
+	virtual StringRef getClassName() override { return "AsyncFileDetachable"_sr; }
+
 	static void init() {
 		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
 		if (eio_init(&eio_want_poll, nullptr)) {

@@ -71,6 +71,8 @@ private:
 	bool assertOnReadWriteCancel;
 
 public:
+	virtual StringRef getClassName() override { return "AsyncFileDetachable"_sr; }
+
 	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), assertOnReadWriteCancel(true) {
 		shutdown = doShutdown(this);
 	}
@@ -103,6 +105,8 @@ public:
 // killed This is used to simulate a power failure which prevents all written data from being persisted to disk
 class AsyncFileNonDurable final : public IAsyncFile, public ReferenceCounted<AsyncFileNonDurable> {
 public:
+	virtual StringRef getClassName() override { return "AsyncFileNonDurable"_sr; }
+
 	UID id;
 	std::string filename;
 

@@ -26,6 +26,7 @@
 #include <map>
 #include <boost/preprocessor/facilities/is_empty.hpp>
 #include <boost/preprocessor/control/if.hpp>
+#include "flow/ActorContext.h"
 #include "flow/Platform.h"
 #include "flow/Knobs.h"
 #include "flow/FileIdentifier.h"
@@ -57,7 +58,7 @@ public:
 		serializer(ar, error_code);
 	}
 
-	Error() : error_code(invalid_error_code), flags(0) {}
+	Error();
 	explicit Error(int error_code);
 
 	static void init();
