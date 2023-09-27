@@ -715,6 +715,8 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			    .suppressFor(60)
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 			    .detail("ExpiresIn", rconn.expirationTime - now())
+			    .detail("Counter", rconn.counter)
+			    q.detail("DebugID", rconn.conn->getDebugID())
 			    .detail("Proxy", b->proxyHost.orDefault(""));
 			return rconn;
 		}
@@ -743,6 +745,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	} else {
 		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
+
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -764,6 +767,8 @@ Future<S3BlobStoreEndpoint::ReusableConnection> S3BlobStoreEndpoint::connect() {
 void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	// If it expires in the future then add it to the pool in the front
 	if (rconn.expirationTime > now())
+		TraceEvent("S3BlobStoreEndpointReuseConnection").detail("DebugID", rconn.conn->getDebugID());
+	    rconn.counter = rconn.counter + 1;
 		connectionPool.push(rconn);
 	rconn.conn = Reference<IConnection>();
 }
@@ -819,6 +824,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 	headers["Content-Length"] = format("%d", contentLen);
 	headers["Host"] = bstore->host;
 	headers["Accept"] = "application/xml";
+	// Keep the HTTP session open for more efficient uploads.
+	// TODO Validate those settings if they make sense
+	headers["Keep-Alive"] = "timeout=3600, max=10000";
+	headers["Connection"] = "keep-alive";
 
 	// Avoid to send request with an empty resouce.
 	if (resource.empty()) {
@@ -846,6 +855,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state int thisTry = 1;
 	state double nextRetryDelay = 2.0;
+
+	TraceEvent("S3BlobStoreDoHTTPRequest")
+		.detail("RequestTimeout", requestTimeout)
+		.detail("Verb", verb)
+		.detail("Resource", resource)
+		.detail("Proxy", bstore->proxyHost.orDefault(""));
 
 	loop {
 		state Optional<Error> err;
@@ -877,6 +892,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			state S3BlobStoreEndpoint::ReusableConnection rconn =
 			    wait(timeoutError(frconn, bstore->knobs.connect_timeout));
 			connectionEstablished = true;
+			TraceEvent("S3BlobStoreWaitForConnectionSuccess")
+			.detail("Counter", rconn.counter)
+			.detail("IsValid", rconn.conn.isValid())
+			.detail("DebugID", rconn.conn->getDebugID());
 
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are
@@ -917,14 +936,18 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
+			TraceEvent("S3BlobStoreHTTPRequestDone")
+			.detail("ConnectionHeader", r->headers["Connection"])
+			.detail("DebugID", rconn.conn->getDebugID());
+
 			if (r->headers["Connection"] != "close")
 				bstore->returnConnection(rconn);
 			rconn.conn.clear();
-
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			err = e;
+			// TODO clean up connection if we closed it?
 		}
 
 		// If err is not present then r is valid.
@@ -956,6 +979,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		}
 
 		event.detail("ConnectionEstablished", connectionEstablished);
+		event.detail("DebugID", rconn.conn->getDebugID());
 
 		if (remoteAddress.present())
 			event.detail("RemoteEndpoint", remoteAddress.get());

@@ -150,6 +150,7 @@ public:
 	struct ReusableConnection {
 		Reference<IConnection> conn;
 		double expirationTime;
+		int counter;
 	};
 	std::queue<ReusableConnection> connectionPool;
 	Future<ReusableConnection> connect();

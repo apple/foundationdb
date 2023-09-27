@@ -869,9 +869,11 @@ public:
 		}
 
 		if (existingSocket != nullptr) {
+			TraceEvent("CreatingTLSConnectionOverExistingSocket").detail("PeerIP", addr);
 			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
 			self->peer_address = addr;
 			self->init();
+			//self->getSocket()
 			return self;
 		}
 

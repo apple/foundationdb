@@ -361,7 +361,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
                                                   int64_t* pSent,
                                                   Reference<IRateControl> recvRate,
                                                   std::string requestIDHeader) {
-	state TraceEvent event(SevDebug, "HTTPRequest");
+	// TODO: change debugging back.
+	state TraceEvent event(SevWarnAlways, "HTTPRequest");
 
 	state UnsentPacketQueue empty;
 	if (pContent == nullptr)
@@ -373,6 +374,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
 	}
 
+	TraceEvent(SevWarn, "HTTPRequestStart");
 	state bool earlyResponse = false;
 	state int total_sent = 0;
 	state double send_start;
@@ -423,6 +425,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			// set the Connection header to "close" as a hint to the caller that this connection can't be used
 			// again, and break out of the send loop.
 			if (responseReading.isReady()) {
+				TraceEvent(SevWarn, "HTTPRequestConectionClosing")
+					.detail("Verb", verb)
+					.detail("RemoteAddress", conn->getPeerAddress())
+					.detail("DebugID", conn->getDebugID());
 				conn->close();
 				r->headers["Connection"] = "close";
 				earlyResponse = true;
@@ -509,6 +515,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			throw err.get();
 		}
 
+		event.log();
 		return r;
 	} catch (Error& e) {
 		double elapsed = timer() - send_start;
@@ -536,12 +543,20 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	headers["Host"] = remoteHost + ":" + remoteService;
 	headers["Accept"] = "application/xml";
 	headers["Proxy-Connection"] = "Keep-Alive";
+	// Keep the HTTP session open for more efficient uploads.
+	headers["Keep-Alive"] = "timeout=3600, max=10000";
+	headers["Connection"] = "keep-alive";
+
 	state int requestTimeout = 60;
 	state int maxTries = FLOW_KNOBS->HTTP_CONNECT_TRIES;
 	state int thisTry = 1;
 	state double nextRetryDelay = 2.0;
 	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	state int64_t bytes_sent = 0;
+
+	TraceEvent(SevWarn, "ProxyConnectRequest")
+		.detail("RemoteHost", remoteHost)
+		.detail("RemoteService", remoteService);
 
 	loop {
 		state Optional<Error> err;
