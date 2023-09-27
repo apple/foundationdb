@@ -716,7 +716,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 			    .detail("ExpiresIn", rconn.expirationTime - now())
 			    .detail("Counter", rconn.counter)
-			    q.detail("DebugID", rconn.conn->getDebugID())
+			    .detail("DebugID", rconn.conn->getDebugID())
 			    .detail("Proxy", b->proxyHost.orDefault(""));
 			return rconn;
 		}
