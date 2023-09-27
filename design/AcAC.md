@@ -81,6 +81,38 @@ enum class ActorContextDumpType : uint8_t {
 
 `FULL_CONTEXT` will dump *all* running actors, while `CURRENT_CALL_BACKTRACE` will dump the call backtrace of the current running actor. `CURRENT_STACK` is not as helpful since it will dump the current call stack and is for debugging purposes only. The result will be encoded in `base64` format and returned as a `std::string` object. The object can be consumed by `bin/acac`.
 
+### Dump the actor call backtrace in debugger
+
+It is possible to dump the encoded actor call backtrace within `gdb` or `lldb` via `dumpActorCallBacktrace()`, e.g.,
+
+```
+(lldb) p dumpActorCallBacktrace()
+AsfmEwAAAAAACQAAAMfmEwAAAAAAAM2oiSx71iIAGrSuCzh6ICZdEwAAAAAAJl0TAAAAAAAA
+xtSlzYb4jwDwjH12k/QMyyITAAAAAADLIhMAAAAAAAB494CVpeUhADemI+QonWM4IgAAAAAA
+ADgiAAAAAAAAABGOhIZwfcMAYcMZsUHF4yoiAAAAAAAAKiIAAAAAAAAAZ0OdsC0dMwBDhOSw
+qDHU7CAAAAAAAADsIAAAAAAAAAD/+N1Ch/X3AEwORpyq68Y8AAAAAAAAADwAAAAAAAAAAEqD
+W3c/M9kAHCBUzBTlojsAAAAAAAAAOwAAAAAAAAAA+uRVDFla0gA5DXKp8yQbCgAAAAAAAAAK
+AAAAAAAAAADwo2kloY1WAKDXp1f+BrgAAAAAAAAAAA==
+```
+
+```bash
+# echo "AsfmEwAAAAAACQAAAMfmEwAAAAAAAM2oiSx71iIAGrSuCzh6ICZdEwAAAAAAJl0TAAAAAAAA
+\ xtSlzYb4jwDwjH12k/QMyyITAAAAAADLIhMAAAAAAAB494CVpeUhADemI+QonWM4IgAAAAAA
+\ ADgiAAAAAAAAABGOhIZwfcMAYcMZsUHF4yoiAAAAAAAAKiIAAAAAAAAAZ0OdsC0dMwBDhOSw
+\ qDHU7CAAAAAAAADsIAAAAAAAAAD/+N1Ch/X3AEwORpyq68Y8AAAAAAAAADwAAAAAAAAAAEqD
+\ W3c/M9kAHCBUzBTlojsAAAAAAAAAOwAAAAAAAAAA+uRVDFla0gA5DXKp8yQbCgAAAAAAAAAK
+\ AAAAAAAAAADwo2kloY1WAKDXp1f+BrgAAAAAAAAAAA=="|bin/acac
+     1304263 /root/src/fdbserver/workloads/FuzzApiCorrectness.actor.cpp:loadAndRun  <ACTIVE>
+     1269030 /root/src/fdbserver/tester.actor.cpp:runWorkloadAsync
+     1254091 /root/src/fdbserver/tester.actor.cpp:testerServerWorkload
+        8760 /root/src/fdbserver/tester.actor.cpp:testerServerCore
+        8746 /root/src/fdbserver/worker.actor.cpp:workerServer
+        8428 /root/src/fdbserver/worker.actor.cpp:fdbd
+          60 /root/src/fdbserver/SimulatedCluster.actor.cpp:simulatedFDBDRebooter
+          59 /root/src/fdbserver/SimulatedCluster.actor.cpp:simulatedMachine
+          10 /root/src/fdbserver/SimulatedCluster.actor.cpp:simulationSetupAndRun
+```
+
 ## Implementation Details
 
 <TODO>

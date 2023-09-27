@@ -3,6 +3,7 @@
 #ifdef WITH_ACAC
 
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 
 #include "flow/flow.h"
@@ -120,6 +121,11 @@ std::vector<ActiveActor> getCallBacktraceOfActor(const ActorID& actorID) {
 }
 
 } // anonymous namespace
+
+void dumpActorCallBacktrace() {
+	std::string backtrace = encodeActorContext(ActorContextDumpType::CURRENT_CALL_BACKTRACE);
+	std::cout << backtrace << std::endl;
+}
 
 std::string encodeActorContext(const ActorContextDumpType dumpType) {
 	BinaryWriter writer(Unversioned());

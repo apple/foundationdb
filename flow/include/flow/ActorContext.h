@@ -26,8 +26,6 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include "flow/FastAlloc.h"
@@ -95,6 +93,9 @@ enum class ActorContextDumpType : uint8_t {
 
 // Encode the current actor context into a string
 extern std::string encodeActorContext(const ActorContextDumpType dumpType = ActorContextDumpType::FULL_CONTEXT);
+
+// Encode the current actor call backtrace
+extern void dumpActorCallBacktrace();
 
 struct DecodedActorContext {
 	struct ActorInfo {
