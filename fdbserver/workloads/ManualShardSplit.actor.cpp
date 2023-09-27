@@ -50,36 +50,42 @@ struct ManualShardSplitWorkload : TestWorkload {
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
-
 		Version ver = wait(self->populateData(self, cx, &kvs));
 		TraceEvent("ManualShardSplitPopulateDataDone");
-		loop {
-			try {
-				wait(redistribute(
-				    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr), /*timeoutSeconds=*/30));
-				break;
-			} catch (Error& e) {
-				if (e.code() == error_code_manual_shard_split_failed) {
-					wait(delay(1.0));
-					continue;
-				} else {
-					throw e;
+		state std::vector<KeyRangeRef> ranges = {
+			KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr),
+			KeyRangeRef("TestKeyC"_sr, "TestKeyD"_sr), KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr),
+			KeyRangeRef("TestKeyE"_sr, "TestKeyF"_sr), KeyRangeRef("TestKeyA"_sr, "TestKeyC"_sr),
+			KeyRangeRef("TestKeyA"_sr, "TestKeyD"_sr), KeyRangeRef("TestKeyA"_sr, "TestKeyE"_sr),
+			KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), KeyRangeRef("TestKeyB"_sr, "TestKeyD"_sr),
+			KeyRangeRef("TestKeyB"_sr, "TestKeyE"_sr), KeyRangeRef("TestKeyB"_sr, "TestKeyF"_sr),
+			KeyRangeRef("TestKeyC"_sr, "TestKeyE"_sr), KeyRangeRef("TestKeyC"_sr, "TestKeyF"_sr),
+			KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr), KeyRangeRef("TestKeyE"_sr, "TestKeyE"_sr),
+			KeyRangeRef("TestKeyF"_sr, "TestKeyF"_sr),
+		};
+		state int count = 0;
+		while (count < 100) {
+			state KeyRange selectRange = deterministicRandom()->randomChoice(ranges);
+			loop {
+				try {
+					wait(redistribute(cx->getConnectionRecord(), selectRange, 30));
+					if (selectRange.empty()) {
+						throw internal_error(); // empty is not expected to be complete
+					}
+					break;
+				} catch (Error& e) {
+					if (e.code() == error_code_manual_shard_split_failed) {
+						if (selectRange.empty()) {
+							break; // expected for the empty range
+						}
+						wait(delay(1.0));
+						continue;
+					} else {
+						throw e;
+					}
 				}
 			}
-		}
-		loop {
-			try {
-				wait(redistribute(
-				    cx->getConnectionRecord(), KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr), /*timeoutSeconds=*/30));
-				break;
-			} catch (Error& e) {
-				if (e.code() == error_code_manual_shard_split_failed) {
-					wait(delay(1.0));
-					continue;
-				} else {
-					throw e;
-				}
-			}
+			count++;
 		}
 		TraceEvent("ManualShardSplitTestComplete");
 		return Void();
