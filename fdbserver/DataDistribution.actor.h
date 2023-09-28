@@ -84,6 +84,8 @@ struct GetTeamRequest {
 	bool preferLowerUtilization;
 	bool teamMustHaveShards;
 	double inflightPenalty;
+	UID relocationId;
+	bool traceStorageQueueAware;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
@@ -96,7 +98,7 @@ struct GetTeamRequest {
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), storageQueueAware(false),
 	    preferLowerUtilization(preferLowerUtilization), teamMustHaveShards(teamMustHaveShards),
-	    inflightPenalty(inflightPenalty) {}
+	    inflightPenalty(inflightPenalty), traceStorageQueueAware(false) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;

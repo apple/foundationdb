@@ -235,6 +235,7 @@ public:
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
 	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // experimental!
 	int64_t DD_TARGET_STORAGE_QUEUE_SIZE;
+	bool TRACE_STORAGE_QUEUE_AWARE_GET_TEAM_FOR_MANUAL_SPLIT_ONLY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
