@@ -261,7 +261,6 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 	// there must be response content.
 	if (header_only && pos == buf.size())
 		return Void();
-
 	// There should be content (or at least metadata describing that there is no content.
 	// Chunked transfer and 'normal' mode (content length given, data in one segment after headers) are supported.
 	if (r->contentLen >= 0) {
@@ -339,7 +338,6 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 			throw http_bad_response();
 		}
 	}
-
 	return Void();
 }
 
@@ -361,7 +359,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
                                                   int64_t* pSent,
                                                   Reference<IRateControl> recvRate,
                                                   std::string requestIDHeader) {
-	state TraceEvent event(SevDebug, "HTTPRequest");
+	state TraceEvent event("Hfu4HTTPRequest");
 
 	state UnsentPacketQueue empty;
 	if (pContent == nullptr)
@@ -403,18 +401,20 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		pContent->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
-			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
+			printf("[%s] HTTP starting %s %s ContentLen:%d HeaderSize:%d\n",
 			       conn->getDebugID().toString().c_str(),
 			       verb.c_str(),
 			       resource.c_str(),
-			       contentLen);
+			       contentLen,
+				   headers.size());
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : headers)
 				printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
 		}
 
 		state Reference<HTTP::Response> r(new HTTP::Response());
-		state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE" || verb == "CONNECT");
+		TraceEvent("Hfu5HTTPBefore").detail("Verb", verb).detail("HeaderSize", headers.size()).log();
+		state Future<Void> responseReading = r->read(conn, verb == "PUT" || verb == "HEAD" || verb == "DELETE" || verb == "CONNECT");
 
 		send_start = timer();
 
@@ -423,6 +423,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			// set the Connection header to "close" as a hint to the caller that this connection can't be used
 			// again, and break out of the send loop.
 			if (responseReading.isReady()) {
+				TraceEvent("Hfu5HTTPRequestConectionClosing")
+					.detail("IsReady", responseReading.isReady())
+					.detail("IsError", responseReading.isError())
+					.detail("Error", responseReading.getError().code())
+					.detail("QueueEmpty", pContent->empty())
+					.detail("Verb", verb).log();
 				conn->close();
 				r->headers["Connection"] = "close";
 				earlyResponse = true;
@@ -443,6 +449,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			wait(conn->onWritable());
 			wait(yield(TaskPriority::WriteSocket));
 		}
+		TraceEvent("Hfu5HTTPAfterWrite").log();
 
 		wait(responseReading);
 		double elapsed = timer() - send_start;
@@ -512,6 +519,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		return r;
 	} catch (Error& e) {
 		double elapsed = timer() - send_start;
+		TraceEvent("Hfu5HTTPError").detail("Code", e.code()).log();
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
 			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
@@ -568,9 +576,25 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
 		if (!err.present() && r->code == 200) {
+			TraceEvent(SevWarn, "Hfu5ProxyConnectRequestBefore")
+				.detail("RemoteHost", remoteHost)
+				.detail("RemoteService", remoteService)
+				.log();
+			//boost::asio::ip::tcp::socket socket = std::move(conn->getSocket());
+			// Get socket options
+			boost::asio::socket_base::keep_alive keep_alive_option;
+			conn->getSocket().get_option(keep_alive_option);
+
+			boost::asio::socket_base::keep_alive option(true);
+			conn->getSocket().set_option(option);
+			// Check if the value is set.
+			conn->getSocket().get_option(keep_alive_option);
+			TraceEvent(SevWarn, "Hfu5ProxyConnectRequestSuccess")
+					.detail("RemoteHost", remoteHost)
+					.detail("RemoteService", remoteService);
 			return Void();
 		}
-
+		TraceEvent(SevWarn, "Hfu5ProxyConnectRequestFailed").detail("Code", r->code).log();
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
 		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
 
@@ -583,7 +607,6 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		if (err.present()) {
 			event.errorUnsuppressed(err.get());
 		}
-		event.suppressFor(60);
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
 		}

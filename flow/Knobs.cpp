@@ -169,7 +169,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// HTTP
 	init( HTTP_READ_SIZE,                                 128*1024 );
 	init( HTTP_SEND_SIZE,                                  32*1024 );
-	init( HTTP_VERBOSE_LEVEL,                                    0 );
+	init( HTTP_VERBOSE_LEVEL,                                    5 );
 	init( HTTP_REQUEST_ID_HEADER,                               "" );
 	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );
 	init( HTTP_CONNECT_TRIES,                                   10 );

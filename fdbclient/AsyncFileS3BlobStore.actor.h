@@ -145,6 +145,7 @@ public:
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
 			part->finalizeMD5();
+
 			wait(f->m_bstore->writeEntireFileFromBuffer(
 			    f->m_bucket, f->m_object, &part->content, part->length, part->md5string));
 			return Void();

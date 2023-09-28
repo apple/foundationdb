@@ -705,20 +705,24 @@ Future<Void> S3BlobStoreEndpoint::updateSecret() {
 
 ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3BlobStoreEndpoint> b) {
 	// First try to get a connection from the pool
+	TraceEvent("Hfu5ConnectImplStart").detail("PoolSize", b->connectionPool.size()).log();
 	while (!b->connectionPool.empty()) {
 		S3BlobStoreEndpoint::ReusableConnection rconn = b->connectionPool.front();
 		b->connectionPool.pop();
 
 		// If the connection expires in the future then return it
 		if (rconn.expirationTime > now()) {
-			TraceEvent("S3BlobStoreEndpointReusingConnected")
-			    .suppressFor(60)
+			TraceEvent("S3BlobStoreEndpointReusingConnected11")
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 			    .detail("ExpiresIn", rconn.expirationTime - now())
 			    .detail("Proxy", b->proxyHost.orDefault(""));
 			return rconn;
 		}
 	}
+	TraceEvent("Hfu5S3BlobStoreTryBuildNewConnection")
+	    .detail("Useproxy", b->useProxy)
+		.detail("TLS", b->knobs.secure_connection == 1)
+		.log();
 	std::string host = b->host, service = b->service;
 	if (service.empty()) {
 		if (b->useProxy) {
@@ -746,7 +750,6 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
-	    .suppressFor(60)
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life)
 	    .detail("Proxy", b->proxyHost.orDefault(""));
@@ -903,6 +906,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
+			TraceEvent("Hfu5DoRequest3").detail("Verb", verb)
+				.detail("Timeout", requestTimeout)
+				.detail("Len", contentLen)
+				.detail("RemoteAddr", remoteAddress).log();
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
 			                                                                 verb,
 			                                                                 canonicalURI,
@@ -914,6 +921,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			                                                                 bstore->recvRate),
 			                                                 requestTimeout));
 			r = _r;
+			TraceEvent("Hfu5DoRequest4").detail("RemoteAddr", remoteAddress).log();
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
@@ -922,6 +930,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			rconn.conn.clear();
 
 		} catch (Error& e) {
+			TraceEvent("Hfu5DoRequestError").detail("Error", e.code()).log();
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			err = e;
@@ -950,7 +959,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		if (err.present()) {
 			event.errorUnsuppressed(err.get());
 		}
-		event.suppressFor(60);
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
 		}
@@ -965,6 +973,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		event.detail("Verb", verb)
 		    .detail("Resource", resource)
 		    .detail("ThisTry", thisTry)
+			.detail("URI", canonicalURI)
 		    .detail("Proxy", bstore->proxyHost.orDefault(""));
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
@@ -1693,6 +1702,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
+
 	state Reference<HTTP::Response> r =
 	    wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 }));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then

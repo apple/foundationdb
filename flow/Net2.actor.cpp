@@ -460,7 +460,6 @@ public:
 		size_t toRead = end - begin;
 		size_t size = socket.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
 		g_net2->bytesReceived += size;
-		//TraceEvent("ConnRead", this->id).detail("Bytes", size);
 		if (err) {
 			if (err == boost::asio::error::would_block) {
 				++g_net2->countWouldBlock;
