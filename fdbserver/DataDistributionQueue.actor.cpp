@@ -63,7 +63,8 @@ struct RelocateData {
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
-	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
+	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT ||
+	                    rs.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT),
 	    cancellable(true), interval("QueuedRelocation") {}
 
 	static bool isHealthPriority(int priority) {
@@ -1108,7 +1109,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	state std::vector<UID> destIds;
 
 	if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-		TraceEvent(SevInfo, "ManualShardSplitDDRelocatorStart").detail("Range", rd.keys);
+		TraceEvent(SevInfo, "ManualShardSplitDDRelocatorStart", distributorId)
+		    .detail("Range", rd.keys)
+		    .detail("RelocationID", relocateShardInterval.pairID);
 	}
 
 	try {
@@ -1164,6 +1167,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 					req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
+					req.relocationId = relocateShardInterval.pairID;
+					if (SERVER_KNOBS->TRACE_STORAGE_QUEUE_AWARE_GET_TEAM_FOR_MANUAL_SPLIT_ONLY) {
+						if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
+							req.traceStorageQueueAware = true;
+						} else {
+							req.traceStorageQueueAware = false;
+						}
+					} else {
+						req.traceStorageQueueAware = true;
+					}
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
@@ -1217,7 +1230,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					    .detail("TeamCollectionId", tciIndex)
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
-					    .detail("Servers", destServersString(bestTeams));
+					    .detail("Servers", destServersString(bestTeams))
+					    .detail("RelocationID", relocateShardInterval.pairID);
 					wait(delay(SERVER_KNOBS->DEST_OVERLOADED_DELAY, TaskPriority::DataDistributionLaunch));
 				} else {
 					TEST(true); // did not find a healthy destination team on the first attempt
@@ -1228,7 +1242,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					    .detail("DestOverloadedCount", destOverloadedCount)
 					    .detail("TeamCollectionId", tciIndex)
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
-					    .detail("NumOfTeamCollections", self->teamCollections.size());
+					    .detail("NumOfTeamCollections", self->teamCollections.size())
+					    .detail("RelocationID", relocateShardInterval.pairID);
 					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
 				}
 
@@ -1284,7 +1299,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				TraceEvent(SevWarn, "IncorrectDestTeamSize")
 				    .suppressFor(1.0)
 				    .detail("ExpectedTeamSize", self->teamSize)
-				    .detail("DestTeamSize", totalIds);
+				    .detail("DestTeamSize", totalIds)
+				    .detail("RelocationID", relocateShardInterval.pairID);
 			}
 
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
@@ -1422,7 +1438,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 					if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-						TraceEvent(SevInfo, "ManualShardSplitDDRelocatorComplete").detail("Range", rd.keys);
+						TraceEvent(SevInfo, "ManualShardSplitDDRelocatorComplete", distributorId)
+						    .detail("Range", rd.keys)
+						    .detail("Dest", describe(destIds))
+						    .detail("Src", describe(rd.src))
+						    .detail("Duration", now() - startTime)
+						    .detail("RelocationID", relocateShardInterval.pairID);
 					}
 					return Void();
 				} else {
@@ -1430,9 +1451,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				}
 			} else {
 				if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-					TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError")
+					TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError", distributorId)
 					    .errorUnsuppressed(error)
-					    .detail("Range", rd.keys);
+					    .detail("Range", rd.keys)
+					    .detail("RelocationID", relocateShardInterval.pairID);
 				}
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
@@ -1448,7 +1470,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 		}
 	} catch (Error& e) {
 		if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
-			TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError").errorUnsuppressed(e).detail("Range", rd.keys);
+			TraceEvent(SevInfo, "ManualShardSplitDDRelocatorError", distributorId)
+			    .errorUnsuppressed(e)
+			    .detail("Range", rd.keys)
+			    .detail("RelocationID", relocateShardInterval.pairID);
 		}
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(e)

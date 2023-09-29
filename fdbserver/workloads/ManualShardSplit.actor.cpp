@@ -64,18 +64,18 @@ struct ManualShardSplitWorkload : TestWorkload {
 			KeyRangeRef("TestKeyF"_sr, "TestKeyF"_sr),
 		};
 		state int count = 0;
-		while (count < 100) {
-			state KeyRange selectRange = deterministicRandom()->randomChoice(ranges);
+		while (count < 25) {
+			state KeyRange selectRange1 = deterministicRandom()->randomChoice(ranges);
 			loop {
 				try {
-					wait(redistribute(cx->getConnectionRecord(), selectRange, 30));
-					if (selectRange.empty()) {
+					wait(redistribute(cx->getConnectionRecord(), selectRange1, 30));
+					if (selectRange1.empty()) {
 						throw internal_error(); // empty is not expected to be complete
 					}
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_manual_shard_split_failed) {
-						if (selectRange.empty()) {
+						if (selectRange1.empty()) {
 							break; // expected for the empty range
 						}
 						wait(delay(1.0));
@@ -86,6 +86,36 @@ struct ManualShardSplitWorkload : TestWorkload {
 				}
 			}
 			count++;
+			wait(delay(20.0));
+		}
+		state int i = 0;
+		for (; i < 5; i++) {
+			state int j = 0;
+			for (; j < 5; j++) {
+				state Key beginKey = std::to_string(i) + std::to_string(j);
+				state Key endKey = std::to_string(i) + std::to_string(j) + "a";
+				state KeyRange selectRange2 = KeyRangeRef(beginKey, endKey);
+				loop {
+					try {
+						wait(redistribute(cx->getConnectionRecord(), selectRange2, 30));
+						if (selectRange2.empty()) {
+							throw internal_error(); // empty is not expected to be complete
+						}
+						break;
+					} catch (Error& e) {
+						if (e.code() == error_code_manual_shard_split_failed) {
+							if (selectRange2.empty()) {
+								break; // expected for the empty range
+							}
+							wait(delay(1.0));
+							continue;
+						} else {
+							throw e;
+						}
+					}
+				}
+				wait(delay(20.0));
+			}
 		}
 		TraceEvent("ManualShardSplitTestComplete");
 		return Void();

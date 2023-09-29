@@ -192,7 +192,8 @@ public:
 					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", self->distributorId)
 					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace)
 					    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
-					    .detail("Primary", self->primary);
+					    .detail("Primary", self->primary)
+					    .detail("RelocationId", req.relocationId);
 					self->printDetailedTeamsInfo.trigger();
 				}
 			}
@@ -216,6 +217,14 @@ public:
 			// The situation happens rarely. We may want to eliminate this situation someday
 			if (!self->teams.size()) {
 				req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
+				if (req.storageQueueAware && req.traceStorageQueueAware) {
+					TraceEvent(SevWarn, "StorageQueueAwareGetTeam", self->distributorId)
+					    .detail("Request", req.getDesc())
+					    .detail("Src", describe(req.src))
+					    .detail("Succeed", false)
+					    .detail("Reason", "Teams size 0")
+					    .detail("RelocationID", req.relocationId);
+				}
 				return Void();
 			}
 
@@ -224,6 +233,8 @@ public:
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<TCTeamInfo>> randomTeams;
 			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
+			state int numSkippedSSFailedGetQueueLength = 0;
+			state int numSkippedSSQueueTooLong = 0;
 
 			// Note: this block does not apply any filters from the request
 			if (!req.wantsNewServers) {
@@ -244,6 +255,14 @@ public:
 						if (found && teamList[j]->isHealthy()) {
 							bestOption = teamList[j];
 							req.reply.send(std::make_pair(bestOption, foundSrc));
+							if (req.storageQueueAware && req.traceStorageQueueAware) {
+								TraceEvent(SevInfo, "StorageQueueAwareGetTeam", self->distributorId)
+								    .detail("Request", req.getDesc())
+								    .detail("Src", describe(req.src))
+								    .detail("Succeed", false)
+								    .detail("Reason", "Not want new server")
+								    .detail("RelocationID", req.relocationId);
+							}
 							return Void();
 						}
 					}
@@ -269,8 +288,10 @@ public:
 							Optional<int64_t> storageQueueSize =
 							    self->teams[currentIndex]->getLongestStorageQueueSize();
 							if (!storageQueueSize.present()) {
+								numSkippedSSFailedGetQueueLength++;
 								continue; // this SS may not healthy, skip
 							} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+								numSkippedSSQueueTooLong++;
 								continue; // this SS storage queue is too long, skip
 							}
 						}
@@ -320,8 +341,10 @@ public:
 					if (req.storageQueueAware) {
 						Optional<int64_t> storageQueueSize = dest->getLongestStorageQueueSize();
 						if (!storageQueueSize.present()) {
+							numSkippedSSFailedGetQueueLength++;
 							ok = false; // this SS may not healthy, skip
 						} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+							numSkippedSSQueueTooLong++;
 							ok = false; // this SS storage queue is too long, skip
 						}
 					}
@@ -382,6 +405,16 @@ public:
 						if (found) {
 							bestOption = teamList[j];
 							req.reply.send(std::make_pair(bestOption, foundSrc));
+							if (req.storageQueueAware && req.traceStorageQueueAware) {
+								TraceEvent(SevInfo, "StorageQueueAwareGetTeam", self->distributorId)
+								    .detail("Request", req.getDesc())
+								    .detail("Src", describe(req.src))
+								    .detail("Succeed", false)
+								    .detail("Reason", "zero health team")
+								    .detail("NumSkippedSSFailedGetQueueLength", numSkippedSSFailedGetQueueLength)
+								    .detail("NumSkippedSSQueueTooLong", numSkippedSSQueueTooLong)
+								    .detail("RelocationID", req.relocationId);
+							}
 							return Void();
 						}
 					}
@@ -391,6 +424,16 @@ public:
 			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
 			// 	self->traceAllInfo(true);
 			// }
+
+			if (req.storageQueueAware && req.traceStorageQueueAware) {
+				TraceEvent(bestOption.present() ? SevInfo : SevWarn, "StorageQueueAwareGetTeam", self->distributorId)
+				    .detail("Request", req.getDesc())
+				    .detail("Src", describe(req.src))
+				    .detail("Succeed", bestOption.present())
+				    .detail("NumSkippedSSFailedGetQueueLength", numSkippedSSFailedGetQueueLength)
+				    .detail("NumSkippedSSQueueTooLong", numSkippedSSQueueTooLong)
+				    .detail("RelocationID", req.relocationId);
+			}
 
 			if (req.storageQueueAware && !bestOption.present()) {
 				req.storageQueueAware = false;
