@@ -64,7 +64,8 @@ struct RelocateData {
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT ||
-	                    rs.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT),
+	                    rs.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT ||
+	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG),
 	    cancellable(true), interval("QueuedRelocation") {}
 
 	static bool isHealthPriority(int priority) {

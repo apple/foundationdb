@@ -1442,6 +1442,20 @@ public:
 					when(wait(storageMetadataTracker || storeTypeTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
+					when(wait(server->storageQueueTooLong.onChange())) {
+						TraceEvent(SevInfo, "StorageQueueTooLongTriggerSplit", self->distributorId)
+						    .detail("SSID", server->getId());
+						std::vector<ShardsAffectedByTeamFailure::Team> teams;
+						for (const auto& team : server->getTeams()) {
+							std::vector<UID> servers;
+							for (const auto& server : team->getServers()) {
+								servers.push_back(server->getId());
+							}
+							teams.push_back(ShardsAffectedByTeamFailure::Team(servers, self->primary));
+						}
+						self->triggerSplitForStorageQueueTooLong.send(
+						    ServerTeamInfo(server->getId(), teams, self->primary));
+					}
 				}
 
 				if (recordTeamCollectionInfo) {
@@ -3754,7 +3768,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount,
-                                   PromiseStream<Promise<int64_t>> getAverageShardBytes)
+                                   PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                   PromiseStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong)
   : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
@@ -3769,7 +3784,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(getShardMetrics),
     getUnhealthyRelocationCount(getUnhealthyRelocationCount), getAverageShardBytes(getAverageShardBytes),
-    removeFailedServer(removeFailedServer),
+    triggerSplitForStorageQueueTooLong(triggerSplitForStorageQueueTooLong), removeFailedServer(removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
@@ -5343,7 +5358,8 @@ class DDTeamCollectionUnitTest {
 		                                                           PromiseStream<GetMetricsRequest>(),
 		                                                           Promise<UID>(),
 		                                                           PromiseStream<Promise<int>>(),
-		                                                           PromiseStream<Promise<int64_t>>()));
+		                                                           PromiseStream<Promise<int64_t>>(),
+		                                                           PromiseStream<ServerTeamInfo>()));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -5388,7 +5404,8 @@ class DDTeamCollectionUnitTest {
 		                                                           PromiseStream<GetMetricsRequest>(),
 		                                                           Promise<UID>(),
 		                                                           PromiseStream<Promise<int>>(),
-		                                                           PromiseStream<Promise<int64_t>>()));
+		                                                           PromiseStream<Promise<int64_t>>(),
+		                                                           PromiseStream<ServerTeamInfo>()));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);

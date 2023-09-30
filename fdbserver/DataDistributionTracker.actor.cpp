@@ -984,6 +984,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           FutureStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
@@ -1007,6 +1008,45 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		loop choose {
 			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
 				req.send(self.maxShardSize->get().get() / 2);
+			}
+			when(ServerTeamInfo req = waitNext(triggerSplitForStorageQueueTooLong)) {
+				TraceEvent e("DDTrackerStorageServerQueueTooLongNotified", self.distributorId);
+				e.detail("Server", req.serverId);
+				e.detail("Teams", req.teams.size());
+				int64_t maxShardWriteTraffic = 0;
+				KeyRange shardToMove;
+				ShardsAffectedByTeamFailure::Team selectedTeam;
+				for (const auto& team : req.teams) {
+					for (auto const& shard : self.shardsAffectedByTeamFailure->getShardsFor(team)) {
+						for (auto it : self.shards.intersectingRanges(shard)) {
+							if (it->value().stats->get().present()) {
+								int64_t shardWriteTraffic = it->value().stats->get().get().metrics.bytesPerKSecond;
+								if (shardWriteTraffic > maxShardWriteTraffic) {
+									shardToMove = it->range();
+									selectedTeam = team;
+									maxShardWriteTraffic = shardWriteTraffic;
+								}
+							}
+						}
+					}
+				}
+				if (!shardToMove.empty()) {
+					e.detail("TeamSelected", selectedTeam.servers);
+					e.detail("ShardSelected", shardToMove);
+					e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
+					if (maxShardWriteTraffic >= SERVER_KNOBS->DD_MIN_SHARD_BYTES_PER_KSEC_TO_MOVE_OUT) {
+						RelocateShard rs;
+						rs.keys = shardToMove;
+						rs.priority = SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG;
+						self.output.send(rs);
+						TraceEvent("SendRelocateToDDQueue", self.distributorId)
+						    .detail("ServerPrimary", req.primary)
+						    .detail("ServerTeam", selectedTeam.servers)
+						    .detail("KeyBegin", rs.keys.begin)
+						    .detail("KeyEnd", rs.keys.end)
+						    .detail("Priority", rs.priority);
+					}
+				}
 			}
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)

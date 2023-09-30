@@ -256,6 +256,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+	PromiseStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong;
 	Promise<UID> removeFailedServer;
 
 	// WIGGLING if an address is under storage wiggling.
@@ -636,7 +637,8 @@ public:
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount,
-	                 PromiseStream<Promise<int64_t>> getAverageShardBytes);
+	                 PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	                 PromiseStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong);
 
 	~DDTeamCollection();
 
