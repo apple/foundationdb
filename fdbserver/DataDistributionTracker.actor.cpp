@@ -1037,11 +1037,18 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 					req.reply.sendError(manual_shard_split_failed());
 					continue;
 				}
-				TraceEvent(SevInfo, "ManualShardSplitDDStart", self.distributorId)
-				    .detail("SplitPoints", req.splitPoints);
 				KeyRange inputRange = req.splitPoints[0] < req.splitPoints[1]
 				                          ? KeyRangeRef(req.splitPoints[0], req.splitPoints[1])
 				                          : KeyRangeRef(req.splitPoints[1], req.splitPoints[0]);
+				if (inputRange.begin >= systemKeys.begin || inputRange.end > systemKeys.begin) {
+					TraceEvent(SevWarn, "ManualShardSplitDDFailedToTrigger", self.distributorId)
+					    .detail("Reason", "Split points covers system key space")
+					    .detail("SplitPoints", req.splitPoints);
+					req.reply.sendError(manual_shard_split_failed());
+					continue;
+				}
+				TraceEvent(SevInfo, "ManualShardSplitDDStart", self.distributorId)
+				    .detail("SplitPoints", req.splitPoints);
 				for (auto it : self.shards.intersectingRanges(inputRange)) {
 					bool triggerManualSplitShard = false;
 					for (const auto& splitPoint : req.splitPoints) {
