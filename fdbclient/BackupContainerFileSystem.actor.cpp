@@ -364,7 +364,8 @@ public:
 		    .detail("ScanBegin", scanBegin)
 		    .detail("ScanEnd", scanEnd)
 		    .detail("Begin", begin)
-		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get());
+		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get())
+		    .detail("SnapshotBeginVersion", snapshotBeginVersion);
 		for (const auto& file : logs) {
 			if (file.beginVersion > begin) {
 				if (scanBegin > 0)

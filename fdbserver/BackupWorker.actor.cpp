@@ -349,6 +349,7 @@ struct BackupData {
 
 	void stop() {
 		stopped = true;
+		pulling = false;
 		for (auto& [uid, info] : backups) {
 			// Cancel the actor. Because container is valid, CANNOT set the
 			// "stop" flag that will block writing mutation files in
