@@ -3032,13 +3032,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version datacenterVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
-    metacluster::MetaclusterMetrics metaclusterMetrics,
-    std::string requestedStatusJsonField) {
+    metacluster::MetaclusterMetrics metaclusterMetrics) {
 
-	if (requestedStatusJsonField == "fault_tolerance") {
-		StatusReply reply = wait(clusterGetFaultToleranceStatus(db, cx, workers, coordinators));
-		return reply;
-	}
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -3675,127 +3670,39 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		    .detail("Duration", timer() - tStart)
 		    .detail("StatusSize", statusObj.getFinalLength());
 
+		std::cout << "StatusObj string: " << statusObj.getJson() << std::endl;
+
 		return StatusReply(statusObj.getJson());
+
 	} catch (Error& e) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;
 	}
 }
 
-ACTOR Future<StatusReply> clusterGetFaultToleranceStatus(Reference<AsyncVar<ServerDBInfo>> db,
-                                                         Database cx,
-                                                         std::vector<WorkerDetails> workers,
-                                                         ServerCoordinators coordinators) {
-	state double tStart = timer();
-
-	state JsonBuilderArray messages;
-	state std::set<std::string> status_incomplete_reasons;
-	state WorkerDetails mWorker; // Master worker
-	state WorkerDetails ccWorker; // Cluster-Controller worker
-	state WorkerDetails ddWorker; // DataDistributor worker
+StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
+	double tStart = timer();
 
 	try {
-		state JsonBuilderObject statusObj;
+		json_spirit::mValue mv = readJSONStrictly(statusStr);
+		JSONDoc jsonDoc(mv);
 
-		// Get the master Worker interface
-		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
-		if (_mWorker.present()) {
-			mWorker = _mWorker.get();
-		} else {
-			messages.push_back(
-			    JsonString::makeMessage("unreachable_master_worker", "Unable to locate the master worker."));
-		}
+		std::string faultToleranceRelatedFields[] = {
+			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining",
+			"recovery_state",  "messages"
+		};
 
-		// Get the cluster-controller Worker interface
-		Optional<WorkerDetails> _ccWorker = getWorker(workers, db->get().clusterInterface.address());
-		if (_ccWorker.present()) {
-			ccWorker = _ccWorker.get();
-		} else {
-			messages.push_back(JsonString::makeMessage("unreachable_cluster_controller_worker",
-			                                           "Unable to locate the cluster-controller worker."));
-		}
-
-		// Get the DataDistributor worker interface
-		Optional<WorkerDetails> _ddWorker;
-		if (db->get().distributor.present()) {
-			_ddWorker = getWorker(workers, db->get().distributor.get().address());
-		}
-
-		if (!db->get().distributor.present() || !_ddWorker.present()) {
-			messages.push_back(JsonString::makeMessage("unreachable_dataDistributor_worker",
-			                                           "Unable to locate the data distributor worker."));
-		} else {
-			ddWorker = _ddWorker.get();
-		}
-
-		// construct status information for cluster subsections
-		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
-
-		if (!recoveryStateStatus.empty())
-			statusObj["recovery_state"] = recoveryStateStatus;
-
-		state Optional<DatabaseConfiguration> configuration;
-		state Optional<LoadConfigurationResult> loadResult;
-		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
-
-		if (statusCode != RecoveryStatus::configuration_missing) {
-			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
-			    wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
-			configuration = loadResults.first;
-			loadResult = loadResults.second;
-		}
-
-		if (loadResult.present()) {
-			statusObj["full_replication"] = loadResult.get().fullReplication;
-			if (loadResult.get().healthyZone.present()) {
-				if (loadResult.get().healthyZone.get() != ignoreSSFailuresZoneString) {
-					statusObj["maintenance_zone"] = loadResult.get().healthyZone.get().printable();
-					statusObj["maintenance_seconds_remaining"] = loadResult.get().healthyZoneSeconds;
-				} else {
-					statusObj["data_distribution_disabled_for_ss_failures"] = true;
-				}
+		JsonBuilderObject statusObj;
+		for (std::string& field : faultToleranceRelatedFields) {
+			if (jsonDoc.has(field, false)) {
+				std::string value = json_spirit::write_string(jsonDoc.last());
+				statusObj.setKey(field, value);
 			}
 		}
-
-		if (configuration.present()) {
-			for (auto const& worker : workers) {
-				address_workers[worker.interf.address()] = worker.interf;
-			}
-
-			state int minStorageReplicasRemaining = -1;
-			JsonBuilderObject clusterDataSection =
-			    wait(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
-
-			// If data section not empty, add it to statusObj
-			if (!clusterDataSection.empty())
-				statusObj["data"] = clusterDataSection;
-
-			int logFaultTolerance = 100;
-			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
-			}
-		}
-
-		// Create the status_incomplete message if there were any reasons that the status is incomplete.
-		if (!status_incomplete_reasons.empty()) {
-			JsonBuilderObject incomplete_message =
-			    JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
-			// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
-			JsonBuilderArray reasons;
-			for (auto i : status_incomplete_reasons) {
-				reasons.push_back(JsonBuilderObject().setKey("description", i));
-			}
-			incomplete_message["reasons"] = reasons;
-			messages.push_back(incomplete_message);
-		}
-
-		statusObj["messages"] = messages;
 
 		int64_t clusterTime = g_network->timer();
 		if (clusterTime != -1) {
-			statusObj["cluster_controller_timestamp"] = clusterTime;
+			statusObj.setKey("cluster_controller_timestamp", clusterTime);
 		}
 
 		TraceEvent("ClusterGetFaultToleranceStatus")
