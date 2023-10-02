@@ -152,6 +152,10 @@ Here is a complete list of valid parameters:
 
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined.
 
+ *max_delay_retryable_error (or *dre*) - Max seconds to delay before retry again when seeing an retryable error.
+
+ *max_delay_connection_failed (or *dcf*) - Max seconds to delay before retry again when seeing an connection failure.
+
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
  
   **Example**: The URL parameter *header=x-amz-storage-class:REDUCED_REDUNDANCY* would send the HTTP header required to use the reduced redundancy storage option in the S3 API.
