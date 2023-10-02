@@ -302,10 +302,11 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			}
 
 			// The parameter is known to S3BlobStoreEndpoint so it must be numeric and valid.
-			char* valueEnd;
-			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
-			if (*valueEnd || (ivalue == 0 && value.toString() != "0"))
-				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
+			char* valueEnd = nullptr;
+			std::string s = value.toString();
+			int ivalue = strtol(s.c_str(), &valueEnd, 10);
+			if (*valueEnd || (ivalue == 0 && s != "0"))
+				throw format("%s is not a valid value for %s", s.c_str(), name.toString().c_str());
 
 			// It should not be possible for this set to fail now since the dummy set above had to have worked.
 			ASSERT(knobs.set(name, ivalue));
