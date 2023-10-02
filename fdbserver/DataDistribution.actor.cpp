@@ -2245,7 +2245,7 @@ ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAu
 		if (auditExistInAuditMap(self, req.getType(), req.id)) {
 			removeAuditFromAuditMap(self, req.getType(), req.id);
 		}
-		TraceEvent(SevVerbose, "DDCancelAuditStorageReply", self->ddId)
+		TraceEvent(SevInfo, "DDCancelAuditStorageComplete", self->ddId)
 		    .detail("AuditType", req.getType())
 		    .detail("AuditID", req.id);
 		req.reply.send(req.id);
