@@ -8871,6 +8871,7 @@ void AddingShard::addMutation(Version version,
 }
 
 ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
+	state double startTime = now();
 	if (g_network->isSimulated()) {
 		Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id())));
 		if (!pm.present()) {
@@ -8883,10 +8884,11 @@ ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* s
 
 	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
 	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-	TraceEvent(SevDebug, "UpdatedMoveInShardMetaData", data->thisServerID)
+	TraceEvent(SevInfo, "UpdatedMoveInShardMetaData", data->thisServerID)
 	    .detail("Shard", shard->toString())
 	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
-	    .detail("DurableVersion", data->durableVersion.get());
+	    .detail("DurableVersion", data->durableVersion.get())
+	    .detail("DurationSecs", now() - startTime);
 
 	return Void();
 }
@@ -8900,10 +8902,13 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         EnablePhysicalShardMove enablePSM);
 
 ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveInShard) {
-	if (moveInShard->getPhase() != MoveInPhase::Fetching) {
+	if (moveInShard->getPhase() != MoveInPhase::Fetching && moveInShard->getPhase() != MoveInPhase::Ingesting) {
 		TraceEvent(SevError, "FallBackToAddingShardError", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->meta->toString());
 		throw internal_error();
+	}
+	if (moveInShard->failed()) {
+		return Void();
 	}
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 	TraceEvent(SevInfo, "FallBackToAddingShardBegin", data->thisServerID)
@@ -9043,8 +9048,9 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			// TODO(heliu): make this `retry from beginning` applies to only some specific cases.
-			moveInShard->setPhase(MoveInPhase::Fetching);
-			wait(updateMoveInShardMetaData(data, moveInShard));
+			// moveInShard->setPhase(MoveInPhase::Fetching);
+			// wait(updateMoveInShardMetaData(data, moveInShard));
+			wait(fallBackToAddingShard(data, moveInShard));
 			return Void();
 		}
 		throw err;
@@ -9211,13 +9217,13 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 
 		double duration = now() - startTime;
 		const int64_t totalBytes = getTotalFetchedBytes(moveInShard->checkpoints());
-		TraceEvent(moveInShard->logSev, "IngestShardStats", data->thisServerID)
+		TraceEvent(SevInfo, "IngestShardStats", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Duration", duration)
 		    .detail("TotalBytes", totalBytes)
 		    .detail("Rate", (double)totalBytes / duration);
 		duration = now() - moveInShard->meta->startTime;
-		TraceEvent(moveInShard->logSev, "FetchShardStats", data->thisServerID)
+		TraceEvent(SevInfo, "FetchShardStats", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Duration", duration)
 		    .detail("TotalBytes", totalBytes)
