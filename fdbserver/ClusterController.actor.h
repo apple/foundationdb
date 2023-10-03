@@ -368,7 +368,7 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
+			if (workerAvailable(it.second, false) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
@@ -599,11 +599,6 @@ public:
 			}
 			if (!workerAvailable(worker_info, checkStable)) {
 				logWorkerUnavailable(SevInfo, id, "complex", "Worker is not available", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!worker_details.recoveredDiskFiles) {
-				logWorkerUnavailable(
-				    SevInfo, id, "complex", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (conf.isExcludedServer(worker_details.interf.addresses(), worker_details.interf.locality)) {
@@ -851,11 +846,6 @@ public:
 				logWorkerUnavailable(SevInfo, id, "simple", "Worker is not available", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!worker_details.recoveredDiskFiles) {
-				logWorkerUnavailable(
-				    SevInfo, id, "simple", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
-				continue;
-			}
 			if (conf.isExcludedServer(worker_details.interf.addresses(), worker_details.interf.locality)) {
 				logWorkerUnavailable(SevInfo,
 				                     id,
@@ -1001,11 +991,6 @@ public:
 			if (!workerAvailable(worker_info, checkStable)) {
 				logWorkerUnavailable(
 				    SevInfo, id, "deprecated", "Worker is not available", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!worker_details.recoveredDiskFiles) {
-				logWorkerUnavailable(
-				    SevInfo, id, "deprecated", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (conf.isExcludedServer(worker_details.interf.addresses(), worker_details.interf.locality)) {

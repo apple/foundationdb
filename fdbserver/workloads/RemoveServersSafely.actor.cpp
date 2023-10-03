@@ -681,7 +681,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Wait For Server Exclusion")
 			    .detail("Addresses", describe(toKill))
-			    .detail("ClusterAvailable", g_simulator->isAvailable());
+			    .detail("ClusterAvailable", g_simulator.isAvailable());
 			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 
 			TraceEvent("RemoveAndKill", functionId)
