@@ -703,15 +703,45 @@ struct CommitBatchContext {
 
 	IdempotencyIdKVBuilder idempotencyKVBuilder;
 
+	bool throttledShard;
+
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
 	void setupTraceBatch();
 
 	std::set<Tag> getWrittenTagsPreResolution();
 
+	bool checkHotShards();
+
 private:
 	void evaluateBatchSize();
 };
+
+bool CommitBatchContext::checkHotShards() {
+	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
+		int mutationNum = 0;
+		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
+		for (; mutationNum < pMutations->size(); mutationNum++) {
+			auto& m = (*pMutations)[mutationNum];
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				for (const auto& shard : pProxyCommitData->hotShards) {
+					if (shard.contains(KeyRef(m.param1))) {
+						return true;
+					}
+				}
+			} else if (m.type == MutationRef::ClearRange) {
+				for (const auto& shard : pProxyCommitData->hotShards) {
+					if (shard.intersects(KeyRangeRef(m.param1, m.param2))) {
+						return true;
+					}
+				}
+			} else {
+				UNREACHABLE();
+			}
+		}
+	}
+	return false;
+}
 
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
@@ -764,7 +794,7 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
     currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
     localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
     toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
-    committed(trs.size()) {
+    committed(trs.size()), throttledShard(false) {
 
 	evaluateBatchSize();
 
@@ -886,6 +916,11 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		self->writtenTagsPreResolution = self->getWrittenTagsPreResolution();
 	}
+
+	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED) {
+		self->throttledShard = self->checkHotShards();
+	}
+
 	GetCommitVersionRequest req(span.context,
 	                            pProxyCommitData->commitVersionRequestNumber++,
 	                            pProxyCommitData->mostRecentProcessedRequestNumber,
@@ -2376,6 +2411,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 	state const Optional<UID>& debugID = self->debugID;
 
+	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED && self->throttledShard && deterministicRandom()->coinflip()) {
+		TraceEvent(SevDebug, "ThrottledShardDelay");
+		throw retry();
+	}
+
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 		//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
@@ -3827,6 +3867,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		}
 		when(TxnStateRequest request = waitNext(proxy.txnState.getFuture())) {
 			addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
+		}
+		when(SetThrottledShardRequest request = waitNext(proxy.setThrottledShard.getFuture())) {
+			commitData.hotShards.assign(request.throttledShards.begin(), request.throttledShards.end());
+			TraceEvent(SevDebug, "ReceivedSetThrottledShard");
 		}
 	}
 }

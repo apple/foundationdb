@@ -797,6 +797,8 @@ public: // Methods for IStorageMetricsService
 		req.reply.send(emptyReply);
 	}
 
+	int64_t getHotShardsMetrics(const KeyRange& range) override { return 0; }
+
 	template <class Reply>
 	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
 		promise.sendError(err);

@@ -123,6 +123,7 @@ struct StorageServerInterface {
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
 	RequestStream<struct AuditStorageRequest> auditStorage;
+	RequestStream<struct GetBusyShardsRequest> getBusyShards;
 
 private:
 	bool acceptingRequests;
@@ -198,6 +199,8 @@ public:
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 				auditStorage =
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
+				getBusyShards =
+				    RequestStream<struct GetBusyShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -250,6 +253,7 @@ public:
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
 		streams.push_back(auditStorage.getReceiver());
+		streams.push_back(getBusyShards.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1230,6 +1234,31 @@ struct StorageQueuingMetricsRequest {
 	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
 	constexpr static FileIdentifier file_identifier = 3978640;
 	ReplyPromise<struct StorageQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct GetBusyShardsReply {
+	constexpr static FileIdentifier file_identifier = 3828140;
+	std::vector<KeyRange> busyShards;
+
+	GetBusyShardsReply() {}
+	explicit GetBusyShardsReply(std::vector<KeyRange> busyShards) : busyShards(busyShards) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, busyShards);
+	}
+};
+
+struct GetBusyShardsRequest {
+	constexpr static FileIdentifier file_identifier = 3828141;
+	ReplyPromise<GetBusyShardsReply> reply;
+
+	GetBusyShardsRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

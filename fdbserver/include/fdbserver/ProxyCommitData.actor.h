@@ -248,6 +248,7 @@ struct ProxyCommitData {
 	Version lastTxsPop;
 	bool popRemoteTxs;
 	std::vector<Standalone<StringRef>> whitelistedBinPathVec;
+	std::vector<KeyRange> hotShards;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;

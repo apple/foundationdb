@@ -138,6 +138,8 @@ struct StorageServerMetrics {
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
+	int64_t getHotShards(const KeyRange& range) const;
+
 	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
 
 	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
@@ -228,6 +230,8 @@ public:
 	virtual void getSplitMetrics(const SplitMetricsRequest& req) = 0;
 
 	virtual void getHotRangeMetrics(const ReadHotSubRangeRequest& req) = 0;
+
+	virtual int64_t getHotShardsMetrics(const KeyRange& range) = 0;
 
 	// NOTE: also need to have this function but template can't be a virtual so...
 	// template <class Reply>

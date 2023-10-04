@@ -874,6 +874,12 @@ public:
 
 	bool hasRange(Reference<ShardInfo> shard) const;
 
+	int size() const { return ranges.size(); }
+	// Public function to iterate over the ranges
+	std::vector<Reference<ShardInfo>>::const_iterator begin() const { return ranges.begin(); }
+
+	std::vector<Reference<ShardInfo>>::const_iterator end() const { return ranges.end(); }
+
 private:
 	const int64_t id;
 	std::vector<Reference<ShardInfo>> ranges;
@@ -1725,7 +1731,14 @@ public:
 	void addShard(ShardInfo* newShard) {
 		ASSERT(!newShard->keys.empty());
 		newShard->changeCounter = ++shardChangeCounter;
-		//TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State", newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
+		TraceEvent("AddShard", this->thisServerID)
+		    .detail("KeyBegin", newShard->keys.begin)
+		    .detail("KeyEnd", newShard->keys.end)
+		    .detail("State",
+		            newShard->isReadable()    ? "Readable"
+		            : newShard->notAssigned() ? "NotAssigned"
+		                                      : "Adding")
+		    .detail("Version", this->version.get());
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
@@ -1945,6 +1958,8 @@ public:
 	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
 
 	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
+
+	int64_t getHotShardsMetrics(const KeyRange& range) override { return this->metrics.getHotShards(range); }
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
@@ -13501,6 +13516,32 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(wait(self->actors.getResult())) {}
+			when(GetBusyShardsRequest req = waitNext(ssi.getBusyShards.getFuture())) {
+				std::vector<std::pair<KeyRange, int64_t>> topRanges;
+				for (auto& s : self->shards.ranges()) {
+					KeyRange keyRange = KeyRange(s.range());
+					int64_t total = self->metrics.getHotShards(keyRange);
+
+					if (topRanges.size() < SERVER_KNOBS->SHARD_THROTTLING_TRACKED) {
+						topRanges.emplace_back(keyRange, total);
+					} else if (total > topRanges.back().second) {
+						topRanges.pop_back();
+						topRanges.emplace_back(keyRange, total);
+					}
+
+					// Keep sorted
+					// use priority queue
+					std::sort(topRanges.begin(), topRanges.end(), [](const auto& lhs, const auto& rhs) {
+						return lhs.second > rhs.second;
+					});
+				}
+
+				GetBusyShardsReply reply;
+				for (const auto& [keyRange, _] : topRanges) {
+					reply.busyShards.push_back(keyRange);
+				}
+				req.reply.send(reply);
+			}
 		}
 	}
 }

@@ -208,6 +208,7 @@ class Ratekeeper {
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	bool anyBlobRanges;
 	Optional<Key> remoteDC;
+	std::vector<UID> ssHighWriteQueue;
 
 	double getRecoveryDuration(Version ver) const {
 		auto it = version_recovery.lower_bound(ver);
@@ -239,6 +240,7 @@ class Ratekeeper {
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
 	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+	Future<Void> monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

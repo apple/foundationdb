@@ -309,6 +309,42 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> monitorHotShards(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+		loop {
+			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
+			if (!self->ssHighWriteQueue.size()) {
+				continue;
+			}
+
+			loop {
+				state SetThrottledShardRequest setReq;
+				state UID ssi;
+				state int i = 0;
+
+				ssi = self->ssHighWriteQueue[i];
+
+				TraceEvent(SevDebug, "SendGetBusyShardsRequest");
+				try {
+					GetBusyShardsRequest getReq;
+					GetBusyShardsReply reply = wait(self->storageServerInterfaces[ssi].getBusyShards.getReply(getReq));
+					setReq.throttledShards.insert(
+					    setReq.throttledShards.end(), reply.busyShards.begin(), reply.busyShards.end());
+
+					if (++i > self->ssHighWriteQueue.size()) {
+						break;
+					}
+				} catch (Error& e) {
+					TraceEvent(SevError, "CannotMonitorHotShard").detail("SS", ssi);
+					++i;
+				}
+			}
+			for (const auto& cpi : dbInfo->get().client.commitProxies) {
+				// divide throttle amount by num proxies?
+				cpi.setThrottledShard.send(setReq);
+			}
+		}
+	}
+
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
@@ -430,6 +466,11 @@ public:
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
+
+		if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED) {
+			self.addActor.send(self.monitorHotShards(dbInfo));
+		}
+
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
@@ -676,6 +717,10 @@ Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return tagThrottler->monitorThrottlingChanges();
 }
 
+Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return RatekeeperImpl::monitorHotShards(this, dbInfo);
+}
+
 Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return RatekeeperImpl::monitorBlobWorkers(this, dbInfo);
 }
@@ -759,6 +804,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	// Look at each storage server's write queue and local rate, compute and store the desired rate
 	// ratio
+	ssHighWriteQueue.clear();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
 		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
@@ -881,6 +927,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 						    .detail("TargetRateRatio", targetRateRatio);
 					}
 					ssLimitReason = limitReason_t::storage_server_write_queue_size;
+					ssHighWriteQueue.push_back(ss.id);
 				}
 			}
 		}

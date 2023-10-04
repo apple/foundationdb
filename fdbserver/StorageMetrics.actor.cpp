@@ -518,6 +518,12 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
 	return toReturn;
 }
 
+int64_t StorageServerMetrics::getHotShards(const KeyRange& range) const {
+	auto total = bytesWriteSample.getEstimate(range);
+	// TraceEvent("ShardEstimate").detail("S",total);
+	return total;
+}
+
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	ReadHotSubRangeReply reply;
 	auto _ranges = getReadHotRanges(req.keys, req.chunkCount, req.type);
