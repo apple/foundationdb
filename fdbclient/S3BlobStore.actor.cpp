@@ -24,6 +24,7 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
+#include <climits>
 #include <time.h>
 #include <iomanip>
 #include <openssl/sha.h>
@@ -312,8 +313,9 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			// The parameter is known to S3BlobStoreEndpoint so it must be numeric and valid.
 			char* valueEnd = nullptr;
 			std::string s = value.toString();
-			int ivalue = strtol(s.c_str(), &valueEnd, 10);
-			if (*valueEnd || (ivalue == 0 && s != "0"))
+			long int ivalue = strtol(s.c_str(), &valueEnd, 10);
+			if (*valueEnd || (ivalue == 0 && s != "0") ||
+			    (((ivalue == LONG_MAX) || (ivalue == LONG_MIN)) && errno == ERANGE))
 				throw format("%s is not a valid value for %s", s.c_str(), name.toString().c_str());
 
 			// It should not be possible for this set to fail now since the dummy set above had to have worked.
@@ -1901,5 +1903,13 @@ TEST_CASE("/backup/s3/guess_region") {
 	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
 	ASSERT(s3->getRegion() == "us-west-2");
 
+	url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sc=922337203685477580700";
+	try {
+		s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		// conversion of 922337203685477580700 to long int will overflow
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
 	return Void();
 }
