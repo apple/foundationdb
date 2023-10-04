@@ -5674,7 +5674,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						errors.push_back(error);
 						continue; // check next remote server
 					} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-						ASSERT(missingKey);
+						if (!missingKey) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+							           data->thisServerID);
+						}
 						std::string error =
 						    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
 						           remoteServer.uniqueID.first(),
@@ -7458,8 +7462,13 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				    .detail("Chunk", chunks[i].keyRange)
 				    .detail("Version", chunks[i].includedVersion);
 				RangeResult rows;
+				if (i == chunks.size() - 1) {
+					rows.more = false;
+				} else {
+					rows.more = true;
+					rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+				}
 				results.send(rows);
-				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 				continue;
 			}
 			try {

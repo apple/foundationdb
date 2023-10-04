@@ -18,9 +18,12 @@
  * limitations under the License.
  */
 
+#include "flow/PKey.h"
+
 #include "flow/AutoCPointer.h"
 #include "flow/Error.h"
-#include "flow/PKey.h"
+#include "flow/Trace.h"
+
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>

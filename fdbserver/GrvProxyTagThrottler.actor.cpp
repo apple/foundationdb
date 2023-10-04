@@ -118,9 +118,12 @@ void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
 	queues[tag].requests.emplace_back(req);
 }
 
-void GrvProxyTagThrottler::releaseTransactions(double elapsed,
-                                               Deque<GetReadVersionRequest>& outBatchPriority,
-                                               Deque<GetReadVersionRequest>& outDefaultPriority) {
+GrvProxyTagThrottler::ReleaseTransactionsResult GrvProxyTagThrottler::releaseTransactions(
+    double elapsed,
+    Deque<GetReadVersionRequest>& outBatchPriority,
+    Deque<GetReadVersionRequest>& outDefaultPriority) {
+	ReleaseTransactionsResult result;
+
 	// Pointer to a TagQueue with some extra metadata stored alongside
 	struct TagQueueHandle {
 		// Store pointers here to avoid frequent std::unordered_map lookups
@@ -182,6 +185,7 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 				if (tagQueueHandle.queue->isMaxThrottled(maxThrottleDuration)) {
 					// Requests in this queue have been throttled too long and errors
 					// should be sent to clients.
+					result.rejectedRequests += tagQueueHandle.queue->requests.size();
 					tagQueueHandle.queue->rejectRequests(latencyBandsMap);
 				}
 				break;
@@ -191,8 +195,12 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 					*(tagQueueHandle.numReleased) += count;
 					delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);
 					if (delayedReq.req.priority == TransactionPriority::BATCH) {
+						result.batchPriorityTransactionsReleased += delayedReq.req.transactionCount;
+						++result.batchPriorityRequestsReleased;
 						outBatchPriority.push_back(delayedReq.req);
 					} else if (delayedReq.req.priority == TransactionPriority::DEFAULT) {
+						result.defaultPriorityTransactionsReleased += delayedReq.req.transactionCount;
+						++result.defaultPriorityRequestsReleased;
 						outDefaultPriority.push_back(delayedReq.req);
 					} else {
 						// Immediate priority transactions should bypass the GrvProxyTagThrottler
@@ -224,6 +232,8 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 	// If the capacity is increased, that means the vector has been illegally resized, potentially
 	// corrupting memory
 	ASSERT_EQ(transactionsReleased.capacity(), transactionsReleasedInitialCapacity);
+
+	return result;
 }
 
 void GrvProxyTagThrottler::addLatencyBandThreshold(double value) {

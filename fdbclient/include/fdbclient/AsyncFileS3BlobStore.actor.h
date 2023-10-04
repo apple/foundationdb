@@ -60,6 +60,8 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::delref(); }
 
+	virtual StringRef getClassName() override { return "AsyncFileS3BlobStoreWrite"_sr; }
+
 	struct Part : ReferenceCounted<Part> {
 		Part(int n, int minSize)
 		  : number(n), writer(content.getWriteBuffer(minSize), nullptr, Unversioned()), length(0) {
@@ -265,6 +267,8 @@ class AsyncFileS3BlobStoreRead final : public IAsyncFile, public ReferenceCounte
 public:
 	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::delref(); }
+
+	virtual StringRef getClassName() override { return "AsyncFileS3BlobStoreRead"_sr; }
 
 	Future<int> read(void* data, int length, int64_t offset) override;
 

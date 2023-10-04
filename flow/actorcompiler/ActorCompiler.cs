@@ -18,11 +18,12 @@
  * limitations under the License.
  */
 
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace actorcompiler
 {
@@ -320,6 +321,7 @@ namespace actorcompiler
         int chooseGroups = 0, whenCount = 0;
         string This;
         bool generateProbes;
+        public Dictionary<(ulong, ulong), string> uidObjects { get; private set; }
 
         public ActorCompiler(Actor actor, string sourceFile, bool isTopLevel, bool lineNumbersEnabled, bool generateProbes)
         {
@@ -328,9 +330,104 @@ namespace actorcompiler
             this.isTopLevel = isTopLevel;
             this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
+            this.uidObjects = new Dictionary<(ulong, ulong), string>();
 
             FindState();
         }
+
+        private ulong ByteToLong(byte[] bytes) {
+            // NOTE: Always assume big endian.
+            ulong result = 0;
+            foreach(var b in bytes) {
+                result += b;
+                result <<= 8;
+            }
+            return result;
+        }
+
+        // Generates the identifier for the ACTOR
+        private Tuple<ulong, ulong> GetUidFromString(string str) {
+            byte[] sha256Hash = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(str));
+            byte[] first = sha256Hash.Take(8).ToArray();
+            byte[] second = sha256Hash.Skip(8).Take(8).ToArray();
+            return new Tuple<ulong, ulong>(ByteToLong(first), ByteToLong(second));
+        }
+
+        // Writes the function that returns the Actor object
+        private void WriteActorFunction(TextWriter writer, string fullReturnType) {
+            WriteTemplate(writer);
+            LineNumber(writer, actor.SourceLine);
+            foreach (string attribute in actor.attributes) {
+                writer.Write(attribute + " ");
+            }
+            if (actor.isStatic) writer.Write("static ");
+            writer.WriteLine("{0} {3}{1}( {2} ) {{", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
+            LineNumber(writer, actor.SourceLine);
+
+            string newActor = string.Format("new {0}({1})",
+                    fullClassName,
+                    string.Join(", ", actor.parameters.Select(p => p.name).ToArray()));
+
+            if (actor.returnType != null)
+                writer.WriteLine("\treturn Future<{1}>({0});", newActor, actor.returnType);
+            else
+                writer.WriteLine("\t{0};", newActor);
+            writer.WriteLine("}");
+        }
+
+        // Writes the class of the Actor object
+        private void WriteActorClass(TextWriter writer, string fullStateClassName, Function body) {
+            // The final actor class mixes in the State class, the Actor base class and all callback classes
+            writer.WriteLine("// This generated class is to be used only via {0}()", actor.name);
+            WriteTemplate(writer);
+            LineNumber(writer, actor.SourceLine);
+
+            string callback_base_classes = string.Join(", ", callbacks.Select(c=>string.Format("public {0}", c.type)));
+            if (callback_base_classes != "") callback_base_classes += ", ";
+            writer.WriteLine("class {0} final : public Actor<{2}>, {3}public FastAllocated<{1}>, public {4} {{",
+                className,
+                fullClassName,
+                actor.returnType == null ? "void" : actor.returnType,
+                callback_base_classes,
+                fullStateClassName
+                );
+            writer.WriteLine("public:");
+            writer.WriteLine("\tusing FastAllocated<{0}>::operator new;", fullClassName);
+            writer.WriteLine("\tusing FastAllocated<{0}>::operator delete;", fullClassName);
+
+            var actorIdentifierKey = this.sourceFile + ":" + this.actor.name;
+            var actorIdentifier = GetUidFromString(actorIdentifierKey);
+            uidObjects.Add((actorIdentifier.Item1, actorIdentifier.Item2), actorIdentifierKey);
+            // NOTE UL is required as a u64 postfix for large integers, otherwise Clang would complain
+            writer.WriteLine("\tstatic constexpr ActorIdentifier __actorIdentifier = UID({0}UL, {1}UL);", actorIdentifier.Item1, actorIdentifier.Item2);
+            writer.WriteLine("\tActiveActorHelper activeActorHelper;");
+
+            writer.WriteLine("#pragma clang diagnostic push");
+            writer.WriteLine("#pragma clang diagnostic ignored \"-Wdelete-non-virtual-dtor\"");
+            if (actor.returnType != null)
+                writer.WriteLine(@"    void destroy() override {{
+        activeActorHelper.~ActiveActorHelper();
+        static_cast<Actor<{0}>*>(this)->~Actor();
+        operator delete(this);
+    }}", actor.returnType);
+            else
+                writer.WriteLine(@"    void destroy() {{
+        activeActorHelper.~ActiveActorHelper();
+        static_cast<Actor<void>*>(this)->~Actor();
+        operator delete(this);
+    }}");
+            writer.WriteLine("#pragma clang diagnostic pop");
+
+            foreach (var cb in callbacks)
+                writer.WriteLine("friend struct {0};", cb.type);
+
+            LineNumber(writer, actor.SourceLine);
+            WriteConstructor(body, writer, fullStateClassName);
+            WriteCancelFunc(writer);
+            writer.WriteLine("};");
+
+        }
+
         public void Write(TextWriter writer)
         {
             string fullReturnType =
@@ -349,10 +446,13 @@ namespace actorcompiler
                     break;
             }
 
+            // e.g. SimpleTimerActor
             fullClassName = className + GetTemplateActuals();
             var actorClassFormal = new VarDeclaration { name = className, type = "class" };
             This = string.Format("static_cast<{0}*>(this)", actorClassFormal.name);
+            // e.g. SimpleTimerActorState
             stateClassName = className + "State";
+            // e.g. SimpleTimerActorState<SimpleTimerActor>
             var fullStateClassName = stateClassName + GetTemplateActuals(new VarDeclaration { type = "class", name = fullClassName });
 
             if (actor.isForwardDeclaration) {
@@ -414,59 +514,11 @@ namespace actorcompiler
             }
             writer.WriteLine("};");
 
-            // The final actor class mixes in the State class, the Actor base class and all callback classes
-            writer.WriteLine("// This generated class is to be used only via {0}()", actor.name);
-            WriteTemplate(writer);
-            LineNumber(writer, actor.SourceLine);
+            WriteActorClass(writer, fullStateClassName, body);
 
-            string callback_base_classes = string.Join(", ", callbacks.Select(c=>string.Format("public {0}", c.type)));
-            if (callback_base_classes != "") callback_base_classes += ", ";
-            writer.WriteLine("class {0} final : public Actor<{2}>, {3}public FastAllocated<{1}>, public {4} {{",
-                className,
-                fullClassName,
-                actor.returnType == null ? "void" : actor.returnType,
-                callback_base_classes,
-                fullStateClassName
-                );
-            writer.WriteLine("public:");
-            writer.WriteLine("\tusing FastAllocated<{0}>::operator new;", fullClassName);
-            writer.WriteLine("\tusing FastAllocated<{0}>::operator delete;", fullClassName);
+            if (isTopLevel && actor.nameSpace == null) writer.WriteLine("} // namespace"); // namespace
 
-            writer.WriteLine("#pragma clang diagnostic push");
-            writer.WriteLine("#pragma clang diagnostic ignored \"-Wdelete-non-virtual-dtor\"");
-            if (actor.returnType != null)
-                writer.WriteLine("\tvoid destroy() override {{ ((Actor<{0}>*)this)->~Actor(); operator delete(this); }}", actor.returnType);
-            else
-                writer.WriteLine("\tvoid destroy() {{ ((Actor<void>*)this)->~Actor(); operator delete(this); }}");
-            writer.WriteLine("#pragma clang diagnostic pop");
-
-            foreach (var cb in callbacks)
-                writer.WriteLine("friend struct {0};", cb.type);
-
-            LineNumber(writer, actor.SourceLine);
-            WriteConstructor(body, writer, fullStateClassName);
-            //WriteStartFunc(body, writer);
-            WriteCancelFunc(writer);
-            writer.WriteLine("};");
-            if (isTopLevel && actor.nameSpace == null) writer.WriteLine("}"); // namespace
-            WriteTemplate(writer);
-            LineNumber(writer, actor.SourceLine);
-            foreach (string attribute in actor.attributes) {
-                writer.Write(attribute + " ");
-            }
-            if (actor.isStatic) writer.Write("static ");
-            writer.WriteLine("{0} {3}{1}( {2} ) {{", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
-            LineNumber(writer, actor.SourceLine);
-
-            string newActor = string.Format("new {0}({1})", 
-                    fullClassName,
-                    string.Join(", ", actor.parameters.Select(p => p.name).ToArray()));
-
-            if (actor.returnType != null)
-                writer.WriteLine("\treturn Future<{1}>({0});", newActor, actor.returnType);
-            else
-                writer.WriteLine("\t{0};", newActor);
-            writer.WriteLine("}");
+            WriteActorFunction(writer, fullReturnType);
 
             if (actor.testCaseParameters != null)
             {
@@ -482,6 +534,11 @@ namespace actorcompiler
             if (generateProbes) {
                 fun.WriteLine("fdb_probe_actor_enter(\"{0}\", {1}, {2});", name, thisAddress, index);
             }
+            var blockIdentifier = GetUidFromString(fun.name);
+            fun.WriteLine("#ifdef WITH_ACAC");
+            fun.WriteLine("static constexpr ActorBlockIdentifier __identifier = UID({0}UL, {1}UL);", blockIdentifier.Item1, blockIdentifier.Item2);
+            fun.WriteLine("ActorExecutionContextHelper __helper(static_cast<{0}*>(this)->activeActorHelper.actorID, __identifier);", className);
+            fun.WriteLine("#endif // WITH_ACAC");
         }
 
         void ProbeExit(Function fun, string name, int index = -1) {
@@ -1291,20 +1348,29 @@ namespace actorcompiler
                 endIsUnreachable = true,
                 publicName = true
             };
+
+            // Initializes class member variables
             constructor.Indent(codeIndent);
             constructor.WriteLine( " : Actor<" + (actor.returnType == null ? "void" : actor.returnType) + ">()," );
-            constructor.WriteLine( "   {0}({1})", fullStateClassName, string.Join(", ", actor.parameters.Select(p => p.name)));
+            constructor.WriteLine( "   {0}({1}),", fullStateClassName, string.Join(", ", actor.parameters.Select(p => p.name)));
+            constructor.WriteLine( "   activeActorHelper(__actorIdentifier)");
             constructor.Indent(-1);
+
             constructor.WriteLine("{");
             constructor.Indent(+1);
+
             ProbeEnter(constructor, actor.name);
+
             constructor.WriteLine("#ifdef ENABLE_SAMPLING");
             constructor.WriteLine("this->lineage.setActorName(\"{0}\");", actor.name);
             constructor.WriteLine("LineageScope _(&this->lineage);");
-            constructor.WriteLine("#endif");
             // constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = \"{0}\"_sr;", actor.name);
+            constructor.WriteLine("#endif");
+
             constructor.WriteLine("this->{0};", body.call());
+
             ProbeExit(constructor, actor.name);
+
             WriteFunction(writer, constructor, constructor.BodyText);
         }
 

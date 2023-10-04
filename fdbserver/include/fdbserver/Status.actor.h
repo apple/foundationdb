@@ -48,6 +48,7 @@ Future<StatusReply> clusterGetStatus(
     Database const& cx,
     std::vector<WorkerDetails> const& workers,
     std::vector<ProcessIssues> const& workerIssues,
+    std::vector<StorageServerMetaInfo> const& storageMetadatas,
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
