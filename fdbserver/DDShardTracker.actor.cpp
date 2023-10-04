@@ -120,9 +120,9 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 
 int64_t getMaxShardSize(double dbSizeEstimate) {
 	int64_t size = std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
-	                                                     SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
-	                    SERVER_KNOBS->SHARD_BYTES_RATIO,
-	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
+	                                                             SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
+	                            SERVER_KNOBS->SHARD_BYTES_RATIO,
+	                        (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
 		size = std::max(size, static_cast<int64_t>(SERVER_KNOBS->MAX_LARGE_SHARD_BYTES));
 	}
