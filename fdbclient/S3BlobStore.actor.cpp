@@ -24,6 +24,7 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
+#include <climits>
 #include <time.h>
 #include <iomanip>
 #include <openssl/sha.h>
@@ -186,13 +187,12 @@ std::string guessRegionFromDomain(std::string domain) {
 		const char* service = knownServices[i];
 
 		std::size_t p = domain.find(service);
-
 		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {
 			// eg. 127.0.0.1, example.com, s3-service.example.com, mys3.example.com
 			continue;
 		}
 
-		StringRef h(domain.c_str() + p);
+		StringRef h = StringRef(domain).substr(p);
 
 		if (!h.startsWith("oss-"_sr)) {
 			h.eat(service); // ignore s3 service
@@ -311,10 +311,12 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			}
 
 			// The parameter is known to S3BlobStoreEndpoint so it must be numeric and valid.
-			char* valueEnd;
-			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
-			if (*valueEnd || (ivalue == 0 && value.toString() != "0"))
-				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
+			char* valueEnd = nullptr;
+			std::string s = value.toString();
+			long int ivalue = strtol(s.c_str(), &valueEnd, 10);
+			if (*valueEnd || (ivalue == 0 && s != "0") ||
+			    (((ivalue == LONG_MAX) || (ivalue == LONG_MIN)) && errno == ERANGE))
+				throw format("%s is not a valid value for %s", s.c_str(), name.toString().c_str());
 
 			// It should not be possible for this set to fail now since the dummy set above had to have worked.
 			ASSERT(knobs.set(name, ivalue));
@@ -1889,5 +1891,25 @@ TEST_CASE("/backup/s3/v4headers") {
 		ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
 	}
 
+	return Void();
+}
+
+TEST_CASE("/backup/s3/guess_region") {
+	std::string url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sa=1";
+
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+	ASSERT(s3->getRegion() == "us-west-2");
+
+	url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sc=922337203685477580700";
+	try {
+		s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		// conversion of 922337203685477580700 to long int will overflow
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
 	return Void();
 }
