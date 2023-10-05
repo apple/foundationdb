@@ -5584,6 +5584,15 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 					    .detail("RepsSize", reps.size());
 					throw audit_storage_cancelled();
 				}
+				if (reps.size() == 1) {
+					// if no other server to compare
+					TraceEvent(SevWarn, "SSAuditStorageShardReplicaNothingToCompare", data->thisServerID)
+					    .detail("AuditID", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("AuditType", req.type)
+					    .detail("TargetServers", describe(req.targetServers));
+					complete = true;
+				}
 				// Compare local and each remote one by one
 				// The last one of reps is local, so skip it
 				for (int repIdx = 0; repIdx < reps.size() - 1; repIdx++) {
