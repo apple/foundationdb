@@ -2831,12 +2831,12 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								}
 							}
 							if (storageServersToCheck.size() <= 1) {
-							    TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-							        .detail("Reason", "Single replica, ignore")
-							        .detail("AuditID", audit->coreState.id)
-							        .detail("AuditRange", audit->coreState.range)
-							        .detail("AuditType", auditType);
-							    return Void();
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+								    .detail("Reason", "Single replica, ignore")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("AuditRange", audit->coreState.range)
+								    .detail("AuditType", auditType);
+								return Void();
 							}
 						} else {
 							UNREACHABLE();
