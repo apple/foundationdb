@@ -1537,6 +1537,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				else if (requests_batch.back().statusField.empty())
 					requests_batch.back().reply.send(result.get());
 				else {
+					ASSERT(requests_batch.back().statusField == "fault_tolerance");
 					if (!faultToleranceRelatedStatus.present()) {
 						faultToleranceRelatedStatus = clusterGetFaultToleranceStatus(result.get().statusStr);
 					}
@@ -1545,6 +1546,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 				requests_batch.pop_back();
 				wait(yield());
 			}
+			faultToleranceRelatedStatus.reset();
 		} catch (Error& e) {
 			TraceEvent(SevError, "StatusServerError").error(e);
 			throw e;

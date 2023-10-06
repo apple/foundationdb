@@ -3670,8 +3670,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		    .detail("Duration", timer() - tStart)
 		    .detail("StatusSize", statusObj.getFinalLength());
 
-		std::cout << "StatusObj string: " << statusObj.getJson() << std::endl;
-
 		return StatusReply(statusObj.getJson());
 
 	} catch (Error& e) {
@@ -3688,21 +3686,15 @@ StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
 		JSONDoc jsonDoc(mv);
 
 		std::string faultToleranceRelatedFields[] = {
-			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining",
+			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining", "qos",
 			"recovery_state",  "messages"
 		};
 
 		JsonBuilderObject statusObj;
 		for (std::string& field : faultToleranceRelatedFields) {
-			if (jsonDoc.has(field, false)) {
-				std::string value = json_spirit::write_string(jsonDoc.last());
-				statusObj.setKey(field, value);
+			if (jsonDoc.has(field)) {
+				statusObj[field] = jsonDoc.last();
 			}
-		}
-
-		int64_t clusterTime = g_network->timer();
-		if (clusterTime != -1) {
-			statusObj.setKey("cluster_controller_timestamp", clusterTime);
 		}
 
 		TraceEvent("ClusterGetFaultToleranceStatus")
