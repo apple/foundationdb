@@ -2810,25 +2810,24 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								storageServersToCheck.push_back(it->second[idx]);
 							}
 						} else if (auditType == AuditType::ValidateReplica) {
-							auto it = rangeLocations[rangeLocationIndex].servers.begin();
-							const int idx = deterministicRandom()->randomInt(0, it->second.size());
-							// use a server from primary dc to do audit
+							// select a server from primary DC to do audit
 							// check all servers from each DC
-							targetServer = it->second[idx];
-							storageServersToCheck.push_back(it->second[idx]);
-							for (int i = 0; i < it->second.size(); ++i) {
-								if (i == idx) {
-									continue;
+							int dcid = 0;
+							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
+								if (dcid == 0) {
+									// in primary DC randomly select a server to do the audit task
+									const int idx = deterministicRandom()->randomInt(0, dcServers.size());
+									targetServer = dcServers[idx];
 								}
-								req.targetServers.push_back(it->second[i].id());
-								storageServersToCheck.push_back(it->second[idx]);
-							}
-							++it;
-							for (; it != rangeLocations[rangeLocationIndex].servers.end(); ++it) {
-								for (int i = 0; i < it->second.size(); ++i) {
-									req.targetServers.push_back(it->second[i].id());
-									storageServersToCheck.push_back(it->second[i]);
+								for (int i = 0; i < dcServers.size(); i++) {
+									if (dcServers[i].id() == targetServer.id()) {
+										ASSERT_WE_THINK(dcid == 0);
+									} else {
+										req.targetServers.push_back(dcServers[i].id());
+									}
+									storageServersToCheck.push_back(dcServers[i]);
 								}
+								dcid++;
 							}
 							if (storageServersToCheck.size() <= 1) {
 								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)

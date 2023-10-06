@@ -5092,6 +5092,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	state Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 	state int64_t remoteReadBytes = 0;
+	state double startTime = now();
 	state double lastRateLimiterWaitTime = 0;
 	state double rateLimiterBeforeWaitTime = 0;
 	state double rateLimiterTotalWaitTime = 0;
@@ -5396,7 +5397,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						    .detail("CompleteRange", res.range)
 						    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
 						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
-						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+						    .detail("TotalTime", now() - startTime);
 						break;
 					}
 				}
@@ -5419,7 +5421,9 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID)
-		    .detail("Reason", failureReason);
+		    .detail("Reason", failureReason)
+		    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+		    .detail("TotalTime", now() - startTime);
 		// Make sure the history collection is not open due to this audit
 		data->stopTrackShardAssignment();
 		TraceEvent(SevVerbose, "SSShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
@@ -5468,6 +5472,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	state int64_t validatedBytes = 0;
 	state bool complete = false;
 	state int64_t checkTimes = 0;
+	state double startTime = now();
 	state double lastRateLimiterWaitTime = 0;
 	state double rateLimiterBeforeWaitTime = 0;
 	state double rateLimiterTotalWaitTime = 0;
@@ -5785,7 +5790,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("CheckTimes", checkTimes)
 						    .detail("NumValidatedKeys", numValidatedKeys)
 						    .detail("ValidatedBytes", validatedBytes)
-						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+						    .detail("TotalTime", now() - startTime);
 						break;
 					} else {
 						TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
@@ -5820,7 +5826,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
-		    .detail("AuditServer", data->thisServerID);
+		    .detail("AuditServer", data->thisServerID)
+		    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+		    .detail("TotalTime", now() - startTime);
 		if (e.code() == error_code_audit_storage_cancelled) {
 			req.reply.sendError(audit_storage_cancelled());
 		} else if (e.code() == error_code_audit_storage_task_outdated) {
