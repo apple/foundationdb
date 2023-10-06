@@ -81,7 +81,7 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId) {
 	try {
 		state Transaction tr(cx);
-		TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataStart", auditId)
+		TraceEvent(SevInfo, "AuditUtilCancelAuditMetadataStart", auditId)
 		    .detail("AuditKey", auditKey(auditType, auditId));
 		loop {
 			try {
@@ -99,11 +99,11 @@ ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID aud
 				tr.set(auditKey(toCancelState.getType(), toCancelState.id), auditStorageStateValue(toCancelState));
 				clearAuditProgressMetadata(&tr, toCancelState.getType(), toCancelState.id);
 				wait(tr.commit());
-				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataEnd", auditId)
+				TraceEvent(SevInfo, "AuditUtilCancelAuditMetadataEnd", auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataError", auditId)
+				TraceEvent(SevWarn, "AuditUtilCancelAuditMetadataError", auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
 				wait(tr.onError(e));
 			}
@@ -420,7 +420,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
-			TraceEvent(SevDebug, "AuditUtilPersistAuditState", auditState.id)
+			TraceEvent(SevInfo, "AuditUtilPersistAuditState", auditState.id)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
 			    .detail("AuditPhase", auditPhase)
@@ -428,7 +428,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			    .detail("Context", context);
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilPersistAuditStateError", auditState.id)
+			TraceEvent(SevWarn, "AuditUtilPersistAuditStateError", auditState.id)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
