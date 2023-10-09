@@ -47,6 +47,8 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	int64_t dataInFlightToServer;
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
+	Optional<double> storageQueueTooLongStartTime;
+	Optional<double> lastStorageQueueTooLongTriggerTime;
 
 	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
 
@@ -66,6 +68,7 @@ public:
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
+	AsyncVar<Void> storageQueueTooLong;
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,
@@ -107,6 +110,45 @@ public:
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
+
+	// Return true if storage queue keeps too long for a while
+	bool updateAndGetStorageQueueTooLong(int64_t currentBytes, UID ssid) {
+		double currentTime = now();
+		if (currentBytes > SERVER_KNOBS->DD_SS_TOO_LONG_STORAGE_QUEUE_BYTES) {
+			if (!storageQueueTooLongStartTime.present()) {
+				storageQueueTooLongStartTime = currentTime;
+				TraceEvent(SevWarn, "TCDetectStorageQueueBecomeTooLong")
+				    .detail("SSID", ssid)
+				    .detail("StorageQueueBytes", currentBytes)
+				    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+			} else {
+				TraceEvent(SevDebug, "TCDetectStorageQueueTooLong")
+				    .detail("SSID", ssid)
+				    .detail("StorageQueueBytes", currentBytes)
+				    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+			}
+		} else if (currentBytes < SERVER_KNOBS->DD_SS_SHORT_STORAGE_QUEUE_BYTES) {
+			if (storageQueueTooLongStartTime.present()) {
+				storageQueueTooLongStartTime = Optional<double>();
+				TraceEvent(SevWarn, "TCDetectStorageQueueBecomeNormal")
+				    .detail("SSID", ssid)
+				    .detail("StorageQueueBytes", currentBytes);
+			}
+		} else {
+			if (storageQueueTooLongStartTime.present()) {
+				TraceEvent(SevDebug, "TCDetectStorageQueueLong")
+				    .detail("SSID", ssid)
+				    .detail("StorageQueueBytes", currentBytes)
+				    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+			}
+		}
+		if (storageQueueTooLongStartTime.present() &&
+		    currentTime - storageQueueTooLongStartTime.get() > SERVER_KNOBS->DD_STORAGE_QUEUE_TOO_LONG_DURATION) {
+			return true;
+		} else {
+			return false;
+		}
+	}
 
 	~TCServerInfo();
 };
