@@ -178,7 +178,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_DEST_CPU_PERCENT, 		  					   100.0 );
 	init( DD_TEAM_PIVOT_UPDATE_DELAY,                            5.0 );
 
-	init( SHARD_ENCODE_LOCATION_METADATA,                      true ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
+	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); if( isSimulated )   DD_PHYSICAL_SHARD_MOVE_PROBABILITY = 0.5;
 	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
@@ -519,10 +519,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_EMPTY_RANGE_CHECK,       isSimulated ? true : false);
 	init( ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX,             50 );
 	init( ROCKSDB_ATOMIC_FLUSH,                                false );
- 	init( ROCKSDB_IMPORT_MOVE_FILES,                            true );
+ 	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
  	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
  	init( ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE,               true );
- 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); if( randomize && BUGGIFY )   ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
+ 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); if ( randomize && BUGGIFY ) ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
 	init( ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT,                false ); if ( randomize && BUGGIFY ) ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT = true;
 	init( ROCKSDB_COMPACTION_PRI,                                  3 ); // kMinOverlappingRatio, RocksDB default. 
 	init( ROCKSDB_WAL_RECOVERY_MODE,                               2 ); // kPointInTimeRecovery, RocksDB default.
@@ -973,7 +973,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// The enumeration is currently: eager, fetch, low, normal, high
 	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
 	init( SPLIT_METRICS_MAX_ROWS,                              10000 ); if( randomize && BUGGIFY ) SPLIT_METRICS_MAX_ROWS = 10;
-	init( PHYSICAL_SHARD_MOVE_LOG_SEVERITY,                       10 );
+	init( PHYSICAL_SHARD_MOVE_LOG_SEVERITY,                        1 );
 	init( FETCH_SHARD_BUFFER_BYTE_LIMIT,                        20e6 ); if( randomize && BUGGIFY ) FETCH_SHARD_BUFFER_BYTE_LIMIT = 1;
 	init( FETCH_SHARD_UPDATES_BYTE_LIMIT,                    2500000 ); if( randomize && BUGGIFY ) FETCH_SHARD_UPDATES_BYTE_LIMIT = 1;
 

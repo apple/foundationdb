@@ -257,7 +257,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	}
 
 	const Key beginKey = persistUpdatesKey(self->id, begin), endKey = persistUpdatesKey(self->id, end);
-	TraceEvent(SevInfo, "MoveInUpdatesLoadBegin", self->id)
+	TraceEvent(self->logSev, "MoveInUpdatesLoadBegin", self->id)
 	    .detail("BeginVersion", begin)
 	    .detail("EndVersion", end)
 	    .detail("BeginKey", beginKey)
@@ -284,7 +284,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	if (!res.more) {
 		for (int i = restored.size() - 1; i >= 0; --i) {
 			if (self->updates.empty() || restored[i].version < self->updates.front().version) {
-				self->updates.push_front(restored[i]);
+				self->updates.push_front(std::move(restored[i]));
 			}
 		}
 		self->spilled = MoveInUpdatesSpilled::False;
@@ -294,7 +294,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	}
 
 	self->loadFuture = Future<Void>();
-	TraceEvent(SevInfo, "MoveInUpdatesLoadEnd", self->id)
+	TraceEvent(self->logSev, "MoveInUpdatesLoadEnd", self->id)
 	    .detail("MinVersion", restored.empty() ? invalidVersion : restored.front().version)
 	    .detail("MaxVersion", restored.empty() ? invalidVersion : restored.back().version)
 	    .detail("VersionCount", restored.size())
@@ -8884,7 +8884,7 @@ ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* s
 
 	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
 	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-	TraceEvent(SevInfo, "UpdatedMoveInShardMetaData", data->thisServerID)
+	TraceEvent(shard->logSev, "UpdatedMoveInShardMetaData", data->thisServerID)
 	    .detail("Shard", shard->toString())
 	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
 	    .detail("DurableVersion", data->durableVersion.get())
@@ -9047,10 +9047,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
-			// TODO(heliu): make this `retry from beginning` applies to only some specific cases.
-			// moveInShard->setPhase(MoveInPhase::Fetching);
-			// wait(updateMoveInShardMetaData(data, moveInShard));
-			wait(fallBackToAddingShard(data, moveInShard));
+			moveInShard->setPhase(MoveInPhase::Fetching);
+			wait(updateMoveInShardMetaData(data, moveInShard));
 			return Void();
 		}
 		throw err;
