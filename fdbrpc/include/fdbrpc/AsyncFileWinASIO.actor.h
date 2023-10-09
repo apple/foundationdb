@@ -43,6 +43,8 @@ public:
 
 	static void stop() {}
 
+	virtual StringRef getClassName() override { return "AsnycFileWinASIO"_sr; }
+
 	static bool should_poll() { return false; }
 	// FIXME: This implementation isn't actually asynchronous - it just does operations synchronously!
 

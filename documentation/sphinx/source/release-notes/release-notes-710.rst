@@ -2,6 +2,18 @@
 Release Notes
 #############
 
+7.1.41
+======
+* Same as 7.1.40 release with AVX enabled.
+
+7.1.40
+======
+* Released with AVX disabled.
+* Removed storageWiggleID from storage metadata if the storage server is not wiggling. `(PR #10913) <https://github.com/apple/foundationdb/pull/10913>`_
+* Augmented storage team selection to be aware of storage queue sizes. `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_
+* Fixed the proxy setting for backup agents. `(PR #10903) <https://github.com/apple/foundationdb/pull/10903>`_
+* Added an option to set perpetual_storage_wiggle_engine to none. `(PR #10881) <https://github.com/apple/foundationdb/pull/10881>`_
+
 7.1.39
 ======
 * Same as 7.1.38 release with AVX enabled.

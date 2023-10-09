@@ -26,13 +26,13 @@
 
 #include "flow/Traceable.h"
 #include "flow/FileIdentifier.h"
-#include "flow/Error.h"
 #include "flow/swift_support.h"
 #ifdef WITH_SWIFT
 #include <swift/bridging>
 #endif
 
 class Arena;
+class Void;
 
 // Optional is a wrapper for std::optional. There
 // are two primary reasons to use this wrapper instead

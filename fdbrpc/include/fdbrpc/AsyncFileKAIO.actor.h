@@ -58,6 +58,8 @@ DESCR struct SlowAioSubmit {
 
 class AsyncFileKAIO final : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:
+	virtual StringRef getClassName() override { return "AsyncFileKAIO"_sr; }
+
 	struct AsyncFileKAIOMetrics {
 		LatencySample readLatencySample = { "AsyncFileKAIOReadLatency",
 			                                UID(),

@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cinttypes>
+#include <regex>
 #include <set>
 #include <string>
 #include <variant>
@@ -35,6 +36,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "fdbclient/Status.h"
+#include "fdbrpc/Locality.h"
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -1612,11 +1614,22 @@ struct DatabaseSharedState {
 	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
+const static std::regex wiggleLocalityValidation("(\\w+:\\w+)(;\\w+:\\w+)*");
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
-	int pos = locality.find(':');
-	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
-	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
+	if (locality == "0") {
+		return true;
+	}
+	return std::regex_match(locality, wiggleLocalityValidation);
 }
+
+// Parses `perpetual_storage_wiggle_locality` database option.
+std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
+    const std::string& localityKeyValues);
+
+// Whether the locality matches any locality filter in `localityKeyValues` (which is supposed to be parsed from
+// ParsePerpetualStorageWiggleLocality).
+bool localityMatchInList(const std::vector<std::pair<Optional<Value>, Optional<Value>>>& localityKeyValues,
+                         const LocalityData& locality);
 
 // matches what's in fdb_c.h
 struct ReadBlobGranuleContext {
