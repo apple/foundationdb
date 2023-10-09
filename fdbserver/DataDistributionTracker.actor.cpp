@@ -1021,7 +1021,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 						for (auto it : self.shards.intersectingRanges(shard)) {
 							if (it->value().stats->get().present()) {
 								int64_t shardWriteTraffic = it->value().stats->get().get().metrics.bytesPerKSecond;
-								if (shardWriteTraffic > maxShardWriteTraffic) {
+								if (shardWriteTraffic > maxShardWriteTraffic &&
+								    shardWriteTraffic > SERVER_KNOBS->DD_MIN_SHARD_BYTES_PER_KSEC_TO_MOVE_OUT) {
 									shardToMove = it->range();
 									selectedTeam = team;
 									maxShardWriteTraffic = shardWriteTraffic;
@@ -1034,18 +1035,16 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 					e.detail("TeamSelected", selectedTeam.servers);
 					e.detail("ShardSelected", shardToMove);
 					e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
-					if (maxShardWriteTraffic >= SERVER_KNOBS->DD_MIN_SHARD_BYTES_PER_KSEC_TO_MOVE_OUT) {
-						RelocateShard rs;
-						rs.keys = shardToMove;
-						rs.priority = SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG;
-						self.output.send(rs);
-						TraceEvent("SendRelocateToDDQueue", self.distributorId)
-						    .detail("ServerPrimary", req.primary)
-						    .detail("ServerTeam", selectedTeam.servers)
-						    .detail("KeyBegin", rs.keys.begin)
-						    .detail("KeyEnd", rs.keys.end)
-						    .detail("Priority", rs.priority);
-					}
+					RelocateShard rs;
+					rs.keys = shardToMove;
+					rs.priority = SERVER_KNOBS->PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG;
+					self.output.send(rs);
+					TraceEvent("SendRelocateToDDQueue", self.distributorId)
+					    .detail("ServerPrimary", req.primary)
+					    .detail("ServerTeam", selectedTeam.servers)
+					    .detail("KeyBegin", rs.keys.begin)
+					    .detail("KeyEnd", rs.keys.end)
+					    .detail("Priority", rs.priority);
 				}
 			}
 			when(wait(loggingTrigger)) {

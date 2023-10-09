@@ -48,7 +48,6 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
 	Optional<double> storageQueueTooLongStartTime;
-	Optional<double> whenRedistributeForLongStorageQueue;
 	Optional<double> lastStorageQueueTooLongTriggerTime;
 
 	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
@@ -112,7 +111,7 @@ public:
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
 
-	// Return if storage queue keeps too long for a while
+	// Return true if storage queue keeps too long for a while
 	bool updateAndGetStorageQueueTooLong(int64_t currentBytes, UID ssid) {
 		double currentTime = now();
 		if (currentBytes > SERVER_KNOBS->DD_SS_TOO_LONG_STORAGE_QUEUE_BYTES) {
