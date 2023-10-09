@@ -137,7 +137,7 @@ int getWriteStallState(const rocksdb::WriteStallCondition& condition) {
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(UID id) : logId(id) {}
+	RocksDBEventListener(UID id) : logId(id), lastResetTime(now()) {}
 	void OnStallConditionsChanged(const rocksdb::WriteStallInfo& info) override {
 		auto curState = getWriteStallState(info.condition.cur);
 		auto prevState = getWriteStallState(info.condition.prev);
