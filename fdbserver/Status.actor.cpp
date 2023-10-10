@@ -669,6 +669,46 @@ struct RolesInfo {
 			if (commitBatchingWindowSize.size()) {
 				obj["commit_batching_window_size"] = addLatencyStatistics(commitBatchingWindowSize);
 			}
+
+			TraceEventFields const& commitBatchTransactions = metrics.at("CommitBatchTransactions");
+			if (commitBatchTransactions.size()) {
+				obj["commit_batch_transactions"] = addLatencyStatistics(commitBatchTransactions);
+			}
+
+			TraceEventFields const& commitBatchBytes = metrics.at("CommitBatchBytes");
+			if (commitBatchBytes.size()) {
+				obj["commit_batch_bytes"] = addLatencyStatistics(commitBatchBytes);
+			}
+
+			TraceEventFields const& commitBatchingWaiting = metrics.at("CommitBatchingWaiting");
+			if (commitBatchingWaiting.size()) {
+				obj["commit_batching_waiting"] = addLatencyStatistics(commitBatchingWaiting);
+			}
+
+			TraceEventFields const& commitPreresolutionLatency = metrics.at("CommitPreresolutionLatency");
+			if (commitPreresolutionLatency.size()) {
+				obj["commit_preresolution_latency"] = addLatencyStatistics(commitPreresolutionLatency);
+			}
+
+			TraceEventFields const& commitResolutionLatency = metrics.at("CommitResolutionLatency");
+			if (commitResolutionLatency.size()) {
+				obj["commit_resolution_latency"] = addLatencyStatistics(commitResolutionLatency);
+			}
+
+			TraceEventFields const& commitPostresolutionLatency = metrics.at("CommitPostresolutionLatency");
+			if (commitPostresolutionLatency.size()) {
+				obj["commit_postresolution_latency"] = addLatencyStatistics(commitPostresolutionLatency);
+			}
+
+			TraceEventFields const& commitTLogLoggingLatency = metrics.at("CommitTLogLoggingLatency");
+			if (commitTLogLoggingLatency.size()) {
+				obj["commit_tlog_logging_latency"] = addLatencyStatistics(commitTLogLoggingLatency);
+			}
+
+			TraceEventFields const& commitReplyLatency = metrics.at("CommitReplyLatency");
+			if (commitReplyLatency.size()) {
+				obj["commit_reply_latency"] = addLatencyStatistics(commitReplyLatency);
+			}
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
 				throw e;
@@ -2017,10 +2057,20 @@ ACTOR static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAnd
 ACTOR static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().client.commitProxies,
-	    address_workers,
-	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" }));
+	std::vector<std::pair<CommitProxyInterface, EventMap>> results =
+	    wait(getServerMetrics(db->get().client.commitProxies,
+	                          address_workers,
+	                          std::vector<std::string>{ "CommitLatencyMetrics",
+	                                                    "CommitLatencyBands",
+	                                                    "CommitBatchingWindowSize",
+	                                                    "CommitBatchTransactions",
+	                                                    "CommitBatchBytes",
+	                                                    "CommitBatchingWaiting",
+	                                                    "CommitPreresolutionLatency",
+	                                                    "CommitResolutionLatency",
+	                                                    "CommitPostresolutionLatency",
+	                                                    "CommitTLogLoggingLatency",
+	                                                    "CommitReplyLatency" }));
 
 	return results;
 }
