@@ -157,8 +157,8 @@ storage_queue              number   The number of bytes of mutations that need t
 
 ``\xff\xff/metrics\fault_tolerance_metrics_json``
 
-Fetches the following fault tolerance related json fields of :doc:`Machine-readable status <mr-status>`: 
-``fault_tolerance``, ``data``, ``logs``, ``maintenance_zone``, ``maintenance_seconds_remaining``, ``qos``, ``recovery_state``, ``messages``, and ``client``.
+Fetches the following fault tolerance related json fields (in addition to the ``client`` json field) of :doc:`Machine-readable status <mr-status>`: 
+``fault_tolerance``, ``data``, ``logs``, ``maintenance_zone``, ``maintenance_seconds_remaining``, ``qos``, ``recovery_state``, ``messages``.
 
 Caveats
 ~~~~~~~
