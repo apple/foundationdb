@@ -703,8 +703,6 @@ struct CommitBatchContext {
 
 	IdempotencyIdKVBuilder idempotencyKVBuilder;
 
-	bool throttledShard;
-
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
 	void setupTraceBatch();
@@ -718,6 +716,16 @@ private:
 };
 
 bool CommitBatchContext::checkHotShards() {
+
+	// removed expired hot shards
+	pProxyCommitData->hotShards.erase(
+	    remove_if(pProxyCommitData->hotShards.begin(),
+	              pProxyCommitData->hotShards.end(),
+	              [](const std::pair<Standalone<KeyRangeRef>, double>& p) { return p.second < now(); }));
+	if (pProxyCommitData->hotShards.empty()) {
+		return false;
+	}
+
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
 		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
@@ -725,13 +733,14 @@ bool CommitBatchContext::checkHotShards() {
 			auto& m = (*pMutations)[mutationNum];
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				for (const auto& shard : pProxyCommitData->hotShards) {
-					if (shard.contains(KeyRef(m.param1))) {
+					if (shard.first.contains(KeyRef(m.param1))) {
 						return true;
 					}
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				for (const auto& shard : pProxyCommitData->hotShards) {
-					if (shard.intersects(KeyRangeRef(m.param1, m.param2))) {
+					// check shard expired , if so delete it
+					if (shard.first.intersects(KeyRangeRef(m.param1, m.param2))) {
 						return true;
 					}
 				}
@@ -740,6 +749,7 @@ bool CommitBatchContext::checkHotShards() {
 			}
 		}
 	}
+	// if no hotshards, set throttled to false
 	return false;
 }
 
@@ -794,7 +804,7 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
     currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
     localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
     toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
-    committed(trs.size()), throttledShard(false) {
+    committed(trs.size()) {
 
 	evaluateBatchSize();
 
@@ -917,8 +927,11 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		self->writtenTagsPreResolution = self->getWrittenTagsPreResolution();
 	}
 
-	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED) {
-		self->throttledShard = self->checkHotShards();
+	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED && !pProxyCommitData->hotShards.empty()) {
+		if (self->checkHotShards() && deterministicRandom()->coinflip()) {
+			TraceEvent(SevDebug, "ThrottledShardDelay");
+			throw retry();
+		}
 	}
 
 	GetCommitVersionRequest req(span.context,
@@ -2411,11 +2424,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 	state const Optional<UID>& debugID = self->debugID;
 
-	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED && self->throttledShard && deterministicRandom()->coinflip()) {
-		TraceEvent(SevDebug, "ThrottledShardDelay");
-		throw retry();
-	}
-
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 		//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
@@ -3869,7 +3877,18 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
 		}
 		when(SetThrottledShardRequest request = waitNext(proxy.setThrottledShard.getFuture())) {
-			commitData.hotShards.assign(request.throttledShards.begin(), request.throttledShards.end());
+			for (auto& shard : request.throttledShards) {
+				auto it = commitData.hotShards.begin();
+				for (; it != commitData.hotShards.end(); ++it) {
+					if (it->first == shard) {
+						it->second = request.expirationTime;
+						break;
+					}
+				}
+				if (it == commitData.hotShards.end()) {
+					commitData.hotShards.emplace_back(std::make_pair(shard, request.expirationTime));
+				}
+			}
 			TraceEvent(SevDebug, "ReceivedSetThrottledShard");
 		}
 	}

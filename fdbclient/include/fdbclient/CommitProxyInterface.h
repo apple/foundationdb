@@ -768,14 +768,16 @@ struct SetThrottledShardReply {
 struct SetThrottledShardRequest {
 	constexpr static FileIdentifier file_identifier = 2828141;
 	std::vector<KeyRange> throttledShards;
+	double expirationTime;
 	ReplyPromise<SetThrottledShardReply> reply;
 
 	SetThrottledShardRequest() {}
-	explicit SetThrottledShardRequest(std::vector<KeyRange> throttledShards) : throttledShards(throttledShards) {}
+	explicit SetThrottledShardRequest(std::vector<KeyRange> throttledShards, double expirationTime)
+	  : throttledShards(throttledShards), expirationTime(expirationTime) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, throttledShards, reply);
+		serializer(ar, throttledShards, expirationTime, reply);
 	}
 };
 

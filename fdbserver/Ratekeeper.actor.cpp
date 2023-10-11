@@ -338,6 +338,7 @@ public:
 					++i;
 				}
 			}
+			setReq.expirationTime = now() + 3.0;
 			for (const auto& cpi : dbInfo->get().client.commitProxies) {
 				// divide throttle amount by num proxies?
 				cpi.setThrottledShard.send(setReq);
