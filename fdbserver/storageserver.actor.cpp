@@ -11568,7 +11568,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		recentCommitStats.back().beforeStorageUpdates = beforeStorageUpdates;
 
 		// Allow data fetch to use an additional bytesLeft but don't penalize fetch budget if bytesLeft is negative
-		if (bytesLeft > 0) {
+		if (SERVER_KNOBS->STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET && bytesLeft > 0) {
 			data->fetchKeysBytesBudget += bytesLeft;
 			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 
