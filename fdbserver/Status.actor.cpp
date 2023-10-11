@@ -3033,6 +3033,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ConfigBroadcaster const* configBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
     metacluster::MetaclusterMetrics metaclusterMetrics) {
+
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -3666,6 +3667,37 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		TraceEvent("ClusterGetStatus")
+		    .detail("Duration", timer() - tStart)
+		    .detail("StatusSize", statusObj.getFinalLength());
+
+		return StatusReply(statusObj.getJson());
+
+	} catch (Error& e) {
+		TraceEvent(SevError, "StatusError").error(e);
+		throw;
+	}
+}
+
+StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
+	double tStart = timer();
+
+	try {
+		json_spirit::mValue mv = readJSONStrictly(statusStr);
+		JSONDoc jsonDoc(mv);
+
+		std::string faultToleranceRelatedFields[] = {
+			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining", "qos",
+			"recovery_state",  "messages"
+		};
+
+		JsonBuilderObject statusObj;
+		for (std::string& field : faultToleranceRelatedFields) {
+			if (jsonDoc.has(field)) {
+				statusObj[field] = jsonDoc.last();
+			}
+		}
+
+		TraceEvent("ClusterGetFaultToleranceStatus")
 		    .detail("Duration", timer() - tStart)
 		    .detail("StatusSize", statusObj.getFinalLength());
 

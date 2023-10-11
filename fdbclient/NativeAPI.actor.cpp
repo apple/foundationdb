@@ -1373,7 +1373,7 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
-ACTOR Future<Optional<Value>> getJSON(Database db);
+ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
@@ -1599,6 +1599,15 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
+
+	if (apiVersion.version() >= 740) {
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::METRICS,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<FaultToleranceMetricsImpl>(
+		        singleKeyRange("fault_tolerance_metrics_json"_sr)
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METRICS).begin)));
+	}
 
 	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,

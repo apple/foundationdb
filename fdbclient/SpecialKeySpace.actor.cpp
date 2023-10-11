@@ -2903,6 +2903,29 @@ Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTrans
 	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
+ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
+
+ACTOR static Future<RangeResult> FaultToleranceMetricsImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	state RangeResult res;
+	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+		Optional<Value> val = wait(getJSON(ryw->getDatabase(), "fault_tolerance"));
+		if (val.present()) {
+			res.push_back_deep(res.arena(), KeyValueRef(kr.begin, val.get()));
+		}
+	}
+	return res;
+}
+
+FaultToleranceMetricsImpl::FaultToleranceMetricsImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+Future<RangeResult> FaultToleranceMetricsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                        KeyRangeRef kr,
+                                                        GetRangeLimits limitsHint) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	return FaultToleranceMetricsImplActor(ryw, kr);
+}
+
 ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
                                                KeySelector begin,
                                                KeySelector end,

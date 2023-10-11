@@ -57,6 +57,8 @@ Future<StatusReply> clusterGetStatus(
     Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
     metacluster::MetaclusterMetrics const& metaclusterMetrics);
 
+StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);
+
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
