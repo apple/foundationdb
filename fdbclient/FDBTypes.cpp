@@ -256,7 +256,13 @@ KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
 
 TEST_CASE("/PerpetualStorageWiggleLocality/Validation") {
 	ASSERT(isValidPerpetualStorageWiggleLocality("aaa:bbb"));
-	ASSERT(isValidPerpetualStorageWiggleLocality("aaa:bbb;ccc:ddd"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("instance_id:FDB0401023121"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("machineid:pv47p01if-infs11081401.pv.if.apple.com"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("processid:0b36eaf96eb34b4b702d1bbcb1b49773"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("zoneid:pv47-1108"));
+	ASSERT(isValidPerpetualStorageWiggleLocality(
+	    "zoneid:pv47-1108;instance_id:FDB0401023121;processid:0b36eaf96eb34b4b702d1bbcb1b49773;machineid:pv47p01if-"
+	    "infs11081401.pv.if.apple.com"));
 	ASSERT(isValidPerpetualStorageWiggleLocality("0"));
 
 	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;"));
