@@ -164,7 +164,8 @@ extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
                         EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
-                        UnassignShard unassignShard = UnassignShard::False);
+                        UnassignShard unassignShard = UnassignShard::False,
+                        Optional<uint64_t> dmReasonBitMask = Optional<uint64_t>());
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);

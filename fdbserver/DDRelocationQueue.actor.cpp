@@ -117,6 +117,54 @@ int dataMovementPriority(DataMovementReason reason) {
 	return reasonPriority->at(reason);
 }
 
+uint64_t encodeBitMaskForDmReason(DataMovementReason reason) {
+	if (reason == DataMovementReason::INVALID) {
+		return 1U;
+	} else if (reason == DataMovementReason::RECOVER_MOVE) {
+		return 2U;
+	} else if (reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM) {
+		return 3U;
+	} else if (reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM) {
+		return 4U;
+	} else if (reason == DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM) {
+		return 5U;
+	} else if (reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM) {
+		return 6U;
+	} else if (reason == DataMovementReason::PERPETUAL_STORAGE_WIGGLE) {
+		return 7U;
+	} else if (reason == DataMovementReason::TEAM_HEALTHY) {
+		return 8U;
+	} else if (reason == DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER) {
+		return 9U;
+	} else if (reason == DataMovementReason::TEAM_REDUNDANT) {
+		return 10U;
+	} else if (reason == DataMovementReason::MERGE_SHARD) {
+		return 11U;
+	} else if (reason == DataMovementReason::POPULATE_REGION) {
+		return 12U;
+	} else if (reason == DataMovementReason::TEAM_UNHEALTHY) {
+		return 13U;
+	} else if (reason == DataMovementReason::TEAM_2_LEFT) {
+		return 14U;
+	} else if (reason == DataMovementReason::TEAM_1_LEFT) {
+		return 15U;
+	} else if (reason == DataMovementReason::TEAM_FAILED) {
+		return 16U;
+	} else if (reason == DataMovementReason::TEAM_0_LEFT) {
+		return 17U;
+	} else if (reason == DataMovementReason::SPLIT_SHARD) {
+		return 18U;
+	} else if (reason == DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD) {
+		return 19U;
+	} else {
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "UnknownDataMovementReason")
+		    .suppressFor(10.0)
+		    .detail("Reason", reason)
+		    .detail("Priority", dataMovementPriority(reason));
+		return 31U; // unknown reason
+	}
+}
+
 DataMovementReason priorityToDataMovementReason(int priority) {
 	auto [_, priorityReason] = buildPriorityMappings();
 	return priorityReason->at(priority);
@@ -1073,7 +1121,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                               AssignEmptyRange::False,
-						                               EnablePhysicalShardMove(enabled));
+						                               EnablePhysicalShardMove(enabled),
+						                               UnassignShard::False,
+						                               encodeBitMaskForDmReason(rrs.dmReason));
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1660,8 +1710,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 					const bool enabled =
 					    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
-					rd.dataMoveId = newDataMoveId(
-					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
+					                              AssignEmptyRange::False,
+					                              EnablePhysicalShardMove(enabled),
+					                              UnassignShard::False,
+					                              encodeBitMaskForDmReason(rd.dmReason));
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())

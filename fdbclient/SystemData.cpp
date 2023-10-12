@@ -519,7 +519,8 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
                         EnablePhysicalShardMove enablePSM,
-                        UnassignShard unassignShard) {
+                        UnassignShard unassignShard,
+                        Optional<uint64_t> dmReasonBitMask) {
 	uint64_t split = 0;
 	if (assignEmptyRange) {
 		split = emptyShardId;
@@ -528,6 +529,11 @@ const UID newDataMoveId(const uint64_t physicalShardId,
 	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
+			split &= 64U; // clear last 6 bits
+			if (dmReasonBitMask.present()) {
+				// the last 1 bit is reserved for enablePSM
+				split |= (dmReasonBitMask.get() << 1);
+			}
 			if (enablePSM) {
 				split |= 1U;
 			} else {
