@@ -5050,10 +5050,12 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	// to make sure no onging auditStorageServerShardQ is running
 	if (data->trackShardAssignmentMinVersion != invalidVersion) {
 		// Another auditStorageServerShardQ is running
-		req.reply.sendError(audit_storage_failed());
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ExistStorageServerShardAudit") // unexpected
+		req.reply.sendError(audit_storage_cancelled());
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+		           "ExistStorageServerShardAuditExit") // unexpected
 		    .detail("NewAuditId", req.id)
 		    .detail("NewAuditType", req.getType());
+		return Void();
 	}
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
@@ -5403,6 +5405,13 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					// In this case, we need not stop tracking shard assignment
+					// The shard history will not get unboundedly large for this case
+					// When this actor gets cancelled, data will be eventually destroyed
+					// Therefore, the shard history will be destroyed
+					throw e;
+				}
 				data->stopTrackShardAssignment();
 				wait(tr.onError(e));
 			}
