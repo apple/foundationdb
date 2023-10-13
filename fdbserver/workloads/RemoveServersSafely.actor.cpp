@@ -634,9 +634,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		state bool excludeLocalitiesInsteadOfServers = deterministicRandom()->coinflip();
 		if (markExcludeAsFailed) {
-			if (excludeLocalitiesInsteadOfServers) {
-				state std::unordered_set<std::string> toKillLocalitiesFailed =
-				    self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			state std::unordered_set<std::string> toKillLocalitiesFailed =
+			    self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
 				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
@@ -655,8 +655,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 		}
 
-		if (excludeLocalitiesInsteadOfServers) {
-			state std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+		state std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+		if (excludeLocalitiesInsteadOfServers && toKillLocalities.size() > 0) {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Excluding localities without failed option")
 			    .detail("AddressesSize", toKillArray.size())
@@ -677,14 +677,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough
 		// servers left alive to do a coordinators auto (?)
 		if (toKill.size()) {
-			if (!excludeLocalitiesInsteadOfServers) {
-				// Wait for removal to be safe
-				TraceEvent("RemoveAndKill", functionId)
-				    .detail("Step", "Wait For Server Exclusion")
-				    .detail("Addresses", describe(toKill))
-				    .detail("ClusterAvailable", g_simulator.isAvailable());
-				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
-			}
+			// Wait for removal to be safe
+			TraceEvent("RemoveAndKill", functionId)
+			    .detail("Step", "Wait For Server Exclusion")
+			    .detail("Addresses", describe(toKill))
+			    .detail("ClusterAvailable", g_simulator.isAvailable());
+			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "coordinators auto")
@@ -778,6 +776,24 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (const auto& l : killableLocalitiesCount) {
 			if (l.second == allLocalitiesCount[l.first]) {
 				toKillLocalities.insert(l.first);
+			}
+		}
+
+		for (const auto& processInfo : processes) {
+			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
+			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
+				std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
+				bool found = false;
+				for (const auto& l : localityData) {
+					if (toKillLocalities.count(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
+					                           l.second)) {
+						found = true;
+						break;
+					}
+				}
+				if (!found) {
+					return std::unordered_set<std::string>();
+				}
 			}
 		}
 

@@ -208,6 +208,15 @@ private:
 	void insert(Team team, KeyRange const& range);
 };
 
+struct ServerTeamInfo {
+	UID serverId;
+	std::vector<ShardsAffectedByTeamFailure::Team> teams;
+	bool primary;
+
+	ServerTeamInfo() {}
+	ServerTeamInfo(UID serverId, std::vector<ShardsAffectedByTeamFailure::Team> teams, bool primary)
+	  : serverId(serverId), teams(teams), primary(primary) {}
+};
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
@@ -259,6 +268,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            PromiseStream<DistributorSplitRangeRequest> manualShardSplit,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           FutureStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,
                                            UID distributorId,

@@ -92,6 +92,24 @@ public:
 				server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 			}
 		}
+
+		if (SERVER_KNOBS->ENABLE_AUTO_SHARD_SPLIT_FOR_LONG_STORAGE_QUEUE) {
+			int64_t queueSize = server->getStorageQueueSize();
+			bool storageQueueKeepTooLong = server->updateAndGetStorageQueueTooLong(queueSize, server->getId());
+			double currentTime = now();
+			if (storageQueueKeepTooLong) {
+				if (!server->lastStorageQueueTooLongTriggerTime.present() ||
+				    currentTime - server->lastStorageQueueTooLongTriggerTime.get() >
+				        SERVER_KNOBS->DD_MIN_LONG_STORAGE_QUEUE_SPLIT_INTERVAL_SEC) {
+					server->storageQueueTooLong.trigger(); // will trigger split
+					TraceEvent(SevInfo, "StorageQueueTooLongNotified", server->collection->getDistributorId())
+					    .detail("SSID", server->getId())
+					    .detail("CurrentQueueSize", queueSize);
+					server->lastStorageQueueTooLongTriggerTime = currentTime;
+				}
+			}
+		}
+
 		return Void();
 	}
 

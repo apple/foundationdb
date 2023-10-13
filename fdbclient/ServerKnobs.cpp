@@ -163,6 +163,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_1_LEFT,                                  800 );
 	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
+	init( PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG,                  940 ); if( randomize && BUGGIFY ) PRIORITY_TEAM_STORAGE_QUEUE_TOO_LONG = 345;
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 	init( PRIORITY_MANUAL_SHARD_SPLIT,                           960 );
 
@@ -292,8 +293,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
 	init( ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION,           false ); if( randomize && BUGGIFY ) ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION = true;
-	init( DD_TARGET_STORAGE_QUEUE_SIZE, TARGET_BYTES_PER_STORAGE_SERVER/3 ); if( randomize && BUGGIFY ) DD_TARGET_STORAGE_QUEUE_SIZE = TARGET_BYTES_PER_STORAGE_SERVER/10;
 	init( TRACE_STORAGE_QUEUE_AWARE_GET_TEAM_FOR_MANUAL_SPLIT_ONLY, true ); if (isSimulated) TRACE_STORAGE_QUEUE_AWARE_GET_TEAM_FOR_MANUAL_SPLIT_ONLY = false;
+	init( DD_TARGET_STORAGE_QUEUE_SIZE, TARGET_BYTES_PER_STORAGE_SERVER*0.35 ); if( randomize && BUGGIFY ) DD_TARGET_STORAGE_QUEUE_SIZE = TARGET_BYTES_PER_STORAGE_SERVER*0.035;
+	init( ENABLE_AUTO_SHARD_SPLIT_FOR_LONG_STORAGE_QUEUE,      false ); if( randomize && BUGGIFY ) ENABLE_AUTO_SHARD_SPLIT_FOR_LONG_STORAGE_QUEUE = true;
+	init( DD_SS_TOO_LONG_STORAGE_QUEUE_BYTES, TARGET_BYTES_PER_STORAGE_SERVER*0.5); if( randomize && BUGGIFY ) DD_SS_TOO_LONG_STORAGE_QUEUE_BYTES = TARGET_BYTES_PER_STORAGE_SERVER*0.05;
+	init( DD_SS_SHORT_STORAGE_QUEUE_BYTES, TARGET_BYTES_PER_STORAGE_SERVER*0.35); if( randomize && BUGGIFY ) DD_SS_SHORT_STORAGE_QUEUE_BYTES = TARGET_BYTES_PER_STORAGE_SERVER*0.035;
+	init( DD_STORAGE_QUEUE_TOO_LONG_DURATION,                  300.0 ); if( isSimulated ) DD_STORAGE_QUEUE_TOO_LONG_DURATION = deterministicRandom()->random01() * 10 + 1;
+	init( DD_MIN_LONG_STORAGE_QUEUE_SPLIT_INTERVAL_SEC,         60.0 ); if( isSimulated ) DD_MIN_LONG_STORAGE_QUEUE_SPLIT_INTERVAL_SEC = 5.0;
+	init( DD_MIN_SHARD_BYTES_PER_KSEC_TO_MOVE_OUT, SHARD_MIN_BYTES_PER_KSEC);
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -449,8 +456,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Can commit will delay ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD seconds for
 	// ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD times, if rocksdb overloaded.
 	// Set ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD to 0, to disable
-	init( ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD,                    1 );
-	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,              5 );
+	init( ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD,                  0.2 );
+	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,             20 );
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
 	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.

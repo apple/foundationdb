@@ -670,6 +670,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<RelocateShard> output;
 			state PromiseStream<RelocateShard> input;
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
+			state PromiseStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
@@ -739,6 +740,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            getShardMetricsList,
 			                                                            manualShardSplit,
 			                                                            getAverageShardBytes.getFuture(),
+			                                                            triggerSplitForStorageQueueTooLong.getFuture(),
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
@@ -785,7 +787,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    getShardMetrics,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount,
-			    getAverageShardBytes);
+			    getAverageShardBytes,
+			    triggerSplitForStorageQueueTooLong);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
@@ -807,7 +810,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    getShardMetrics,
 				                                    removeFailedServer,
 				                                    getUnhealthyRelocationCount,
-				                                    getAverageShardBytes);
+				                                    getAverageShardBytes,
+				                                    triggerSplitForStorageQueueTooLong);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(

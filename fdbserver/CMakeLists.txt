@@ -41,6 +41,7 @@ set(FDBSERVER_SRCS
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
+  ExclusionTracker.actor.h
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   FDBRocksDBVersion.h

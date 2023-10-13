@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/ExclusionTracker.actor.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -1442,6 +1443,20 @@ public:
 					when(wait(storageMetadataTracker || storeTypeTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
+					when(wait(server->storageQueueTooLong.onChange())) {
+						TraceEvent(SevInfo, "StorageQueueTooLongTriggerSplit", self->distributorId)
+						    .detail("SSID", server->getId());
+						std::vector<ShardsAffectedByTeamFailure::Team> teams;
+						for (const auto& team : server->getTeams()) {
+							std::vector<UID> servers;
+							for (const auto& server : team->getServers()) {
+								servers.push_back(server->getId());
+							}
+							teams.push_back(ShardsAffectedByTeamFailure::Team(servers, self->primary));
+						}
+						self->triggerSplitForStorageQueueTooLong.send(
+						    ServerTeamInfo(server->getId(), teams, self->primary));
+					}
 				}
 
 				if (recordTeamCollectionInfo) {
@@ -1928,96 +1943,38 @@ public:
 
 	ACTOR static Future<Void> trackExcludedServers(DDTeamCollection* self) {
 		// Fetch the list of excluded servers
-		state ReadYourWritesTransaction tr(self->cx);
+		state ExclusionTracker exclusionTracker(self->cx);
 		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> flocalitiesExclude =
-				    tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<std::vector<ProcessData>> fworkers = getWorkers(self->cx);
-				wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
-				     success(flocalitiesFailed));
+			// wait for new set of excluded servers
+			wait(exclusionTracker.changed.onTrigger());
 
-				state RangeResult excludedResults = fresultsExclude.get();
-				ASSERT(!excludedResults.more && excludedResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-				state RangeResult failedResults = fresultsFailed.get();
-				ASSERT(!failedResults.more && failedResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-				state RangeResult excludedLocalityResults = flocalitiesExclude.get();
-				ASSERT(!excludedLocalityResults.more && excludedLocalityResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-				state RangeResult failedLocalityResults = flocalitiesFailed.get();
-				ASSERT(!failedLocalityResults.more && failedLocalityResults.size() < CLIENT_KNOBS->TOO_MANY);
-
-				state std::set<AddressExclusion> excluded;
-				state std::set<AddressExclusion> failed;
-				for (const auto& r : excludedResults) {
-					AddressExclusion addr = decodeExcludedServersKey(r.key);
-					if (addr.isValid()) {
-						excluded.insert(addr);
-					}
+			// Reset and reassign self->excludedServers based on excluded, but we only
+			// want to trigger entries that are different
+			// Do not retrigger and double-overwrite failed or wiggling servers
+			auto old = self->excludedServers.getKeys();
+			for (const auto& o : old) {
+				if (!exclusionTracker.excluded.count(o) && !exclusionTracker.failed.count(o) &&
+				    !(self->excludedServers.count(o) &&
+				      self->excludedServers.get(o) == DDTeamCollection::Status::WIGGLING)) {
+					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
 				}
-				for (const auto& r : failedResults) {
-					AddressExclusion addr = decodeFailedServersKey(r.key);
-					if (addr.isValid()) {
-						failed.insert(addr);
-					}
-				}
-
-				wait(success(fworkers));
-				std::vector<ProcessData> workers = fworkers.get();
-				for (const auto& r : excludedLocalityResults) {
-					std::string locality = decodeExcludedLocalityKey(r.key);
-					std::set<AddressExclusion> localityExcludedAddresses = getAddressesByLocality(workers, locality);
-					excluded.insert(localityExcludedAddresses.begin(), localityExcludedAddresses.end());
-				}
-				for (const auto& r : failedLocalityResults) {
-					std::string locality = decodeFailedLocalityKey(r.key);
-					std::set<AddressExclusion> localityFailedAddresses = getAddressesByLocality(workers, locality);
-					failed.insert(localityFailedAddresses.begin(), localityFailedAddresses.end());
-				}
-
-				// Reset and reassign self->excludedServers based on excluded, but we only
-				// want to trigger entries that are different
-				// Do not retrigger and double-overwrite failed or wiggling servers
-				auto old = self->excludedServers.getKeys();
-				for (const auto& o : old) {
-					if (!excluded.count(o) && !failed.count(o) &&
-					    !(self->excludedServers.count(o) &&
-					      self->excludedServers.get(o) == DDTeamCollection::Status::WIGGLING)) {
-						self->excludedServers.set(o, DDTeamCollection::Status::NONE);
-					}
-				}
-				for (const auto& n : excluded) {
-					if (!failed.count(n)) {
-						self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
-					}
-				}
-
-				for (const auto& f : failed) {
-					self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
-				}
-
-				TraceEvent("DDExcludedServersChanged", self->distributorId)
-				    .detail("AddressesExcluded", excludedResults.size())
-				    .detail("AddressesFailed", failedResults.size())
-				    .detail("LocalitiesExcluded", excludedLocalityResults.size())
-				    .detail("LocalitiesFailed", failedLocalityResults.size());
-
-				self->restartRecruiting.trigger();
-				state Future<Void> watchFuture =
-				    tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey) ||
-				    tr.watch(excludedLocalityVersionKey) || tr.watch(failedLocalityVersionKey);
-				wait(tr.commit());
-				wait(watchFuture);
-				tr.reset();
-			} catch (Error& e) {
-				wait(tr.onError(e));
 			}
+			for (const auto& n : exclusionTracker.excluded) {
+				if (!exclusionTracker.failed.count(n)) {
+					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
+				}
+			}
+
+			for (const auto& f : exclusionTracker.failed) {
+				self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
+			}
+
+			TraceEvent("DDExcludedServersChanged", self->distributorId)
+			    .detail("AddressesExcluded", exclusionTracker.excluded.size())
+			    .detail("AddressesFailed", exclusionTracker.failed.size())
+			    .detail("Primary", self->isPrimary());
+
+			self->restartRecruiting.trigger();
 		}
 	}
 
@@ -3754,7 +3711,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount,
-                                   PromiseStream<Promise<int64_t>> getAverageShardBytes)
+                                   PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                   PromiseStream<ServerTeamInfo> triggerSplitForStorageQueueTooLong)
   : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
@@ -3769,7 +3727,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(getShardMetrics),
     getUnhealthyRelocationCount(getUnhealthyRelocationCount), getAverageShardBytes(getAverageShardBytes),
-    removeFailedServer(removeFailedServer),
+    triggerSplitForStorageQueueTooLong(triggerSplitForStorageQueueTooLong), removeFailedServer(removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
@@ -5343,7 +5301,8 @@ class DDTeamCollectionUnitTest {
 		                                                           PromiseStream<GetMetricsRequest>(),
 		                                                           Promise<UID>(),
 		                                                           PromiseStream<Promise<int>>(),
-		                                                           PromiseStream<Promise<int64_t>>()));
+		                                                           PromiseStream<Promise<int64_t>>(),
+		                                                           PromiseStream<ServerTeamInfo>()));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -5388,7 +5347,8 @@ class DDTeamCollectionUnitTest {
 		                                                           PromiseStream<GetMetricsRequest>(),
 		                                                           Promise<UID>(),
 		                                                           PromiseStream<Promise<int>>(),
-		                                                           PromiseStream<Promise<int64_t>>()));
+		                                                           PromiseStream<Promise<int64_t>>(),
+		                                                           PromiseStream<ServerTeamInfo>()));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
