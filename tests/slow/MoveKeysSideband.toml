@@ -1,3 +1,6 @@
+[[knobs]]
+peek_tracker_expiration_time = 600
+
 [[test]]
 testTitle = 'MoveKeysNew'
 
