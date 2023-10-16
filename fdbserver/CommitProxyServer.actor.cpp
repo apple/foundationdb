@@ -739,7 +739,6 @@ bool CommitBatchContext::checkHotShards() {
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				for (const auto& shard : pProxyCommitData->hotShards) {
-					// check shard expired , if so delete it
 					if (shard.first.intersects(KeyRangeRef(m.param1, m.param2))) {
 						return true;
 					}
@@ -749,7 +748,6 @@ bool CommitBatchContext::checkHotShards() {
 			}
 		}
 	}
-	// if no hotshards, set throttled to false
 	return false;
 }
 
@@ -928,9 +926,9 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	}
 
 	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED && !pProxyCommitData->hotShards.empty()) {
-		if (self->checkHotShards() && deterministicRandom()->coinflip()) {
-			TraceEvent(SevDebug, "ThrottledShardDelay");
-			throw retry();
+		if (self->checkHotShards()) {
+			TraceEvent(SevDebug, "ThrottledShard");
+			throw transaction_throttled_hot_shard();
 		}
 	}
 
@@ -3889,7 +3887,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					commitData.hotShards.emplace_back(std::make_pair(shard, request.expirationTime));
 				}
 			}
-			TraceEvent(SevDebug, "ReceivedSetThrottledShard");
+			TraceEvent(SevDebug, "ReceivedSetThrottledShards").detail("NumHotShards", commitData.hotShards.size());
 		}
 	}
 }

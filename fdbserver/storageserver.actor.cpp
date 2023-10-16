@@ -13515,7 +13515,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
-			when(wait(self->actors.getResult())) {}
 			when(GetBusyShardsRequest req = waitNext(ssi.getBusyShards.getFuture())) {
 				std::vector<std::pair<KeyRange, int64_t>> topRanges;
 				for (auto& s : self->shards.ranges()) {
@@ -13536,12 +13535,14 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					});
 				}
 
+				TraceEvent(SevDebug, "ReceivedGetBusyShards").detail("TopRanges", topRanges.size());
 				GetBusyShardsReply reply;
 				for (const auto& [keyRange, _] : topRanges) {
 					reply.busyShards.push_back(keyRange);
 				}
 				req.reply.send(reply);
 			}
+			when(wait(self->actors.getResult())) {}
 		}
 	}
 }
