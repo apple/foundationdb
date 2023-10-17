@@ -716,12 +716,15 @@ private:
 };
 
 bool CommitBatchContext::checkHotShards() {
-
 	// removed expired hot shards
-	pProxyCommitData->hotShards.erase(
-	    remove_if(pProxyCommitData->hotShards.begin(),
-	              pProxyCommitData->hotShards.end(),
-	              [](const std::pair<Standalone<KeyRangeRef>, double>& p) { return p.second < now(); }));
+	for (auto it = pProxyCommitData->hotShards.begin(); it != pProxyCommitData->hotShards.end();) {
+		if (now() > it->second) {
+			it = pProxyCommitData->hotShards.erase(it);
+		} else {
+			++it;
+		}
+	}
+
 	if (pProxyCommitData->hotShards.empty()) {
 		return false;
 	}
@@ -925,9 +928,9 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		self->writtenTagsPreResolution = self->getWrittenTagsPreResolution();
 	}
 
-	if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED && !pProxyCommitData->hotShards.empty()) {
+	if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED && !pProxyCommitData->hotShards.empty()) {
 		if (self->checkHotShards()) {
-			TraceEvent(SevDebug, "ThrottledShard");
+			TraceEvent(SevDebug, "ThrottledHotShard");
 			throw transaction_throttled_hot_shard();
 		}
 	}

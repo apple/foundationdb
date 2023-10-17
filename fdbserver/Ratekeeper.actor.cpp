@@ -311,36 +311,43 @@ public:
 
 	ACTOR static Future<Void> monitorHotShards(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		loop {
-			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
+			wait(delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY));
 			if (!self->ssHighWriteQueue.size()) {
 				continue;
 			}
 
-			loop {
-				state SetThrottledShardRequest setReq;
+			state std::vector<Future<GetBusyShardsReply>> trackStorageServerQueueInfo;
+			state int i = 0;
+			for (; i < self->ssHighWriteQueue.size(); i++) {
 				state UID ssi;
-				state int i = 0;
 
 				ssi = self->ssHighWriteQueue[i];
-
-				TraceEvent(SevDebug, "SendGetBusyShardsRequest");
+				TraceEvent(SevDebug, "SendGetHotShardsRequest");
 				try {
 					GetBusyShardsRequest getReq;
-					GetBusyShardsReply reply = wait(self->storageServerInterfaces[ssi].getBusyShards.getReply(getReq));
-					setReq.throttledShards.insert(
-					    setReq.throttledShards.end(), reply.busyShards.begin(), reply.busyShards.end());
-
-					if (++i > self->ssHighWriteQueue.size()) {
-						break;
-					}
+					trackStorageServerQueueInfo.push_back(
+					    self->storageServerInterfaces[ssi].getBusyShards.getReply(getReq));
 				} catch (Error& e) {
 					TraceEvent(SevError, "CannotMonitorHotShard").detail("SS", ssi);
-					++i;
 				}
 			}
-			setReq.expirationTime = now() + SERVER_KNOBS->SHARD_THROTTLING_EXPIRE_AFTER;
+
+			wait(waitForAll(trackStorageServerQueueInfo));
+
+			SetThrottledShardRequest setReq;
+
+			for (auto& r : trackStorageServerQueueInfo) {
+				if (r.isError()) {
+					continue;
+				}
+				GetBusyShardsReply reply = r.get();
+				setReq.throttledShards.insert(
+				    setReq.throttledShards.end(), reply.busyShards.begin(), reply.busyShards.end());
+				TraceEvent(SevDebug, "GotHotShardsReply").detail("ThrottledShardsCount", setReq.throttledShards.size());
+			}
+
+			setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
 			for (const auto& cpi : dbInfo->get().client.commitProxies) {
-				// divide throttle amount by num proxies?
 				cpi.setThrottledShard.send(setReq);
 			}
 		}
@@ -468,7 +475,7 @@ public:
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
 
-		if (SERVER_KNOBS->SHARD_THROTTLING_ENABLED) {
+		if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorHotShards(dbInfo));
 		}
 
@@ -928,7 +935,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 						    .detail("TargetRateRatio", targetRateRatio);
 					}
 					ssLimitReason = limitReason_t::storage_server_write_queue_size;
-					ssHighWriteQueue.push_back(ss.id);
 				}
 			}
 		}
@@ -965,6 +971,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst
 		// SS, we still report it as the limiting process
 		limitReason = ssReasons[reasonID];
+		ssHighWriteQueue.push_back(reasonID); // TEMPORARY WHILE TESTING
 		break;
 	}
 

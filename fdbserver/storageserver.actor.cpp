@@ -1731,14 +1731,7 @@ public:
 	void addShard(ShardInfo* newShard) {
 		ASSERT(!newShard->keys.empty());
 		newShard->changeCounter = ++shardChangeCounter;
-		TraceEvent("AddShard", this->thisServerID)
-		    .detail("KeyBegin", newShard->keys.begin)
-		    .detail("KeyEnd", newShard->keys.end)
-		    .detail("State",
-		            newShard->isReadable()    ? "Readable"
-		            : newShard->notAssigned() ? "NotAssigned"
-		                                      : "Adding")
-		    .detail("Version", this->version.get());
+		// TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State",newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
@@ -13516,30 +13509,35 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(GetBusyShardsRequest req = waitNext(ssi.getBusyShards.getFuture())) {
-				std::vector<std::pair<KeyRange, int64_t>> topRanges;
+				struct ComparePair {
+					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
+						return lhs.second > rhs.second;
+					}
+				};
+				std::
+				    priority_queue<std::pair<KeyRange, int64_t>, std::vector<std::pair<KeyRange, int64_t>>, ComparePair>
+				        topRanges;
+
 				for (auto& s : self->shards.ranges()) {
 					KeyRange keyRange = KeyRange(s.range());
 					int64_t total = self->metrics.getHotShards(keyRange);
 
-					if (topRanges.size() < SERVER_KNOBS->SHARD_THROTTLING_TRACKED) {
-						topRanges.emplace_back(keyRange, total);
-					} else if (total > topRanges.back().second) {
-						topRanges.pop_back();
-						topRanges.emplace_back(keyRange, total);
+					if (topRanges.size() < SERVER_KNOBS->HOT_SHARD_THROTTLING_TRACKED) {
+						topRanges.push(std::make_pair(keyRange, total));
+					} else if (total > topRanges.top().second) {
+						topRanges.pop();
+						topRanges.push(std::make_pair(keyRange, total));
 					}
-
-					// Keep sorted
-					// use priority queue
-					std::sort(topRanges.begin(), topRanges.end(), [](const auto& lhs, const auto& rhs) {
-						return lhs.second > rhs.second;
-					});
 				}
 
-				TraceEvent(SevDebug, "ReceivedGetBusyShards").detail("TopRanges", topRanges.size());
+				TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
 				GetBusyShardsReply reply;
-				for (const auto& [keyRange, _] : topRanges) {
-					reply.busyShards.push_back(keyRange);
+
+				while (!topRanges.empty()) {
+					reply.busyShards.push_back(topRanges.top().first);
+					topRanges.pop();
 				}
+
 				req.reply.send(reply);
 			}
 			when(wait(self->actors.getResult())) {}
