@@ -372,10 +372,10 @@ struct BackupData {
 		}
 
 		// keep track of each arena and accumulate their sizes
-		int64_t bytes = 0;
-		for (int i = 0; i < num; i++) {
+		int64_t bytes = messages[0].bytes;
+		for (int i = 1; i < num; i++) {
 			const Arena& a = messages[i].arena;
-			const Arena& b = messages[i + 1].arena;
+			const Arena& b = messages[i - 1].arena;
 			if (!a.sameArena(b)) {
 				bytes += messages[i].bytes;
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", messages[i].bytes);
@@ -878,25 +878,19 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		int lastVersionIndex = 0;
 		Version lastVersion = invalidVersion;
 
-		if (self->messages.empty()) {
-			// Even though messages is empty, we still want to advance popVersion.
-			if (!self->endVersion.present()) {
-				popVersion = std::max(popVersion, self->minKnownCommittedVersion);
+		for (auto& message : self->messages) {
+			// message may be prefetched in peek; uncommitted message should not be uploaded.
+			const Version version = message.getVersion();
+			if (version > self->maxPopVersion()) {
+				break;
 			}
-		} else {
-			for (auto& message : self->messages) {
-				// message may be prefetched in peek; uncommitted message should not be uploaded.
-				const Version version = message.getVersion();
-				if (version > self->maxPopVersion())
-					break;
-				if (version > popVersion) {
-					lastVersionIndex = numMsg;
-					lastVersion = popVersion;
-					popVersion = version;
-				}
-				message.collectCipherDetailIfEncrypted(cipherDetails);
-				numMsg++;
+			if (version > popVersion) {
+				lastVersionIndex = numMsg;
+				lastVersion = popVersion;
+				popVersion = version;
 			}
+			message.collectCipherDetailIfEncrypted(cipherDetails);
+			numMsg++;
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
@@ -938,7 +932,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (self->allMessageSaved()) {
-			self->eraseMessages(self->messages.size());
 			return Void();
 		}
 
@@ -974,6 +967,16 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				}
 				logSystemChange = self->logSystem.onChange();
 			}
+		}
+
+		// It's data loss issue if popped() > 0. It means mutations between popped() and tagAt are not available
+		if (r->popped() > 0) {
+			TraceEvent(SevWarn, "BackupWorkerPullMissingMutations", self->myId)
+			    .detail("Tag", self->tag)
+			    .detail("BackupEpoch", self->backupEpoch)
+			    .detail("Popped", r->popped())
+			    .detail("ExpectedPeekVersion", tagAt);
+			throw worker_removed();
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
@@ -1033,29 +1036,8 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			self->pulling = false;
 			TraceEvent("BackupWorkerPaused", self->myId).detail("Reson", "NoBackup");
 		} else {
-			// Backup key is not present, enter this NOOP POP mode.
-			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
-
-			loop choose {
-				when(wait(success(present))) {
-					break;
-				}
-				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
-					if (committedVersion.isReady()) {
-						self->popVersion =
-						    std::max(self->popVersion, std::max(committedVersion.get(), self->savedVersion));
-						self->minKnownCommittedVersion =
-						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
-						TraceEvent("BackupWorkerNoopPop", self->myId)
-						    .detail("SavedVersion", self->savedVersion)
-						    .detail("PopVersion", self->popVersion);
-						self->pop(); // Pop while the worker is in this NOOP state.
-						committedVersion = Never();
-					} else {
-						committedVersion = self->getMinKnownCommittedVersion();
-					}
-				}
-			}
+			// wait if backup start key is not present yet
+			wait(success(present));
 		}
 		ASSERT(!keyPresent == present.get());
 		keyPresent = !keyPresent;
@@ -1138,6 +1120,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present).detail("ExitEarly", self.exitEarly);
 
 		pull = self.exitEarly ? Void() : monitorBackupKeyOrPullData(&self, present);
+		addActor.send(pull);
 		done = self.exitEarly ? Void() : uploadData(&self);
 
 		loop choose {

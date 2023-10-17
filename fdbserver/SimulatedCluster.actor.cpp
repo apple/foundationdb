@@ -1627,10 +1627,6 @@ void SimulationConfig::setRandomConfig() {
 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
 		set_config("perpetual_storage_wiggle=1");
 	}
-
-	if (deterministicRandom()->random01() < 0.5) {
-		set_config("backup_worker_enabled:=1");
-	}
 }
 
 // Overwrite DB with simple options, used when simpleConfig is true in the TestConfig

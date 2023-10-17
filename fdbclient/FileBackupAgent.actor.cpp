@@ -3375,10 +3375,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				partitionedLog = config.partitionedLogEnabled().get(tr);
-				state Future<Version> startVersionFuture = tr->getReadVersion();
-				wait(success(partitionedLog) && success(startVersionFuture));
-
-				Params.beginVersion().set(task, startVersionFuture.get());
+				wait(success(partitionedLog));
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -3393,6 +3390,23 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			// the flag was not set before.
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true)));
 			backupWorkerEnabled = true;
+			// the user is responsible for manually disabling backup worker after the last backup is done
+		}
+
+		// Get start version after backup worker are enabled
+		loop {
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state Future<Version> startVersionFuture = tr->getReadVersion();
+				wait(success(startVersionFuture));
+				Params.beginVersion().set(task, startVersionFuture.get());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
 		}
 
 		// Set the "backupStartedKey" and wait for all backup worker started

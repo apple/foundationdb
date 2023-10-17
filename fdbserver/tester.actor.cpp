@@ -1990,6 +1990,20 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 	return Void();
 }
 
+ACTOR Future<bool> checkBackupWorkerStarted(Database db) {
+	state ReadYourWritesTransaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> value = wait(tr.get(backupStartedKey));
+			return value.present();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -2032,6 +2046,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state bool enableDD = false;
 	state TesterConsistencyScanState consistencyScanState;
+	state Arena arena;
+
 	if (tests.empty())
 		useDB = true;
 	for (auto iter = tests.begin(); iter != tests.end(); ++iter) {
@@ -2074,6 +2090,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	consistencyScanState.enableAfter = consistencyScanState.waitForComplete && deterministicRandom()->random01() < 0.1;
 
 	disableConnectionFailures("Tester");
+
+	if (restartingTest && useDB) {
+		// if backup worker is not running in phase 1 of restarting test, force to disable it in phase 2
+		bool backupWorkerStarted = wait(checkBackupWorkerStarted(cx));
+		if (!backupWorkerStarted) {
+			if (startingConfiguration.empty()) {
+				startingConfiguration = "backup_worker_enabled:=0"_sr;
+			} else {
+				std::string conf = startingConfiguration.toString() + " backup_worker_enabled:=0";
+				startingConfiguration = StringRef(arena, conf);
+			}
+		}
+	}
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());

@@ -48,7 +48,6 @@ static const char* logTypes[] = { "log_engine:=1",
 	                              // downgrade incompatible log version
 	                              "log_version:=7" };
 static const char* redundancies[] = { "single", "double", "triple" };
-static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
 std::string generateRegions() {
 	std::string result;
@@ -357,12 +356,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			state int randomChoice;
 			if (self->allowTestStorageMigration) {
 				randomChoice = (deterministicRandom()->random01() < 0.375) ? deterministicRandom()->randomInt(0, 3)
-				                                                           : deterministicRandom()->randomInt(4, 9);
+				                                                           : deterministicRandom()->randomInt(4, 7);
 			} else if (self->storageMigrationCompatibleConf) {
 				randomChoice = (deterministicRandom()->random01() < 3.0 / 7) ? deterministicRandom()->randomInt(0, 3)
-				                                                             : deterministicRandom()->randomInt(4, 8);
+				                                                             : deterministicRandom()->randomInt(4, 7);
 			} else {
-				randomChoice = deterministicRandom()->randomInt(0, 8);
+				randomChoice = deterministicRandom()->randomInt(0, 7);
 			}
 			if (randomChoice == 0) {
 				wait(success(
@@ -462,11 +461,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				wait(success(
 				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false)));
 			} else if (randomChoice == 7) {
-				wait(success(IssueConfigurationChange(
-				    cx,
-				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
-				    false)));
-			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
 					CODE_PROBE(true, "storage migration type change");
 
