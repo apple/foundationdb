@@ -1,0 +1,8 @@
+[configuration]
+buggify = false
+
+[[test]]
+testTitle = 'DataDistributionMetricsTest'
+
+    [[test.workload]]
+    testName = 'DataDistributionMetrics'
