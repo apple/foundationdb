@@ -2016,8 +2016,25 @@ public:
 			avgShardBytes.reset();
 			self->getAverageShardBytes.send(avgShardBytes);
 			int64_t avgBytes = wait(avgShardBytes.getFuture());
-			double ratio = self->loadBytesBalanceRatio(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
-			bool imbalance = ratio < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
+			bool imbalance;
+			int numSSToBeLoadBytesBalanced;
+			double ratio;
+
+			if (SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO) {
+				// PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO: Maximum number of storage servers that can
+				// have the load bytes less than PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO before perpetual
+				// wiggle will start the next wiggle.
+				// The wiggle waits until the numSSToBeLoadBytesBalanced to be less than
+				// PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO before starting the next wiggle. With this we can have
+				// mutiple SS that are in balancing state. Used to speed up wiggling rather than waiting for every SS to
+				// get balanced/filledup before starting the next wiggle.
+				numSSToBeLoadBytesBalanced =
+				    self->numSSToBeLoadBytesBalanced(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
+				imbalance = numSSToBeLoadBytesBalanced > SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO;
+			} else {
+				ratio = self->loadBytesBalanceRatio(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
+				imbalance = ratio < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
+			}
 
 			// there must not have other teams to place wiggled data
 			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
@@ -2027,7 +2044,9 @@ public:
 			if (takeRest && self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 				TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
 				    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-				    .detail("BytesBalanceRatio", ratio)
+				    .detail("ImbalanceFactor",
+				            SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO ? numSSToBeLoadBytesBalanced
+				                                                                     : ratio)
 				    .detail("ServerSize", self->server_info.size())
 				    .detail("MachineSize", self->machine_info.size())
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize);
@@ -3569,6 +3588,53 @@ double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const
 	}
 
 	return minLoadBytes / avgLoad;
+}
+
+int DDTeamCollection::numSSToBeLoadBytesBalanced(int64_t smallLoadThreshold) const {
+	double totalLoadBytes = 0;
+	int count = 0;
+	for (auto& [id, s] : server_info) {
+		// If a healthy SS don't have storage metrics, skip this round
+		if (server_status.get(s->getId()).isUnhealthy() || !s->metricsPresent()) {
+			TraceEvent(SevDebug, "NumSSToBeLoadBytesBalancedNoMetrics").detail("Server", id);
+			return INT_MAX; // return all are imbalanced
+		}
+
+		totalLoadBytes += s->loadBytes();
+		++count;
+	}
+
+	if (!count)
+		return INT_MAX;
+
+	double avgLoad = totalLoadBytes / count;
+	if (totalLoadBytes == 0 || avgLoad < smallLoadThreshold) {
+		return 0;
+	}
+
+	int numSSToBeLoadBytesBalanced = 0;
+	double balanceRatio;
+	for (auto& [id, s] : server_info) {
+		// If a healthy SS don't have storage metrics, skip this round
+		if (server_status.get(s->getId()).isUnhealthy() || !s->metricsPresent()) {
+			TraceEvent(SevDebug, "NumSSToBeLoadBytesBalancedNoMetrics").detail("Server", id);
+			return INT_MAX;
+		}
+
+		balanceRatio = s->loadBytes() / avgLoad;
+		if (balanceRatio < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO) {
+			numSSToBeLoadBytesBalanced++;
+		}
+	}
+
+	TraceEvent(SevDebug, "NumSSToBeLoadBytesBalancedMetrics")
+	    .detail("NumSSToBeLoadBytesBalanced", numSSToBeLoadBytesBalanced)
+	    .detail("TotalLoad", totalLoadBytes)
+	    .detail("AvgLoad", avgLoad)
+	    .detail("SmallLoadThreshold", smallLoadThreshold)
+	    .detail("Count", count);
+
+	return numSSToBeLoadBytesBalanced;
 }
 
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
