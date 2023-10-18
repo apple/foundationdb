@@ -1144,7 +1144,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
 		                          100 * 1000, // refill_period_us
 		                          10, // fairness
-		                          rocksdb::RateLimiter::Mode::kWritesOnly,
+		                          rocksdb::RateLimiter::Mode::kAllIo,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
 		                    : nullptr) {
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
@@ -1334,11 +1334,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			double writeBeginTime = timer_monotonic();
-			if (rateLimiter) {
-				// Controls the total write rate of compaction and flush in bytes per second.
-				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
-				rateLimiter->Request(a.batchToCommit->GetDataSize() /* bytes */, rocksdb::Env::IO_HIGH);
-			}
 			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			double currTime = timer_monotonic();
