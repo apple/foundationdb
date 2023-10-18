@@ -286,6 +286,7 @@ public:
 	int MIN_PACKET_BUFFER_FREE_BYTES;
 	int FLOW_TCP_NODELAY;
 	int FLOW_TCP_QUICKACK;
+	bool RESOLVE_PREFER_IPV4_ADDR;
 
 	// Sim2
 	// FIMXE: more parameters could be factored out

@@ -222,6 +222,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
 	init( FLOW_TCP_QUICKACK,                                     0 );
+	init( RESOLVE_PREFER_IPV4_ADDR,                          false );  // Default to prefer IPv6 addresses. Set to true to prefer IPv4 addresses.
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
