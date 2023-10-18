@@ -2,6 +2,17 @@
 Release Notes
 #############
 
+7.3.25
+======
+* Same as 7.3.24 release with AVX enabled.
+
+7.3.24
+======
+* Released with AVX disabled.
+* Added support for large shard. `(PR#10965) <https://github.com/apple/foundationdb/pull/10965>`_
+* Fixed perpetual wiggle locality match regex. `(PR#10973) <https://github.com/apple/foundationdb/pull/10973>`_
+* Added a knob to throttle perpetual wiggle data move. `(PR#10957) <https://github.com/apple/foundationdb/pull/10957>`_
+
 7.3.19
 ======
 * Same as 7.3.18 release with AVX enabled.
