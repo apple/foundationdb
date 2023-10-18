@@ -1692,10 +1692,35 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transact
 
 ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr) {
 	state std::vector<AddressExclusion> exclusions;
-	std::vector<AddressExclusion> excludedServers = wait(getExcludedServerList(tr));
+	// Request all exclusion based information concurrently.
+	state Future<std::vector<AddressExclusion>> fExcludedServers = getExcludedServerList(tr);
+	state Future<std::vector<AddressExclusion>> fExcludedFailed = getExcludedFailedServerList(tr);
+	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(tr);
+	// Wait until all data is gathered.
+	wait(success(fExcludedServers) && success(fExcludedFailed) && success(fExcludedLocalities));
+	// Update the exclusions vector with all excluded servers.
+	auto excludedServers = fExcludedServers.get();
 	exclusions.insert(exclusions.end(), excludedServers.begin(), excludedServers.end());
-	std::vector<AddressExclusion> excludedFailed = wait(getExcludedFailedServerList(tr));
+	auto excludedFailed = fExcludedFailed.get();
 	exclusions.insert(exclusions.end(), excludedFailed.begin(), excludedFailed.end());
+
+	// We have to return all servers that are excluded, this includes servers that are excluded
+	// based on the locality. Otherwise those excluded servers might be used, even if they shouldn't.
+	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+
+	// Only if at least one locality was found we have to perform this check.
+	if (!excludedLocalities.empty()) {
+		// First we have to fetch all workers to match the localities of each worker against the excluded localities.
+		state std::vector<ProcessData> workers = wait(getWorkers(tr));
+		for (const auto& locality : excludedLocalities) {
+			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality);
+			if (!localityAddresses.empty()) {
+				// Add all the server ipaddresses that belong to the given localities to the exclusionSet.
+				exclusions.insert(exclusions.end(), localityAddresses.begin(), localityAddresses.end());
+			}
+		}
+	}
+
 	uniquify(exclusions);
 	return exclusions;
 }
@@ -1743,10 +1768,17 @@ ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction
 
 ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr) {
 	state std::vector<std::string> exclusions;
-	std::vector<std::string> excludedLocalities = wait(getExcludedLocalityList(tr));
+	state Future<std::vector<std::string>> fExcludedLocalities = getExcludedLocalityList(tr);
+	state Future<std::vector<std::string>> fFailedLocalities = getExcludedFailedLocalityList(tr);
+
+	// Wait until all data is gathered.
+	wait(success(fExcludedLocalities) && success(fFailedLocalities));
+
+	auto excludedLocalities = fExcludedLocalities.get();
 	exclusions.insert(exclusions.end(), excludedLocalities.begin(), excludedLocalities.end());
-	std::vector<std::string> failedLocalities = wait(getExcludedFailedLocalityList(tr));
+	auto failedLocalities = fFailedLocalities.get();
 	exclusions.insert(exclusions.end(), failedLocalities.begin(), failedLocalities.end());
+
 	uniquify(exclusions);
 	return exclusions;
 }
