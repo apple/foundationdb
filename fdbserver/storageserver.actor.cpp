@@ -8940,7 +8940,8 @@ ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* s
 	}
 
 	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
-	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+	// wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+	wait(delay(0, TaskPriority::FetchKeys));
 	TraceEvent(SevDebug, "UpdatedMoveInShardMetaData", data->thisServerID)
 	    .detail("Shard", shard->toString())
 	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
