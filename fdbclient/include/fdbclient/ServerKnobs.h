@@ -250,6 +250,11 @@ public:
 	                                          // load balance in the cluster
 	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
 	                                                 // before perpetual wiggle will start the next wiggle
+	int PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO; // Maximum number of storage servers that can have the load bytes
+	                                                // less than PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO before
+	                                                // perpetual wiggle will start the next wiggle.
+	                                                // Used to speed up wiggling rather than waiting for every SS to get
+	                                                // balanced/filledup before starting the next wiggle.
 	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
 	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	double LOG_ON_COMPLETION_DELAY;
