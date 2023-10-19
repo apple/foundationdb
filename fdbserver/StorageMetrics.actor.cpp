@@ -519,9 +519,9 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
 }
 
 int64_t StorageServerMetrics::getHotShards(const KeyRange& range) const {
-	auto total = bytesWriteSample.getEstimate(range);
-	// TraceEvent("ShardEstimate").detail("S",total);
-	return total;
+	auto bytesWrittenPerKSecond =
+	    bytesWriteSample.getEstimate(range) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	return bytesWrittenPerKSecond;
 }
 
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {

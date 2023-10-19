@@ -930,7 +930,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 	if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED && !pProxyCommitData->hotShards.empty()) {
 		if (self->checkHotShards()) {
-			TraceEvent(SevDebug, "ThrottledHotShard");
+			// TraceEvent(SevDebug, "ThrottledHotShard");
 			throw transaction_throttled_hot_shard();
 		}
 	}
@@ -3890,7 +3890,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					commitData.hotShards.emplace_back(std::make_pair(shard, request.expirationTime));
 				}
 			}
-			TraceEvent(SevDebug, "ReceivedSetThrottledShards").detail("NumHotShards", commitData.hotShards.size());
+			// TraceEvent(SevDebug, "ReceivedSetThrottledShards").detail("NumHotShards", commitData.hotShards.size());
 		}
 	}
 }

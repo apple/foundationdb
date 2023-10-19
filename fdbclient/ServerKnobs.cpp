@@ -866,7 +866,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( HOT_SHARD_THROTTLING_ENABLED,                         false );
 	init( HOT_SHARD_THROTTLING_EXPIRE_AFTER,                      3.0 );
-	init( HOT_SHARD_THROTTLING_TRACKED,                             2 );
+	init( HOT_SHARD_THROTTLING_TRACKED,                             1 );
 	init( HOT_SHARD_MONITOR_FREQUENCY,                            5.0 );
 
 	//Storage Metrics

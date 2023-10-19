@@ -13508,7 +13508,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
-			when(GetBusyShardsRequest req = waitNext(ssi.getBusyShards.getFuture())) {
+			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
 				struct ComparePair {
 					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
 						return lhs.second > rhs.second;
@@ -13520,21 +13520,24 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 
 				for (auto& s : self->shards.ranges()) {
 					KeyRange keyRange = KeyRange(s.range());
-					int64_t total = self->metrics.getHotShards(keyRange);
-
+					int64_t bytesWrittenPerKSecond = self->metrics.getHotShards(keyRange);
+					if (systemKeys.intersects(keyRange) ||
+					    (bytesWrittenPerKSecond <= SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)) {
+						continue;
+					}
 					if (topRanges.size() < SERVER_KNOBS->HOT_SHARD_THROTTLING_TRACKED) {
-						topRanges.push(std::make_pair(keyRange, total));
-					} else if (total > topRanges.top().second) {
+						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+					} else if (bytesWrittenPerKSecond > topRanges.top().second) {
 						topRanges.pop();
-						topRanges.push(std::make_pair(keyRange, total));
+						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
 					}
 				}
 
-				TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
-				GetBusyShardsReply reply;
+				// TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
+				GetHotShardsReply reply;
 
 				while (!topRanges.empty()) {
-					reply.busyShards.push_back(topRanges.top().first);
+					reply.hotShards.push_back(topRanges.top().first);
 					topRanges.pop();
 				}
 

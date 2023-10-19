@@ -123,7 +123,7 @@ struct StorageServerInterface {
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
 	RequestStream<struct AuditStorageRequest> auditStorage;
-	RequestStream<struct GetBusyShardsRequest> getBusyShards;
+	RequestStream<struct GetHotShardsRequest> getHotShards;
 
 private:
 	bool acceptingRequests;
@@ -199,8 +199,8 @@ public:
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 				auditStorage =
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
-				getBusyShards =
-				    RequestStream<struct GetBusyShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
+				getHotShards =
+				    RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -253,7 +253,7 @@ public:
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
 		streams.push_back(auditStorage.getReceiver());
-		streams.push_back(getBusyShards.getReceiver());
+		streams.push_back(getHotShards.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1241,24 +1241,24 @@ struct StorageQueuingMetricsRequest {
 	}
 };
 
-struct GetBusyShardsReply {
+struct GetHotShardsReply {
 	constexpr static FileIdentifier file_identifier = 3828140;
-	std::vector<KeyRange> busyShards;
+	std::vector<KeyRange> hotShards;
 
-	GetBusyShardsReply() {}
-	explicit GetBusyShardsReply(std::vector<KeyRange> busyShards) : busyShards(busyShards) {}
+	GetHotShardsReply() {}
+	explicit GetHotShardsReply(std::vector<KeyRange> hotShards) : hotShards(hotShards) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, busyShards);
+		serializer(ar, hotShards);
 	}
 };
 
-struct GetBusyShardsRequest {
+struct GetHotShardsRequest {
 	constexpr static FileIdentifier file_identifier = 3828141;
-	ReplyPromise<GetBusyShardsReply> reply;
+	ReplyPromise<GetHotShardsReply> reply;
 
-	GetBusyShardsRequest() {}
+	GetHotShardsRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

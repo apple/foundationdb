@@ -6937,7 +6937,7 @@ Future<Void> Transaction::commitMutations() {
 		return commitResult;
 	} catch (Error& e) {
 		if (e.code() == error_code_transaction_throttled_hot_shard) {
-			TraceEvent(SevInfo, "TransactionThrottledHotShard").detail("Error", e.what());
+			TraceEvent("TransactionThrottledHotShard").error(e);
 			return onError(e);
 		}
 		TraceEvent("ClientCommitError").error(e);
@@ -7795,8 +7795,7 @@ Future<Void> Transaction::onError(Error const& e) {
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
 	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
-	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled ||
-	    e.code() == error_code_transaction_throttled_hot_shard) {
+	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)

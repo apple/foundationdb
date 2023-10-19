@@ -312,40 +312,27 @@ public:
 	ACTOR static Future<Void> monitorHotShards(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		loop {
 			wait(delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY));
-			if (!self->ssHighWriteQueue.size()) {
+			if (!self->ssHighWriteQueue.present()) {
 				continue;
 			}
 
-			state std::vector<Future<GetBusyShardsReply>> trackStorageServerQueueInfo;
-			state int i = 0;
-			for (; i < self->ssHighWriteQueue.size(); i++) {
-				state UID ssi;
+			state UID ssi = self->ssHighWriteQueue.get();
+			state SetThrottledShardRequest setReq;
 
-				ssi = self->ssHighWriteQueue[i];
-				TraceEvent(SevDebug, "SendGetHotShardsRequest");
-				try {
-					GetBusyShardsRequest getReq;
-					trackStorageServerQueueInfo.push_back(
-					    self->storageServerInterfaces[ssi].getBusyShards.getReply(getReq));
-				} catch (Error& e) {
-					TraceEvent(SevError, "CannotMonitorHotShard").detail("SS", ssi);
-				}
-			}
+			// TraceEvent(SevDebug, "SendGetHotShardsRequest");
+			try {
+				GetHotShardsRequest getReq;
+				GetHotShardsReply reply = wait(self->storageServerInterfaces[ssi].getHotShards.getReply(getReq));
 
-			wait(waitForAll(trackStorageServerQueueInfo));
-
-			SetThrottledShardRequest setReq;
-
-			for (auto& r : trackStorageServerQueueInfo) {
-				if (r.isError()) {
-					continue;
-				}
-				GetBusyShardsReply reply = r.get();
 				setReq.throttledShards.insert(
-				    setReq.throttledShards.end(), reply.busyShards.begin(), reply.busyShards.end());
-				TraceEvent(SevDebug, "GotHotShardsReply").detail("ThrottledShardsCount", setReq.throttledShards.size());
+				    setReq.throttledShards.end(), reply.hotShards.begin(), reply.hotShards.end());
+			} catch (Error& e) {
+				TraceEvent(SevError, "CannotMonitorHotShardForSS").detail("SS", ssi);
+				continue;
 			}
-
+			if (!setReq.throttledShards.size()) {
+				continue;
+			}
 			setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
 			for (const auto& cpi : dbInfo->get().client.commitProxies) {
 				cpi.setThrottledShard.send(setReq);
@@ -812,7 +799,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	// Look at each storage server's write queue and local rate, compute and store the desired rate
 	// ratio
-	ssHighWriteQueue.clear();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
 		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
@@ -971,7 +957,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst
 		// SS, we still report it as the limiting process
 		limitReason = ssReasons[reasonID];
-		ssHighWriteQueue.push_back(reasonID); // TEMPORARY WHILE TESTING
 		break;
 	}
 
@@ -1397,6 +1382,10 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    .detail("TagsManuallyThrottled", tagThrottler->manualThrottleCount())
 		    .detail("AutoThrottlingEnabled", tagThrottler->isAutoThrottlingEnabled())
 		    .trackLatest(name);
+	}
+	ssHighWriteQueue.reset();
+	if (limitReason == limitReason_t::storage_server_write_queue_size) {
+		ssHighWriteQueue = reasonID;
 	}
 }
 
