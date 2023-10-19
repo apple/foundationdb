@@ -1782,15 +1782,15 @@ std::pair<std::string, std::string> decodeLocality(const std::string& locality) 
 }
 
 // Returns the list of IPAddresses of the workers that match the given locality.
-// Example: locality="dcid:primary" returns all the ip addresses of the workers in the primary dc.
+// Example: locality="locality_dcid:primary" returns all the ip addresses of the workers in the primary dc.
 std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers,
                                                   const std::string& locality) {
 	std::pair<std::string, std::string> localityKeyValue = decodeLocality(locality);
 
 	std::set<AddressExclusion> localityAddresses;
 	for (int i = 0; i < workers.size(); i++) {
-		if (workers[i].locality.isPresent(localityKeyValue.first) &&
-		    workers[i].locality.get(localityKeyValue.first) == localityKeyValue.second) {
+		auto localityValue = workers[i].locality.get(localityKeyValue.first);
+		if (localityValue.present() && localityValue.get() == localityKeyValue.second) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
 		}
 	}
