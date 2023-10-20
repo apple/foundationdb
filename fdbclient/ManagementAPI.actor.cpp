@@ -2024,7 +2024,10 @@ ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* t
 	state Future<std::vector<AddressExclusion>> fExcludedServers = getExcludedServerList(tr);
 	state Future<std::vector<AddressExclusion>> fExcludedFailed = getExcludedFailedServerList(tr);
 	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(tr);
-	// Wait until all data is gathered.
+	state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr);
+
+	// Wait until all data is gathered, we are not waiting here for the workers future to return
+	// instead we wait for the worker future only if we need the data.
 	wait(success(fExcludedServers) && success(fExcludedFailed) && success(fExcludedLocalities));
 	// Update the exclusions vector with all excluded servers.
 	auto excludedServers = fExcludedServers.get();
@@ -2039,7 +2042,9 @@ ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* t
 	// Only if at least one locality was found we have to perform this check.
 	if (!excludedLocalities.empty()) {
 		// First we have to fetch all workers to match the localities of each worker against the excluded localities.
-		state std::vector<ProcessData> workers = wait(getWorkers(tr));
+		wait(success(fWorkers));
+		state std::vector<ProcessData> workers = fWorkers.get();
+
 		for (const auto& locality : excludedLocalities) {
 			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality);
 			if (!localityAddresses.empty()) {
