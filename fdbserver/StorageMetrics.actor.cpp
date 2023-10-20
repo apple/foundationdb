@@ -295,7 +295,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 		//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes).detail("MinSplitBytes", minSplitBytes);
 
 		while (true) {
-			if (remaining.bytes < 2 * minSplitBytes && (!SERVER_KNOBS->CHECK_WRITE_TRAFFIC_WHEN_EXIT_SPLIT ||
+			if (remaining.bytes < 2 * minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
 			                                            remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
 				break;
 			KeyRef key = req.keys.end;
@@ -311,7 +311,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			                  lastKey,
 			                  key,
 			                  hasUsed);
-			if (used.bytes < minSplitBytes && (!SERVER_KNOBS->CHECK_WRITE_TRAFFIC_WHEN_EXIT_SPLIT ||
+			if (used.bytes < minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
 			                                   remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
 				key = std::max(
 				    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
