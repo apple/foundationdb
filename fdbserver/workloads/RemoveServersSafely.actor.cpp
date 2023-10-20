@@ -675,9 +675,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
 
 		state bool excludeLocalitiesInsteadOfServers = deterministicRandom()->coinflip();
+		state std::unordered_set<std::string> toKillLocalitiesFailed;
 		if (markExcludeAsFailed) {
-			state std::unordered_set<std::string> toKillLocalitiesFailed =
-			    self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			toKillLocalitiesFailed = self->getLocalitiesFromAddresses(toKillMarkFailedArray);
 			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
