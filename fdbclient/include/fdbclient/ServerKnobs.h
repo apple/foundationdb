@@ -236,6 +236,7 @@ public:
 	// When the sampled read operations changes more than this threshold, the
 	// shard metrics will update immediately
 	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
+	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // experimental
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
