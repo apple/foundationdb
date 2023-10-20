@@ -530,7 +530,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Step", "localities changed")
 			    .detail("OrigKillLocalities", describe(origKillLocalities))
 			    .detail("KillLocalities", describe(killLocalities))
-			    .detail("ToKillLocalities", describe(toKillLocalities));
+			    .detail("ToKillLocalities", describe(toKillLocalities))
+			    .detail("Failed", markExcludeAsFailed);
 			killLocalities = toKillLocalities;
 
 			// Include back the localities that are no longer in the kill list
@@ -722,7 +723,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ClusterAvailable", g_simulator.isAvailable());
 			if (excludeLocalitiesInsteadOfServers) {
 				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
-				     checkLocalityChange(self, cx, toKillArray, toKillLocalities, markExcludeAsFailed));
+				     checkLocalityChange(self,
+				                         cx,
+				                         toKillArray,
+				                         toKillLocalities,
+				                         markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
 			} else {
 				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 			}
