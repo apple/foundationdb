@@ -1692,10 +1692,40 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transact
 
 ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr) {
 	state std::vector<AddressExclusion> exclusions;
-	std::vector<AddressExclusion> excludedServers = wait(getExcludedServerList(tr));
+	// Request all exclusion based information concurrently.
+	state Future<std::vector<AddressExclusion>> fExcludedServers = getExcludedServerList(tr);
+	state Future<std::vector<AddressExclusion>> fExcludedFailed = getExcludedFailedServerList(tr);
+	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(tr);
+	state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr);
+
+	// Wait until all data is gathered, we are not waiting here for the workers future to return
+	// instead we wait for the worker future only if we need the data.
+	wait(success(fExcludedServers) && success(fExcludedFailed) && success(fExcludedLocalities));
+	// Update the exclusions vector with all excluded servers.
+	auto excludedServers = fExcludedServers.get();
 	exclusions.insert(exclusions.end(), excludedServers.begin(), excludedServers.end());
-	std::vector<AddressExclusion> excludedFailed = wait(getExcludedFailedServerList(tr));
+	auto excludedFailed = fExcludedFailed.get();
 	exclusions.insert(exclusions.end(), excludedFailed.begin(), excludedFailed.end());
+
+	// We have to return all servers that are excluded, this includes servers that are excluded
+	// based on the locality. Otherwise those excluded servers might be used, even if they shouldn't.
+	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+
+	// Only if at least one locality was found we have to perform this check.
+	if (!excludedLocalities.empty()) {
+		// First we have to fetch all workers to match the localities of each worker against the excluded localities.
+		wait(success(fWorkers));
+		state std::vector<ProcessData> workers = fWorkers.get();
+
+		for (const auto& locality : excludedLocalities) {
+			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality);
+			if (!localityAddresses.empty()) {
+				// Add all the server ipaddresses that belong to the given localities to the exclusionSet.
+				exclusions.insert(exclusions.end(), localityAddresses.begin(), localityAddresses.end());
+			}
+		}
+	}
+
 	uniquify(exclusions);
 	return exclusions;
 }
@@ -1743,10 +1773,17 @@ ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction
 
 ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr) {
 	state std::vector<std::string> exclusions;
-	std::vector<std::string> excludedLocalities = wait(getExcludedLocalityList(tr));
+	state Future<std::vector<std::string>> fExcludedLocalities = getExcludedLocalityList(tr);
+	state Future<std::vector<std::string>> fFailedLocalities = getExcludedFailedLocalityList(tr);
+
+	// Wait until all data is gathered.
+	wait(success(fExcludedLocalities) && success(fFailedLocalities));
+
+	auto excludedLocalities = fExcludedLocalities.get();
 	exclusions.insert(exclusions.end(), excludedLocalities.begin(), excludedLocalities.end());
-	std::vector<std::string> failedLocalities = wait(getExcludedFailedLocalityList(tr));
+	auto failedLocalities = fFailedLocalities.get();
 	exclusions.insert(exclusions.end(), failedLocalities.begin(), failedLocalities.end());
+
 	uniquify(exclusions);
 	return exclusions;
 }
@@ -1782,15 +1819,15 @@ std::pair<std::string, std::string> decodeLocality(const std::string& locality) 
 }
 
 // Returns the list of IPAddresses of the workers that match the given locality.
-// Example: locality="dcid:primary" returns all the ip addresses of the workers in the primary dc.
+// Example: locality="locality_dcid:primary" returns all the ip addresses of the workers in the primary dc.
 std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers,
                                                   const std::string& locality) {
 	std::pair<std::string, std::string> localityKeyValue = decodeLocality(locality);
 
 	std::set<AddressExclusion> localityAddresses;
 	for (int i = 0; i < workers.size(); i++) {
-		if (workers[i].locality.isPresent(localityKeyValue.first) &&
-		    workers[i].locality.get(localityKeyValue.first) == localityKeyValue.second) {
+		auto localityValue = workers[i].locality.get(localityKeyValue.first);
+		if (localityValue.present() && localityValue.get() == localityKeyValue.second) {
 			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
 		}
 	}
