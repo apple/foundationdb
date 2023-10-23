@@ -1,10 +1,15 @@
-# Download doctest repo.
-if(EXISTS /opt/doctest_proj_2.4.8)
+find_package(doctest 2.4.8 CONFIG)
+if(doctest_FOUND)
+    find_path(DOCTEST_INCLUDE_DIR NAMES doctest/doctest.h PATH_SUFFIXES include)
+    add_library(doctest INTERFACE)
+    target_include_directories(doctest INTERFACE "${DOCTEST_INCLUDE_DIR}/doctest")
+elseif(EXISTS /opt/doctest_proj_2.4.8)
     set(DOCTEST_INCLUDE_DIR "/opt/doctest_proj_2.4.8/doctest" CACHE INTERNAL "Path to include folder for doctest")
     add_library(doctest INTERFACE)
     add_dependencies(doctest doctest_proj)
     target_include_directories(doctest INTERFACE "${DOCTEST_INCLUDE_DIR}")
 else()
+    # Download doctest repo.
     include(ExternalProject)
     find_package(Git REQUIRED)
 
