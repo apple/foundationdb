@@ -1584,6 +1584,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 
 		state double shardCheckStartTime = now();
 		state double rateLimiterWaitTimeForThisShard = 0;
+		state double dataConsistencyCheckTimeForThisShard = 0;
 
 		int desiredReplicas = configuration.storageTeamSize;
 		if (ddLargeTeamEnabled()) {
@@ -1753,7 +1754,6 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			state int64_t totalReadAmount = 0;
 			state KeyRange readRange = range;
 			state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
-			state double dataConsistencyCheckTime = 0;
 
 			// Read a limited number of entries at a time, repeating until all keys in the shard have been read
 			loop {
@@ -1780,7 +1780,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					if (failures > 0) {
 						testFailure("Data inconsistent", performQuiescentChecks, success, true);
 					}
-					dataConsistencyCheckTime += (now() - dataConsistencyCheckBeginTime);
+					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
 
 					// If the data is not available and we aren't relocating this shard
 					for (int i = 0; i < storageServerInterfaces.size(); i++) {
@@ -2055,7 +2055,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		    .detail("Range", range)
 		    .detail("BytesRead", bytesReadInRange)
 		    .detail("ShardCheckTime", now() - shardCheckStartTime)
-		    .detail("DataConsistencyCheckTime", dataConsistencyCheckTime)
+		    .detail("DataConsistencyCheckTime", dataConsistencyCheckTimeForThisShard)
 		    .detail("RateLimitTime", rateLimiterWaitTimeForThisShard)
 		    .detail("CumulatedRateLimitTime", rateLimiterCumulatedWaitTime)
 		    .detail("DecideToRunAtMaxRate", decideToRunAtMaxRate)
