@@ -199,11 +199,11 @@ private:
 		ASSERT(data.metaclusterRegistration.get().id == clusterMetadata.entry.id);
 
 		if (data.tenantData.lastTenantId >= 0) {
-			ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);
+			ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix.get());
 			ASSERT_LE(data.tenantData.lastTenantId, managementData.tenantData.lastTenantId);
 		} else {
 			for (auto const& [id, tenant] : data.tenantData.tenantMap) {
-				ASSERT_NE(TenantAPI::getTenantIdPrefix(id), managementData.tenantIdPrefix);
+				ASSERT_NE(TenantAPI::getTenantIdPrefix(id), managementData.tenantIdPrefix.get());
 			}
 		}
 
@@ -243,7 +243,8 @@ private:
 				ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
 				ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 			} else if (entry.tenantName != metaclusterEntry.tenantName) {
-				ASSERT(entry.tenantName == metaclusterEntry.renameDestination);
+				ASSERT(metaclusterEntry.renameDestination.present() &&
+				       entry.tenantName == metaclusterEntry.renameDestination.get());
 			}
 			if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
 			    metaclusterEntry.tenantState != TenantState::REMOVING) {
