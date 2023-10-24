@@ -864,7 +864,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME,   10.0 );
 	init( GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME,               10.0 );
 
-	init( HOT_SHARD_THROTTLING_ENABLED,                         false );
+	init( HOT_SHARD_THROTTLING_ENABLED,                         false ); if(randomize && BUGGIFY) HOT_SHARD_THROTTLING_ENABLED = true;
 	init( HOT_SHARD_THROTTLING_EXPIRE_AFTER,                      3.0 );
 	init( HOT_SHARD_THROTTLING_TRACKED,                             1 );
 	init( HOT_SHARD_MONITOR_FREQUENCY,                            5.0 );

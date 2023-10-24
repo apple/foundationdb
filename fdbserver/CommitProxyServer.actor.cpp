@@ -709,13 +709,13 @@ struct CommitBatchContext {
 
 	std::set<Tag> getWrittenTagsPreResolution();
 
-	bool checkHotShards();
+	void checkHotShards();
 
 private:
 	void evaluateBatchSize();
 };
 
-bool CommitBatchContext::checkHotShards() {
+void CommitBatchContext::checkHotShards() {
 	// removed expired hot shards
 	for (auto it = pProxyCommitData->hotShards.begin(); it != pProxyCommitData->hotShards.end();) {
 		if (now() > it->second) {
@@ -726,32 +726,46 @@ bool CommitBatchContext::checkHotShards() {
 	}
 
 	if (pProxyCommitData->hotShards.empty()) {
-		return false;
+		return;
 	}
 
+	auto trsBegin = trs.begin();
+
+	std::vector<size_t> transactionsToRemove;
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
-		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
-		for (; mutationNum < pMutations->size(); mutationNum++) {
+		bool abortTransaction = false;
+		for (int mutationNum = 0; mutationNum < pMutations->size(); mutationNum++) {
 			auto& m = (*pMutations)[mutationNum];
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				for (const auto& shard : pProxyCommitData->hotShards) {
 					if (shard.first.contains(KeyRef(m.param1))) {
-						return true;
+						abortTransaction = true;
+						break;
 					}
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				for (const auto& shard : pProxyCommitData->hotShards) {
 					if (shard.first.intersects(KeyRangeRef(m.param1, m.param2))) {
-						return true;
+						abortTransaction = true;
+						break;
 					}
 				}
 			} else {
 				UNREACHABLE();
 			}
 		}
+		if (abortTransaction) {
+			trs[transactionNum].reply.sendError(transaction_throttled_hot_shard());
+			transactionsToRemove.push_back(transactionNum);
+		}
 	}
-	return false;
+	// Remove transactions marked for removal in reverse order to avoid shifting indices
+	for (auto it = transactionsToRemove.rbegin(); it != transactionsToRemove.rend(); ++it) {
+		trs.erase(trsBegin + *it);
+	}
+	committed.resize(trs.size());
+	return;
 }
 
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
@@ -929,10 +943,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	}
 
 	if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED && !pProxyCommitData->hotShards.empty()) {
-		if (self->checkHotShards()) {
-			// TraceEvent(SevDebug, "ThrottledHotShard");
-			throw transaction_throttled_hot_shard();
-		}
+		self->checkHotShards();
 	}
 
 	GetCommitVersionRequest req(span.context,
