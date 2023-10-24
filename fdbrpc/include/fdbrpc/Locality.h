@@ -397,7 +397,6 @@ public:
 	}
 
 	static const UID UNSET_ID;
-	static const StringRef ExcludeLocalityKeyMachineIdPrefix;
 	static const StringRef ExcludeLocalityPrefix;
 };
 
