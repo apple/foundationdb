@@ -384,19 +384,24 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				machineJsonMap[machineId] = statusObj;
 			}
 
-			NetworkAddressList tempList;
-			tempList.address = it->first;
 			bool excludedServer = true;
-			bool excludedLocality = true;
-			if (configuration.present() && !configuration.get().isExcludedServer(tempList, LocalityData()))
-				excludedServer = false;
-			if (locality.count(it->first) && configuration.present() &&
-			    !configuration.get().isMachineExcluded(locality[it->first]))
-				excludedLocality = false;
+			// If the machine is already marked as not excluded, because at least one process was found to not be
+			// excluded, we can stop checking further servers on this machine.
+			if (configuration.present() && excludedMap[machineId]) {
+				NetworkAddressList tempList;
+				tempList.address = it->first;
+				// Check if the locality data is present and if so, make use of it.
+				auto localityData = LocalityData();
+				if (locality.count(it->first)) {
+					localityData = locality[it->first];
+				}
 
-			// If any server is not excluded, set the overall exclusion status
-			// of the machine to false.
-			if (!excludedServer && !excludedLocality) {
+				// The isExcludedServer method already contains a check for the excluded localities.
+				excludedServer = configuration.get().isExcludedServer(tempList, localityData);
+			}
+
+			// If any server is not excluded, set the overall exclusion status of the machine to false.
+			if (!excludedServer) {
 				excludedMap[machineId] = false;
 			}
 			workerContribMap[machineId]++;
