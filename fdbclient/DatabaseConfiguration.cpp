@@ -758,20 +758,6 @@ bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) con
 	return false;
 }
 
-// checks if this machineid of given locality is excluded.
-bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
-	if (locality.machineId().present()) {
-		return get(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
-		                                     locality.machineId().get().toString()))
-		           .present() ||
-		       get(encodeFailedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
-		                                   locality.machineId().get().toString()))
-		           .present();
-	}
-
-	return false;
-}
-
 // Gets the list of already excluded localities (with failed option)
 std::set<std::string> DatabaseConfiguration::getExcludedLocalities() const {
 	// TODO: revisit all const_cast usages

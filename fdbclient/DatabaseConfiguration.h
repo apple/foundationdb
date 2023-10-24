@@ -260,7 +260,6 @@ struct DatabaseConfiguration {
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList, const LocalityData& locality) const;
 	bool isExcludedLocality(const LocalityData& locality) const;
-	bool isMachineExcluded(const LocalityData& locality) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 	std::set<std::string> getExcludedLocalities() const;
 
