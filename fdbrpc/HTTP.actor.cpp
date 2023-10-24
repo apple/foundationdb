@@ -520,6 +520,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
                                                                Reference<IRateControl> sendRate,
                                                                int64_t* pSent,
                                                                Reference<IRateControl> recvRate) {
+
+	TraceEvent("DoRequestActor0").log();
 	state TraceEvent event(SevDebug, "HTTPRequest");
 
 	// There is no standard http request id header field, so either a global default can be set via a knob
@@ -536,6 +538,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 	event.detail("Resource", request->resource);
 	event.detail("RequestContentLen", request->data.contentLen);
 
+	TraceEvent("DoRequestActor1").detail("Empty", requestIDHeader.empty()).log();
+
 	try {
 		state std::string requestID;
 		if (!requestIDHeader.empty()) {
@@ -549,12 +553,15 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			event.detail("RequestIDSent", requestID);
 		}
 		request->data.headers["Content-Length"] = std::to_string(request->data.contentLen);
+		TraceEvent("DoRequestActor2").log();
 
 		// Write headers to a packet buffer chain
 		PacketBuffer* pFirst = PacketBuffer::create();
 		PacketBuffer* pLast = writeRequestHeader(request, pFirst);
+		TraceEvent("DoRequestActor3").log();
 		// Prepend headers to content packer buffer chain
 		request->data.content->prependWriteBuffer(pFirst, pLast);
+		TraceEvent("DoRequestActor4").log();
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
 			fmt::print("[{}] HTTP starting {} {} ContentLen:{}\n",
@@ -567,6 +574,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				fmt::print("Request Header: {}: {}\n", h.first, h.second);
 		}
 
+		TraceEvent("DoRequestActor5").log();
 		state Reference<HTTP::IncomingResponse> r(new HTTP::IncomingResponse());
 		state Future<Void> responseReading = r->read(conn, request->isHeaderOnlyResponse());
 
@@ -574,6 +582,10 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 
 		// too many state things here to refactor this with writing the response
 		loop {
+			TraceEvent("DoRequestActor6Loop")
+			    .detail("Ready", responseReading.isReady())
+			    .detail("ERROR", responseReading.isError())
+			    .log();
 			// If we already got a response, before finishing sending the request, then close the connection,
 			// set the Connection header to "close" as a hint to the caller that this connection can't be used
 			// again, and break out of the send loop.
@@ -595,6 +607,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
 				trySend = deterministicRandom()->randomInt(1, 10);
 			}
+			TraceEvent("DoRequestActor7Loop").log();
 			wait(sendRate->getAllowance(trySend));
 			int len = conn->write(request->data.content->getUnsent(), trySend);
 			if (pSent != nullptr)
@@ -602,15 +615,17 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			sendRate->returnUnused(trySend - len);
 			total_sent += len;
 			request->data.content->sent(len);
+			TraceEvent("DoRequestActor8Loop").detail("Empty", request->data.content->empty()).log();
 			if (request->data.content->empty())
 				break;
 
 			wait(conn->onWritable());
 			wait(yield(TaskPriority::WriteSocket));
 		}
-
+		TraceEvent("DoRequestActor9Loop").log();
 		wait(responseReading);
 		double elapsed = timer() - send_start;
+		TraceEvent("DoRequestActor10Loop").detail("ResponseCode", r->code).log();
 
 		event.detail("ResponseCode", r->code);
 		event.detail("ResponseContentLen", r->data.contentLen);
@@ -676,6 +691,10 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 
 		return r;
 	} catch (Error& e) {
+		TraceEvent("DoRequestActorErrorCaught")
+		    .detail("Ready", responseReading.isReady())
+		    .detail("ERROR", responseReading.isError())
+		    .log();
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
