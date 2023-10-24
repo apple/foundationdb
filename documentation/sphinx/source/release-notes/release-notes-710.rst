@@ -16,7 +16,10 @@ Release Notes
 * Added knobs to control backup retry delays for blob stores. `(PR #10947) <https://github.com/apple/foundationdb/pull/10947>`_
 * Fixed two use-after-free bugs for backup agents. `(PR #10951) <https://github.com/apple/foundationdb/pull/10951>`_
 * Added automatic range split for hot storage queue. `(PR #10932) <https://github.com/apple/foundationdb/pull/10932>`_
-* Fixed multiple bugs related to locality based exclusions. `(PR #10976) <https://github.com/apple/foundationdb/pull/10976>`_
+* Fixed multiple bugs related to locality based exclusions. `(PR #10976) <https://github.com/apple/foundationdb/pull/10976>`_, `(PR #11008) <https://github.com/apple/foundationdb/pull/11008>`_, and `(PR #11025) <https://github.com/apple/foundationdb/pull/11025>`_
+* Fixed compaction rate limiter for RocksDB storage engine. `(PR #10988) <https://github.com/apple/foundationdb/pull/10988>`_
+* Added a perpetual wiggle option to have multiple storage servers in rebalance state during wiggling. `(PR #10995) <https://github.com/apple/foundationdb/pull/10995>`_
+* Fixed exclude status of machines in status json when not all processes are excluded. `(PR #10996) <https://github.com/apple/foundationdb/pull/10996>`_ and `(PR #11006) <https://github.com/apple/foundationdb/pull/11006>`_
 
 7.1.41
 ======
