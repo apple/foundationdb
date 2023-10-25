@@ -30,6 +30,7 @@
 
 #include <set>
 #include "flow/flow.h"
+#include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -101,11 +102,17 @@ struct ExclusionTracker {
 					std::string locality = decodeExcludedLocalityKey(r.key);
 					std::set<AddressExclusion> localityExcludedAddresses = getAddressesByLocality(workers, locality);
 					newExcluded.insert(localityExcludedAddresses.begin(), localityExcludedAddresses.end());
+					if (localityExcludedAddresses.empty()) {
+						TraceEvent(SevWarn, "ExclusionTrackerLocalityNotFound").detail("Locality", locality);
+					}
 				}
 				for (const auto& r : failedLocalityResults) {
 					std::string locality = decodeFailedLocalityKey(r.key);
 					std::set<AddressExclusion> localityFailedAddresses = getAddressesByLocality(workers, locality);
 					newFailed.insert(localityFailedAddresses.begin(), localityFailedAddresses.end());
+					if (localityFailedAddresses.empty()) {
+						TraceEvent(SevWarn, "ExclusionTrackerFailedLocalityNotFound").detail("Locality", locality);
+					}
 				}
 
 				bool foundChange = false;
@@ -134,6 +141,7 @@ struct ExclusionTracker {
 				wait(watchFuture);
 				tr.reset();
 			} catch (Error& e) {
+				TraceEvent("ExclusionTrackerError").error(e);
 				wait(tr.onError(e));
 			}
 		}
