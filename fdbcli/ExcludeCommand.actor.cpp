@@ -362,8 +362,10 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 			}
 		}
 
-		if (exclusionSet.empty()) {
-			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality is not provided\n");
+		// The validation if a locality or address has no match is done below and will result in a warning. If we abort
+		// here the provided locality and/or address will not be excluded.
+		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
+			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality must be provided\n");
 			return false;
 		}
 
