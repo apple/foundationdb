@@ -409,6 +409,8 @@ Note that since paths must be absolute this will result in three slashes (/) in 
 <p><em>read_cache_blocks_per_file</em> (or <em>rcb</em>) - Size of the read cache for a file in blocks.</p>
 <p><em>max_send_bytes_per_second</em> (or <em>sbps</em>) - Max send bytes per second for all requests combined.</p>
 <p><em>max_recv_bytes_per_second</em> (or <em>rbps</em>) - Max receive bytes per second for all requests combined.</p>
+<p><em>max_delay_retryable_error (or *dre</em>) - Max seconds to delay before retry again when seeing an retryable error.</p>
+<p><em>max_delay_connection_failed (or *dcf</em>) - Max seconds to delay before retry again when seeing an connection failure.</p>
 <p><em>header</em> - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is <em>header=&lt;FieldName&gt;:&lt;FieldValue&gt;</em> where both strings are non-empty.</p>
 <blockquote>
 <div><p><strong>Example</strong>: The URL parameter <em>header=x-amz-storage-class:REDUCED_REDUNDANCY</em> would send the HTTP header required to use the reduced redundancy storage option in the S3 API.</p>
@@ -827,7 +829,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 05, 2023.<br/>
+      Last updated on Oct 25, 2023.<br/>
     </p>
   </div>
 </footer>
