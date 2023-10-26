@@ -8928,7 +8928,7 @@ void AddingShard::addMutation(Version version,
 		ASSERT(false);
 }
 
-ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
+ACTOR Future<Void> updateMoveInShardMetaDataAsync(StorageServer* data, MoveInShard* shard) {
 	if (g_network->isSimulated()) {
 		Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id())));
 		if (!pm.present()) {
@@ -8948,6 +8948,14 @@ ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* s
 	    .detail("DurableVersion", data->durableVersion.get());
 
 	return Void();
+}
+
+void updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
+	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
+	TraceEvent(SevDebug, "UpdatedMoveInShardMetaData", data->thisServerID)
+	    .detail("Shard", shard->toString())
+	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
+	    .detail("DurableVersion", data->durableVersion.get());
 }
 
 void changeServerKeysWithPhysicalShards(StorageServer* data,
@@ -9079,7 +9087,8 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	moveInShard->meta->checkpoints = std::move(localRecords);
 	moveInShard->setPhase(MoveInPhase::Ingesting);
 
-	wait(updateMoveInShardMetaData(data, moveInShard));
+	// wait(updateMoveInShardMetaData(data, moveInShard));
+	updateMoveInShardMetaData(data, moveInShard);
 
 	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
 	return Void();
@@ -9103,7 +9112,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			// TODO(heliu): make this `retry from beginning` applies to only some specific cases.
 			moveInShard->setPhase(MoveInPhase::Fetching);
-			wait(updateMoveInShardMetaData(data, moveInShard));
+			updateMoveInShardMetaData(data, moveInShard);
 			return Void();
 		}
 		throw err;
@@ -9149,7 +9158,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	}
 
 	moveInShard->setPhase(MoveInPhase::ApplyingUpdates);
-	wait(updateMoveInShardMetaData(data, moveInShard));
+	updateMoveInShardMetaData(data, moveInShard);
 
 	moveInShard->fetchComplete.send(Void());
 
@@ -9276,7 +9285,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 
 		double duration = now() - startTime;
 		const int64_t totalBytes = getTotalFetchedBytes(moveInShard->checkpoints());
-		TraceEvent(moveInShard->logSev, "IngestShardStats", data->thisServerID)
+		TraceEvent(moveInShard->logSev, "FetchShardApplyUpdatesStats", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Duration", duration)
 		    .detail("TotalBytes", totalBytes)
