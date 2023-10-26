@@ -232,6 +232,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
 		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
 		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
+		state double consistenyCheckerBeginTime = now();
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -403,7 +404,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("ConsistencyCheck_FinishedCheck").detail("Repetitions", self->repetitions);
+		TraceEvent("ConsistencyCheck_FinishedCheck")
+		    .detail("Repetitions", self->repetitions)
+		    .detail("TimeSpan", now() - consistenyCheckerBeginTime);
 
 		return Void();
 	}
