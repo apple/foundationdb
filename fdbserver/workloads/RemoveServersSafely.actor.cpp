@@ -511,6 +511,45 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killProcArray;
 	}
 
+	// If a process is rebooted, it's processid will change. So we need to monitor
+	// such changes and re-issue the locality-based exclusion again.
+	ACTOR static Future<Void> checkLocalityChange(RemoveServersSafelyWorkload* self,
+	                                              Database cx,
+	                                              std::vector<AddressExclusion> toKillArray,
+	                                              std::unordered_set<std::string> origKillLocalities,
+	                                              bool markExcludeAsFailed) {
+		state std::unordered_set<std::string> killLocalities = origKillLocalities;
+
+		loop {
+			wait(delay(10.0));
+			wait(self->updateProcessIds(cx));
+			std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+			if (toKillLocalities == killLocalities) {
+				continue;
+			}
+
+			// The kill localities have changed.
+			TraceEvent("RemoveAndKill")
+			    .detail("Step", "localities changed")
+			    .detail("OrigKillLocalities", describe(origKillLocalities))
+			    .detail("KillLocalities", describe(killLocalities))
+			    .detail("ToKillLocalities", describe(toKillLocalities))
+			    .detail("Failed", markExcludeAsFailed);
+			killLocalities = toKillLocalities;
+
+			// Include back the localities that are no longer in the kill list
+			state bool failed = true;
+			wait(includeLocalities(cx, std::vector<std::string>(), failed, true));
+			wait(includeLocalities(cx, std::vector<std::string>(), !failed, true));
+
+			// Exclude the localities that are now in the kill list
+			wait(excludeLocalities(cx, killLocalities, markExcludeAsFailed));
+			TraceEvent("RemoveAndKill")
+			    .detail("Step", "new localities excluded")
+			    .detail("Localities", describe(killLocalities));
+		}
+	}
+
 	// Attempts to exclude a set of processes, and once the exclusion is successful it kills them.
 	// If markExcludeAsFailed is true, then it is an error if we cannot complete the exclusion.
 	ACTOR static Future<Void> removeAndKill(RemoveServersSafelyWorkload* self,
@@ -636,9 +675,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
 
 		state bool excludeLocalitiesInsteadOfServers = deterministicRandom()->coinflip();
+		state std::unordered_set<std::string> toKillLocalitiesFailed;
 		if (markExcludeAsFailed) {
-			state std::unordered_set<std::string> toKillLocalitiesFailed =
-			    self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			toKillLocalitiesFailed = self->getLocalitiesFromAddresses(toKillMarkFailedArray);
 			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
@@ -685,7 +724,16 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Step", "Wait For Server Exclusion")
 			    .detail("Addresses", describe(toKill))
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
-			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
+			if (excludeLocalitiesInsteadOfServers) {
+				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
+				     checkLocalityChange(self,
+				                         cx,
+				                         toKillArray,
+				                         toKillLocalities,
+				                         markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
+			} else {
+				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
+			}
 
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "coordinators auto")
