@@ -553,7 +553,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		// Write headers to a packet buffer chain
 		PacketBuffer* pFirst = PacketBuffer::create();
 		PacketBuffer* pLast = writeRequestHeader(request, pFirst);
-		// Prepend headers to content packer buffer chain
+		// Prepend headers to content packet buffer chain
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
@@ -712,15 +712,17 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	state double nextRetryDelay = 2.0;
 	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	state int64_t bytes_sent = 0;
+	state UnsentPacketQueue empty_packet_queue;
 
 	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
 	req->verb = HTTP_VERB_CONNECT;
 	req->resource = remoteHost + ":" + remoteService;
-	req->data.content = nullptr;
+	req->data.content = &empty_packet_queue;
 	req->data.contentLen = 0;
 	req->data.headers["Host"] = req->resource;
 	req->data.headers["Accept"] = "application/xml";
 	req->data.headers["Proxy-Connection"] = "Keep-Alive";
+
 	loop {
 		state Optional<Error> err;
 
