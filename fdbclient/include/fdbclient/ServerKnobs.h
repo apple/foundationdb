@@ -127,6 +127,8 @@ public:
 	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
 	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
 	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
+	double WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER; // take effects when pertual wiggle priority is larger
+	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
@@ -202,6 +204,9 @@ public:
 	// The constant interval DD update pivot values for team selection. It should be >=
 	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
+
+	bool ALLOW_LARGE_SHARD;
+	int MAX_LARGE_SHARD_BYTES;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
@@ -440,7 +445,7 @@ public:
 	int64_t SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
 	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
 	bool ROCKSDB_PARANOID_FILE_CHECKS;
-	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
+	double ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	int64_t ROCKSDB_WAL_TTL_SECONDS;
@@ -743,6 +748,7 @@ public:
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 	double STORAGE_FETCH_KEYS_DELAY;
+	bool STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -901,6 +907,7 @@ public:
 	bool AUDIT_DATAMOVE_POST_CHECK;
 	int AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX;
 	int AUDIT_STORAGE_RATE_PER_SERVER_MAX;
+	bool ENABLE_AUDIT_VERBOSE_TRACE;
 	bool LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT;
 	double LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY;
 	int LOGGING_RECENT_STORAGE_COMMIT_SIZE;
@@ -997,6 +1004,8 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING; // When enabled, health monitor will try to detect any gray
+	                                                   // failure during tlog recovery during the recovery process.
 	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
 	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
 	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,

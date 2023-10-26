@@ -234,6 +234,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1752,12 +1753,14 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state RangeResult kvPairs =
 			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), GetRangeLimits::ROW_LIMIT_UNLIMITED));
-			json_spirit::mObject statusDoc;
-			JSONDoc modifier(statusDoc);
+			state json_spirit::mObject statusDoc;
+			state JSONDoc modifier(statusDoc);
 			for (auto& kv : kvPairs) {
-				json_spirit::mValue docValue;
+				state json_spirit::mValue docValue;
 				json_spirit::read_string(kv.value.toString(), docValue);
+				wait(yield());
 				modifier.absorb(docValue);
+				wait(yield());
 			}
 			JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 			modifier.cleanOps();
@@ -4116,6 +4119,7 @@ int main(int argc, char* argv[]) {
 		    .detail("CommandLine", commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("MemoryLimit", memLimit)
+		    .detail("Proxy", proxy.orDefault(""))
 		    .trackLatest("ProgramStart");
 
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
@@ -4188,6 +4192,7 @@ int main(int argc, char* argv[]) {
 		case ProgramExe::AGENT:
 			if (!initCluster())
 				return FDB_EXIT_ERROR;
+			fileBackupAgentProxy = proxy;
 			f = stopAfter(runAgent(db));
 			break;
 		case ProgramExe::BACKUP:

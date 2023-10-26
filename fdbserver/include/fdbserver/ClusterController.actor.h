@@ -18,24 +18,23 @@
  * limitations under the License.
  */
 
-#pragma once
-
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/BlobMigratorInterface.h"
-#include <utility>
-
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
 #include "fdbserver/ClusterController.actor.g.h"
 #elif !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
+#pragma once
+
+#include <utility>
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/MetaclusterRegistration.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
@@ -3339,6 +3338,7 @@ public:
 	AsyncTrigger updateDBInfo;
 	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
+	std::vector<StorageServerMetaInfo> storageStatusInfos;
 
 	DBInfo db;
 	Database cx;

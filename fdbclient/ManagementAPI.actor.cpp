@@ -284,7 +284,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "memory-1") {
 		logType = KeyValueStoreType::MEMORY;
 		storeType = KeyValueStoreType::MEMORY;
-	} else if (mode == "memory-radixtree-beta") {
+	} else if (mode == "memory-radixtree" || mode == "memory-radixtree-beta") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::MEMORY_RADIXTREE;
 	}

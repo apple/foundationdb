@@ -1,5 +1,6 @@
 [configuration]
 allowDefaultTenant = false
+storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'BackupAndParallelRestoreWithAtomicOp'

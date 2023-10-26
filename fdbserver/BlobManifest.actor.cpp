@@ -57,7 +57,7 @@
 // Default manifest folder on external blob storage
 #define MANIFEST "manifest"
 
-#define ENABLE_DEBUG_PRINT true
+#define ENABLE_DEBUG_PRINT false
 template <typename... T>
 inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 	if (ENABLE_DEBUG_PRINT)

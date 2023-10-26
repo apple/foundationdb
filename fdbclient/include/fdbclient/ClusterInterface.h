@@ -245,10 +245,14 @@ struct StatusReply {
 struct StatusRequest {
 	constexpr static FileIdentifier file_identifier = 14419140;
 	ReplyPromise<struct StatusReply> reply;
+	std::string statusField;
+
+	StatusRequest() {}
+	explicit StatusRequest(std::string statusField) : statusField(statusField) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, reply, statusField);
 	}
 };
 

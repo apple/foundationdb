@@ -134,6 +134,7 @@ Users may also utilize `fdbcli` to set and update knobs dynamically. Usage is as
 ```
 setknob <knob_name> <knob_value> [config_class]
 getknob <knob_name> [config_class]
+clearknob <knob_name> [config_class]
 ```
 Where `knob_name` is an existing knob, `knob_value` is the desired value to set the knob and `config_class` is the optional configuration class. Furthermore, `setknob` may be combined within a `begin\commit` to update multiple knobs atomically. If using this option, a description must follow `commit` otherwise a prompt will be shown asking for a description. The description must be non-empty. An example follows.
 ```
@@ -151,7 +152,7 @@ commit "change"
 ```
 Specifically, `set, clear, get, getrange, clearrange` cannot be combined in any transaction with a `setknob` or `getknob`.
 
-If using an individual `setknob` without being inside a `begin\commit` block, then `fdbcli` will prompt for a description as well.
+If using an individual `setknob` or `clearknob` without being inside a `begin\commit` block, then `fdbcli` will prompt for a description as well.
 
 #### Type checking
 Knobs have implicit types attached to them when defined. For example, the knob `tracing_udp_listener_addr` is set to `"127.0.0.1"` as so the type is string. If a user invokes `setknob` on this knob with an incorrect value that is not a string, the transaction will fail. 

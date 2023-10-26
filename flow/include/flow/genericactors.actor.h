@@ -754,7 +754,7 @@ private:
 
 // FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
 #define SWIFT_CXX_REF_ASYNCVAR                                                                                         \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))                     \
 	__attribute__((swift_attr("release:immortal")))
 // // TODO(swift): https://github.com/apple/swift/issues/62456 can't support retain/release funcs that are templates
 // themselfes

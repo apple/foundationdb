@@ -656,6 +656,8 @@ class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
 	static void init() {}
 
+	virtual StringRef getClassName() override { return "SimpleFile"_sr; }
+
 	static bool should_poll() { return false; }
 
 	ACTOR static Future<Reference<IAsyncFile>> open(
@@ -2905,6 +2907,7 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 
 void startNewSimulator(bool printSimTime) {
 	ASSERT(!g_network);
+	ASSERT(!g_simulator);
 	g_network = g_simulator = new Sim2(printSimTime);
 	g_simulator->connectionFailuresDisableDuration =
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;

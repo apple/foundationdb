@@ -101,10 +101,12 @@ Error internal_error_impl(const char* a_nm,
 	return Error(error_code_internal_error);
 }
 
+Error::Error() : error_code(invalid_error_code), flags(0) {}
+
 Error::Error(int error_code) : error_code(error_code), flags(0) {
 	if (TRACE_SAMPLE())
 		TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
-	// std::cout << "Error: " << error_code << std::endl;
+
 	if (error_code >= 3000 && error_code < 6000) {
 		{
 			TraceEvent te(SevError, "SystemError");

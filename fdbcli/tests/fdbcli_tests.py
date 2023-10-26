@@ -547,6 +547,13 @@ def knobmanagement(logger):
     output = run_fdbcli_command("getknob", "tracing_sample_rate")
     assert r"`tracing_sample_rate' is `0.300000'" == output
 
+    output = run_fdbcli_command(
+        'begin; clearknob min_trace_severity; commit "fdbcli clearknob";'
+    )
+    assert "Committed" in output
+    output = run_fdbcli_command("getknob", "min_trace_severity")
+    assert r"`min_trace_severity' is not found" == output
+
 
 @enable_logging()
 def cache_range(logger):

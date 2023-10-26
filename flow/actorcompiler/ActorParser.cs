@@ -18,10 +18,9 @@
  * limitations under the License.
  */
 
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace actorcompiler
@@ -242,12 +241,14 @@ namespace actorcompiler
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
         public bool generateProbes;
+        public Dictionary<(ulong, ulong), string> uidObjects { get; private set; }
 
         public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes)
         {
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
             this.generateProbes = generateProbes;
+            this.uidObjects = new Dictionary<(ulong, ulong), string>();
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
@@ -340,15 +341,17 @@ namespace actorcompiler
                 }
                 if (tokens[i].Value == "ACTOR" || tokens[i].Value == "SWIFT_ACTOR" || tokens[i].Value == "TEST_CASE")
                 {
-                    int end;
-                    var actor = ParseActor(i, out end);
+                    var actor = ParseActor(i, out int end);
                     if (classContextStack.Count > 0)
                     {
                         actor.enclosingClass = String.Join("::", classContextStack.Reverse().Select(t => t.name));
                     }
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes).Write(actorWriter);
+                    var actorCompiler = new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes);
+                    actorCompiler.Write(actorWriter);
+                    actorCompiler.uidObjects.ToList().ForEach(x => this.uidObjects.TryAdd(x.Key, x.Value));
+
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
                     bool hasLineNumber = false;

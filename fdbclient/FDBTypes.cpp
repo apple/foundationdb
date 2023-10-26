@@ -21,6 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include <boost/algorithm/string.hpp>
 
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {
 	if (!prefix.present() || prefix.get().empty()) {
@@ -226,7 +227,9 @@ std::string KeyValueStoreType::getStoreTypeStr(const StoreType& storeType) {
 	case MEMORY:
 		return "memory";
 	case MEMORY_RADIXTREE:
-		return "memory-radixtree-beta";
+		return "memory-radixtree";
+	case NONE:
+		return "none";
 	default:
 		return "unknown";
 	}
@@ -242,10 +245,156 @@ KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
 		                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
 		                                              { "ssd-sharded-rocksdb", SSD_SHARDED_ROCKSDB },
 		                                              { "memory", MEMORY },
-		                                              { "memory-radixtree-beta", MEMORY_RADIXTREE } };
+		                                              { "memory-radixtree", MEMORY_RADIXTREE },
+		                                              { "none", NONE } };
 	auto it = names.find(str);
 	if (it == names.end()) {
 		throw unknown_storage_engine();
 	}
 	return it->second;
+}
+
+TEST_CASE("/PerpetualStorageWiggleLocality/Validation") {
+	ASSERT(isValidPerpetualStorageWiggleLocality("aaa:bbb"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("instance_id:FDB0401023121"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("machineid:pv47p01if-infs11081401.pv.if.apple.com"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("processid:0b36eaf96eb34b4b702d1bbcb1b49773"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("zoneid:pv47-1108"));
+	ASSERT(isValidPerpetualStorageWiggleLocality(
+	    "zoneid:pv47-1108;instance_id:FDB0401023121;processid:0b36eaf96eb34b4b702d1bbcb1b49773;machineid:pv47p01if-"
+	    "infs11081401.pv.if.apple.com"));
+	ASSERT(isValidPerpetualStorageWiggleLocality("0"));
+
+	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;"));
+	ASSERT(!isValidPerpetualStorageWiggleLocality("aaa:bbb;ccc"));
+	ASSERT(!isValidPerpetualStorageWiggleLocality(""));
+
+	return Void();
+}
+
+std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
+    const std::string& localityKeyValues) {
+	// parsing format is like "datahall:0<;locality:filter>"
+	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValues));
+
+	std::vector<std::pair<Optional<Value>, Optional<Value>>> parsedLocalities;
+
+	if (localityKeyValues == "0") {
+		return parsedLocalities;
+	}
+
+	std::vector<std::string> splitLocalityKeyValues;
+	boost::split(splitLocalityKeyValues, localityKeyValues, [](char c) { return c == ';'; });
+
+	for (const auto& localityKeyValue : splitLocalityKeyValues) {
+		ASSERT(!localityKeyValue.empty());
+
+		// get key and value from perpetual_storage_wiggle_locality.
+		int split = localityKeyValue.find(':');
+		auto key = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
+		auto value = Optional<Value>(
+		    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+		parsedLocalities.push_back(std::make_pair(key, value));
+	}
+
+	return parsedLocalities;
+}
+
+bool localityMatchInList(const std::vector<std::pair<Optional<Value>, Optional<Value>>>& localityKeyValues,
+                         const LocalityData& locality) {
+	for (const auto& [localityKey, localityValue] : localityKeyValues) {
+		if (locality.get(localityKey.get()) == localityValue) {
+			return true;
+		}
+	}
+	return false;
+}
+
+TEST_CASE("/PerpetualStorageWiggleLocality/ParsePerpetualStorageWiggleLocality") {
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:bbb");
+		ASSERT(localityKeyValues.size() == 1);
+		ASSERT(localityKeyValues[0].first.get() == "aaa");
+		ASSERT(localityKeyValues[0].second.get() == "bbb");
+
+		{
+			LocalityData locality;
+			locality.set("aaa"_sr, "bbb"_sr);
+			ASSERT(localityMatchInList(localityKeyValues, locality));
+		}
+
+		{
+			LocalityData locality;
+			locality.set("aaa"_sr, "ccc"_sr);
+			ASSERT(!localityMatchInList(localityKeyValues, locality));
+		}
+	}
+
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:bbb;ccc:ddd");
+		ASSERT(localityKeyValues.size() == 2);
+		ASSERT(localityKeyValues[0].first.get() == "aaa");
+		ASSERT(localityKeyValues[0].second.get() == "bbb");
+		ASSERT(localityKeyValues[1].first.get() == "ccc");
+		ASSERT(localityKeyValues[1].second.get() == "ddd");
+
+		{
+			LocalityData locality;
+			locality.set("aaa"_sr, "bbb"_sr);
+			ASSERT(localityMatchInList(localityKeyValues, locality));
+		}
+
+		{
+			LocalityData locality;
+			locality.set("ccc"_sr, "ddd"_sr);
+			ASSERT(localityMatchInList(localityKeyValues, locality));
+		}
+
+		{
+			LocalityData locality;
+			locality.set("aaa"_sr, "ddd"_sr);
+			ASSERT(!localityMatchInList(localityKeyValues, locality));
+		}
+	}
+
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("aaa:111;bbb:222;ccc:3dd");
+		ASSERT(localityKeyValues.size() == 3);
+		ASSERT(localityKeyValues[0].first.get() == "aaa");
+		ASSERT(localityKeyValues[0].second.get() == "111");
+		ASSERT(localityKeyValues[1].first.get() == "bbb");
+		ASSERT(localityKeyValues[1].second.get() == "222");
+		ASSERT(localityKeyValues[2].first.get() == "ccc");
+		ASSERT(localityKeyValues[2].second.get() == "3dd");
+
+		{
+			LocalityData locality;
+			locality.set("aaa"_sr, "111"_sr);
+			ASSERT(localityMatchInList(localityKeyValues, locality));
+		}
+
+		{
+			LocalityData locality;
+			locality.set("bbb"_sr, "222"_sr);
+			ASSERT(localityMatchInList(localityKeyValues, locality));
+		}
+
+		{
+			LocalityData locality;
+			locality.set("ccc"_sr, "222"_sr);
+			ASSERT(!localityMatchInList(localityKeyValues, locality));
+		}
+	}
+
+	{
+		auto localityKeyValues = ParsePerpetualStorageWiggleLocality("0");
+		ASSERT(localityKeyValues.empty());
+
+		{
+			LocalityData locality;
+			locality.set("aaa"_sr, "111"_sr);
+			ASSERT(!localityMatchInList(localityKeyValues, locality));
+		}
+	}
+	return Void();
 }

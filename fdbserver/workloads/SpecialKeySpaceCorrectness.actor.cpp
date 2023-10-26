@@ -121,7 +121,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		testRywLifetime(cx);
 		wait(timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
-		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
+		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self) &&
+		                 self->metricsApiCorrectnessActor(cx, self),
 		             self->testDuration,
 		             Void()));
 		// Only use one client to avoid potential conflicts on changing cluster configuration
@@ -1166,6 +1167,22 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					wait(tx->onError(e));
 				}
 			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> metricsApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+		state Database cx = cx_->clone();
+		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		{
+			Optional<Value> metrics = wait(tx->get("fault_tolerance_metrics_json"_sr.withPrefix(
+			    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METRICS).begin)));
+			ASSERT(metrics.present());
+			auto metricsObj = readJSONStrictly(metrics.get().toString()).get_obj();
+			auto schema = readJSONStrictly(JSONSchemas::faultToleranceStatusSchema.toString()).get_obj();
+			std::string errorStr;
+			ASSERT(schemaMatch(schema, metricsObj, errorStr, SevError, true));
 		}
 		return Void();
 	}

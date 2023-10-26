@@ -1598,8 +1598,8 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Database db) {
-	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
+ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "") {
+	StatusObject statusObj = wait(StatusClient::statusFetcher(db, jsonField));
 	return getValueFromJSON(statusObj);
 }
 

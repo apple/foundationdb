@@ -79,12 +79,20 @@ public:
 	// Called with rates received from ratekeeper
 	void updateRates(TransactionTagMap<double> const& newRates);
 
+	struct ReleaseTransactionsResult {
+		uint64_t batchPriorityTransactionsReleased{ 0 };
+		uint64_t batchPriorityRequestsReleased{ 0 };
+		uint64_t defaultPriorityTransactionsReleased{ 0 };
+		uint64_t defaultPriorityRequestsReleased{ 0 };
+		uint64_t rejectedRequests{ 0 };
+	};
+
 	// elapsed indicates the amount of time since the last epoch was run.
 	// If a request is ready to be executed, it is sent to the deque
 	// corresponding to its priority. If not, the request remains queued.
-	void releaseTransactions(double elapsed,
-	                         Deque<GetReadVersionRequest>& outBatchPriority,
-	                         Deque<GetReadVersionRequest>& outDefaultPriority);
+	ReleaseTransactionsResult releaseTransactions(double elapsed,
+	                                              Deque<GetReadVersionRequest>& outBatchPriority,
+	                                              Deque<GetReadVersionRequest>& outDefaultPriority);
 
 	void addRequest(GetReadVersionRequest const&);
 
