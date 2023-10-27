@@ -217,6 +217,10 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
+.. warning:: Localtiy based exclusions should only be used in FDB versions 7.1.42+, 7.3.26+ or newer. Older versions have limited support for locality based exclsuions and therefore the usage of locality based exclusions on those older version is not recommended.
+
+.. warning:: There is currently one known limitation with the locality based exclusions: If a process is serving as a log and the process is currently not reporting to the cluster, e.g. because of a partition, the process will not be detected by the exclude command. The exclusion is still initiated in the background but the exclude command itself will not block.
+
 Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
 
 If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
