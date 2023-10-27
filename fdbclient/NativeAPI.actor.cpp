@@ -7806,7 +7806,8 @@ Future<Void> Transaction::onError(Error const& e) {
 			++trState->cx->transactionsResourceConstrained;
 		else if (e.code() == error_code_process_behind)
 			++trState->cx->transactionsProcessBehind;
-		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
+		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
+		         e.code() == error_code_transaction_throttled_hot_shard) {
 			++trState->cx->transactionsThrottled;
 		} else if (e.code() == error_code_proxy_tag_throttled) {
 			++trState->cx->transactionsThrottled;
