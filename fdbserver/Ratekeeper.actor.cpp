@@ -327,7 +327,7 @@ public:
 				setReq.throttledShards.insert(
 				    setReq.throttledShards.end(), reply.hotShards.begin(), reply.hotShards.end());
 			} catch (Error& e) {
-				TraceEvent(SevError, "CannotMonitorHotShardForSS").detail("SS", ssi);
+				TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
 				continue;
 			}
 			if (!setReq.throttledShards.size()) {
