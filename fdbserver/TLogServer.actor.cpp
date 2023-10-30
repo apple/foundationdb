@@ -1622,7 +1622,7 @@ void commitMessages(TLogData* self, Reference<LogData> logData, Version version,
 Version poppedVersion(Reference<LogData> self, Tag tag) {
 	auto tagData = self->getTagData(tag);
 	if (!tagData) {
-		if (tag == txsTag || tag.locality == tagLocalityTxs) {
+		if (tag == txsTag || tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter) {
 			return 0;
 		}
 		return std::max(self->recoveredAt + 1, self->recoveryTxnVersion);
