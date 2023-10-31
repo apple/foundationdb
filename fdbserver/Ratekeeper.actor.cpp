@@ -334,6 +334,11 @@ public:
 				continue;
 			}
 			setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
+			for (auto& shard : setReq.throttledShards) {
+				TraceEvent(SevInfo, "SendRequestThrottleHotShard")
+				    .detail("Shard", shard)
+				    .detail("DelayUntil", setReq.expirationTime);
+			}
 			for (const auto& cpi : dbInfo->get().client.commitProxies) {
 				cpi.setThrottledShard.send(setReq);
 			}
