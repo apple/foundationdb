@@ -679,6 +679,7 @@ rocksdb::WALRecoveryMode getWalRecoveryMode() {
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
+	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
@@ -758,6 +759,7 @@ rocksdb::Options getOptions() {
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	options.atomic_flush = SERVER_KNOBS->ROCKSDB_ATOMIC_FLUSH;
+	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}

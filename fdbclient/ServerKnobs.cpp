@@ -534,8 +534,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_TARGET_FILE_SIZE_BASE,                    16777216 ); // 16MB, RocksDB default.
 	init( ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                     1 ); // RocksDB default.
 	init( ROCKSDB_MAX_OPEN_FILES,                              50000 ); // Should be smaller than OS's fd limit.
-	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); if (isSimulated) ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS = deterministicRandom()->coinflip();
-	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                      1000 );
+	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); 
+	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                         0 );
+	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                  100 );
 	init (ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
 	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
 	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
