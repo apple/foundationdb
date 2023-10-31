@@ -155,6 +155,8 @@ public:
 
 	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override;
 
+	int64_t getHotShardsMetrics(const KeyRange& range) override;
+
 	template <class Reply>
 	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
 

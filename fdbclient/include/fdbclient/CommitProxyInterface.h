@@ -66,6 +66,7 @@ struct CommitProxyInterface {
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
 	PublicRequestStream<struct GetBlobGranuleLocationsRequest> getBlobGranuleLocations;
+	RequestStream<struct SetThrottledShardRequest> setThrottledShard;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -97,6 +98,8 @@ struct CommitProxyInterface {
 			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
 			    commit.getEndpoint().getAdjustedEndpoint(12));
+			setThrottledShard =
+			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
 		}
 	}
 
@@ -116,6 +119,7 @@ struct CommitProxyInterface {
 		streams.push_back(expireIdempotencyId.getReceiver());
 		streams.push_back(getTenantId.getReceiver());
 		streams.push_back(getBlobGranuleLocations.getReceiver());
+		streams.push_back(setThrottledShard.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -747,6 +751,33 @@ struct GlobalConfigRefreshRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, lastKnown, reply);
+	}
+};
+
+struct SetThrottledShardReply {
+	constexpr static FileIdentifier file_identifier = 2828140;
+
+	SetThrottledShardReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
+};
+
+struct SetThrottledShardRequest {
+	constexpr static FileIdentifier file_identifier = 2828141;
+	std::vector<KeyRange> throttledShards;
+	double expirationTime;
+	ReplyPromise<SetThrottledShardReply> reply;
+
+	SetThrottledShardRequest() {}
+	explicit SetThrottledShardRequest(std::vector<KeyRange> throttledShards, double expirationTime)
+	  : throttledShards(throttledShards), expirationTime(expirationTime) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, throttledShards, expirationTime, reply);
 	}
 };
 
