@@ -855,13 +855,13 @@ public:
 		ASSERT(cf);
 		TraceEvent(SevVerbose, "ShardedRocksReadIteratorPool")
 		    .detail("Path", path)
-		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
+		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
 	}
 
 	// Called on every db commit.
 	void update() {
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			iteratorsMap.clear();
 		}
@@ -870,7 +870,7 @@ public:
 	// Called on every read operation.
 	ReadIterator getIterator(const KeyRange& range) {
 		// Shared iterators are not bounded.
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
 				if (!it->second.inUse) {
@@ -892,7 +892,7 @@ public:
 
 	// Called on every read operation, after the keys are collected.
 	void returnIterator(ReadIterator& iter) {
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			it = iteratorsMap.find(iter.index);
 			// iterator found: put the iterator back to the pool(inUse=false).
@@ -1043,7 +1043,7 @@ struct PhysicalShard {
 			if (!this->isInitialized) {
 				readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 				this->isInitialized.store(true);
-			} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+			} else if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
 				this->readIterPool->update();
 			}
 		}
@@ -2524,7 +2524,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		state Reference<Histogram> histogram = Histogram::getHistogram(
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "TimeSpentRefreshIterators"_sr, Histogram::Unit::milliseconds);
 
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
 			try {
 				wait(readyToStart);
 				loop {
@@ -2883,7 +2883,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+			if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
 				for (auto shard : *(a.dirtyShards)) {
 					shard->readIterPool->update();
 				}
