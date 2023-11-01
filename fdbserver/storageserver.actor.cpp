@@ -8922,6 +8922,7 @@ void AddingShard::addMutation(Version version,
 }
 
 ACTOR Future<Void> updateMoveInShardMetaDataAsync(StorageServer* data, MoveInShard* shard) {
+	state double startTime = now();
 	if (g_network->isSimulated()) {
 		Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id())));
 		if (!pm.present()) {
