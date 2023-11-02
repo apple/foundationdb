@@ -1373,7 +1373,7 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
-ACTOR Future<Optional<Value>> getJSON(Database db);
+ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
@@ -1599,6 +1599,15 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
+
+	if (apiVersion.version() >= 740) {
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::METRICS,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<FaultToleranceMetricsImpl>(
+		        singleKeyRange("fault_tolerance_metrics_json"_sr)
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METRICS).begin)));
+	}
 
 	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
@@ -6036,6 +6045,13 @@ void Transaction::atomicOp(const KeyRef& key,
 	CODE_PROBE(true, "NativeAPI atomic operation");
 }
 
+void TransactionState::addClearCost() {
+	// NOTE: The throttling cost of each clear is assumed to be one page.
+	// This makes compuation fast, but can be inaccurate and may
+	// underestimate the cost of large clears.
+	totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+}
+
 void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange) {
 	++trState->cx->transactionClearMutations;
 	auto& req = tr;
@@ -6060,10 +6076,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 		return;
 
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
-	// NOTE: The throttling cost of each clear is assumed to be one page.
-	// This makes compuation fast, but can be inaccurate and may
-	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	trState->addClearCost();
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6083,6 +6096,7 @@ void Transaction::clear(const KeyRef& key, AddConflictRange addConflictRange) {
 	data[key.size()] = 0;
 	t.mutations.emplace_back(
 	    req.arena, MutationRef::ClearRange, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
+	trState->addClearCost();
 	if (addConflictRange)
 		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
@@ -6138,7 +6152,8 @@ double Transaction::getBackoff(int errCode) {
 
 	// Set backoff for next time
 	if (errCode == error_code_commit_proxy_memory_limit_exceeded ||
-	    errCode == error_code_grv_proxy_memory_limit_exceeded) {
+	    errCode == error_code_grv_proxy_memory_limit_exceeded ||
+	    errCode == error_code_transaction_throttled_hot_shard) {
 
 		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF);
 	} else {
@@ -6785,7 +6800,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 					Optional<CommitResult> commitResult = wait(determineCommitStatus(
 					    trState,
 					    req.transaction.read_snapshot,
-					    req.transaction.read_snapshot + 5e6 /* Based on MAX_WRITE_TRANSACTION_LIFE_VERSIONS */,
+					    req.transaction.read_snapshot + CLIENT_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS,
 					    req.idempotencyId));
 					if (commitResult.present()) {
 						Standalone<StringRef> ret = makeString(10);
@@ -6812,7 +6827,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
 			    e.code() != error_code_tenant_not_found && e.code() != error_code_illegal_tenant_access &&
 			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded &&
-			    e.code() != error_code_tenant_locked) {
+			    e.code() != error_code_tenant_locked && e.code() != error_code_transaction_throttled_hot_shard) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -6930,6 +6945,10 @@ Future<Void> Transaction::commitMutations() {
 		}
 		return commitResult;
 	} catch (Error& e) {
+		if (e.code() == error_code_transaction_throttled_hot_shard) {
+			TraceEvent("TransactionThrottledHotShard").error(e);
+			return onError(e);
+		}
 		TraceEvent("ClientCommitError").error(e);
 		return Future<Void>(e);
 	} catch (...) {
@@ -7785,7 +7804,8 @@ Future<Void> Transaction::onError(Error const& e) {
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
 	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
-	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled) {
+	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled ||
+	    e.code() == error_code_transaction_throttled_hot_shard) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
@@ -7795,7 +7815,8 @@ Future<Void> Transaction::onError(Error const& e) {
 			++trState->cx->transactionsResourceConstrained;
 		else if (e.code() == error_code_process_behind)
 			++trState->cx->transactionsProcessBehind;
-		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
+		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
+		         e.code() == error_code_transaction_throttled_hot_shard) {
 			++trState->cx->transactionsThrottled;
 		} else if (e.code() == error_code_proxy_tag_throttled) {
 			++trState->cx->transactionsThrottled;

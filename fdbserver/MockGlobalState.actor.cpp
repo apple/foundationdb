@@ -392,6 +392,10 @@ void MockStorageServer::getHotRangeMetrics(const ReadHotSubRangeRequest& req) {
 	this->metrics.getReadHotRanges(req);
 }
 
+int64_t MockStorageServer::getHotShardsMetrics(const KeyRange& range) {
+	return 0;
+}
+
 Future<Void> MockStorageServer::run() {
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();

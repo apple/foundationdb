@@ -747,6 +747,7 @@ ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
 				// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
 				json_spirit::mObject statsObj;
 				statsObj["shard_bytes"] = ddMetricsRef.shardBytes;
+				statsObj["shard_bytes_per_ksecond"] = ddMetricsRef.shardBytesPerKSecond;
 				std::string statsString =
 				    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 				ValueRef bytes(result.arena(), statsString);
@@ -1218,7 +1219,12 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state std::vector<AddressExclusion> excl = wait((getAllExcludedServers(&tr)));
+	state Future<std::vector<AddressExclusion>> fExclusions = getAllExcludedServers(&tr);
+	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(&tr);
+
+	wait(success(fExclusions) && success(fExcludedLocalities));
+
+	state std::vector<AddressExclusion> excl = fExclusions.get();
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
@@ -1226,18 +1232,48 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
+	// We have to make use of the localities here to verify if a server is still in the server list,
+	// even if it might be missing in the workers as the server is not running anymore.
+	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+	// Decode the excluded localities to check if any server is excluded by locality.
+	state std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+	for (auto& excludedLocality : excludedLocalities) {
+		decodedExcludedLocalities.push_back(decodeLocality(excludedLocality));
+	}
+
 	for (auto& s : serverList) {
-		auto addresses = decodeServerListValue(s.value).getKeyValues.getEndpoint().addresses;
+		auto decodedServer = decodeServerListValue(s.value);
+		auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
 		if (addressExcluded(exclusions, addresses.address)) {
 			inProgressExclusion.insert(addresses.address);
 		}
+
 		if (addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get())) {
 			inProgressExclusion.insert(addresses.secondaryAddress.get());
+		}
+
+		// Check if the server is excluded based on a locality.
+		for (auto& excludedLocality : decodedExcludedLocalities) {
+			if (!decodedServer.locality.isPresent(excludedLocality.first)) {
+				continue;
+			}
+
+			if (decodedServer.locality.get(excludedLocality.first) != excludedLocality.second) {
+				continue;
+			}
+
+			inProgressExclusion.insert(addresses.address);
+			if (addresses.secondaryAddress.present()) {
+				inProgressExclusion.insert(addresses.secondaryAddress.get());
+			}
 		}
 	}
 
 	Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
 	ASSERT(value.present());
+	// TODO(jscheuermann): The logs key range doesn't hold any information about localities. This is a limitation
+	// for locality based exclusions. The problematic edge case here is a log server that still has mutation on it
+	// but is currently not part of the worker list, e.g. because it was shutdown or is partitioned.
 	auto logs = decodeLogsValue(value.get());
 	for (auto const& log : logs.first) {
 		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
@@ -1263,6 +1299,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 			result.arena().dependsOn(addrKey.arena());
 		}
 	}
+
 	return result;
 }
 
@@ -2901,6 +2938,29 @@ Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTrans
                                                              KeyRangeRef kr,
                                                              GetRangeLimits limitsHint) const {
 	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
+
+ACTOR static Future<RangeResult> FaultToleranceMetricsImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	state RangeResult res;
+	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+		Optional<Value> val = wait(getJSON(ryw->getDatabase(), "fault_tolerance"));
+		if (val.present()) {
+			res.push_back_deep(res.arena(), KeyValueRef(kr.begin, val.get()));
+		}
+	}
+	return res;
+}
+
+FaultToleranceMetricsImpl::FaultToleranceMetricsImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+Future<RangeResult> FaultToleranceMetricsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                        KeyRangeRef kr,
+                                                        GetRangeLimits limitsHint) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	return FaultToleranceMetricsImplActor(ryw, kr);
 }
 
 ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,

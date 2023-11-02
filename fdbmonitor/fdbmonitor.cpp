@@ -80,7 +80,9 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
+#ifdef __linux__
 constexpr uint64_t DEFAULT_MEMORY_LIMIT = 8LL << 30;
+#endif
 constexpr double MEMORY_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__

@@ -68,6 +68,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+Optional<std::string> fileBackupAgentProxy = Optional<std::string>();
+
 #define SevFRTestInfo SevVerbose
 // #define SevFRTestInfo SevInfo
 
@@ -314,25 +316,19 @@ public:
 		this->addPrefix().set(tr, addPrefix);
 		this->removePrefix().set(tr, removePrefix);
 
-		// Skip applyMutationsKeyVersionCount, applyMutationsKeyVersionMap, applyMutationsEnd, applyMutationsBegin
-		// for only-apply-mutation-logs restore. They were initialized in preloadApplyMutationsKeyVersionMap
-		clearApplyMutationsKeys(tr, onlyApplyMutationLogs);
+		clearApplyMutationsKeys(tr);
 
 		// Initialize add/remove prefix, range version map count and set the map's start key to InvalidVersion
 		tr->set(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid), addPrefix);
 		tr->set(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid), removePrefix);
 
-		// Skip init applyMutationsKeyVersionCount and applyMutationsKeyVersionMap for only-apply-mutation-logs restore.
-		// They were initialized in preloadApplyMutationsKeyVersionMap
-		if (!onlyApplyMutationLogs) {
-			int64_t startCount = 0;
-			tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid), StringRef((uint8_t*)&startCount, 8));
-			Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-			tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
-		}
+		int64_t startCount = 0;
+		tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid), StringRef((uint8_t*)&startCount, 8));
+		Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+		tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
 	}
 
-	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr, bool skipMutationKeyVersionMap = false) {
+	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		// Clear add/remove prefix keys
@@ -340,21 +336,17 @@ public:
 		tr->clear(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid));
 
 		// Clear range version map and count key
-		if (!skipMutationKeyVersionMap) {
-			tr->clear(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid));
-			Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-			tr->clear(KeyRangeRef(mapStart, strinc(mapStart)));
-		}
+		tr->clear(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid));
+		Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+		tr->clear(KeyRangeRef(mapStart, strinc(mapStart)));
 
 		// Clear any loaded mutations that have not yet been applied
 		Key mutationPrefix = mutationLogPrefix();
 		tr->clear(KeyRangeRef(mutationPrefix, strinc(mutationPrefix)));
 
-		if (!skipMutationKeyVersionMap) {
-			// Clear end and begin versions (intentionally in this order)
-			tr->clear(uidPrefixKey(applyMutationsEndRange.begin, uid));
-			tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
-		}
+		// Clear end and begin versions (intentionally in this order)
+		tr->clear(uidPrefixKey(applyMutationsEndRange.begin, uid));
+		tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
 	}
 
 	void setApplyBeginVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
@@ -1143,6 +1135,12 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 
 	return Void();
 }
+
+static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackupContainer> _bc) {
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(_bc->getURL(), fileBackupAgentProxy, {});
+	return bc;
+}
+
 Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf) {
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	StringRefReader reader(buf, restore_corrupted_data());
@@ -1838,11 +1836,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
-		if (!bc) {
+		Reference<IBackupContainer> _bc = wait(backup.backupContainer().getD(cx.getReference()));
+		if (!_bc) {
 			return Void();
 		}
-
+		state Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
 		state bool done = false;
 		state int64_t nrKeys = 0;
 		state Optional<bool> encryptionEnabled;
@@ -2653,7 +2651,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 				if (!bc) {
 					// Backup container must be present if we're still here
 					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
-					bc = _bc;
+					bc = getBackupContainerWithProxy(_bc);
 				}
 
 				Version currentVersion = tr->getReadVersion().get();
@@ -3180,7 +3178,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 				if (!bc) {
 					// Backup container must be present if we're still here
-					wait(store(bc, config.backupContainer().getOrThrow(tr)));
+					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+					bc = getBackupContainerWithProxy(_bc);
 				}
 
 				BackupConfig::RangeFileMapT::RangeResultType rangeresults =
@@ -3701,7 +3700,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				bc = restore.sourceContainer().getOrThrow(tr);
+				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
+				bc = getBackupContainerWithProxy(_bc);
 				restoreRanges = restore.getRestoreRangesOrDefault(tr);
 				addPrefix = restore.addPrefix().getD(tr);
 				removePrefix = restore.removePrefix().getD(tr);
@@ -4149,7 +4149,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
-				bc = _bc;
+				bc = getBackupContainerWithProxy(_bc);
 
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
 
@@ -4827,7 +4827,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				restore.fileBlockCount().clear(tr);
 				restore.fileCount().clear(tr);
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
-				bc = _bc;
+				bc = getBackupContainerWithProxy(_bc);
 
 				wait(tr->commit());
 				break;
@@ -5011,11 +5011,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state RestoreConfig restore(task);
 
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
+		state bool isBlobGranuleRestore;
+		wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
+
 		if (firstVersion == invalidVersion) {
-			// For blob granule restore, we can complete the restore job if no mutation log is needed
-			state bool isBlobGranuleRestore;
-			wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
 			if (isBlobGranuleRestore) {
+				// For blob granule restore, we can complete the restore job if no mutation log is needed
 				state Version beginVersion;
 				state Version restoreVersion;
 				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
@@ -5048,6 +5049,19 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 		wait(taskBucket->finish(tr, task));
+
+		// Initialize apply mutations map for non-blob-restore case. For blob restore, it's initialized
+		// in blob migrator
+		if (!isBlobGranuleRestore) {
+			state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
+			wait(success(logsOnly));
+			if (logsOnly.get().present() && logsOnly.get().get()) {
+				//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
+				//  to the earliest log version so no mutations are missed
+				Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
+				wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
+			}
+		}
 		return Void();
 	}
 
@@ -5285,7 +5299,7 @@ public:
 					if (pContainer != nullptr) {
 						Reference<IBackupContainer> c =
 						    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
-						*pContainer = c;
+						*pContainer = fileBackup::getBackupContainerWithProxy(c);
 					}
 
 					if (pUID != nullptr) {
@@ -5828,6 +5842,7 @@ public:
 						wait(
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
 						    store(bc, config.backupContainer().getOrThrow(tr)));
+						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
 
@@ -5971,6 +5986,7 @@ public:
 					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
 					     store(bc, config.backupContainer().getOrThrow(tr)) &&
 					     store(recentReadVersion, tr->getReadVersion()));
+					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
 
@@ -6365,6 +6381,7 @@ public:
 		}
 
 		state Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+		bc = fileBackup::getBackupContainerWithProxy(bc);
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();

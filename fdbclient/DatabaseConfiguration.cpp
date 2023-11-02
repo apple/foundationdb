@@ -37,8 +37,8 @@ void DatabaseConfiguration::resetInternal() {
 	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
 	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
-	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = perpetualStoreType =
-	    KeyValueStoreType::END;
+	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
+	perpetualStoreType = KeyValueStoreType::NONE;
 	desiredTSSCount = 0;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
@@ -792,20 +792,6 @@ bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) con
 		        .present()) {
 			return true;
 		}
-	}
-
-	return false;
-}
-
-// checks if this machineid of given locality is excluded.
-bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
-	if (locality.machineId().present()) {
-		return get(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
-		                                     locality.machineId().get().toString()))
-		           .present() ||
-		       get(encodeFailedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
-		                                   locality.machineId().get().toString()))
-		           .present();
 	}
 
 	return false;

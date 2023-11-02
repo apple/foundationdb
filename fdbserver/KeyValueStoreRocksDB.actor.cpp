@@ -1190,7 +1190,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
 		                          100 * 1000, // refill_period_us
 		                          10, // fairness
-		                          rocksdb::RateLimiter::Mode::kWritesOnly,
+		                          rocksdb::RateLimiter::Mode::kAllIo,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
 		                    : nullptr) {
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
@@ -1379,11 +1379,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			double writeBeginTime = timer_monotonic();
-			if (rateLimiter) {
-				// Controls the total write rate of compaction and flush in bytes per second.
-				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
-				rateLimiter->Request(a.batchToCommit->GetDataSize() /* bytes */, rocksdb::Env::IO_HIGH);
-			}
 			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			double currTime = timer_monotonic();
@@ -2110,6 +2105,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						--maxDeletes;
 						it++;
 					}
+					it = previousCommitKeysSet.lower_bound(keyRange.begin);
+					while (it != previousCommitKeysSet.end() && *it < keyRange.end) {
+						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						++counters.convertedDeleteKeyReqs;
+						--maxDeletes;
+						it++;
+					}
 				}
 			} else {
 				writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
@@ -2138,19 +2140,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> canCommit() override { return checkRocksdbState(this); }
 
-	Future<Void> commit(bool) override {
+	ACTOR Future<Void> commitInRocksDB(RocksDBKeyValueStore* self) {
 		// If there is nothing to write, don't write.
-		if (writeBatch == nullptr) {
+		if (self->writeBatch == nullptr) {
 			return Void();
 		}
 		auto a = new Writer::CommitAction();
-		a->batchToCommit = std::move(writeBatch);
-		keysSet.clear();
-		maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
-		auto res = a->done.getFuture();
-		writeThread->post(a);
-		return res;
+		a->batchToCommit = std::move(self->writeBatch);
+		self->previousCommitKeysSet = std::move(self->keysSet);
+		self->maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
+		state Future<Void> fut = a->done.getFuture();
+		self->writeThread->post(a);
+		wait(fut);
+		self->previousCommitKeysSet.clear();
+		return Void();
 	}
+
+	Future<Void> commit(bool) override { return commitInRocksDB(this); }
 
 	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
 		if (semaphore.waiters() > maxWaiters) {
@@ -2344,7 +2350,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	// keysSet will store the written keys in the current transaction.
+	// previousCommitKeysSet will store the written keys that are currently in the rocksdb commit path.
+	// When one commit is in the rocksdb commit path, the other processing commit in the kvsstorerocksdb
+	// read iterators will not see the the writes set in previousCommitKeysSet. To avoid that, we will
+	// maintain the previousCommitKeysSet until the rocksdb commit is processed and returned.
 	std::set<Key> keysSet;
+	std::set<Key> previousCommitKeysSet;
 	// maximum number of single key deletes in a commit, if ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled.
 	int maxDeletes;
 	Optional<Future<Void>> metrics;

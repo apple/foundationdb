@@ -418,8 +418,10 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 }
 
 // Cluster section of json output
-ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI, StatusArray* messages) {
-	state StatusRequest req;
+ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
+                                                          StatusArray* messages,
+                                                          std::string statusField) {
+	state StatusRequest req(statusField);
 	state Future<Void> clusterTimeout = delay(30.0);
 	state Optional<StatusObject> oStatusObj;
 
@@ -506,7 +508,8 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 }
 
 ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> connRecord,
-                                             Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface) {
+                                             Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface,
+                                             std::string statusField) {
 	if (!g_network)
 		throw network_not_setup();
 
@@ -548,7 +551,7 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 			loop {
 				if (clusterInterface->get().present()) {
 					Optional<StatusObject> _statusObjCluster =
-					    wait(clusterStatusFetcher(clusterInterface->get().get(), &clientMessages));
+					    wait(clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField));
 					if (_statusObjCluster.present()) {
 						statusObjCluster = _statusObjCluster.get();
 						// TODO: this is a temporary fix, getting the number of available coordinators should move to
@@ -622,12 +625,12 @@ ACTOR Future<Void> timeoutMonitorLeader(Database db) {
 	}
 }
 
-Future<StatusObject> StatusClient::statusFetcher(Database db) {
+Future<StatusObject> StatusClient::statusFetcher(Database db, std::string statusField) {
 	db->lastStatusFetch = now();
 	if (!db->statusClusterInterface) {
 		db->statusClusterInterface = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 		db->statusLeaderMon = timeoutMonitorLeader(db);
 	}
 
-	return statusFetcherImpl(db->getConnectionRecord(), db->statusClusterInterface);
+	return statusFetcherImpl(db->getConnectionRecord(), db->statusClusterInterface, statusField);
 }

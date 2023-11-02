@@ -24,6 +24,7 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
+#include <climits>
 #include <time.h>
 #include <iomanip>
 #include <openssl/sha.h>
@@ -94,6 +95,8 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	max_delay_retryable_error = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
+	max_delay_connection_failed = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
 	sdk_auth = false;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
 }
@@ -133,6 +136,8 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
+	TRY_PARAM(max_delay_retryable_error, dre);
+	TRY_PARAM(max_delay_connection_failed, dcf);
 	TRY_PARAM(sdk_auth, sa);
 	TRY_PARAM(global_connection_pool, gcp);
 #undef TRY_PARAM
@@ -174,6 +179,8 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(max_recv_bytes_per_second, rbps);
 	_CHECK_PARAM(sdk_auth, sa);
 	_CHECK_PARAM(global_connection_pool, gcp);
+	_CHECK_PARAM(max_delay_retryable_error, dre);
+	_CHECK_PARAM(max_delay_connection_failed, dcf);
 #undef _CHECK_PARAM
 	return r;
 }
@@ -310,10 +317,12 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			}
 
 			// The parameter is known to S3BlobStoreEndpoint so it must be numeric and valid.
-			char* valueEnd;
-			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
-			if (*valueEnd || (ivalue == 0 && value.toString() != "0"))
-				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
+			char* valueEnd = nullptr;
+			std::string s = value.toString();
+			long int ivalue = strtol(s.c_str(), &valueEnd, 10);
+			if (*valueEnd || (ivalue == 0 && s != "0") ||
+			    (((ivalue == LONG_MAX) || (ivalue == LONG_MIN)) && errno == ERANGE))
+				throw format("%s is not a valid value for %s", s.c_str(), name.toString().c_str());
 
 			// It should not be possible for this set to fail now since the dummy set above had to have worked.
 			ASSERT(knobs.set(name, ivalue));
@@ -736,13 +745,20 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			TraceEvent("S3BlobStoreEndpointReusingConnected")
 			    .suppressFor(60)
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			    .detail("ExpiresIn", rconn.expirationTime - now());
+			    .detail("ExpiresIn", rconn.expirationTime - now())
+			    .detail("Proxy", b->proxyHost.orDefault(""));
 			return rconn;
 		}
 		++b->blobStats->expiredConnections;
 	}
 	++b->blobStats->newConnections;
 	std::string host = b->host, service = b->service;
+	TraceEvent(SevDebug, "S3BlobStoreEndpointBuildingNewConnection")
+	    .detail("UseProxy", b->useProxy)
+	    .detail("TLS", b->knobs.secure_connection == 1)
+	    .detail("Host", host)
+	    .detail("Service", service)
+	    .log();
 	if (service.empty()) {
 		if (b->useProxy) {
 			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
@@ -768,10 +784,11 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	}
 	wait(conn->connectHandshake());
 
-	TraceEvent("S3BlobStoreEndpointNewConnection")
+	TraceEvent("S3BlobStoreEndpointNewConnectionSuccess")
 	    .suppressFor(60)
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
-	    .detail("ExpiresIn", b->knobs.max_connection_life);
+	    .detail("ExpiresIn", b->knobs.max_connection_life)
+	    .detail("Proxy", b->proxyHost.orDefault(""));
 
 	if (b->lookupKey || b->lookupSecret || b->knobs.sdk_auth)
 		wait(b->updateSecret());
@@ -964,6 +981,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			rconn.conn.clear();
 
 		} catch (Error& e) {
+			TraceEvent("S3BlobStoreDoRequestError").errorUnsuppressed(e);
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
@@ -1002,9 +1020,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		                                        : "S3BlobStoreEndpointRequestFailedRetryable")
 		                           : "S3BlobStoreEndpointRequestFailed");
 
+		bool connectionFailed = false;
 		// Attach err to trace event if present, otherwise extract some stuff from the response
 		if (err.present()) {
 			event.errorUnsuppressed(err.get());
+			if (err.get().code() == error_code_connection_failed) {
+				connectionFailed = true;
+			}
 		}
 		event.suppressFor(60);
 		if (!err.present()) {
@@ -1024,7 +1046,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		else
 			event.detail("RemoteHost", bstore->host);
 
-		event.detail("Verb", verb).detail("Resource", resource).detail("ThisTry", thisTry);
+		event.detail("Verb", verb)
+		    .detail("Resource", resource)
+		    .detail("ThisTry", thisTry)
+		    .detail("URI", canonicalURI)
+		    .detail("Proxy", bstore->proxyHost.orDefault(""));
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
 		// limit. Also skip incrementing the retry count for fast retries
@@ -1037,9 +1063,12 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		} else if (retryable) {
 			// We will wait delay seconds before the next retry, start with nextRetryDelay.
 			double delay = nextRetryDelay;
+			// conenctionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
+			// so there is no point of waiting too long, instead retry more aggressively
+			double limit =
+			    connectionFailed ? bstore->knobs.max_delay_connection_failed : bstore->knobs.max_delay_retryable_error;
 			// Double but limit the *next* nextRetryDelay.
-			nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
-
+			nextRetryDelay = std::min(nextRetryDelay * 2, limit);
 			// If r is valid then obey the Retry-After response header if present.
 			if (r) {
 				auto iRetryAfter = r->data.headers.find("Retry-After");
@@ -1895,5 +1924,13 @@ TEST_CASE("/backup/s3/guess_region") {
 	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
 	ASSERT(s3->getRegion() == "us-west-2");
 
+	url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sc=922337203685477580700";
+	try {
+		s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		// conversion of 922337203685477580700 to long int will overflow
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
 	return Void();
 }

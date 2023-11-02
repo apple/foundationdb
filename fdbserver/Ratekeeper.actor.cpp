@@ -309,6 +309,42 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> monitorHotShards(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+		loop {
+			wait(delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY));
+			if (!self->ssHighWriteQueue.present()) {
+				continue;
+			}
+
+			state UID ssi = self->ssHighWriteQueue.get();
+			state SetThrottledShardRequest setReq;
+
+			// TraceEvent(SevDebug, "SendGetHotShardsRequest");
+			try {
+				GetHotShardsRequest getReq;
+				GetHotShardsReply reply = wait(self->storageServerInterfaces[ssi].getHotShards.getReply(getReq));
+
+				setReq.throttledShards.insert(
+				    setReq.throttledShards.end(), reply.hotShards.begin(), reply.hotShards.end());
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
+				continue;
+			}
+			if (!setReq.throttledShards.size()) {
+				continue;
+			}
+			setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
+			for (auto& shard : setReq.throttledShards) {
+				TraceEvent(SevInfo, "SendRequestThrottleHotShard")
+				    .detail("Shard", shard)
+				    .detail("DelayUntil", setReq.expirationTime);
+			}
+			for (const auto& cpi : dbInfo->get().client.commitProxies) {
+				cpi.setThrottledShard.send(setReq);
+			}
+		}
+	}
+
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
@@ -430,6 +466,11 @@ public:
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
+
+		if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED) {
+			self.addActor.send(self.monitorHotShards(dbInfo));
+		}
+
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
@@ -674,6 +715,10 @@ Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 
 Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return tagThrottler->monitorThrottlingChanges();
+}
+
+Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return RatekeeperImpl::monitorHotShards(this, dbInfo);
 }
 
 Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -1343,6 +1388,10 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    .detail("AutoThrottlingEnabled", tagThrottler->isAutoThrottlingEnabled())
 		    .trackLatest(name);
 	}
+	ssHighWriteQueue.reset();
+	if (limitReason == limitReason_t::storage_server_write_queue_size) {
+		ssHighWriteQueue = reasonID;
+	}
 }
 
 Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
@@ -1403,20 +1452,31 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	busiestWriteTags.clear();
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
-	double maxRate = 0, maxBusyness = 0;
+	double maxRate = 0;
+	std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKWriters;
 	for (const auto& [tag, cost] : tagCostEst) {
 		double rate = cost.getCostSum() / elapsed;
+		double busyness = static_cast<double>(maxCost.getCostSum()) / totalWriteCosts;
+		if (rate < SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
+			continue;
+		}
+		if (topKWriters.size() < SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED) {
+			topKWriters.emplace(tag, rate, busyness);
+		} else if (topKWriters.top().rate < rate) {
+			topKWriters.pop();
+			topKWriters.emplace(tag, rate, busyness);
+		}
+
 		if (rate > maxRate) {
 			busiestTag = tag;
 			maxRate = rate;
 			maxCost = cost;
 		}
 	}
-	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
-		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
-		ASSERT_GT(totalWriteCosts, 0);
-		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
-		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
+
+	while (!topKWriters.empty()) {
+		busiestWriteTags.push_back(std::move(topKWriters.top()));
+		topKWriters.pop();
 	}
 
 	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,

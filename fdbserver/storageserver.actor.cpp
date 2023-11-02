@@ -865,6 +865,12 @@ public:
 
 	bool hasRange(Reference<ShardInfo> shard) const;
 
+	int size() const { return ranges.size(); }
+	// Public function to iterate over the ranges
+	std::vector<Reference<ShardInfo>>::const_iterator begin() const { return ranges.begin(); }
+
+	std::vector<Reference<ShardInfo>>::const_iterator end() const { return ranges.end(); }
+
 private:
 	const int64_t id;
 	std::vector<Reference<ShardInfo>> ranges;
@@ -1716,7 +1722,7 @@ public:
 	void addShard(ShardInfo* newShard) {
 		ASSERT(!newShard->keys.empty());
 		newShard->changeCounter = ++shardChangeCounter;
-		//TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State", newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
+		// TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State",newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
@@ -1936,6 +1942,8 @@ public:
 	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
 
 	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
+
+	int64_t getHotShardsMetrics(const KeyRange& range) override { return this->metrics.getHotShards(range); }
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
@@ -5041,10 +5049,12 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	// to make sure no onging auditStorageServerShardQ is running
 	if (data->trackShardAssignmentMinVersion != invalidVersion) {
 		// Another auditStorageServerShardQ is running
-		req.reply.sendError(audit_storage_failed());
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ExistStorageServerShardAudit") // unexpected
+		req.reply.sendError(audit_storage_cancelled());
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+		           "ExistStorageServerShardAuditExit") // unexpected
 		    .detail("NewAuditId", req.id)
 		    .detail("NewAuditType", req.getType());
+		return Void();
 	}
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
@@ -5083,6 +5093,10 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	state Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 	state int64_t remoteReadBytes = 0;
+	state double startTime = now();
+	state double lastRateLimiterWaitTime = 0;
+	state double rateLimiterBeforeWaitTime = 0;
+	state double rateLimiterTotalWaitTime = 0;
 
 	try {
 		loop {
@@ -5370,7 +5384,9 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						    .detail("AuditServer", data->thisServerID)
 						    .detail("CompleteRange", res.range)
 						    .detail("ClaimRange", claimRange)
-						    .detail("RangeToReadEnd", req.range.end);
+						    .detail("RangeToReadEnd", req.range.end)
+						    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
 						rangeToReadBegin = res.range.end;
 					} else { // complete
 						req.reply.send(res);
@@ -5378,18 +5394,31 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("AuditServer", data->thisServerID)
+						    .detail("ClaimRange", claimRange)
 						    .detail("CompleteRange", res.range)
 						    .detail("NumValidatedLocalShards", cumulatedValidatedLocalShardsNum)
-						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum);
+						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+						    .detail("TotalTime", now() - startTime);
 						break;
 					}
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					// In this case, we need not stop tracking shard assignment
+					// The shard history will not get unboundedly large for this case
+					// When this actor gets cancelled, data will be eventually destroyed
+					// Therefore, the shard history will be destroyed
+					throw e;
+				}
 				data->stopTrackShardAssignment();
 				wait(tr.onError(e));
 			}
 
+			rateLimiterBeforeWaitTime = now();
 			wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
+			lastRateLimiterWaitTime = now() - rateLimiterBeforeWaitTime;
+			rateLimiterTotalWaitTime = rateLimiterTotalWaitTime + lastRateLimiterWaitTime;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -5400,7 +5429,9 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID)
-		    .detail("Reason", failureReason);
+		    .detail("Reason", failureReason)
+		    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+		    .detail("TotalTime", now() - startTime);
 		// Make sure the history collection is not open due to this audit
 		data->stopTrackShardAssignment();
 		TraceEvent(SevVerbose, "SSShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
@@ -5449,6 +5480,10 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	state int64_t validatedBytes = 0;
 	state bool complete = false;
 	state int64_t checkTimes = 0;
+	state double startTime = now();
+	state double lastRateLimiterWaitTime = 0;
+	state double rateLimiterBeforeWaitTime = 0;
+	state double rateLimiterTotalWaitTime = 0;
 	state Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
 
@@ -5562,6 +5597,15 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 					    .detail("RepsSize", reps.size());
 					throw audit_storage_cancelled();
 				}
+				if (reps.size() == 1) {
+					// if no other server to compare
+					TraceEvent(SevWarn, "SSAuditStorageShardReplicaNothingToCompare", data->thisServerID)
+					    .detail("AuditID", req.id)
+					    .detail("AuditRange", req.range)
+					    .detail("AuditType", req.type)
+					    .detail("TargetServers", describe(req.targetServers));
+					complete = true;
+				}
 				// Compare local and each remote one by one
 				// The last one of reps is local, so skip it
 				for (int repIdx = 0; repIdx < reps.size() - 1; repIdx++) {
@@ -5665,7 +5709,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						errors.push_back(error);
 						continue; // check next remote server
 					} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-						ASSERT(missingKey);
+						if (!missingKey) {
+							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+							           "SSAuditStorageShardReplicaMissingKeyUnexpected",
+							           data->thisServerID);
+						}
 						std::string error =
 						    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
 						           remoteServer.uniqueID.first(),
@@ -5687,6 +5735,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 				    .detail("AuditID", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditType", req.type)
+				    .detail("AuditServer", data->thisServerID)
+				    .detail("ReplicaServers", req.targetServers)
 				    .detail("CheckTimes", checkTimes)
 				    .detail("NumValidatedKeys", numValidatedKeys)
 				    .detail("CurrentValidatedInclusiveRange", claimRange)
@@ -5742,10 +5792,14 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("AuditServer", data->thisServerID)
+						    .detail("ReplicaServers", req.targetServers)
+						    .detail("ClaimRange", claimRange)
 						    .detail("CompleteRange", res.range)
 						    .detail("CheckTimes", checkTimes)
 						    .detail("NumValidatedKeys", numValidatedKeys)
-						    .detail("ValidatedBytes", validatedBytes);
+						    .detail("ValidatedBytes", validatedBytes)
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+						    .detail("TotalTime", now() - startTime);
 						break;
 					} else {
 						TraceEvent(SevInfo, "SSAuditStorageShardReplicaPartialDone", data->thisServerID)
@@ -5753,7 +5807,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("AuditServer", data->thisServerID)
-						    .detail("CompleteRange", res.range);
+						    .detail("ReplicaServers", req.targetServers)
+						    .detail("ClaimRange", claimRange)
+						    .detail("CompleteRange", res.range)
+						    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
 						rangeToReadBegin = claimRange.end;
 					}
 				}
@@ -5761,7 +5819,10 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 				wait(tr.onError(e));
 			}
 
+			rateLimiterBeforeWaitTime = now();
 			wait(rateLimiter->getAllowance(readBytes)); // RateKeeping
+			lastRateLimiterWaitTime = now() - rateLimiterBeforeWaitTime;
+			rateLimiterTotalWaitTime = rateLimiterTotalWaitTime + lastRateLimiterWaitTime;
 			++checkTimes;
 		}
 
@@ -5773,7 +5834,9 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
-		    .detail("AuditServer", data->thisServerID);
+		    .detail("AuditServer", data->thisServerID)
+		    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+		    .detail("TotalTime", now() - startTime);
 		if (e.code() == error_code_audit_storage_cancelled) {
 			req.reply.sendError(audit_storage_cancelled());
 		} else if (e.code() == error_code_audit_storage_task_outdated) {
@@ -7449,8 +7512,13 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				    .detail("Chunk", chunks[i].keyRange)
 				    .detail("Version", chunks[i].includedVersion);
 				RangeResult rows;
+				if (i == chunks.size() - 1) {
+					rows.more = false;
+				} else {
+					rows.more = true;
+					rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+				}
 				results.send(rows);
-				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 				continue;
 			}
 			try {
@@ -11774,7 +11842,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		recentCommitStats.back().beforeStorageUpdates = beforeStorageUpdates;
 
 		// Allow data fetch to use an additional bytesLeft but don't penalize fetch budget if bytesLeft is negative
-		if (bytesLeft > 0) {
+		if (SERVER_KNOBS->STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET && bytesLeft > 0) {
 			data->fetchKeysBytesBudget += bytesLeft;
 			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 
@@ -13572,6 +13640,41 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
+			}
+			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
+				struct ComparePair {
+					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
+						return lhs.second > rhs.second;
+					}
+				};
+				std::
+				    priority_queue<std::pair<KeyRange, int64_t>, std::vector<std::pair<KeyRange, int64_t>>, ComparePair>
+				        topRanges;
+
+				for (auto& s : self->shards.ranges()) {
+					KeyRange keyRange = KeyRange(s.range());
+					int64_t bytesWrittenPerKSecond = self->metrics.getHotShards(keyRange);
+					if (systemKeys.intersects(keyRange) ||
+					    (bytesWrittenPerKSecond <= SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)) {
+						continue;
+					}
+					if (topRanges.size() < SERVER_KNOBS->HOT_SHARD_THROTTLING_TRACKED) {
+						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+					} else if (bytesWrittenPerKSecond > topRanges.top().second) {
+						topRanges.pop();
+						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+					}
+				}
+
+				// TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
+				GetHotShardsReply reply;
+
+				while (!topRanges.empty()) {
+					reply.hotShards.push_back(topRanges.top().first);
+					topRanges.pop();
+				}
+
+				req.reply.send(reply);
 			}
 			when(wait(self->actors.getResult())) {}
 		}

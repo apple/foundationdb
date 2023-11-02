@@ -30,6 +30,8 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileWriteChecker>::delref(); }
 
+	virtual StringRef getClassName() override { return "AsyncFileWriteChecker"_sr; }
+
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	Future<int> read(void* data, int length, int64_t offset) override {
 		// Lambda must hold a reference to this to keep it alive until after the read

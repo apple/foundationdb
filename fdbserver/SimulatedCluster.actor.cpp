@@ -472,7 +472,7 @@ public:
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
-	//	2 = "memory-radixtree-beta"
+	//	2 = "memory-radixtree"
 	//	3 = "ssd-redwood-1"
 	//	4 = "ssd-rocksdb-v1"
 	//	5 = "ssd-sharded-rocksdb"
@@ -1762,7 +1762,7 @@ void memoryStorageEngineConfig(SimulationConfig* simCfg) {
 
 void radixTreeStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using radix-tree storage engine");
-	simCfg->set_config("memory-radixtree-beta");
+	simCfg->set_config("memory-radixtree");
 }
 
 void redwoodStorageEngineConfig(SimulationConfig* simCfg) {

@@ -5,6 +5,7 @@ machineCount = 20
 commitProxyCount = 4
 config = 'triple'
 desiredTLogCount = 6
+storageEngineExcludeTypes = [5]
 
 [[knobs]]
 enable_worker_health_monitor = true
@@ -13,6 +14,7 @@ cc_worker_health_checking_interval = 15
 cc_min_degradation_interval = 30
 cc_health_trigger_recovery = true
 peer_latency_degradation_threshold = 1
+peek_tracker_expiration_time = 600
 
 [[test]]
 testTitle = 'ClogTlog'

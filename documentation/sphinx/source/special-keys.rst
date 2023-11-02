@@ -155,6 +155,11 @@ storage_durability_lag     number   The difference between the newest version an
 storage_queue              number   The number of bytes of mutations that need to be stored in memory on this storage process
 ========================== ======== ===============
 
+``\xff\xff/metrics/fault_tolerance_metrics_json``
+
+Fetches the following fault tolerance related json fields (in addition to the ``client`` json field) of :doc:`Machine-readable status <mr-status>`: 
+``fault_tolerance``, ``data``, ``logs``, ``maintenance_zone``, ``maintenance_seconds_remaining``, ``qos``, ``recovery_state``, ``messages``.
+
 Caveats
 ~~~~~~~
 

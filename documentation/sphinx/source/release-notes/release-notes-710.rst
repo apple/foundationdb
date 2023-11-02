@@ -2,6 +2,52 @@
 Release Notes
 #############
 
+7.1.43
+======
+* Same as 7.1.42 release with AVX enabled.
+
+7.1.42
+======
+* Released with AVX disabled.
+* Added redistribute fdbcli command to manually split shards. `(PR #10909) <https://github.com/apple/foundationdb/pull/10909>`_, `(PR #10936) <https://github.com/apple/foundationdb/pull/10936>`_, `(PR #10942) <https://github.com/apple/foundationdb/pull/10942>`_, `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_, and `(PR #10958) <https://github.com/apple/foundationdb/pull/10958>`_
+* Fixed a MacOS linking issue for go bindings. `(PR #10924) <https://github.com/apple/foundationdb/pull/10924>`_
+* Added knobs to control backup retry delays for blob stores. `(PR #10947) <https://github.com/apple/foundationdb/pull/10947>`_
+* Fixed two use-after-free bugs for backup agents. `(PR #10951) <https://github.com/apple/foundationdb/pull/10951>`_
+* Added automatic range split for hot storage queue. `(PR #10932) <https://github.com/apple/foundationdb/pull/10932>`_
+* Fixed multiple bugs related to locality based exclusions. `(PR #10976) <https://github.com/apple/foundationdb/pull/10976>`_, `(PR #11008) <https://github.com/apple/foundationdb/pull/11008>`_, and `(PR #11025) <https://github.com/apple/foundationdb/pull/11025>`_
+* Fixed compaction rate limiter for RocksDB storage engine. `(PR #10988) <https://github.com/apple/foundationdb/pull/10988>`_
+* Added a perpetual wiggle option to have multiple storage servers in rebalance state during wiggling. `(PR #10995) <https://github.com/apple/foundationdb/pull/10995>`_
+* Fixed exclude status of machines in status json when not all processes are excluded. `(PR #10996) <https://github.com/apple/foundationdb/pull/10996>`_ and `(PR #11006) <https://github.com/apple/foundationdb/pull/11006>`_
+
+7.1.41
+======
+* Same as 7.1.40 release with AVX enabled.
+
+7.1.40
+======
+* Released with AVX disabled.
+* Removed storageWiggleID from storage metadata if the storage server is not wiggling. `(PR #10913) <https://github.com/apple/foundationdb/pull/10913>`_
+* Augmented storage team selection to be aware of storage queue sizes. `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_
+* Fixed the proxy setting for backup agents. `(PR #10903) <https://github.com/apple/foundationdb/pull/10903>`_
+* Added an option to set perpetual_storage_wiggle_engine to none. `(PR #10881) <https://github.com/apple/foundationdb/pull/10881>`_
+
+7.1.39
+======
+* Same as 7.1.38 release with AVX enabled.
+
+7.1.38
+======
+* Released with AVX disabled.
+* Added locality check on reading perpetualStorageWiggleIDPrefix key when DD restarts. `(PR #10864) <https://github.com/apple/foundationdb/pull/10864>`_
+* Added perpetual wiggle wait based on data balance of the cluster. `(PR #10865) <https://github.com/apple/foundationdb/pull/10865>`_
+* Added rocksdb options to delete old rocksdb logs. `(PR #10872) <https://github.com/apple/foundationdb/pull/10872>`_
+* Added knob to guard the gray failure rejection during TLog recovery. `(PR #10852) <https://github.com/apple/foundationdb/pull/10852>`_
+* Added knob RESOLVE_PREFER_IPV4_ADDR to prefer IPv4 addresses. `(PR #10826) <https://github.com/apple/foundationdb/pull/10826>`_
+* Added perpetual_storage_wiggle_engine config to support storage migration with perpetual wiggle. `(PR #10790) <https://github.com/apple/foundationdb/pull/10790>`_
+* Fixed the return code for perpetual wiggle configure command. `(PR #10795) <https://github.com/apple/foundationdb/pull/10795>`_
+* Fixed a compatibility issue of s3 backup. `(PR #10774) <https://github.com/apple/foundationdb/pull/10774>`_
+* Added proxy to backup agent via global variable. `(PR #10875) <https://github.com/apple/foundationdb/pull/10875>`_
+
 7.1.37
 ======
 * Same as 7.1.36 release with AVX enabled.

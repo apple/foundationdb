@@ -2,6 +2,49 @@
 Release Notes
 #############
 
+7.3.25
+======
+* Same as 7.3.24 release with AVX enabled.
+
+7.3.24
+======
+* Released with AVX disabled.
+* Added support for large shard. `(PR#10965) <https://github.com/apple/foundationdb/pull/10965>`_
+* Fixed perpetual wiggle locality match regex. `(PR#10973) <https://github.com/apple/foundationdb/pull/10973>`_
+* Added a knob to throttle perpetual wiggle data move. `(PR#10957) <https://github.com/apple/foundationdb/pull/10957>`_
+
+7.3.19
+======
+* Same as 7.3.18 release with AVX enabled.
+
+7.3.18
+======
+* Released with AVX disabled.
+* Changed Event to use std::latch from c++20. `(PR #10929) <https://github.com/apple/foundationdb/pull/10929>`_
+* Added support for preinstalled libfmt. `(PR #10929) <https://github.com/apple/foundationdb/pull/10929>`_
+* Changed perpetual_storage_wiggle_locality database option to take a list of localities. `(PR #10928) <https://github.com/apple/foundationdb/pull/10928>`_
+* Fixed the trailing newline in c++filt output for Implib.so. `(PR #10921) <https://github.com/apple/foundationdb/pull/10921>`_
+* Stopped tracking a storage server after its removal. `(PR #10921) <https://github.com/apple/foundationdb/pull/10921>`_
+* Fixed Ratekeeper for not accounting dropped requests. `(PR #10921) <https://github.com/apple/foundationdb/pull/10921>`_
+* Fixed a memory leak of cluster controller's status json invocation. `(PR #10921) <https://github.com/apple/foundationdb/pull/10921>`_
+* Fixed cluster controller from issuing many point reads for storage metadata. `(PR #10906) <https://github.com/apple/foundationdb/pull/10906>`_
+* Fixed multiple issues with AuditStorage. `(PR #10895) <https://github.com/apple/foundationdb/pull/10895>`_
+* Disabled storage server read sampling by default. `(PR #10899) <https://github.com/apple/foundationdb/pull/10899>`_
+
+7.3.17
+======
+* Same as 7.3.16 release with AVX enabled.
+
+7.3.16
+======
+* Released with AVX disabled.
+* Added location_metadata fdbcli to query shard locations and assignements. `(PR #10428) <https://github.com/apple/foundationdb/pull/10428>`_
+* Added degraded/disconnected peer recovery in gray failure. `(PR #10541) <https://github.com/apple/foundationdb/pull/10541>`_
+* Added replica and metadata audit support. `(PR #10631) <https://github.com/apple/foundationdb/pull/10631>`_
+* Added a SecurityMode for data distributor where data movements are not allowed but auditStorage is enabled. `(PR #10660) <https://github.com/apple/foundationdb/pull/10660>`_
+* Remove SS entries from RateKeeper once it is down. `(PR #10681) <https://github.com/apple/foundationdb/pull/10681/files>`_
+* Added the support of manual compaction for Sharded RocksDB. `(PR #10815) <https://github.com/apple/foundationdb/pull/10838>`_
+
 7.3.0
 =====
 

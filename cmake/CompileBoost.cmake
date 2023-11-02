@@ -9,7 +9,7 @@ function(compile_boost)
 
   # Configure bootstrap command
   set(BOOTSTRAP_COMMAND "./bootstrap.sh")
-  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams,system,serialization")
+  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams,system,serialization,program_options")
 
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   # Can't build Boost with Intel compiler, use clang instead.
@@ -38,6 +38,10 @@ function(compile_boost)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
+    if (APPLE)
+      # Remove this after boost 1.81 or above is used
+      list(APPEND BOOST_COMPILER_FLAGS -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
+    endif()
     list(APPEND BOOST_LINK_FLAGS -lc++ -lc++abi)
     if (NOT APPLE)
       list(APPEND BOOST_LINK_FLAGS -static-libgcc)
@@ -88,11 +92,16 @@ function(compile_boost)
                        "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_serialization.a"
-                       "${BOOST_INSTALL_DIR}/lib/libboost_system.a")
+                       "${BOOST_INSTALL_DIR}/lib/libboost_system.a"
+					   "${BOOST_INSTALL_DIR}/lib/libboost_program_options.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_context PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
+
+  add_library(${COMPILE_BOOST_TARGET}_program_options STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_program_options ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_program_options PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_program_options.a")
 
   add_library(${COMPILE_BOOST_TARGET}_filesystem STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}Project)
@@ -138,11 +147,11 @@ set(Boost_USE_STATIC_LIBS ON)
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0_clang)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0_clang)
-  message(STATUS "Using Clang version of boost::context boost::filesystem and boost::iostreams")
+  message(STATUS "Using Clang version of boost")
 else ()
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0)
-  message(STATUS "Using g++ version of boost::context boost::filesystem and boost::iostreams")
+  message(STATUS "Using g++ version of boost")
 endif ()
 
 if(BOOST_ROOT)
@@ -154,13 +163,16 @@ if(WIN32)
   # properly for config mode. So we use the old way on Windows
   #  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
   # I think depending on the cmake version this will cause weird warnings
-  find_package(Boost 1.78 COMPONENTS filesystem iostreams serialization system)
+  find_package(Boost 1.78 COMPONENTS filesystem iostreams serialization system program_options)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
+
+  add_library(boost_target_program_options INTERFACE)
+  target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
   return()
 endif()
 
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 # The precompiled boost silently broke in CI.  While investigating, I considered extending
@@ -179,6 +191,9 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
+
+  add_library(boost_target_program_options INTERFACE)
+  target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
 elseif(WIN32)
   message(FATAL_ERROR "Could not find Boost")
 else()

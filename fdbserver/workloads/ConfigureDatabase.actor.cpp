@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -305,14 +307,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 
 				state std::string wiggleLocalityKeyValue = conf.perpetualStorageWiggleLocality;
-				state std::string wiggleLocalityKey;
-				state std::string wiggleLocalityValue;
+				state std::vector<std::pair<Optional<Value>, Optional<Value>>> wiggleLocalityKeyValues =
+				    ParsePerpetualStorageWiggleLocality(wiggleLocalityKeyValue);
 				state int i;
-				if (wiggleLocalityKeyValue != "0") {
-					int split = wiggleLocalityKeyValue.find(':');
-					wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
-					wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
-				}
 
 				state bool pass = true;
 				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
@@ -321,8 +318,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					// Check that each storage server has the correct key value store type
 					if (!storageServers[i].isTss() &&
 					    (wiggleLocalityKeyValue == "0" ||
-					     (storageServers[i].locality.get(wiggleLocalityKey).present() &&
-					      storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue))) {
+					     localityMatchInList(wiggleLocalityKeyValues, storageServers[i].locality))) {
 						ReplyPromise<KeyValueStoreType> typeReply;
 						ErrorOr<KeyValueStoreType> keyValueStoreType =
 						    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
@@ -445,7 +441,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					storeTypeStr = memoryTypes[deterministicRandom()->randomInt(0, 3)];
 					break;
 				case 2:
-					storeTypeStr = "memory-radixtree-beta";
+					storeTypeStr = "memory-radixtree";
 					break;
 				case 3:
 					// Experimental suffix is still supported so test it
@@ -478,19 +474,31 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					state std::string randomPerpetualWiggleLocality;
 					if (deterministicRandom()->random01() < 0.25) {
 						state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
-						StorageServerInterface randomSS =
-						    storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
+						std::string localityFilter;
+						int selectSSCount =
+						    deterministicRandom()->randomInt(1, std::min(4, (int)(storageServers.size())));
 						std::vector<StringRef> localityKeys = { LocalityData::keyDcId,
 							                                    LocalityData::keyDataHallId,
 							                                    LocalityData::keyZoneId,
 							                                    LocalityData::keyMachineId,
 							                                    LocalityData::keyProcessId };
-						StringRef randomLocalityKey =
-						    localityKeys[deterministicRandom()->randomInt(0, localityKeys.size())];
-						if (randomSS.locality.isPresent(randomLocalityKey)) {
-							randomPerpetualWiggleLocality =
-							    " perpetual_storage_wiggle_locality=" + randomLocalityKey.toString() + ":" +
-							    randomSS.locality.get(randomLocalityKey).get().toString();
+						for (int i = 0; i < selectSSCount; ++i) {
+							StorageServerInterface randomSS =
+							    storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
+							StringRef randomLocalityKey =
+							    localityKeys[deterministicRandom()->randomInt(0, localityKeys.size())];
+							if (randomSS.locality.isPresent(randomLocalityKey)) {
+								if (localityFilter.size() > 0) {
+									localityFilter += ";";
+								}
+								localityFilter += randomLocalityKey.toString() + ":" +
+								                  randomSS.locality.get(randomLocalityKey).get().toString();
+							}
+						}
+
+						if (localityFilter.size() > 0) {
+							TraceEvent("ConfigureTestSettingWiggleLocality").detail("LocalityFilter", localityFilter);
+							randomPerpetualWiggleLocality = " perpetual_storage_wiggle_locality=" + localityFilter;
 						}
 					}
 

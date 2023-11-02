@@ -48,6 +48,7 @@ Future<StatusReply> clusterGetStatus(
     Database const& cx,
     std::vector<WorkerDetails> const& workers,
     std::vector<ProcessIssues> const& workerIssues,
+    std::vector<StorageServerMetaInfo> const& storageMetadatas,
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
@@ -55,6 +56,8 @@ Future<StatusReply> clusterGetStatus(
     ConfigBroadcaster const* const& conifgBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
     metacluster::MetaclusterMetrics const& metaclusterMetrics);
+
+StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(

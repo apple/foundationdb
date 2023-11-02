@@ -57,7 +57,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define ENABLE_DEBUG_MG true
+#define ENABLE_DEBUG_MG false
 
 template <typename... T>
 static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
@@ -96,7 +96,7 @@ private:
 				continue;
 			}
 
-			if (phase > BlobRestorePhase::COPYING_DATA) {
+			if (phase > BlobRestorePhase::COPIED_DATA) {
 				CODE_PROBE(true, "Restart blob migrator after data copy");
 				TraceEvent("BlobMigratorAlreadyCopied", self->interf_.id()).detail("Phase", phase);
 				return Void();
@@ -143,6 +143,9 @@ private:
 					TraceEvent("ReplacedStorageInterfaceError", self->interf_.id()).error(e);
 					throw e;
 				}
+			} else if (phase == BlobRestorePhase::COPIED_DATA) {
+				CODE_PROBE(true, "Restart blob migrator after data copy");
+				self->addActor(logProgress(self));
 			}
 			return Void();
 		}
@@ -213,16 +216,70 @@ private:
 		state Reference<BlobRestoreController> controller = makeReference<BlobRestoreController>(self->db_, normalKeys);
 		loop {
 			BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(controller));
-			if (phase > COPYING_DATA) {
+			if (phase > COPIED_DATA) {
 				return Void();
 			}
 			bool done = wait(checkCopyProgress(self));
 			if (done) {
+				wait(BlobRestoreController::setPhase(controller, COPIED_DATA, self->interf_.id()));
+				wait(waitForPendingDataMovements(self));
 				wait(BlobRestoreController::setPhase(controller, APPLYING_MLOGS, self->interf_.id()));
 				TraceEvent("BlobMigratorCopied", self->interf_.id()).log();
 				return Void();
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
+		}
+	}
+
+	// Wait until all pending data movements are done. Data movement starts earlier may still potentially
+	// read data from blob, which may cause race with applying mutation logs.
+	ACTOR static Future<Void> waitForPendingDataMovements(Reference<BlobMigrator> self) {
+		loop {
+			bool pending = wait(checkPendingDataMovements(self));
+			TraceEvent("BlobMigratorCheckPendingMovement", self->interf_.id()).detail("Pending", pending);
+			if (!pending)
+				return Void();
+			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
+		}
+	}
+
+	// Check if there is any pending data movement
+	ACTOR static Future<bool> checkPendingDataMovements(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> controller = makeReference<BlobRestoreController>(self->db_, normalKeys);
+		state Transaction tr(self->db_);
+		state Key begin = normalKeys.begin;
+
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state std::vector<UID> src;
+				state std::vector<UID> dest;
+				state UID srcId;
+				state UID destId;
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				while (begin < normalKeys.end) {
+					state RangeResult keyServers = wait(krmGetRanges(&tr,
+					                                                 keyServersPrefix,
+					                                                 KeyRangeRef(begin, normalKeys.end),
+					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					state int i = 0;
+					for (; i < keyServers.size() - 1; ++i) {
+						state KeyValueRef it = keyServers[i];
+						decodeKeyServersValue(UIDtoTagMap, it.value, src, dest, srcId, destId);
+						if (!dest.empty()) {
+							return true;
+						}
+					}
+					begin = keyServers.back().key;
+				}
+				return false;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
 
@@ -739,6 +796,8 @@ public: // Methods for IStorageMetricsService
 		ReadHotSubRangeReply emptyReply;
 		req.reply.send(emptyReply);
 	}
+
+	int64_t getHotShardsMetrics(const KeyRange& range) override { return 0; }
 
 	template <class Reply>
 	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {

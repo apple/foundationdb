@@ -232,6 +232,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
 		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
 		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
+		state double consistenyCheckerBeginTime = now();
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -412,7 +413,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("ConsistencyCheck_FinishedCheck").detail("Repetitions", self->repetitions);
+		TraceEvent("ConsistencyCheck_FinishedCheck")
+		    .detail("Repetitions", self->repetitions)
+		    .detail("TimeSpan", now() - consistenyCheckerBeginTime);
 
 		return Void();
 	}
@@ -931,13 +934,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int j;
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 		state std::string wiggleLocalityKeyValue = configuration.perpetualStorageWiggleLocality;
-		state std::string wiggleLocalityKey;
-		state std::string wiggleLocalityValue;
-		if (wiggleLocalityKeyValue != "0") {
-			int split = wiggleLocalityKeyValue.find(':');
-			wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
-			wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
-		}
+		state std::vector<std::pair<Optional<Value>, Optional<Value>>> wiggleLocalityKeyValues =
+		    ParsePerpetualStorageWiggleLocality(configuration.perpetualStorageWiggleLocality);
 
 		// Check each pair of storage servers for an address match
 		for (i = 0; i < storageServers.size(); i++) {
@@ -949,12 +947,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!keyValueStoreType.present()) {
 				TraceEvent("ConsistencyCheck_ServerUnavailable").detail("ServerID", storageServers[i].id());
 				self->testFailure("Storage server unavailable");
-			} else if (configuration.perpetualStoreType.storeType() != KeyValueStoreType::END) {
+			} else if (configuration.perpetualStoreType.isValid()) {
 				// Perpetual storage wiggle is used to migrate storage. Check that the matched storage servers are
 				// correctly migrated.
 				if (wiggleLocalityKeyValue == "0" ||
-				    (storageServers[i].locality.get(wiggleLocalityKey).present() &&
-				     storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue)) {
+				    localityMatchInList(wiggleLocalityKeyValues, storageServers[i].locality)) {
 					if (keyValueStoreType.get() != configuration.perpetualStoreType) {
 						TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 						    .detail("ServerID", storageServers[i].id())
@@ -981,8 +978,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			            (storageServers[i].isTss() &&
 			             keyValueStoreType.get() != configuration.testingStorageServerStoreType)) &&
 			           (wiggleLocalityKeyValue == "0" ||
-			            (storageServers[i].locality.get(wiggleLocalityKey).present() &&
-			             storageServers[i].locality.get(wiggleLocalityKey).get().toString() == wiggleLocalityValue))) {
+			            localityMatchInList(wiggleLocalityKeyValues, storageServers[i].locality))) {
 				TraceEvent("ConsistencyCheck_WrongKeyValueStoreType")
 				    .detail("ServerID", storageServers[i].id())
 				    .detail("StoreType", keyValueStoreType.get().toString())

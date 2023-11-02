@@ -279,6 +279,10 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr, "ERROR: A cluster cannot change its encryption_at_rest state after database creation.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::INVALID_STORAGE_TYPE:
+		fprintf(stderr, "ERROR: Invalid storage type for storage or TLog.\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
@@ -302,7 +306,7 @@ void configureGenerator(const char* text,
 		                   "memory",
 		                   "memory-1",
 		                   "memory-2",
-		                   "memory-radixtree-beta",
+		                   "memory-radixtree",
 		                   "commit_proxies=",
 		                   "grv_proxies=",
 		                   "logs=",
@@ -323,7 +327,7 @@ CommandFactory configureFactory(
     "configure",
     CommandHelp(
         "configure [new|tss]"
-        "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
+        "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree|proxies=<PROXIES>|"
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"

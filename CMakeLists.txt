@@ -53,6 +53,15 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
+option(WITH_ACAC "Enable actor stack recording" OFF)
+if (WITH_ACAC)
+  message(STATUS "Build FoundationDB with AcAC support")
+  if (FDB_RELEASE OR FDB_RELEASE_CANDITATE)
+	message(FATAL_ERROR "ACAC will cause severe slowdown of the system and SHOULD not be enabled in Release.")
+  endif()
+  add_compile_definitions(WITH_ACAC)
+endif()
+
 ################################################################################
 # Packages used for bindings
 ################################################################################
@@ -242,3 +251,5 @@ endif()
 print_components()
 
 message(STATUS "CPACK_COMPONENTS_ALL ${CPACK_COMPONENTS_ALL}")
+
+

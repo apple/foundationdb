@@ -127,6 +127,8 @@ public:
 	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
 	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
 	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
+	double WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER; // take effects when pertual wiggle priority is larger
+	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
@@ -203,6 +205,9 @@ public:
 	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
 
+	bool ALLOW_LARGE_SHARD;
+	int MAX_LARGE_SHARD_BYTES;
+
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
@@ -231,6 +236,7 @@ public:
 	// When the sampled read operations changes more than this threshold, the
 	// shard metrics will update immediately
 	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
+	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // experimental
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
@@ -245,6 +251,11 @@ public:
 	                                          // load balance in the cluster
 	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
 	                                                 // before perpetual wiggle will start the next wiggle
+	int PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO; // Maximum number of storage servers that can have the load bytes
+	                                                // less than PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO before
+	                                                // perpetual wiggle will start the next wiggle.
+	                                                // Used to speed up wiggling rather than waiting for every SS to get
+	                                                // balanced/filledup before starting the next wiggle.
 	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
 	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	double LOG_ON_COMPLETION_DELAY;
@@ -440,7 +451,7 @@ public:
 	int64_t SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
 	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
 	bool ROCKSDB_PARANOID_FILE_CHECKS;
-	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
+	double ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	int64_t ROCKSDB_WAL_TTL_SECONDS;
@@ -743,6 +754,7 @@ public:
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 	double STORAGE_FETCH_KEYS_DELAY;
+	bool STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -809,6 +821,11 @@ public:
 	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;
 	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
 	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
+
+	bool HOT_SHARD_THROTTLING_ENABLED;
+	double HOT_SHARD_THROTTLING_EXPIRE_AFTER;
+	int64_t HOT_SHARD_THROTTLING_TRACKED;
+	double HOT_SHARD_MONITOR_FREQUENCY;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -901,6 +918,7 @@ public:
 	bool AUDIT_DATAMOVE_POST_CHECK;
 	int AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX;
 	int AUDIT_STORAGE_RATE_PER_SERVER_MAX;
+	bool ENABLE_AUDIT_VERBOSE_TRACE;
 	bool LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT;
 	double LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY;
 	int LOGGING_RECENT_STORAGE_COMMIT_SIZE;
@@ -997,6 +1015,8 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING; // When enabled, health monitor will try to detect any gray
+	                                                   // failure during tlog recovery during the recovery process.
 	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
 	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
 	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,

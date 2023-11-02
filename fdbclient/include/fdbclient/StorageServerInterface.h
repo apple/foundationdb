@@ -123,6 +123,7 @@ struct StorageServerInterface {
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
 	RequestStream<struct AuditStorageRequest> auditStorage;
+	RequestStream<struct GetHotShardsRequest> getHotShards;
 
 private:
 	bool acceptingRequests;
@@ -198,6 +199,8 @@ public:
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 				auditStorage =
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
+				getHotShards =
+				    RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -250,6 +253,7 @@ public:
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
 		streams.push_back(auditStorage.getReceiver());
+		streams.push_back(getHotShards.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -258,6 +262,14 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 	Tag tag;
 	StorageServerInterface interf;
 	StorageInfo() : tag(invalidTag) {}
+};
+
+struct StorageServerMetaInfo : public StorageServerInterface {
+	Optional<StorageMetadataType> metadata;
+
+	StorageServerMetaInfo(const StorageServerInterface& interface,
+	                      Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
+	  : StorageServerInterface(interface), metadata(metadata) {}
 };
 
 struct ServerCacheInfo {
@@ -1222,6 +1234,31 @@ struct StorageQueuingMetricsRequest {
 	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
 	constexpr static FileIdentifier file_identifier = 3978640;
 	ReplyPromise<struct StorageQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct GetHotShardsReply {
+	constexpr static FileIdentifier file_identifier = 3828140;
+	std::vector<KeyRange> hotShards;
+
+	GetHotShardsReply() {}
+	explicit GetHotShardsReply(std::vector<KeyRange> hotShards) : hotShards(hotShards) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, hotShards);
+	}
+};
+
+struct GetHotShardsRequest {
+	constexpr static FileIdentifier file_identifier = 3828141;
+	ReplyPromise<GetHotShardsReply> reply;
+
+	GetHotShardsRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

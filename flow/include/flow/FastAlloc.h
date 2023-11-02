@@ -22,7 +22,6 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
-#include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/config.h"
 

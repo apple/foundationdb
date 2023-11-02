@@ -119,10 +119,15 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 }
 
 int64_t getMaxShardSize(double dbSizeEstimate) {
-	return std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
-	                                                     SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
-	                    SERVER_KNOBS->SHARD_BYTES_RATIO,
-	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
+	int64_t size = std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
+	                                                             SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
+	                            SERVER_KNOBS->SHARD_BYTES_RATIO,
+	                        (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
+	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
+		size = std::max(size, static_cast<int64_t>(SERVER_KNOBS->MAX_LARGE_SHARD_BYTES));
+	}
+
+	return size;
 }
 
 bool ddLargeTeamEnabled() {
@@ -928,6 +933,9 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	const UID actionId = deterministicRandom()->randomUniqueID();
 	const Severity stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
 	int64_t maxShardSize = self->maxShardSize->get().get();
+	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
+		maxShardSize = SERVER_KNOBS->MAX_LARGE_SHARD_BYTES;
+	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
 	auto nextIter = self->shards->rangeContaining(keys.begin);
@@ -1116,6 +1124,10 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
+
+	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
+		shardBounds.max.bytes = SERVER_KNOBS->MAX_LARGE_SHARD_BYTES;
+	}
 
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
@@ -1425,7 +1437,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 					break;
 				}
 				result.push_back_deep(result.arena(),
-				                      DDMetricsRef(stats->get().get().metrics.bytes, KeyRef(t.begin().toString())));
+				                      DDMetricsRef(stats->get().get().metrics.bytes,
+				                                   stats->get().get().metrics.bytesWrittenPerKSecond,
+				                                   KeyRef(t.begin().toString())));
 				++shardNum;
 				if (shardNum >= req.shardLimit) {
 					break;

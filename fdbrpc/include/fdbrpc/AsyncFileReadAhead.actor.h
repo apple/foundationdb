@@ -39,6 +39,8 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileReadAheadCache>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileReadAheadCache>::delref(); }
 
+	virtual StringRef getClassName() override { return "AsyncFileReadAheadCache"_sr; }
+
 	struct CacheBlock : ReferenceCounted<CacheBlock> {
 		CacheBlock(int size = 0) : data(new uint8_t[size]), len(size) {}
 		~CacheBlock() { delete[] data; }

@@ -46,10 +46,11 @@ enum BlobRestorePhase {
 	LOADING_MANIFEST = 3,
 	LOADED_MANIFEST = 4,
 	COPYING_DATA = 5,
-	APPLYING_MLOGS = 6,
-	DONE = 7,
-	ERROR = 8,
-	MAX = 9
+	COPIED_DATA = 6,
+	APPLYING_MLOGS = 7,
+	DONE = 8,
+	ERROR = 9,
+	MAX = 10
 };
 
 struct BlobGranuleRestoreConfig : public KeyBackedClass {
