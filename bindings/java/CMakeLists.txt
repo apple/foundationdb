@@ -319,7 +319,8 @@ if(NOT OPEN_FOR_IDE)
       ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar
       EXPECTED_HASH SHA256=fc68f0d28633caccf3980fdf1e99628fba9c49424ee56dc685cd8b4d2a9fefde)
     file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/opentest4j/opentest4j/1.2.0/opentest4j-1.2.0.jar"
-      ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar)
+      ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
+      EXPECTED_HASH SHA256=58812de60898d976fb81ef3b62da05c6604c18fd4a249f5044282479fc286af2)
 
     set(JUNIT_CLASSPATH "${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar:${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar:${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar")
     set(JUNIT_CLASSPATH "${JUNIT_CLASSPATH}:${CMAKE_BINARY_DIR}/packages/junit-platform-console-1.7.1.jar:${CMAKE_BINARY_DIR}/packages/junit-platform-commons-1.7.1.jar")
