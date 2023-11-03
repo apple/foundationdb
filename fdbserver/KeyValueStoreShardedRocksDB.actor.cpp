@@ -679,22 +679,30 @@ rocksdb::WALRecoveryMode getWalRecoveryMode() {
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
-	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
-	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
-	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+
+	if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
+		options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
+	}
+	options.write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_BUFFER_SIZE;
+	options.max_write_buffer_number = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
+	options.db_write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE;
+	options.target_file_size_base = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
+	options.target_file_size_multiplier = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
 
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
 		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
 	}
 	if (SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
 		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
 	}
-	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
 
 	// Compact sstables when there's too much deleted stuff.
 	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
@@ -754,19 +762,16 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	return options;
 }
 
-rocksdb::Options getOptions() {
-	rocksdb::Options options;
+rocksdb::DBOptions getOptions() {
+	rocksdb::DBOptions options;
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	options.atomic_flush = SERVER_KNOBS->ROCKSDB_ATOMIC_FLUSH;
-	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
 	options.wal_recovery_mode = getWalRecoveryMode();
-	options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
-	options.target_file_size_multiplier = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
@@ -788,8 +793,7 @@ rocksdb::Options getOptions() {
 	options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSDB_WAL_TTL_SECONDS;
 	options.WAL_size_limit_MB = SERVER_KNOBS->ROCKSDB_WAL_SIZE_LIMIT_MB;
 
-	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
-	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
+	options.db_write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
@@ -802,7 +806,6 @@ rocksdb::Options getOptions() {
 	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
-	options.max_write_buffer_number = SERVER_KNOBS->ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
 	return options;
 }
 
@@ -1191,7 +1194,7 @@ class ShardManager {
 public:
 	ShardManager(std::string path,
 	             UID logId,
-	             const rocksdb::Options& options,
+	             const rocksdb::DBOptions& options,
 	             std::shared_ptr<RocksDBErrorListener> errorListener,
 	             std::shared_ptr<RocksDBEventListener> eventListener,
 	             Counters* cc)
@@ -1859,7 +1862,7 @@ public:
 			logRocksDBError(s, "Close");
 			return;
 		}
-		s = rocksdb::DestroyDB(path, dbOptions);
+		s = rocksdb::DestroyDB(path, rocksdb::Options(dbOptions, getCFOptions()));
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyDB");
 		}
@@ -1946,7 +1949,7 @@ public:
 private:
 	const std::string path;
 	const UID logId;
-	rocksdb::Options dbOptions;
+	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
@@ -4108,7 +4111,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	std::shared_ptr<ShardedRocksDBState> rState;
-	rocksdb::Options dbOptions;
+	rocksdb::DBOptions dbOptions;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
 	std::shared_ptr<RocksDBEventListener> eventListener;
 	ShardManager shardManager;
