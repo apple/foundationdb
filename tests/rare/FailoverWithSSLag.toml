@@ -1,0 +1,19 @@
+[configuration]
+generateFearless = true
+processesPerMachine = 1
+machineCount = 20
+minimumRegions = 2
+
+[[test]]
+testTitle = 'FailoverWithSSLag'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 250.0
+    testDuration = 200.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'FailoverWithSSLagWorkload'
+    testDuration = 1000.0

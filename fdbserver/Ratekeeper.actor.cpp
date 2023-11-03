@@ -596,6 +596,11 @@ public:
 					self.updateCommitCostEstimation(req.ssTrTagCommitCost);
 					req.reply.send(Void());
 				}
+				when(GetSSVersionLagRequest req = waitNext(rkInterf.getSSVersionLag.getFuture())) {
+					GetSSVersionLagReply reply;
+					self.getSSVersionLag(reply.maxPrimarySSVersion, reply.maxRemoteSSVersion);
+					req.reply.send(reply);
+				}
 				when(wait(err.getFuture())) {}
 				when(wait(dbInfo->onChange())) {
 					if (!recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -1347,6 +1352,21 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
 	return RatekeeperImpl::refreshStorageServerCommitCosts(this);
+}
+
+void Ratekeeper::getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRemoteVersion) {
+	maxSSPrimaryVersion = maxSSRemoteVersion = invalidVersion;
+	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
+		auto const& ss = i->value;
+		if (!ss.valid || !ss.acceptingRequests)
+			continue;
+
+		if (remoteDC.present() && ss.locality.dcId() == remoteDC) {
+			maxSSRemoteVersion = std::max(ss.getLatestVersion(), maxSSRemoteVersion);
+		} else {
+			maxSSPrimaryVersion = std::max(ss.getLatestVersion(), maxSSPrimaryVersion);
+		}
+	}
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
