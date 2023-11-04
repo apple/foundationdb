@@ -3622,8 +3622,16 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->initialized = true;
 			self->newLogData.trigger();
 
-			if ((req.isPrimary || req.recoverFrom.logRouterTags == 0) && !logData->stopped() &&
-			    logData->unrecoveredBefore <= recoverAt) {
+			bool existOlderEpochNotHaveLogRouterTag = false;
+			for (const auto& oldLog : req.recoverFrom.oldTLogs) {
+				if (oldLog.logRouterTags == 0) {
+					existOlderEpochNotHaveLogRouterTag = true;
+					break;
+				}
+			}
+
+			if ((req.isPrimary || req.recoverFrom.logRouterTags == 0 || existOlderEpochNotHaveLogRouterTag) &&
+			    !logData->stopped() && logData->unrecoveredBefore <= recoverAt) {
 				if (req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalitySatellite) {
 					logData->logRouterPopToVersion = recoverAt;
 					std::vector<Tag> tags;

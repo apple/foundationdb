@@ -23,7 +23,7 @@
 
 #define DebugTraceEvent(enable, ...) enable&& TraceEvent(__VA_ARGS__)
 
-constexpr bool debugLogTraces = false;
+constexpr bool debugLogTraces = true;
 #define DebugLogTraceEvent(...) DebugTraceEvent(debugLogTraces, __VA_ARGS__)
 
 constexpr bool debugRelocationTraces = false;

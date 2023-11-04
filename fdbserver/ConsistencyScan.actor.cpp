@@ -350,6 +350,13 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 									matchingKVPairs++;
 								else {
 									valueMismatchKey = currentKV.key;
+									TraceEvent("ValueMismatchDetail")
+									    .detail("Key", currentKV.key)
+									    .detail("ValueCurrent", currentKV.value)
+									    .detail("ValueReference", referenceKV.value)
+									    .detail("CurrentServer", (*storageServerInterfaces)[j].id())
+									    .detail("ReferenceServer",
+									            (*storageServerInterfaces)[firstValidServer->get()].id());
 									valueMismatches++;
 								}
 

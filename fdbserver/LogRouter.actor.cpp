@@ -244,6 +244,14 @@ void commitMessages(LogRouterData* self, Version version, const std::vector<Tags
 					TraceEvent(SevWarnAlways, "LargeMessage")
 					    .detail("Size", tagData->version_messages.back().second.expectedSize());
 				}
+				TraceEvent("LogRouterPeekCommitMessage", self->dbgid)
+				    .setMaxFieldLength(-1)
+				    .setMaxEventLength(-1)
+				    .detail("Tag", tag)
+				    .detail("Tags", msg.tags)
+				    .detail("Message",
+				            LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size())).toStringRef())
+				    .detail("Version", version);
 			}
 		}
 
@@ -300,16 +308,34 @@ ACTOR Future<Void> waitForVersion(LogRouterData* self, Version ver) {
 ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData* self,
                                                                    Reference<ILogSystem::IPeekCursor> r,
                                                                    Version startVersion) {
+	state Version inputCursorVersion = 0;
+	if (r) {
+		inputCursorVersion = r->version().version;
+	}
 	state Reference<ILogSystem::IPeekCursor> result = r;
 	state bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	loop {
 		Future<Void> getMoreF = Never();
 		if (result) {
+			TraceEvent("LogRouterPeekCursorDataBeforeGetMore", self->dbgid)
+			    .detail("Version", self->version.get())
+			    .detail("StartVersion", startVersion)
+			    .detail("RouterTag", self->routerTag)
+			    .detail("UseSatellite", useSatellite)
+			    .detail("InputCursorVersion", inputCursorVersion)
+			    .detail("CursorVersion", result->version().version);
 			getMoreF = result->getMore(TaskPriority::TLogCommit);
 			++self->getMoreCount;
 			if (!getMoreF.isReady()) {
 				++self->getMoreBlockedCount;
 			}
+			TraceEvent("LogRouterPeekCursorDataAfterGetMore", self->dbgid)
+			    .detail("Version", self->version.get())
+			    .detail("StartVersion", startVersion)
+			    .detail("RouterTag", self->routerTag)
+			    .detail("UseSatellite", useSatellite)
+			    .detail("InputCursorVersion", inputCursorVersion)
+			    .detail("CursorVersion", result->version().version);
 		}
 		state double startTime = now();
 		choose {
@@ -318,6 +344,14 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 				self->peekLatencyDist->sampleSeconds(peekTime);
 				self->getMoreTime += peekTime;
 				self->maxGetMoreTime = std::max(self->maxGetMoreTime, peekTime);
+				TraceEvent("LogRouterPeekCursorDataReturnCursor", self->dbgid)
+				    .detail("LogID", result->getPrimaryPeekLocation())
+				    .detail("Version", self->version.get())
+				    .detail("StartVersion", startVersion)
+				    .detail("RouterTag", self->routerTag)
+				    .detail("UseSatellite", useSatellite)
+				    .detail("InputCursorVersion", inputCursorVersion)
+				    .detail("CursorVersion", result->version().version);
 				return result;
 			}
 			when(wait(self->logSystemChanged)) {
@@ -325,8 +359,14 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 					result =
 					    self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag, useSatellite);
 					self->primaryPeekLocation = result->getPrimaryPeekLocation();
-					TraceEvent("LogRouterPeekLocation", self->dbgid)
+					TraceEvent("LogRouterPeekLocation1", self->dbgid)
 					    .detail("LogID", result->getPrimaryPeekLocation())
+					    .detail("Version", self->version.get())
+					    .detail("StartVersion", startVersion)
+					    .detail("RouterTag", self->routerTag)
+					    .detail("UseSatellite", useSatellite)
+					    .detail("InputCursorVersion", inputCursorVersion)
+					    .detail("CursorVersion", result->version().version)
 					    .trackLatest(self->eventCacheHolder->trackingKey);
 				} else {
 					result = Reference<ILogSystem::IPeekCursor>();
@@ -341,8 +381,10 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 				result =
 				    self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag, useSatellite);
 				self->primaryPeekLocation = result->getPrimaryPeekLocation();
-				TraceEvent("LogRouterPeekLocation", self->dbgid)
+				TraceEvent("LogRouterPeekLocation2", self->dbgid)
 				    .detail("LogID", result->getPrimaryPeekLocation())
+				    .detail("Version", self->version.get())
+				    .detail("StartVersion", startVersion)
 				    .trackLatest(self->eventCacheHolder->trackingKey);
 			}
 		}
@@ -363,12 +405,25 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
+		state Version verBegin = 0;
+		state Version verEnd = 0;
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
 		state Arena arena;
+		state Version maxVersion = self->version.get();
 		while (true) {
 			state bool foundMessage = r->hasMessage();
+			/*TraceEvent("LogRouterPeekDecideTagCursorVersion", self->dbgid)
+			    .detail("FoundMessage", foundMessage)
+			    .detail("Ver", ver)
+			    .detail("CursorVersion", r->version().version);*/
 			if (!foundMessage || r->version().version != ver) {
+				if (r->version().version > verEnd) {
+					verEnd = r->version().version;
+				}
+				if (verBegin == 0 || r->version().version < verBegin) {
+					verBegin = r->version().version;
+				}
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
 					wait(waitForVersion(self, ver));
@@ -399,6 +454,20 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
 			self->logSet.getPushLocations(r->getTags(), tags, 0);
+			TraceEvent("LogRouterPeekDecideTag", self->dbgid)
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
+			    .detail("TagAt", tagAt)
+			    .detail("OldTags", r->getTags())
+			    .detail("NewTags", tags)
+			    .detail("Message", tagAndMsg.message)
+			    .detail("VersionBegin", verBegin)
+			    .detail("VersionEnd", verEnd)
+			    .detail("MaxVersion", maxVersion)
+			    .detail("CurrentMaxVersion", self->version.get())
+			    .detail("MinKnownCommittedVersion", self->minKnownCommittedVersion)
+			    .detail("CursorVersionRaw", r->version().toString())
+			    .detail("CursorVersion", r->version().version);
 			tagAndMsg.tags.reserve(arena, tags.size());
 			for (const auto& t : tags) {
 				tagAndMsg.tags.push_back(arena, Tag(tagLocalityRemoteLog, t));
@@ -444,7 +513,12 @@ void peekMessagesFromMemory(LogRouterData* self, Tag tag, Version begin, BinaryW
 			currentVersion = it->first;
 			messages << VERSION_HEADER << currentVersion;
 		}
-
+		TraceEvent("LogRouterPeekFromMemory", self->dbgid)
+		    .setMaxFieldLength(-1)
+		    .setMaxEventLength(-1)
+		    .detail("Tag", tag)
+		    .detail("Message", it->second.toStringRef())
+		    .detail("Version", it->first);
 		messages << it->second.toStringRef();
 	}
 }
@@ -637,10 +711,13 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 
 	replyPromise.send(reply);
 	DebugLogTraceEvent("LogRouterPeek4", self->dbgid)
+	    .setMaxFieldLength(-1)
+	    .setMaxEventLength(-1)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
 	    .detail("End", reply.end)
 	    .detail("MessageSize", reply.messages.size())
+	    .detail("Message", reply.messages)
 	    .detail("PoppedVersion", self->poppedVersion);
 	return Void();
 }

@@ -892,7 +892,8 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 			*(uint32_t*)((uint8_t*)wr.getData() + firstOffset) = firstLength - sizeof(uint32_t);
 			DEBUG_TAGS_AND_MESSAGE(
 			    "ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength))
-			    .detail("PushLocations", msg_locations);
+			    .detail("PushLocations", msg_locations)
+			    .detail("HasRemoteLogs", logSystem->hasRemoteLogs());
 			first = false;
 		} else {
 			BinaryWriter& from = messagesWriter[msg_locations[0]];

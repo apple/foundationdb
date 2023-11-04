@@ -11238,7 +11238,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .suppressFor(10.0)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
-					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
+					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID).detail("Tag", data->tag);
 					if (ver == data->initialClusterVersion) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).log();
 						// The following trace event may produce a value with special characters

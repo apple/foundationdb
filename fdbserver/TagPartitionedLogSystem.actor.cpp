@@ -2680,8 +2680,29 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	std::vector<InitializeTLogRequest> remoteTLogReqs(remoteWorkers.remoteTLogs.size());
 	state std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> allRemoteTLogServers;
 
+	TraceEvent e("RemoteLogRecruitment_OldLogSystemInfo");
+	e.detail("LogRouterTags", oldLogSystem->logRouterTags);
+	e.detail("Epoch", oldLogSystem->epoch);
+	int count = 0;
+	for (const auto& oldLog : oldLogSystem->oldLogData) {
+		e.detail("Epoch" + std::to_string(count), oldLog.epoch);
+		e.detail("VersionBegin" + std::to_string(count), oldLog.epochBegin);
+		e.detail("VersionEnd" + std::to_string(count), oldLog.epochEnd);
+		e.detail("RecoverAt" + std::to_string(count), oldLog.recoverAt);
+		e.detail("TxnTag" + std::to_string(count), oldLog.txsTags);
+		e.detail("LogRouterTags" + std::to_string(count), oldLog.logRouterTags);
+		count++;
+	}
+
 	bool nonShardedTxs = self->getTLogVersion() < TLogVersion::V4;
-	if (oldLogSystem->logRouterTags == 0) {
+	bool existOlderEpochNotHaveLogRouterTag = false;
+	for (const auto& oldLog : oldLogSystem->oldLogData) {
+		if (oldLog.logRouterTags == 0) {
+			existOlderEpochNotHaveLogRouterTag = true;
+			break;
+		}
+	}
+	if (oldLogSystem->logRouterTags == 0 || existOlderEpochNotHaveLogRouterTag) {
 		std::vector<int> locations;
 		for (Tag tag : localTags) {
 			locations.clear();
@@ -2737,6 +2758,23 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.txsTags = self->txsTags;
 		req.recoveryTransactionVersion = recoveryTransactionVersion;
 		req.oldGenerationRecoverAtVersions = oldGenerationRecoverAtVersions;
+		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogsReqInit")
+		    .detail("RecoverTags", req.recoverTags)
+		    .detail("RecruitmentID", req.recruitmentID)
+		    .detail("LogVersion", req.logVersion)
+		    .detail("StoreType", req.storeType)
+		    .detail("RecoverAt", req.recoverAt)
+		    .detail("KnownCommittedVersion", req.knownCommittedVersion)
+		    .detail("Epoch", req.epoch)
+		    .detail("RemoteTag", req.remoteTag)
+		    .detail("Locality", req.locality)
+		    .detail("IsPrimary", req.isPrimary)
+		    .detail("AllTags", req.allTags)
+		    .detail("StartVersion", req.startVersion)
+		    .detail("LogRouterTags", req.logRouterTags)
+		    .detail("TxsTags", req.txsTags)
+		    .detail("RecoveryTransactionVersion", req.recoveryTransactionVersion)
+		    .detail("OldGenerationRecoverAtVersions", req.oldGenerationRecoverAtVersions);
 	}
 
 	remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
@@ -2751,7 +2789,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs")
 	    .detail("StartVersion", logSet->startVersion)
 	    .detail("LocalStart", self->tLogs[0]->startVersion)
-	    .detail("LogRouterTags", self->logRouterTags);
+	    .detail("LogRouterTags", self->logRouterTags)
+	    .detail("OldLogRouterTags", oldLogSystem->logRouterTags)
+	    .detail("LocalTags", localTags);
 	wait(waitForAll(remoteTLogInitializationReplies) && waitForAll(logRouterInitializationReplies) &&
 	     oldRouterRecruitment);
 
