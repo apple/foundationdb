@@ -553,7 +553,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		// Write headers to a packet buffer chain
 		PacketBuffer* pFirst = PacketBuffer::create();
 		PacketBuffer* pLast = writeRequestHeader(request, pFirst);
-		// Prepend headers to content packer buffer chain
+		// Prepend headers to content packet buffer chain
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
@@ -577,7 +577,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			// If we already got a response, before finishing sending the request, then close the connection,
 			// set the Connection header to "close" as a hint to the caller that this connection can't be used
 			// again, and break out of the send loop.
+			// If there is an error from the future such a connection is closed, this would be run too
 			if (responseReading.isReady()) {
+				TraceEvent("HTTPRequestConectionClosing")
+				    .detail("Ready", responseReading.isReady())
+				    .detail("Error", responseReading.isError())
+				    .detail("QueueEmpty", request->data.content->empty())
+				    .detail("Verb", request->verb)
+				    .log();
 				conn->close();
 				r->data.headers["Connection"] = "close";
 				earlyResponse = true;
@@ -705,15 +712,17 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	state double nextRetryDelay = 2.0;
 	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	state int64_t bytes_sent = 0;
+	state UnsentPacketQueue empty_packet_queue;
 
 	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
 	req->verb = HTTP_VERB_CONNECT;
 	req->resource = remoteHost + ":" + remoteService;
-	req->data.content = nullptr;
+	req->data.content = &empty_packet_queue;
 	req->data.contentLen = 0;
 	req->data.headers["Host"] = req->resource;
 	req->data.headers["Accept"] = "application/xml";
 	req->data.headers["Proxy-Connection"] = "Keep-Alive";
+
 	loop {
 		state Optional<Error> err;
 
@@ -725,6 +734,7 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(f, requestTimeout));
 			r = _r;
 		} catch (Error& e) {
+			TraceEvent("ProxyRequestFailed").errorUnsuppressed(e);
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			err = e;
@@ -733,6 +743,10 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
 		if (!err.present() && r->code == 200) {
+			TraceEvent(SevDebug, "ProxyRequestSuccess")
+			    .detail("RemoteHost", remoteHost)
+			    .detail("RemoteService", remoteService)
+			    .log();
 			return Void();
 		}
 

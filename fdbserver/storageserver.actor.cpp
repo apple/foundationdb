@@ -867,6 +867,12 @@ public:
 
 	bool hasRange(Reference<ShardInfo> shard) const;
 
+	int size() const { return ranges.size(); }
+	// Public function to iterate over the ranges
+	std::vector<Reference<ShardInfo>>::const_iterator begin() const { return ranges.begin(); }
+
+	std::vector<Reference<ShardInfo>>::const_iterator end() const { return ranges.end(); }
+
 private:
 	const int64_t id;
 	std::vector<Reference<ShardInfo>> ranges;
@@ -1718,7 +1724,7 @@ public:
 	void addShard(ShardInfo* newShard) {
 		ASSERT(!newShard->keys.empty());
 		newShard->changeCounter = ++shardChangeCounter;
-		//TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State", newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
+		// TraceEvent("AddShard", this->thisServerID).detail("KeyBegin", newShard->keys.begin).detail("KeyEnd", newShard->keys.end).detail("State",newShard->isReadable() ? "Readable" : newShard->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
@@ -1938,6 +1944,8 @@ public:
 	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
 
 	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
+
+	int64_t getHotShardsMetrics(const KeyRange& range) override { return this->metrics.getHotShards(range); }
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
@@ -5043,10 +5051,12 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	// to make sure no onging auditStorageServerShardQ is running
 	if (data->trackShardAssignmentMinVersion != invalidVersion) {
 		// Another auditStorageServerShardQ is running
-		req.reply.sendError(audit_storage_failed());
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ExistStorageServerShardAudit") // unexpected
+		req.reply.sendError(audit_storage_cancelled());
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+		           "ExistStorageServerShardAuditExit") // unexpected
 		    .detail("NewAuditId", req.id)
 		    .detail("NewAuditType", req.getType());
+		return Void();
 	}
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
@@ -5396,6 +5406,13 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					}
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					// In this case, we need not stop tracking shard assignment
+					// The shard history will not get unboundedly large for this case
+					// When this actor gets cancelled, data will be eventually destroyed
+					// Therefore, the shard history will be destroyed
+					throw e;
+				}
 				data->stopTrackShardAssignment();
 				wait(tr.onError(e));
 			}
@@ -13635,6 +13652,41 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
+			}
+			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
+				struct ComparePair {
+					bool operator()(const std::pair<KeyRange, int64_t>& lhs, const std::pair<KeyRange, int64_t>& rhs) {
+						return lhs.second > rhs.second;
+					}
+				};
+				std::
+				    priority_queue<std::pair<KeyRange, int64_t>, std::vector<std::pair<KeyRange, int64_t>>, ComparePair>
+				        topRanges;
+
+				for (auto& s : self->shards.ranges()) {
+					KeyRange keyRange = KeyRange(s.range());
+					int64_t bytesWrittenPerKSecond = self->metrics.getHotShards(keyRange);
+					if (systemKeys.intersects(keyRange) ||
+					    (bytesWrittenPerKSecond <= SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)) {
+						continue;
+					}
+					if (topRanges.size() < SERVER_KNOBS->HOT_SHARD_THROTTLING_TRACKED) {
+						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+					} else if (bytesWrittenPerKSecond > topRanges.top().second) {
+						topRanges.pop();
+						topRanges.push(std::make_pair(keyRange, bytesWrittenPerKSecond));
+					}
+				}
+
+				// TraceEvent(SevDebug, "ReceivedGetHotShards").detail("TopRanges", topRanges.size());
+				GetHotShardsReply reply;
+
+				while (!topRanges.empty()) {
+					reply.hotShards.push_back(topRanges.top().first);
+					topRanges.pop();
+				}
+
+				req.reply.send(reply);
 			}
 			when(wait(self->actors.getResult())) {}
 		}

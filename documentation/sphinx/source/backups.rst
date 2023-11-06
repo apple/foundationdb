@@ -154,6 +154,10 @@ Here is a complete list of valid parameters:
 
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined.
 
+ *max_delay_retryable_error (or *dre*) - Max seconds to delay before retry again when seeing an retryable error.
+
+ *max_delay_connection_failed (or *dcf*) - Max seconds to delay before retry again when seeing an connection failure.
+
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
 
  *sdk_auth* (or *sa*) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.

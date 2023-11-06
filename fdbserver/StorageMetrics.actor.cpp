@@ -284,6 +284,7 @@ KeyRef StorageServerMetrics::getSplitKey(int64_t remaining,
 
 void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 	int minSplitBytes = req.minSplitBytes.present() ? req.minSplitBytes.get() : SERVER_KNOBS->MIN_SHARD_BYTES;
+	int minSplitWriteTraffic = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	try {
 		SplitMetricsReply reply;
 		KeyRef lastKey = req.keys.begin;
@@ -294,7 +295,8 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 		//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes).detail("MinSplitBytes", minSplitBytes);
 
 		while (true) {
-			if (remaining.bytes < 2 * minSplitBytes)
+			if (remaining.bytes < 2 * minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
+			                                            remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
 				break;
 			KeyRef key = req.keys.end;
 			bool hasUsed = used.bytes != 0 || used.bytesWrittenPerKSecond != 0 || used.iosPerKSecond != 0;
@@ -309,7 +311,8 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			                  lastKey,
 			                  key,
 			                  hasUsed);
-			if (used.bytes < minSplitBytes)
+			if (used.bytes < minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
+			                                   remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
 				key = std::max(
 				    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
 			key = getSplitKey(remaining.iosPerKSecond,
@@ -516,6 +519,12 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
 		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
 	}
 	return toReturn;
+}
+
+int64_t StorageServerMetrics::getHotShards(const KeyRange& range) const {
+	auto bytesWrittenPerKSecond =
+	    bytesWriteSample.getEstimate(range) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	return bytesWrittenPerKSecond;
 }
 
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
