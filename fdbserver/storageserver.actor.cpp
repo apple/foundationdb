@@ -9076,7 +9076,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	moveInShard->meta->checkpoints = std::move(localRecords);
 	moveInShard->setPhase(MoveInPhase::Ingesting);
 
-	// wait(updateMoveInShardMetaData(data, moveInShard));
 	updateMoveInShardMetaData(data, moveInShard);
 
 	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
