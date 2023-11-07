@@ -84,7 +84,8 @@ struct MoveInShardMetaData {
 		return "MoveInShardMetaData: [Range]: " + describe(this->ranges) +
 		       " [DataMoveID]: " + this->dataMoveId.toString() +
 		       " [ShardCreateVersion]: " + std::to_string(this->createVersion) + " [ID]: " + this->id.toString() +
-		       " [State]: " + std::to_string(static_cast<int>(this->phase));
+		       " [State]: " + std::to_string(static_cast<int>(this->phase)) +
+		       " [HighWatermark]: " + std::to_string(this->highWatermark);
 	}
 
 	template <class Ar>
@@ -96,6 +97,10 @@ struct MoveInShardMetaData {
 KeyRange persistMoveInShardsKeyRange();
 
 KeyRange persistUpdatesKeyRange(const UID& id);
+
+Key persistUpdatesKey(const UID& id, const Version version);
+
+Version decodePersistUpdateVersion(KeyRef versionKey);
 
 Key persistMoveInShardKey(const UID& id);
 
