@@ -95,6 +95,8 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	max_delay_retryable_error = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
+	max_delay_connection_failed = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
 	sdk_auth = false;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
 }
@@ -134,6 +136,8 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
+	TRY_PARAM(max_delay_retryable_error, dre);
+	TRY_PARAM(max_delay_connection_failed, dcf);
 	TRY_PARAM(sdk_auth, sa);
 	TRY_PARAM(global_connection_pool, gcp);
 #undef TRY_PARAM
@@ -175,6 +179,8 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(max_recv_bytes_per_second, rbps);
 	_CHECK_PARAM(sdk_auth, sa);
 	_CHECK_PARAM(global_connection_pool, gcp);
+	_CHECK_PARAM(max_delay_retryable_error, dre);
+	_CHECK_PARAM(max_delay_connection_failed, dcf);
 #undef _CHECK_PARAM
 	return r;
 }
@@ -747,6 +753,12 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	}
 	++b->blobStats->newConnections;
 	std::string host = b->host, service = b->service;
+	TraceEvent(SevDebug, "S3BlobStoreEndpointBuildingNewConnection")
+	    .detail("UseProxy", b->useProxy)
+	    .detail("TLS", b->knobs.secure_connection == 1)
+	    .detail("Host", host)
+	    .detail("Service", service)
+	    .log();
 	if (service.empty()) {
 		if (b->useProxy) {
 			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
@@ -772,7 +784,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	}
 	wait(conn->connectHandshake());
 
-	TraceEvent("S3BlobStoreEndpointNewConnection")
+	TraceEvent("S3BlobStoreEndpointNewConnectionSuccess")
 	    .suppressFor(60)
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life)
@@ -969,6 +981,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			rconn.conn.clear();
 
 		} catch (Error& e) {
+			TraceEvent("S3BlobStoreDoRequestError").errorUnsuppressed(e);
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
@@ -1007,9 +1020,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		                                        : "S3BlobStoreEndpointRequestFailedRetryable")
 		                           : "S3BlobStoreEndpointRequestFailed");
 
+		bool connectionFailed = false;
 		// Attach err to trace event if present, otherwise extract some stuff from the response
 		if (err.present()) {
 			event.errorUnsuppressed(err.get());
+			if (err.get().code() == error_code_connection_failed) {
+				connectionFailed = true;
+			}
 		}
 		event.suppressFor(60);
 		if (!err.present()) {
@@ -1032,6 +1049,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		event.detail("Verb", verb)
 		    .detail("Resource", resource)
 		    .detail("ThisTry", thisTry)
+		    .detail("URI", canonicalURI)
 		    .detail("Proxy", bstore->proxyHost.orDefault(""));
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
@@ -1045,9 +1063,12 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		} else if (retryable) {
 			// We will wait delay seconds before the next retry, start with nextRetryDelay.
 			double delay = nextRetryDelay;
+			// conenctionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
+			// so there is no point of waiting too long, instead retry more aggressively
+			double limit =
+			    connectionFailed ? bstore->knobs.max_delay_connection_failed : bstore->knobs.max_delay_retryable_error;
 			// Double but limit the *next* nextRetryDelay.
-			nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
-
+			nextRetryDelay = std::min(nextRetryDelay * 2, limit);
 			// If r is valid then obey the Retry-After response header if present.
 			if (r) {
 				auto iRetryAfter = r->data.headers.find("Retry-After");

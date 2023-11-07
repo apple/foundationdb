@@ -265,6 +265,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 		If this value is too small relative to SHARD_MIN_BYTES_PER_KSEC immediate merging work will be generated.
 		*/
 
+	init( ENABLE_WRITE_BASED_SHARD_SPLIT,                      false ); if( randomize && BUGGIFY ) ENABLE_WRITE_BASED_SHARD_SPLIT = true;
 	init( STORAGE_METRIC_TIMEOUT,         isSimulated ? 60.0 : 600.0 ); if( randomize && BUGGIFY ) STORAGE_METRIC_TIMEOUT = deterministicRandom()->coinflip() ? 10.0 : 30.0;
 	init( METRIC_DELAY,                                          0.1 ); if( randomize && BUGGIFY ) METRIC_DELAY = 1.0;
 	init( ALL_DATA_REMOVED_DELAY,                                1.0 );
@@ -275,6 +276,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PERPETUAL_WIGGLE_DELAY,                                 60 );
 	init( PERPETUAL_WIGGLE_SMALL_LOAD_RATIO,                      10 );
 	init( PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO,             0.85 );
+	init( PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO,              0 );
 	init( PERPETUAL_WIGGLE_DISABLE_REMOVER,                     true );
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
@@ -464,10 +466,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( randomize && BUGGIFY ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                   true ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
+	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false );
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,                0 );
+	init( ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS,                    10 ); // RocksDB default 10
 	// If true, enables dynamic adjustment of ROCKSDB_WRITE_RATE_LIMITER_BYTES according to the recent demand of background IO.
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
@@ -513,8 +517,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
 	init( ENABLE_SHARDED_ROCKSDB,                              false );
-	init( ROCKSDB_WRITE_BUFFER_SIZE,                 isSimulated? 128 << 20 : 1 << 30 ); // 1G
-	init( ROCKSDB_CF_WRITE_BUFFER_SIZE,              isSimulated? 16 << 20 : 64 << 20 ); // 64M, RocksDB default.
+	init( ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 16 << 20 : 64 << 20 ); // 64 MB
+	init( ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                         6 ); // RocksDB default.
+	init( ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE,                2 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               2 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,                 20 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,                     36 ); // RocksDB default.
 	init( ROCKSDB_MAX_TOTAL_WAL_SIZE,                              0 ); // RocksDB default.
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
@@ -529,11 +537,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT,                false ); if ( randomize && BUGGIFY ) ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT = true;
 	init( ROCKSDB_COMPACTION_PRI,                                  3 ); // kMinOverlappingRatio, RocksDB default. 
 	init( ROCKSDB_WAL_RECOVERY_MODE,                               2 ); // kPointInTimeRecovery, RocksDB default.
-	init( ROCKSDB_TARGET_FILE_SIZE_BASE,                    16777216 ); // 16MB, RocksDB default.
+	init( ROCKSDB_TARGET_FILE_SIZE_BASE,                           0 ); // If 0, pick RocksDB default.
 	init( ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                     1 ); // RocksDB default.
 	init( ROCKSDB_MAX_OPEN_FILES,                              50000 ); // Should be smaller than OS's fd limit.
-	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); if (isSimulated) ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS = deterministicRandom()->coinflip();
-	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                      1000 );
+	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); 
+	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                         0 );
+	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                  100 );
 	init (ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
 	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
 	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
@@ -544,11 +553,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
 	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
 	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
-	init (ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                           6 ); // RocksDB default.
+	init (SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
 	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
 	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
 	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                     1 );
+	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated? 128 << 20 : 1 << 30 ); // 1G
+	init( SHARDED_ROCKSDB_CF_WRITE_BUFFER_SIZE, isSimulated? 16 << 20 : 64 << 20 ); // 64M, RocksDB default.
+	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16777216 ); // 16MB, RocksDB default.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -866,6 +878,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,   2.0 );
 	init( GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME,   10.0 );
 	init( GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME,               10.0 );
+
+	init( HOT_SHARD_THROTTLING_ENABLED,                         false ); if(randomize && BUGGIFY) HOT_SHARD_THROTTLING_ENABLED = true;
+	init( HOT_SHARD_THROTTLING_EXPIRE_AFTER,                      3.0 );
+	init( HOT_SHARD_THROTTLING_TRACKED,                             1 );
+	init( HOT_SHARD_MONITOR_FREQUENCY,                            5.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );

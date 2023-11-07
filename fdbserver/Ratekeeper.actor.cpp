@@ -309,6 +309,42 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> monitorHotShards(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+		loop {
+			wait(delay(SERVER_KNOBS->HOT_SHARD_MONITOR_FREQUENCY));
+			if (!self->ssHighWriteQueue.present()) {
+				continue;
+			}
+
+			state UID ssi = self->ssHighWriteQueue.get();
+			state SetThrottledShardRequest setReq;
+
+			// TraceEvent(SevDebug, "SendGetHotShardsRequest");
+			try {
+				GetHotShardsRequest getReq;
+				GetHotShardsReply reply = wait(self->storageServerInterfaces[ssi].getHotShards.getReply(getReq));
+
+				setReq.throttledShards.insert(
+				    setReq.throttledShards.end(), reply.hotShards.begin(), reply.hotShards.end());
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
+				continue;
+			}
+			if (!setReq.throttledShards.size()) {
+				continue;
+			}
+			setReq.expirationTime = now() + SERVER_KNOBS->HOT_SHARD_THROTTLING_EXPIRE_AFTER;
+			for (auto& shard : setReq.throttledShards) {
+				TraceEvent(SevInfo, "SendRequestThrottleHotShard")
+				    .detail("Shard", shard)
+				    .detail("DelayUntil", setReq.expirationTime);
+			}
+			for (const auto& cpi : dbInfo->get().client.commitProxies) {
+				cpi.setThrottledShard.send(setReq);
+			}
+		}
+	}
+
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
@@ -430,6 +466,11 @@ public:
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
+
+		if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED) {
+			self.addActor.send(self.monitorHotShards(dbInfo));
+		}
+
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
@@ -679,6 +720,10 @@ Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 
 Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return tagThrottler->monitorThrottlingChanges();
+}
+
+Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return RatekeeperImpl::monitorHotShards(this, dbInfo);
 }
 
 Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -1347,6 +1392,10 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    .detail("TagsManuallyThrottled", tagThrottler->manualThrottleCount())
 		    .detail("AutoThrottlingEnabled", tagThrottler->isAutoThrottlingEnabled())
 		    .trackLatest(name);
+	}
+	ssHighWriteQueue.reset();
+	if (limitReason == limitReason_t::storage_server_write_queue_size) {
+		ssHighWriteQueue = reasonID;
 	}
 }
 

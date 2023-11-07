@@ -486,6 +486,11 @@ protected:
 	// average load of each storage server is less than smallLoadThreshold, return 1 always.
 	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
 
+	// calculate number of Storage Servers that are yet need to be balanced(disk bytes). Balanced here means the Storage
+	// Serves which are having the ratio of loadBytes / avgLoadBytes less than the
+	// PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO.
+	int numSSToBeLoadBytesBalanced(int64_t smallLoadThreshold) const;
+
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
 	Future<Void> updateNextWigglingStorageID();
