@@ -408,8 +408,9 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 		for (int i = 0; i < readResult.size() - 1; i++) {
 			UID shardId;
 			bool assigned, emptyRange;
-			EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, enablePSM, shardId);
+			// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+			DataMoveType dataMoveType = DataMoveType::LOGICAL;
+			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId);
 			if (!assigned) {
 				TraceEvent(SevError, "ValidateRangeAssignmentCorruptionDetected")
 				    .detail("DataMoveID", dataMoveId)
@@ -418,7 +419,7 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 				    .detail("ErrorMessage", "KeyServers has range but ServerKeys does not have")
 				    .detail("CurrentEmptyRange", emptyRange)
 				    .detail("CurrentAssignment", assigned)
-				    .detail("EnablePSM", enablePSM)
+				    // .detail("EnablePSM", enablePSM)
 				    .detail("ServerID", ssid)
 				    .detail("ShardID", shardId);
 				allCorrect = false;
@@ -2519,8 +2520,9 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	// than one result
 	UID shardId;
 	bool assigned, emptyRange;
-	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, enablePSM, shardId);
+	// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
@@ -2757,8 +2759,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
-						const UID shardId =
-						    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
+						const UID shardId = newDataMoveId(
+						    deterministicRandom()->randomUInt64(), AssignEmptyRange::True, DataMoveType::LOGICAL);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {

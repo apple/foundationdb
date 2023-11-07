@@ -96,16 +96,16 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::unordered_set<UID> includes;
 		state int teamSize = 1;
 		state KeyRangeRef currentRange = KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr);
-		wait(store(teamA,
-		           self->moveShard(self,
-		                           cx,
-		                           newDataMoveId(deterministicRandom()->randomUInt64(),
-		                                         AssignEmptyRange::False,
-		                                         EnablePhysicalShardMove::True),
-		                           currentRange,
-		                           teamSize,
-		                           includes,
-		                           excludes)));
+		wait(store(
+		    teamA,
+		    self->moveShard(
+		        self,
+		        cx,
+		        newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::False, DataMoveType::PHYSICAL),
+		        currentRange,
+		        teamSize,
+		        includes,
+		        excludes)));
 		TraceEvent(SevDebug, "TestMovedRange1").detail("Range", currentRange).detail("Team", describe(teamA));
 
 		excludes.insert(teamA.begin(), teamA.end());
@@ -119,7 +119,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		wait(store(teamA,
 		           self->moveShard(self,
 		                           cx,
-		                           newDataMoveId(sh0, AssignEmptyRange::False, EnablePhysicalShardMove::True),
+		                           newDataMoveId(sh0, AssignEmptyRange::False, DataMoveType::PHYSICAL),
 		                           currentRange,
 		                           teamSize,
 		                           includes,

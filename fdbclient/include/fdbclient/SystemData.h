@@ -37,6 +37,12 @@ FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
 
+enum class DataMoveType : uint8_t {
+	LOGICAL = 0,
+	PHYSICAL = 1,
+	PHYSICAL_EXP = 2,
+};
+
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
 // and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
 struct SystemKey : Key {
@@ -163,7 +169,7 @@ extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
-                        EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
+                        const DataMoveType type,
                         UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
@@ -174,7 +180,7 @@ const Value serverKeysValue(const UID& id);
 void decodeServerKeysValue(const ValueRef& value,
                            bool& assigned,
                            bool& emptyRange,
-                           EnablePhysicalShardMove& enablePSM,
+                           DataMoveType& dataMoveType,
                            UID& id);
 bool physicalShardMoveEnabled(const UID& dataMoveId);
 

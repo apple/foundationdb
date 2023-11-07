@@ -518,7 +518,7 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
 
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
-                        EnablePhysicalShardMove enablePSM,
+                        const DataMoveType type,
                         UnassignShard unassignShard) {
 	uint64_t split = 0;
 	if (assignEmptyRange) {
@@ -528,11 +528,13 @@ const UID newDataMoveId(const uint64_t physicalShardId,
 	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
-			if (enablePSM) {
-				split |= 1U;
-			} else {
-				split &= ~1U;
-			}
+			// uint64_t mask = ~255LL & split | static_cast<uint64_t>(type);
+			split = ((~255LL) & split) | static_cast<uint64_t>(type);
+			// if (enablePSM) {
+			// 	split |= 1U;
+			// } else {
+			// 	split &= ~1U;
+			// }
 		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
 	}
 	return UID(physicalShardId, split);
@@ -574,8 +576,9 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 bool serverHasKey(ValueRef storedValue) {
 	UID shardId;
 	bool assigned, emptyRange;
-	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-	decodeServerKeysValue(storedValue, assigned, emptyRange, enablePSM, shardId);
+	// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	decodeServerKeysValue(storedValue, assigned, emptyRange, dataMoveType, shardId);
 	return assigned;
 }
 
@@ -592,9 +595,9 @@ const Value serverKeysValue(const UID& id) {
 void decodeServerKeysValue(const ValueRef& value,
                            bool& assigned,
                            bool& emptyRange,
-                           EnablePhysicalShardMove& enablePSM,
+                           DataMoveType& dataMoveType,
                            UID& id) {
-	enablePSM = EnablePhysicalShardMove::False;
+	dataMoveType = DataMoveType::LOGICAL;
 	if (value.size() == 0) {
 		assigned = false;
 		emptyRange = false;
@@ -617,8 +620,11 @@ void decodeServerKeysValue(const ValueRef& value,
 		rd >> id;
 		assigned = id.second() != 0;
 		emptyRange = id.second() == emptyShardId;
-		if (id.second() & 1U) {
-			enablePSM = EnablePhysicalShardMove::True;
+		// if (id.second() & 1U) {
+		// 	enablePSM = EnablePhysicalShardMove::True;
+		// }
+		if (assigned && !emptyRange) {
+			dataMoveType = static_cast<DataMoveType>(255 & id.second());
 		}
 	}
 }
