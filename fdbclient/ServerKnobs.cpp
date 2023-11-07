@@ -553,14 +553,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
 	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
 	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
-	init (SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
 	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
 	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
-	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                     1 );
-	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated? 128 << 20 : 1 << 30 ); // 1G
-	init( SHARDED_ROCKSDB_CF_WRITE_BUFFER_SIZE, isSimulated? 16 << 20 : 64 << 20 ); // 64M, RocksDB default.
-	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16777216 ); // 16MB, RocksDB default.
+	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                    -1 );
+	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE,                   16 << 20 ); // 16MB
+	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE,              1 << 30 ); // 1GB
+	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET,                      64 << 20); // 64MB
+	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                    6 ); // RocksDB default.
+	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,                16 << 20); // 16MB
+	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                1 ); // RocksDB default.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
