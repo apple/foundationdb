@@ -112,6 +112,13 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 	return std::make_pair(&reasonPriority, &priorityReason);
 }
 
+DataMoveType getDataMoveType(const UID& dataMoveId) {
+	bool assigned, emptyRange;
+	DataMoveType dataMoveType;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType);
+	return dataMoveType;
+}
+
 int dataMovementPriority(DataMovementReason reason) {
 	auto [reasonPriority, _] = buildPriorityMappings();
 	return reasonPriority->at(reason);
@@ -957,6 +964,18 @@ void DDQueue::launchQueuedWork(RelocateData launchData, const DDEnabledState* dd
 	launchQueuedWork(combined, ddEnabledState);
 }
 
+DataMoveType newDataMoveType() {
+	DataMoveType type = DataMoveType::LOGICAL;
+	if (deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY) {
+		type = DataMoveType::PHYSICAL;
+	}
+	if (type != DataMoveType::PHYSICAL && SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT) {
+		type = DataMoveType::PHYSICAL_EXP;
+	}
+
+	return type;
+}
+
 // For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
 // with rd. If there exist, cancel them by cancelling their actors and reducing the src servers' busyness of those
 // canceled inflight relocateData. Launch the relocation for the rd.
@@ -1069,11 +1088,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						// const bool enabled =
-						//     deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
-						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-						                               AssignEmptyRange::False,
-						                               DataMoveType::PHYSICAL);
+						rrs.dataMoveId =
+						    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::False, newDataMoveType());
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1658,10 +1674,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					// const bool enabled =
-					//     deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
-					rd.dataMoveId = newDataMoveId(
-					    physicalShardIDCandidate, AssignEmptyRange::False, DataMoveType::PHYSICAL);
+					rd.dataMoveId =
+					    newDataMoveId(physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType());
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
@@ -1905,7 +1919,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("Reason", rd.reason.toString())
 					    .detail("DataMoveReason", static_cast<int>(rd.dmReason))
 					    .detail("DataMoveID", rd.dataMoveId)
-					    .detail("PhysicalShardMove", physicalShardMoveEnabled(rd.dataMoveId));
+					    .detail("DataMoveType", getDataMoveType(rd.dataMoveId));
 					if (now() - startTime > 600) {
 						TraceEvent(SevWarnAlways, "RelocateShardTooLong")
 						    .detail("Duration", now() - startTime)

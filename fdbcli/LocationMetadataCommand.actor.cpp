@@ -182,7 +182,6 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 					KeyRangeRef currentRange(serverShards[i].key, serverShards[i + 1].key);
 					UID shardId;
 					bool assigned, emptyRange;
-					// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 					DataMoveType dataMoveType = DataMoveType::LOGICAL;
 					decodeServerKeysValue(serverShards[i].value, assigned, emptyRange, dataMoveType, shardId);
 					printf("Range: %s, ShardID: %s, Assigned: %s\n",

@@ -51,6 +51,13 @@ struct Shard {
 	UID id;
 };
 
+bool shouldCreateCheckpoint(const UID& dataMoveId) {
+	bool assigned, emptyRange;
+	DataMoveType type;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, type);
+	return type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP;
+}
+
 // Unassigns keyrange `range` from server `ssId`, except ranges in `shards`.
 // Note: krmSetRangeCoalescing() doesn't work in this case since each shard is assigned an ID.
 ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range, std::vector<Shard> shards, UID logId) {
@@ -164,7 +171,7 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 }
 
 ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID dataMoveId) {
-	if (!physicalShardMoveEnabled(dataMoveId)) {
+	if (!shouldCreateCheckpoint(dataMoveId)) {
 		return Void();
 	}
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", dataMoveId).detail("Checkpoints", describe(checkpointIds));
@@ -408,7 +415,6 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 		for (int i = 0; i < readResult.size() - 1; i++) {
 			UID shardId;
 			bool assigned, emptyRange;
-			// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
 			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId);
 			if (!assigned) {
@@ -419,7 +425,7 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 				    .detail("ErrorMessage", "KeyServers has range but ServerKeys does not have")
 				    .detail("CurrentEmptyRange", emptyRange)
 				    .detail("CurrentAssignment", assigned)
-				    // .detail("EnablePSM", enablePSM)
+				    .detail("DataMoveType", static_cast<uint8_t>(dataMoveType))
 				    .detail("ServerID", ssid)
 				    .detail("ShardID", shardId);
 				allCorrect = false;
@@ -1798,7 +1804,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 						dataMove.src.insert(src.begin(), src.end());
 
-						if (physicalShardMoveEnabled(dataMoveId)) {
+						if (shouldCreateCheckpoint(dataMoveId)) {
 							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
 							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
 							                              DataMoveRocksCF,
@@ -2520,7 +2526,6 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	// than one result
 	UID shardId;
 	bool assigned, emptyRange;
-	// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
 	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")

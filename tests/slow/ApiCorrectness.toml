@@ -1,5 +1,7 @@
+#[configuration]
+#storageEngineExcludeTypes = [5]
 [configuration]
-storageEngineExcludeTypes = [5]
+storageEngineType = 5
 
 [[test]]
 testTitle = 'ApiCorrectnessTest'

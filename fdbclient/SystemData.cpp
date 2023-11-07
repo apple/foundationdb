@@ -592,6 +592,15 @@ const Value serverKeysValue(const UID& id) {
 	return wr.toValue();
 }
 
+void decodeDataMoveId(const UID& id, bool& assigned, bool& emptyRange, DataMoveType& dataMoveType) {
+	dataMoveType = DataMoveType::LOGICAL;
+	assigned = id.second() != 0LL;
+	emptyRange = id.second() == emptyShardId;
+	if (assigned && !emptyRange && id != anonymousShardId) {
+		dataMoveType = static_cast<DataMoveType>(255 & id.second());
+	}
+}
+
 void decodeServerKeysValue(const ValueRef& value,
                            bool& assigned,
                            bool& emptyRange,
@@ -618,19 +627,8 @@ void decodeServerKeysValue(const ValueRef& value,
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
 		rd >> id;
-		assigned = id.second() != 0;
-		emptyRange = id.second() == emptyShardId;
-		// if (id.second() & 1U) {
-		// 	enablePSM = EnablePhysicalShardMove::True;
-		// }
-		if (assigned && !emptyRange) {
-			dataMoveType = static_cast<DataMoveType>(255 & id.second());
-		}
+		decodeDataMoveId(id, assigned, emptyRange, dataMoveType);
 	}
-}
-
-bool physicalShardMoveEnabled(const UID& dataMoveId) {
-	return (dataMoveId.second() & 1U);
 }
 
 const KeyRef cacheKeysPrefix = "\xff\x02/cacheKeys/"_sr;
