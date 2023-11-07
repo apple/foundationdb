@@ -251,6 +251,7 @@ private:
 };
 
 ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin, Version end) {
+	ASSERT(self->spilled);
 	if (begin >= end) {
 		self->spilled = MoveInUpdatesSpilled::False;
 		return Void();
@@ -268,10 +269,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	                                              SERVER_KNOBS->FETCH_SHARD_UPDATES_BYTE_LIMIT));
 	std::vector<Standalone<VerUpdateRef>> restored;
 	for (int i = 0; i < res.size(); ++i) {
-		BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
-		uint64_t uv;
-		rd >> uv;
-		const Version version = static_cast<Version>(fromBigEndian64(uv));
+		const Version version = decodePersistUpdateVersion(res[i].key.removePrefix(self->range.begin));
 		Standalone<VerUpdateRef> vur =
 		    BinaryReader::fromStringRef<Standalone<VerUpdateRef>>(res[i].value, IncludeVersion());
 		ASSERT(version == vur.version);
@@ -8936,30 +8934,6 @@ void AddingShard::addMutation(Version version,
 		server->addMutation(version, fromFetch, mutation, encryptedMutation, keys, server->updateEagerReads);
 	} else
 		ASSERT(false);
-}
-
-ACTOR Future<Void> updateMoveInShardMetaDataAsync(StorageServer* data, MoveInShard* shard) {
-	state double startTime = now();
-	if (g_network->isSimulated()) {
-		Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id())));
-		if (!pm.present()) {
-			TraceEvent(SevError, "UpdatedMoveInShardMetaDataNotFound", data->thisServerID)
-			    .detail("Shard", shard->toString())
-			    .detail("ShardKey", persistMoveInShardKey(shard->id()))
-			    .detail("DurableVersion", data->durableVersion.get());
-		}
-	}
-
-	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
-	// wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-	wait(delay(0, TaskPriority::FetchKeys));
-	TraceEvent(SevDebug, "UpdatedMoveInShardMetaData", data->thisServerID)
-	    .detail("Shard", shard->toString())
-	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
-	    .detail("DurableVersion", data->durableVersion.get())
-	    .detail("DurationSecs", now() - startTime);
-
-	return Void();
 }
 
 void updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {

@@ -100,6 +100,8 @@ KeyRange persistUpdatesKeyRange(const UID& id);
 
 Key persistUpdatesKey(const UID& id, const Version version);
 
+Version decodePersistUpdateVersion(KeyRef versionKey);
+
 Key persistMoveInShardKey(const UID& id);
 
 UID decodeMoveInShardKey(const KeyRef& key);
