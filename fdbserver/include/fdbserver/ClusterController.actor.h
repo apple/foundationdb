@@ -3346,6 +3346,8 @@ public:
 	Future<Void> goodRecruitmentTime;
 	Future<Void> goodRemoteRecruitmentTime;
 	Version datacenterVersionDifference;
+	Version dcLogServerVersionDifference;
+	Version dcStorageServerVersionDifference;
 	PromiseStream<Future<Void>> addActor;
 	bool versionDifferenceUpdated;
 
@@ -3411,10 +3413,11 @@ public:
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
 	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
 	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
-	    datacenterVersionDifference(0), versionDifferenceUpdated(false), remoteDCMonitorStarted(false),
-	    remoteTransactionSystemDegraded(false), recruitDistributor(false), recruitRatekeeper(false),
-	    recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
-	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
+	    datacenterVersionDifference(0), dcLogServerVersionDifference(0), dcStorageServerVersionDifference(0),
+	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitBlobMigrator(false),
+	    recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
+	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),

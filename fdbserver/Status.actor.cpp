@@ -3035,6 +3035,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
+    Version dcLogServerVersionDifference,
+    Version dcStorageServerVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
     metacluster::MetaclusterMetrics metaclusterMetrics) {
@@ -3572,6 +3574,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+		statusObj["logserver_lag"] = getLagObject(dcLogServerVersionDifference);
+		statusObj["storageserver_lag"] = getLagObject(dcStorageServerVersionDifference);
 
 		int activeTSSCount = 0;
 		JsonBuilderArray wiggleServerAddress;
