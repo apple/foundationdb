@@ -926,6 +926,9 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	const UID ssId = metaData->src.front();
 
 	int64_t fileSize = wait(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID));
+
+	// Reload the metadata in case other concurrent 
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
 	rocksCF.sstFiles[idx].db_path = dir;
 	rocksCF.sstFiles[idx].fetched = true;
 	metaData->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());

@@ -324,6 +324,29 @@ struct RocksDBCheckpointKeyValues {
 	}
 };
 
+// Checkpoint metadata used for with FDB backup.
+struct RocksDBBackupCheckpoint {
+	constexpr static FileIdentifier file_identifier = 13804350;
+	std::string dbComparatorName;
+
+	std::vector<LiveFileMetaData> sstFiles;
+
+	CheckpointFormat format() const { return DataMoveRocksCF; }
+
+	std::string toString() const {
+		std::string res = "RocksDBColumnFamilyCheckpoint:\nSST Files:\n";
+		for (const auto& file : sstFiles) {
+			res += file.db_path + file.name + "\n";
+		}
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, dbComparatorName, sstFiles);
+	}
+};
+
 // Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
 // If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
 // can be continued, in case of crash.
