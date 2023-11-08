@@ -41,6 +41,7 @@ enum class DataMoveType : uint8_t {
 	LOGICAL = 0,
 	PHYSICAL = 1,
 	PHYSICAL_EXP = 2,
+	NUMBER_OF_TYPES = 3,
 };
 
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base

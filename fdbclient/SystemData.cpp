@@ -528,13 +528,8 @@ const UID newDataMoveId(const uint64_t physicalShardId,
 	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
-			// uint64_t mask = ~255LL & split | static_cast<uint64_t>(type);
-			split = ((~255LL) & split) | static_cast<uint64_t>(type);
-			// if (enablePSM) {
-			// 	split |= 1U;
-			// } else {
-			// 	split &= ~1U;
-			// }
+			// Set the lowest 8 bits
+			split = ((~0xFF) & split) | static_cast<uint64_t>(type);
 		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
 	}
 	return UID(physicalShardId, split);
@@ -576,7 +571,6 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 bool serverHasKey(ValueRef storedValue) {
 	UID shardId;
 	bool assigned, emptyRange;
-	// EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
 	decodeServerKeysValue(storedValue, assigned, emptyRange, dataMoveType, shardId);
 	return assigned;
@@ -597,7 +591,7 @@ void decodeDataMoveId(const UID& id, bool& assigned, bool& emptyRange, DataMoveT
 	assigned = id.second() != 0LL;
 	emptyRange = id.second() == emptyShardId;
 	if (assigned && !emptyRange && id != anonymousShardId) {
-		dataMoveType = static_cast<DataMoveType>(255 & id.second());
+		dataMoveType = static_cast<DataMoveType>(0xFF & id.second());
 	}
 }
 
@@ -2072,6 +2066,24 @@ TEST_CASE("noSim/SystemData/compat/KeyServers") {
 	decodeAndVerify(v, anonymousShardId, UID());
 
 	printf("ssi serdes test complete\n");
+
+	return Void();
+}
+
+TEST_CASE("noSim/SystemData/DataMoveId") {
+	printf("testing data move ID encoding/decoding\n");
+	const uint64_t physicalShardId = deterministicRandom()->randomUInt64();
+	const DataMoveType type =
+	    static_cast<DataMoveType>(deterministicRandom()->randomInt(0, static_cast<int>(DataMoveType::NUMBER_OF_TYPES)));
+	const UID dataMoveId = newDataMoveId(physicalShardId, AssignEmptyRange(false), type, UnassignShard(false));
+
+	bool assigned, emptyRange;
+	DataMoveType decodeType;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, decodeType);
+
+	ASSERT(type == decodeType);
+
+	printf("testing data move ID encoding/decoding complete\n");
 
 	return Void();
 }
