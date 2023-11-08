@@ -517,7 +517,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
 	init( ENABLE_SHARDED_ROCKSDB,                              false );
-	init( ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 16 << 20 : 64 << 20 ); // 64 MB
+	init( ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 256 << 10 : 64 << 20 ); // 64 MB
 	init( ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                         6 ); // RocksDB default.
 	init( ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE,                2 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               2 ); // RocksDB default.
