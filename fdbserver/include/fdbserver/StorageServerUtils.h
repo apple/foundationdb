@@ -96,16 +96,17 @@ struct MoveInShardMetaData {
 
 class ThroughputLimiter {
 public:
-	ThroughputLimiter(uint64_t cap);
+	ThroughputLimiter(int64_t cap);
 
-	Future<Void> waitForReady();
-	void addBytes(uint64_t bytes);
+	Future<Void> ready();
+	void addBytes(int64_t bytes);
 	void settle();
 
 private:
-	uint64_t cap;
-	uint64_t bytes;
+	int64_t cap;
+	int64_t bytes;
 	double lastSettleSec;
+	double nextAvailableSec;
 	Future<Void> readyFuture;
 };
 
