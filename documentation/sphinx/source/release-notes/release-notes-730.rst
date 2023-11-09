@@ -2,6 +2,16 @@
 Release Notes
 #############
 
+7.3.27
+======
+* Same as 7.3.26 release with AVX disabled.
+
+7.3.26
+======
+* Fixed exclude command in fdbcli, allows excluding servers by locality.
+* Updated RocskDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
+* Various bug fixes in tests
+
 7.3.25
 ======
 * Same as 7.3.24 release with AVX enabled.
