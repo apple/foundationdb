@@ -2112,8 +2112,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 void SimulationConfig::setTss(const TestConfig& testConfig) {
 	int tssCount = 0;
 	// TODO: Support TSS in SHARD_ENCODE_LOCATION_METADATA mode.
-	if (!testConfig.simpleConfig && !testConfig.disableTss && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	    deterministicRandom()->random01() < 0.25) {
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
