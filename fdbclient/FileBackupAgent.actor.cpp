@@ -3408,6 +3408,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
 				partitionedLog = config.partitionedLogEnabled().get(tr);
 				wait(success(started) && success(taskStarted) && success(partitionedLog));
+				// comment
 
 				if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
 					return Void(); // Skip if not using partitioned logs
