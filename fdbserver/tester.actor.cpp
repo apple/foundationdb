@@ -2032,6 +2032,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state bool enableDD = false;
 	state TesterConsistencyScanState consistencyScanState;
+
 	if (tests.empty())
 		useDB = true;
 	for (auto iter = tests.begin(); iter != tests.end(); ++iter) {
