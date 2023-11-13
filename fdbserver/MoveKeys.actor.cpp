@@ -54,7 +54,8 @@ struct Shard {
 bool shouldCreateCheckpoint(const UID& dataMoveId) {
 	bool assigned, emptyRange;
 	DataMoveType type;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, type);
+	DataMovementReason reason;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, type, reason);
 	return type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP;
 }
 
@@ -416,7 +417,8 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 			UID shardId;
 			bool assigned, emptyRange;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
-			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId);
+			DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
 			if (!assigned) {
 				TraceEvent(SevError, "ValidateRangeAssignmentCorruptionDetected")
 				    .detail("DataMoveID", dataMoveId)
@@ -2527,7 +2529,8 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	UID shardId;
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId);
+	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
@@ -2766,6 +2769,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 
 						const UID shardId = newDataMoveId(
 						    deterministicRandom()->randomUInt64(), AssignEmptyRange::True, DataMoveType::LOGICAL);
+						// no data move is triggered, so, we do not encode dmReason into shardId
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {

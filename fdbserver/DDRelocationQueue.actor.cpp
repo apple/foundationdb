@@ -115,7 +115,8 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 DataMoveType getDataMoveType(const UID& dataMoveId) {
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType);
+	DataMovementReason dataMoveReason;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType, dataMoveReason);
 	return dataMoveType;
 }
 
@@ -1088,8 +1089,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						rrs.dataMoveId = newDataMoveId(
-						    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, newDataMoveType());
+						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						                               AssignEmptyRange::False,
+						                               newDataMoveType(),
+						                               rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1674,7 +1677,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType());
+					rd.dataMoveId = newDataMoveId(
+					    physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType(), rd.dmReason);
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
