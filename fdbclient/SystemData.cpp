@@ -2089,7 +2089,7 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 	const DataMoveType type =
 	    static_cast<DataMoveType>(deterministicRandom()->randomInt(0, static_cast<int>(DataMoveType::NUMBER_OF_TYPES)));
 	const DataMovementReason reason = static_cast<DataMovementReason>(
-	    deterministicRandom()->randomInt(0, static_cast<int>(DataMovementReason::NUMBER_OF_REASONS)));
+	    deterministicRandom()->randomInt(1, static_cast<int>(DataMovementReason::NUMBER_OF_REASONS)));
 	const UID dataMoveId = newDataMoveId(physicalShardId, AssignEmptyRange(false), type, reason, UnassignShard(false));
 
 	bool assigned, emptyRange;

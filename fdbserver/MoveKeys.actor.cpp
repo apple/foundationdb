@@ -2767,9 +2767,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
-						const UID shardId = newDataMoveId(
-						    deterministicRandom()->randomUInt64(), AssignEmptyRange::True, DataMoveType::LOGICAL);
-						// no data move is triggered, so, we do not encode dmReason into shardId
+						const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						                                  AssignEmptyRange::True,
+						                                  DataMoveType::LOGICAL,
+						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {

@@ -65,7 +65,8 @@ enum class DataMovementReason : uint8_t {
 	TEAM_0_LEFT = 16,
 	SPLIT_SHARD = 17,
 	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 18,
-	NUMBER_OF_REASONS = 19,
+	ASSIGN_EMPTY_RANGE = 19, // no corresponding data move priority
+	NUMBER_OF_REASONS = 20,
 };
 
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
@@ -195,7 +196,7 @@ extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
                         const DataMoveType type,
-                        const DataMovementReason reason = DataMovementReason::INVALID,
+                        const DataMovementReason reason,
                         UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);

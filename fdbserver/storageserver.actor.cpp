@@ -9902,7 +9902,6 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context,
                       DataMovementReason dataMoveReason) {
 	ASSERT(!keys.empty());
-
 	// TraceEvent("ChangeServerKeys", data->thisServerID)
 	//     .detail("KeyBegin", keys.begin)
 	//     .detail("KeyEnd", keys.end)
@@ -10511,6 +10510,14 @@ private:
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange,
 					// treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 					// scenario.
+					if (dataMoveId != anonymousShardId && dataMoveId.isValid()) {
+						ASSERT(dataMoveReason != DataMovementReason::NUMBER_OF_REASONS);
+						if (nowAssigned && !emptyRange) {
+							ASSERT(dataMoveReason != DataMovementReason::INVALID);
+						} else {
+							ASSERT(dataMoveReason == DataMovementReason::INVALID);
+						}
+					}
 					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context, dataMoveReason);
 				}
 			}
