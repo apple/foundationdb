@@ -237,14 +237,4 @@ AsyncGenerator<T> toGenerator(FutureStream<T> stream) {
 	}
 }
 
-// below code doesn't work with AppleClang
-#ifndef __apple_build_version__
-
-template <class T>
-auto generatorRange(Generator<T> generator) {
-	return std::ranges::subrange<Generator<T>>(generator, Generator<T>::end());
-}
-
-#endif // __apple_build_version__
-
 #endif // FLOW_COROUTILS_H

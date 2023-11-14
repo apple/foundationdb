@@ -260,6 +260,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
 #endif
 	ProtocolVersion protocolVersion() const override { return baseNetwork->protocolVersion(); }
+	void _swiftEnqueue(void* task) override { baseNetwork->_swiftEnqueue(task); }
 };
 
 Future<Void> testCancelled(bool* exits, Future<Void> f) {
@@ -1746,16 +1747,6 @@ Generator<T> walkElements(std::vector<T> elements) {
 	}
 }
 
-#ifndef __apple_build_version__
-Generator<double> powersOf(double base) {
-	double curr = 1;
-	loop {
-		co_yield curr;
-		curr *= base;
-	}
-}
-#endif // __apple_build_version__
-
 void testElementWalker() {
 	int numElements = deterministicRandom()->randomInt(100, 1000);
 	std::vector<int> elements;
@@ -1774,23 +1765,6 @@ void testElementWalker() {
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_end_of_stream);
 	}
-	// ranges are not properly supported in AppleClang
-#ifndef __apple_build_version__
-	// test iterator semantics
-	gen = walkElements(verificationCopy);
-	auto view = generatorRange(gen);
-	int idx = 0;
-	for (auto v : view) {
-		ASSERT(verificationCopy[idx++] == v);
-	}
-	ASSERT(idx == verificationCopy.size());
-	std::vector<double> expectedPowers = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 };
-	idx = 0;
-	for (auto val : generatorRange(powersOf(2)) | std::ranges::views::take(10)) {
-		ASSERT(expectedPowers[idx++] == val);
-	}
-	ASSERT(idx == expectedPowers.size());
-#endif // __apple_build_version__
 }
 
 Future<Void> simpleCoro() {
@@ -1814,19 +1788,6 @@ Generator<unsigned> fibonacci() {
 	}
 }
 
-// ranges are not properly supported in AppleClang
-#ifndef __apple_build_version__
-std::vector<unsigned> fibDivisible(unsigned n, unsigned by) {
-	static_assert(std::input_iterator<Generator<unsigned>>);
-	auto range = generatorRange(fibonacci());
-	auto view = range | std::views::filter([by](auto v) { return v % by == 0; }) | std::views::take(n);
-	std::vector<unsigned> res;
-	res.reserve(n);
-	std::ranges::copy(view, std::back_inserter(res));
-	return res;
-}
-#else
-// with AppleClang, do the ugly thing
 std::vector<unsigned> fibDivisible(unsigned n, unsigned by) {
 	std::vector<unsigned> res;
 	res.reserve(n);
@@ -1837,7 +1798,6 @@ std::vector<unsigned> fibDivisible(unsigned n, unsigned by) {
 	}
 	return res;
 }
-#endif // __apple_build_version__
 
 std::vector<unsigned> fibDivisibleBad(unsigned n, unsigned by) {
 	unsigned curr = 1, next = 1;
