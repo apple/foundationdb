@@ -43,6 +43,9 @@ void ThroughputLimiter::addBytes(int64_t bytes) {
 }
 
 void ThroughputLimiter::settle() {
+	if (cap <= 0) {
+		return;
+	}
 	const double ts = now();
 	if (ts < this->nextAvailableSec) {
 		return;
