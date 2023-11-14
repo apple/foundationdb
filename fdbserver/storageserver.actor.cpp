@@ -8936,27 +8936,12 @@ void AddingShard::addMutation(Version version,
 		ASSERT(false);
 }
 
-ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
-	state double startTime = now();
-	if (g_network->isSimulated()) {
-		Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id())));
-		if (!pm.present()) {
-			TraceEvent(SevError, "UpdatedMoveInShardMetaDataNotFound", data->thisServerID)
-			    .detail("Shard", shard->toString())
-			    .detail("ShardKey", persistMoveInShardKey(shard->id()))
-			    .detail("DurableVersion", data->durableVersion.get());
-		}
-	}
-
+void updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
 	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
-	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
 	TraceEvent(shard->logSev, "UpdatedMoveInShardMetaData", data->thisServerID)
 	    .detail("Shard", shard->toString())
 	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
-	    .detail("DurableVersion", data->durableVersion.get())
-	    .detail("DurationSecs", now() - startTime);
-
-	return Void();
+	    .detail("DurableVersion", data->durableVersion.get());
 }
 
 void changeServerKeysWithPhysicalShards(StorageServer* data,
@@ -9091,7 +9076,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	moveInShard->meta->checkpoints = std::move(localRecords);
 	moveInShard->setPhase(MoveInPhase::Ingesting);
 
-	wait(updateMoveInShardMetaData(data, moveInShard));
+	updateMoveInShardMetaData(data, moveInShard);
 
 	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
 	return Void();
@@ -9114,7 +9099,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
-			wait(updateMoveInShardMetaData(data, moveInShard));
+			updateMoveInShardMetaData(data, moveInShard);
 			return Void();
 		}
 		throw err;
@@ -9160,7 +9145,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	}
 
 	moveInShard->setPhase(MoveInPhase::ApplyingUpdates);
-	wait(updateMoveInShardMetaData(data, moveInShard));
+	updateMoveInShardMetaData(data, moveInShard);
 
 	moveInShard->fetchComplete.send(Void());
 
@@ -9281,7 +9266,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 
 		double duration = now() - startTime;
 		const int64_t totalBytes = getTotalFetchedBytes(moveInShard->checkpoints());
-		TraceEvent(SevInfo, "IngestShardStats", data->thisServerID)
+		TraceEvent(moveInShard->logSev, "FetchShardApplyUpdatesStats", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Duration", duration)
 		    .detail("TotalBytes", totalBytes)
@@ -10534,7 +10519,10 @@ private:
 			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
 			// keys
 			startKey = m.param1;
-			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, enablePSM, dataMoveId);
+			DataMoveType dataMoveType = DataMoveType::LOGICAL;
+			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId);
+			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL ||
+			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)
