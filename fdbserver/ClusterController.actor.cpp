@@ -1519,6 +1519,8 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  coordinators,
 			                                                                  incompatibleConnections,
 			                                                                  self->datacenterVersionDifference,
+			                                                                  self->dcLogServerVersionDifference,
+			                                                                  self->dcStorageServerVersionDifference,
 			                                                                  configBroadcaster,
 			                                                                  self->db.metaclusterRegistration,
 			                                                                  self->db.metaclusterMetrics)));
@@ -1945,6 +1947,8 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 			                             self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
 			self->versionDifferenceUpdated = true;
 			self->datacenterVersionDifference = 0;
+			self->dcLogServerVersionDifference = 0;
+			self->dcStorageServerVersionDifference = 0;
 
 			if (oldDifferenceTooLarge) {
 				checkOutstandingRequests(self);
@@ -1977,7 +1981,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 			}
 		}
 
-		if (!primaryLog.present() || !remoteLog.present()) {
+		if (!primaryLog.present() || !remoteLog.present() || !self->db.serverInfo->get().ratekeeper.present()) {
 			wait(self->db.serverInfo->onChange());
 			continue;
 		}
@@ -1988,8 +1992,10 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 			    brokenPromiseToNever(primaryLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
 			state Future<TLogQueuingMetricsReply> remoteMetrics =
 			    brokenPromiseToNever(remoteLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
+			state Future<GetSSVersionLagReply> ssVersionLagReply = brokenPromiseToNever(
+			    self->db.serverInfo->get().ratekeeper.get().getSSVersionLag.getReply(GetSSVersionLagRequest()));
 
-			wait((success(primaryMetrics) && success(remoteMetrics)) || onChange);
+			wait((success(primaryMetrics) && success(remoteMetrics) && success(ssVersionLagReply)) || onChange);
 			if (onChange.isReady()) {
 				break;
 			}
@@ -1998,7 +2004,15 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				bool oldDifferenceTooLarge = !self->versionDifferenceUpdated ||
 				                             self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
 				self->versionDifferenceUpdated = true;
-				self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+				self->dcLogServerVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+				self->dcStorageServerVersionDifference =
+				    (ssVersionLagReply.get().maxPrimarySSVersion > 0 && ssVersionLagReply.get().maxRemoteSSVersion > 0)
+				        ? (ssVersionLagReply.get().maxPrimarySSVersion - ssVersionLagReply.get().maxRemoteSSVersion)
+				        : 0;
+				self->datacenterVersionDifference =
+				    std::max(self->dcLogServerVersionDifference, self->dcStorageServerVersionDifference);
+
+				TraceEvent("VersionDifferenceOldLarge").detail("OldDifference", oldDifferenceTooLarge);
 
 				if (oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					checkOutstandingRequests(self);
@@ -2007,7 +2021,9 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				if (now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
 					lastLogTime = now();
 					TraceEvent("DatacenterVersionDifference", self->id)
-					    .detail("Difference", self->datacenterVersionDifference);
+					    .detail("Difference", self->datacenterVersionDifference)
+					    .detail("LogServerVersionDifference", self->dcLogServerVersionDifference)
+					    .detail("StorageServerVersionDifference", self->dcStorageServerVersionDifference);
 				}
 			}
 

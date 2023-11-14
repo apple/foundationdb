@@ -53,6 +53,8 @@ Future<StatusReply> clusterGetStatus(
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference,
+    Version const& dcLogServerVersionDifference,
+    Version const& dcStorageServerVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
     metacluster::MetaclusterMetrics const& metaclusterMetrics);
