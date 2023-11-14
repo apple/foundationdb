@@ -40,6 +40,7 @@
 #include <utility>
 
 #include "flow/flow.h"
+#include "flow/CoroUtils.h"
 #include "flow/Knobs.h"
 #include "flow/Util.h"
 #include "flow/IndexedSet.h"

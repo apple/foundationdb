@@ -124,6 +124,8 @@ foreach(ft flow flow_sampling flowlinktest)
         find_library(CORE_FOUNDATION CoreFoundation)
         target_link_libraries(${ft} PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
     endif()
+    find_package(Coroutines COMPONENTS Experimental Final REQUIRED)
+    target_link_libraries(${ft} PUBLIC std::coroutines)
 endforeach()
 
 if(OPEN_FOR_IDE)

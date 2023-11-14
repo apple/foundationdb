@@ -448,3 +448,6 @@ TEST_CASE("/flow/network/ipV6Preferred") {
 }
 
 NetworkInfo::NetworkInfo() : handshakeLock(new FlowLock(FLOW_KNOBS->TLS_HANDSHAKE_LIMIT)) {}
+NetworkInfo::~NetworkInfo() {
+	delete handshakeLock;
+}
