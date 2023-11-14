@@ -232,9 +232,6 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	[[nodiscard]] Future<Void> onWorkerThread(std::function<void()> fun, TaskPriority priority) override {
-		return baseNetwork->onWorkerThread(std::move(fun), priority);
-	}
 	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
 		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
