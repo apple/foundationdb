@@ -438,14 +438,14 @@ Future<Void> fdbClientStream() {
 			co_await onError;
 			onError = Future<Void>();
 		}
-		PromiseStream<RangeReadResult> results;
+		PromiseStream<Standalone<RangeResultRef>> results;
 		try {
 			Future<Void> stream = tx.getRangeStream(results,
 			                                        KeySelector(firstGreaterOrEqual(next), next.arena()),
 			                                        KeySelector(firstGreaterOrEqual(normalKeys.end)),
 			                                        GetRangeLimits());
 			loop {
-				RangeReadResult range = co_await results.getFuture();
+				Standalone<RangeResultRef> range = co_await results.getFuture();
 				if (range.size()) {
 					bytes += range.expectedSize();
 					next = keyAfter(range.back().key);
