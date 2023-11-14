@@ -10,9 +10,10 @@ Release Notes
 
 7.3.26
 ======
-* Fixed exclude command in fdbcli, allows excluding servers by locality.
+* Fixed several locality-based exclusion bugs. `(PR #11024) <https://github.com/apple/foundationdb/pull/11024>`_ `(PR #11007) <https://github.com/apple/foundationdb/pull/11007>`_ `(PR #11005) <https://github.com/apple/foundationdb/pull/11005>`_
 * Updated RocskDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
-* Various bug fixes in tests
+* Added `fdb_c_apiversion.g.h` to OSX package. `(PR #11039) <https://github.com/apple/foundationdb/pull/11039>`_ `(PR #11016) <https://github.com/apple/foundationdb/pull/11016>`_
+* Added write traffic metrics to ddMetricsGetRange. `(PR #10998) <https://github.com/apple/foundationdb/pull/10998>`_
 
 7.3.25
 ======
