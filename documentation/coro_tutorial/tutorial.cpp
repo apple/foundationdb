@@ -520,7 +520,7 @@ Future<Void> fdbClientGetRange() {
 	int64_t bytes = 0;
 	Future<Void> logFuture = logThroughput(&bytes, &next);
 	co_await runTransactionWhile(db, [&bytes, &next](Transaction* tr) -> Future<bool> {
-		RangeReadResult range =
+		RangeResult range =
 		    co_await tr->getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
 		                          KeySelector(firstGreaterOrEqual(normalKeys.end)),
 		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
@@ -551,7 +551,7 @@ Future<Void> fdbClient() {
 			// 3. write 10 values in [k, k+100]
 			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
 			startKey = keyPrefix + std::to_string(beginIdx);
-			RangeReadResult range = co_await tr->getRange(KeyRangeRef(startKey, endKey), 100);
+			auto range = co_await tr->getRange(KeyRangeRef(startKey, endKey), 100);
 			for (int i = 0; i < 10; ++i) {
 				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
 				tr->set(k, "foo"_sr);
