@@ -592,6 +592,51 @@ const Value serverKeysValue(const UID& id) {
 	return wr.toValue();
 }
 
+void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
+                              const DataMovementReason& dataMoveReason,
+                              const bool& emptyRange,
+                              const bool& assigned,
+                              const UID& dataMoveId) {
+	if (dataMoveType >= DataMoveType::NUMBER_OF_TYPES || dataMoveType < DataMoveType::LOGICAL) {
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
+		    .detail("Reason", "WrongDataMoveTypeOutScope")
+		    .detail("Value", dataMoveType)
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("SplitIDToDecode", dataMoveId.second());
+	}
+	if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason <= DataMovementReason::INVALID) {
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
+		    .detail("Reason", "WrongDataMoveReasonOutScope")
+		    .detail("Value", dataMoveReason)
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("SplitIDToDecode", dataMoveId.second());
+	}
+	if (!emptyRange && assigned) {
+		if (dataMoveReason != DataMovementReason::INVALID) {
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
+			    .detail("Reason", "WrongDataMoveReason")
+			    .detail("Value", dataMoveReason)
+			    .detail("ExpectedValue", DataMovementReason::INVALID)
+			    .detail("DataMoveID", dataMoveId)
+			    .detail("EmptyRange", emptyRange)
+			    .detail("Assigned", assigned)
+			    .detail("SplitIDToDecode", dataMoveId.second());
+		}
+	} else {
+		if (dataMoveReason == DataMovementReason::INVALID) {
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
+			    .detail("Reason", "WrongDataMoveReason")
+			    .detail("Value", dataMoveReason)
+			    .detail("ExpectedValue", "Should not be invalid value")
+			    .detail("DataMoveID", dataMoveId)
+			    .detail("EmptyRange", emptyRange)
+			    .detail("Assigned", assigned)
+			    .detail("SplitIDToDecode", dataMoveId.second());
+		}
+	}
+	return;
+}
+
 void decodeDataMoveId(const UID& id,
                       bool& assigned,
                       bool& emptyRange,
@@ -604,13 +649,7 @@ void decodeDataMoveId(const UID& id,
 	if (assigned && !emptyRange && id != anonymousShardId) {
 		dataMoveType = static_cast<DataMoveType>(0xFF & id.second());
 		dataMoveReason = static_cast<DataMovementReason>(0xFF & (id.second() >> 8));
-		ASSERT(dataMoveType < DataMoveType::NUMBER_OF_TYPES && dataMoveType >= DataMoveType::LOGICAL);
-		ASSERT(dataMoveReason < DataMovementReason::NUMBER_OF_REASONS && dataMoveReason > DataMovementReason::INVALID);
-		if (emptyRange || !assigned) {
-			ASSERT(dataMoveReason == DataMovementReason::INVALID);
-		} else {
-			ASSERT(dataMoveReason != DataMovementReason::INVALID);
-		}
+		validateDataMoveIdDecode(dataMoveType, dataMoveReason, assigned, emptyRange, id);
 	}
 }
 

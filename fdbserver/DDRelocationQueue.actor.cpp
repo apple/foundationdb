@@ -2278,7 +2278,6 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
 	state const char* eventName = isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 	state int ddPriority = dataMovementPriority(reason);
-	ASSERT(ddPriority > 0);
 	state double rebalancePollingInterval = 0;
 
 	loop {
