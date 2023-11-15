@@ -86,7 +86,11 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		// Create checkpoint.
 		state Transaction tr(cx);
 		state CheckpointFormat format = DataMoveRocksCF;
-		state UID dataMoveId = deterministicRandom()->randomUniqueID();
+		state UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+		                                     AssignEmptyRange(false),
+		                                     DataMoveType::PHYSICAL,
+		                                     DataMovementReason::TEAM_HEALTHY,
+		                                     UnassignShard(false));
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);

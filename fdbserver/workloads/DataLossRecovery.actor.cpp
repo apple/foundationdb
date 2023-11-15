@@ -221,7 +221,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
 				std::unique_ptr<MoveKeysParams> params;
 				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-					params = std::make_unique<MoveKeysParams>(deterministicRandom()->randomUniqueID(),
+					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+					                               AssignEmptyRange(false),
+					                               DataMoveType::PHYSICAL,
+					                               DataMovementReason::TEAM_HEALTHY,
+					                               UnassignShard(false));
+					params = std::make_unique<MoveKeysParams>(dataMoveId,
 					                                          std::vector<KeyRange>{ keys },
 					                                          dest,
 					                                          dest,
@@ -234,7 +239,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 					                                          &ddEnabledState,
 					                                          CancelConflictingDataMoves::True);
 				} else {
-					params = std::make_unique<MoveKeysParams>(deterministicRandom()->randomUniqueID(),
+					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+					                               AssignEmptyRange(false),
+					                               DataMoveType::LOGICAL,
+					                               DataMovementReason::TEAM_HEALTHY,
+					                               UnassignShard(false));
+					params = std::make_unique<MoveKeysParams>(dataMoveId,
 					                                          keys,
 					                                          dest,
 					                                          dest,

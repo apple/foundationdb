@@ -91,28 +91,6 @@ private:
 	Value value;
 };
 
-// One-to-one relationship to the priority knobs
-enum class DataMovementReason {
-	INVALID,
-	RECOVER_MOVE,
-	REBALANCE_UNDERUTILIZED_TEAM,
-	REBALANCE_OVERUTILIZED_TEAM,
-	REBALANCE_READ_OVERUTIL_TEAM,
-	REBALANCE_READ_UNDERUTIL_TEAM,
-	PERPETUAL_STORAGE_WIGGLE,
-	TEAM_HEALTHY,
-	TEAM_CONTAINS_UNDESIRED_SERVER,
-	TEAM_REDUNDANT,
-	MERGE_SHARD,
-	POPULATE_REGION,
-	TEAM_UNHEALTHY,
-	TEAM_2_LEFT,
-	TEAM_1_LEFT,
-	TEAM_FAILED,
-	TEAM_0_LEFT,
-	SPLIT_SHARD,
-	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD
-};
 extern int dataMovementPriority(DataMovementReason moveReason);
 extern DataMovementReason priorityToDataMovementReason(int priority);
 

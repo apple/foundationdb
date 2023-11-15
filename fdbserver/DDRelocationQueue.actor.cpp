@@ -94,7 +94,10 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
 		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
 		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
-		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD }
+		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD },
+		{ DataMovementReason::ASSIGN_EMPTY_RANGE, -2 }, // dummy reason, no corresponding actual data move
+		{ DataMovementReason::SEED_SHARD_SERVER, -3 }, // dummy reason, no corresponding actual data move
+		{ DataMovementReason::NUMBER_OF_REASONS, -4 }, // dummy reason, no corresponding actual data move
 	};
 
 	static PriorityDmReasonMapping priorityReason;
@@ -115,10 +118,12 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 DataMoveType getDataMoveType(const UID& dataMoveId) {
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType);
+	DataMovementReason dataMoveReason;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType, dataMoveReason);
 	return dataMoveType;
 }
 
+// Return negative priority for invalid or dummy reasons
 int dataMovementPriority(DataMovementReason reason) {
 	auto [reasonPriority, _] = buildPriorityMappings();
 	return reasonPriority->at(reason);
@@ -1081,8 +1086,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						rrs.dataMoveId = newDataMoveId(
-						    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, newDataMoveType());
+						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						                               AssignEmptyRange::False,
+						                               newDataMoveType(),
+						                               rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1622,7 +1629,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType());
+					rd.dataMoveId = newDataMoveId(
+					    physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType(), rd.dmReason);
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
