@@ -54,7 +54,8 @@ struct Shard {
 bool shouldCreateCheckpoint(const UID& dataMoveId) {
 	bool assigned, emptyRange;
 	DataMoveType type;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, type);
+	DataMovementReason reason;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, type, reason);
 	return type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP;
 }
 
@@ -416,7 +417,8 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 			UID shardId;
 			bool assigned, emptyRange;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
-			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId);
+			DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
 			if (!assigned) {
 				TraceEvent(SevError, "ValidateRangeAssignmentCorruptionDetected")
 				    .detail("DataMoveID", dataMoveId)
@@ -2527,7 +2529,8 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	UID shardId;
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId);
+	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
@@ -2764,8 +2767,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
-						const UID shardId = newDataMoveId(
-						    deterministicRandom()->randomUInt64(), AssignEmptyRange::True, DataMoveType::LOGICAL);
+						const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						                                  AssignEmptyRange::True,
+						                                  DataMoveType::LOGICAL,
+						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -3283,7 +3288,11 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// to a specific
 	//   key (keyServersKeyServersKey)
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		const UID shardId = deterministicRandom()->randomUniqueID();
+		const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
+		                                  AssignEmptyRange(false),
+		                                  DataMoveType::PHYSICAL,
+		                                  DataMovementReason::SEED_SHARD_SERVER,
+		                                  UnassignShard(false));
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 

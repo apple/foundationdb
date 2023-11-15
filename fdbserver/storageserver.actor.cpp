@@ -9899,9 +9899,9 @@ void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
                       bool nowAssigned,
                       Version version,
-                      ChangeServerKeysContext context) {
+                      ChangeServerKeysContext context,
+                      DataMovementReason dataMoveReason) {
 	ASSERT(!keys.empty());
-
 	// TraceEvent("ChangeServerKeys", data->thisServerID)
 	//     .detail("KeyBegin", keys.begin)
 	//     .detail("KeyEnd", keys.end)
@@ -10474,6 +10474,7 @@ private:
 	bool nowAssigned;
 	bool emptyRange;
 	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
 	UID dataMoveId;
 	bool processedStartKey;
 
@@ -10509,7 +10510,7 @@ private:
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange,
 					// treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 					// scenario.
-					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
+					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context, dataMoveReason);
 				}
 			}
 
@@ -10520,7 +10521,8 @@ private:
 			// keys
 			startKey = m.param1;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
-			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId);
+			dataMoveReason = DataMovementReason::INVALID;
+			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId, dataMoveReason);
 			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL ||
 			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
 			processedStartKey = true;
@@ -12658,7 +12660,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			bool nowAssigned = assigned[assignedLoc].value != "0"_sr;
 			/*if(nowAssigned)
 			TraceEvent("AssignedShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
-			changeServerKeys(data, keys, nowAssigned, version, CSK_RESTORE);
+			changeServerKeys(data, keys, nowAssigned, version, CSK_RESTORE, DataMovementReason::INVALID);
 
 			if (!nowAssigned)
 				ASSERT(data->newestAvailableVersion.allEqual(keys, invalidVersion));
