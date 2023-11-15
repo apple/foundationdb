@@ -94,7 +94,10 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
 		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
 		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
-		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD }
+		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD },
+		{ DataMovementReason::ASSIGN_EMPTY_RANGE, -2 }, // dummy reason, no corresponding actual data move
+		{ DataMovementReason::SEED_SHARD_SERVER, -3 }, // dummy reason, no corresponding actual data move
+		{ DataMovementReason::NUMBER_OF_REASONS, -4 }, // dummy reason, no corresponding actual data move
 	};
 
 	static PriorityDmReasonMapping priorityReason;
@@ -120,6 +123,7 @@ DataMoveType getDataMoveType(const UID& dataMoveId) {
 	return dataMoveType;
 }
 
+// Return negative priority for invalid or dummy reasons
 int dataMovementPriority(DataMovementReason reason) {
 	auto [reasonPriority, _] = buildPriorityMappings();
 	return reasonPriority->at(reason);
@@ -2274,6 +2278,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
 	state const char* eventName = isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 	state int ddPriority = dataMovementPriority(reason);
+	ASSERT(ddPriority > 0);
 	state double rebalancePollingInterval = 0;
 
 	loop {

@@ -604,6 +604,13 @@ void decodeDataMoveId(const UID& id,
 	if (assigned && !emptyRange && id != anonymousShardId) {
 		dataMoveType = static_cast<DataMoveType>(0xFF & id.second());
 		dataMoveReason = static_cast<DataMovementReason>(0xFF & (id.second() >> 8));
+		ASSERT(dataMoveType < DataMoveType::NUMBER_OF_TYPES && dataMoveType >= DataMoveType::LOGICAL);
+		ASSERT(dataMoveReason < DataMovementReason::NUMBER_OF_REASONS && dataMoveReason > DataMovementReason::INVALID);
+		if (emptyRange || !assigned) {
+			ASSERT(dataMoveReason == DataMovementReason::INVALID);
+		} else {
+			ASSERT(dataMoveReason != DataMovementReason::INVALID);
+		}
 	}
 }
 
@@ -614,6 +621,7 @@ void decodeServerKeysValue(const ValueRef& value,
                            UID& id,
                            DataMovementReason& dataMoveReason) {
 	dataMoveType = DataMoveType::LOGICAL;
+	dataMoveReason = DataMovementReason::INVALID;
 	if (value.size() == 0) {
 		assigned = false;
 		emptyRange = false;
@@ -2094,7 +2102,7 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 
 	bool assigned, emptyRange;
 	DataMoveType decodeType;
-	DataMovementReason decodeReason;
+	DataMovementReason decodeReason = DataMovementReason::INVALID;
 	decodeDataMoveId(dataMoveId, assigned, emptyRange, decodeType, decodeReason);
 
 	ASSERT(type == decodeType && reason == decodeReason);

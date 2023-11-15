@@ -10510,13 +10510,15 @@ private:
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange,
 					// treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 					// scenario.
+					ASSERT(dataMoveReason != DataMovementReason::NUMBER_OF_REASONS);
 					if (dataMoveId != anonymousShardId && dataMoveId.isValid()) {
-						ASSERT(dataMoveReason != DataMovementReason::NUMBER_OF_REASONS);
 						if (nowAssigned && !emptyRange) {
 							ASSERT(dataMoveReason != DataMovementReason::INVALID);
 						} else {
 							ASSERT(dataMoveReason == DataMovementReason::INVALID);
 						}
+					} else {
+						ASSERT(dataMoveReason == DataMovementReason::INVALID);
 					}
 					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context, dataMoveReason);
 				}
