@@ -3435,8 +3435,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
 				if (it == ids.end()) {
+					// if not exist, then set it in ids and save it back
 					ids.emplace_back(uid, Params.beginVersion().get(task));
 				} else {
+					// if already exist, update local
 					Params.beginVersion().set(task, it->second);
 				}
 
