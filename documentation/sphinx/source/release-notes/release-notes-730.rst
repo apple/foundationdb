@@ -10,7 +10,7 @@ Release Notes
 ======
 * Updated RocskDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
 * Changed RocksDB rate limiter to all IO. `(PR #11016) <https://github.com/apple/foundationdb/pull/11016>`_
-* Added `fdb_c_apiversion.g.h` to OSX package. `(PR #11042) <https://github.com/apple/foundationdb/pull/11042>`_
+* Added ``fdb_c_apiversion.g.h`` to OSX package. `(PR #11042) <https://github.com/apple/foundationdb/pull/11042>`_
 * Added write traffic metrics to ddMetricsGetRange. `(PR #10998) <https://github.com/apple/foundationdb/pull/10998>`_
 * Fixed several locality-based exclusion bugs. `(PR #11024) <https://github.com/apple/foundationdb/pull/11024>`_, `(PR #11007) <https://github.com/apple/foundationdb/pull/11007>`_, and `(PR #11005) <https://github.com/apple/foundationdb/pull/11005>`_
 * Fixed the null pointer issue in proxy setup. `(PR #11039) <https://github.com/apple/foundationdb/pull/11039>`_
