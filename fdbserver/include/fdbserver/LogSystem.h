@@ -813,6 +813,11 @@ struct LogPushData : NonCopyable {
 	// getAllMessages() and is used before writing any other mutations.
 	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
 
+	// After HA is enabled, we always add log router tag (-2, 0) to all mutations
+	// to ensure after the recovery, the mutations can be sent to the log routers
+	// for the remote region to consume.
+	void setChangedToHA() { changedToHA = true; }
+
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
@@ -828,6 +833,7 @@ private:
 	uint32_t subsequence;
 	SpanContext spanContext;
 	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
+	bool changedToHA = false; // if DB configuration usable_regions changed from 1 to 2
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns
@@ -841,6 +847,8 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	prev_tags.clear();
 	if (logSystem->hasRemoteLogs()) {
 		prev_tags.push_back(logSystem->getRandomRouterTag());
+	} else if (changedToHA) {
+		prev_tags.emplace_back(-2, 0);
 	}
 	for (auto& tag : next_message_tags) {
 		prev_tags.push_back(tag);
