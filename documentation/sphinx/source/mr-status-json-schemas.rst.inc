@@ -513,6 +513,14 @@
          "seconds":1.0,
          "versions":1000000
       },
+      "logserver_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
+      "storageserver_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
       "active_tss_count":0,
       "degraded_processes":0,
       "database_available":true,

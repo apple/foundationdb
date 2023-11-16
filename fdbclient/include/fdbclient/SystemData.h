@@ -37,6 +37,39 @@ FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
 
+enum class DataMoveType : uint8_t {
+	LOGICAL = 0,
+	PHYSICAL = 1,
+	PHYSICAL_EXP = 2,
+	NUMBER_OF_TYPES = 3,
+};
+
+// One-to-one relationship to the priority knobs
+enum class DataMovementReason : uint8_t {
+	INVALID = 0,
+	RECOVER_MOVE = 1,
+	REBALANCE_UNDERUTILIZED_TEAM = 2,
+	REBALANCE_OVERUTILIZED_TEAM = 3,
+	REBALANCE_READ_OVERUTIL_TEAM = 4,
+	REBALANCE_READ_UNDERUTIL_TEAM = 5,
+	PERPETUAL_STORAGE_WIGGLE = 6,
+	TEAM_HEALTHY = 7,
+	TEAM_CONTAINS_UNDESIRED_SERVER = 8,
+	TEAM_REDUNDANT = 9,
+	MERGE_SHARD = 10,
+	POPULATE_REGION = 11,
+	TEAM_UNHEALTHY = 12,
+	TEAM_2_LEFT = 13,
+	TEAM_1_LEFT = 14,
+	TEAM_FAILED = 15,
+	TEAM_0_LEFT = 16,
+	SPLIT_SHARD = 17,
+	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 18,
+	ASSIGN_EMPTY_RANGE = 19, // dummy reason, no corresponding data move priority
+	SEED_SHARD_SERVER = 20, // dummy reason, no corresponding data move priority
+	NUMBER_OF_REASONS = 21, // dummy reason, no corresponding data move priority
+};
+
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
 // and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
 struct SystemKey : Key {
@@ -163,7 +196,8 @@ extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
-                        EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
+                        const DataMoveType type,
+                        const DataMovementReason reason,
                         UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
@@ -171,12 +205,17 @@ UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
+void decodeDataMoveId(const UID& id,
+                      bool& assigned,
+                      bool& emptyRange,
+                      DataMoveType& dataMoveType,
+                      DataMovementReason& dataMoveReason);
 void decodeServerKeysValue(const ValueRef& value,
                            bool& assigned,
                            bool& emptyRange,
-                           EnablePhysicalShardMove& enablePSM,
-                           UID& id);
-bool physicalShardMoveEnabled(const UID& dataMoveId);
+                           DataMoveType& dataMoveType,
+                           UID& id,
+                           DataMovementReason& dataMoveReason);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;

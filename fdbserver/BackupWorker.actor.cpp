@@ -372,10 +372,10 @@ struct BackupData {
 		}
 
 		// keep track of each arena and accumulate their sizes
-		int64_t bytes = 0;
-		for (int i = 0; i < num; i++) {
+		int64_t bytes = messages[0].bytes;
+		for (int i = 1; i < num; i++) {
 			const Arena& a = messages[i].arena;
-			const Arena& b = messages[i + 1].arena;
+			const Arena& b = messages[i - 1].arena;
 			if (!a.sameArena(b)) {
 				bytes += messages[i].bytes;
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", messages[i].bytes);
@@ -878,25 +878,19 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		int lastVersionIndex = 0;
 		Version lastVersion = invalidVersion;
 
-		if (self->messages.empty()) {
-			// Even though messages is empty, we still want to advance popVersion.
-			if (!self->endVersion.present()) {
-				popVersion = std::max(popVersion, self->minKnownCommittedVersion);
+		for (auto& message : self->messages) {
+			// message may be prefetched in peek; uncommitted message should not be uploaded.
+			const Version version = message.getVersion();
+			if (version > self->maxPopVersion()) {
+				break;
 			}
-		} else {
-			for (auto& message : self->messages) {
-				// message may be prefetched in peek; uncommitted message should not be uploaded.
-				const Version version = message.getVersion();
-				if (version > self->maxPopVersion())
-					break;
-				if (version > popVersion) {
-					lastVersionIndex = numMsg;
-					lastVersion = popVersion;
-					popVersion = version;
-				}
-				message.collectCipherDetailIfEncrypted(cipherDetails);
-				numMsg++;
+			if (version > popVersion) {
+				lastVersionIndex = numMsg;
+				lastVersion = popVersion;
+				popVersion = version;
 			}
+			message.collectCipherDetailIfEncrypted(cipherDetails);
+			numMsg++;
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
@@ -938,7 +932,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (self->allMessageSaved()) {
-			self->eraseMessages(self->messages.size());
 			return Void();
 		}
 
@@ -1138,6 +1131,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present).detail("ExitEarly", self.exitEarly);
 
 		pull = self.exitEarly ? Void() : monitorBackupKeyOrPullData(&self, present);
+		addActor.send(pull);
 		done = self.exitEarly ? Void() : uploadData(&self);
 
 		loop choose {

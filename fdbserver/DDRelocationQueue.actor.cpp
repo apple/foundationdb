@@ -94,7 +94,10 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
 		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
 		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
-		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD }
+		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD },
+		{ DataMovementReason::ASSIGN_EMPTY_RANGE, -2 }, // dummy reason, no corresponding actual data move
+		{ DataMovementReason::SEED_SHARD_SERVER, -3 }, // dummy reason, no corresponding actual data move
+		{ DataMovementReason::NUMBER_OF_REASONS, -4 }, // dummy reason, no corresponding actual data move
 	};
 
 	static PriorityDmReasonMapping priorityReason;
@@ -112,6 +115,15 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 	return std::make_pair(&reasonPriority, &priorityReason);
 }
 
+DataMoveType getDataMoveType(const UID& dataMoveId) {
+	bool assigned, emptyRange;
+	DataMoveType dataMoveType;
+	DataMovementReason dataMoveReason;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType, dataMoveReason);
+	return dataMoveType;
+}
+
+// Return negative priority for invalid or dummy reasons
 int dataMovementPriority(DataMovementReason reason) {
 	auto [reasonPriority, _] = buildPriorityMappings();
 	return reasonPriority->at(reason);
@@ -957,6 +969,18 @@ void DDQueue::launchQueuedWork(RelocateData launchData, const DDEnabledState* dd
 	launchQueuedWork(combined, ddEnabledState);
 }
 
+DataMoveType newDataMoveType() {
+	DataMoveType type = DataMoveType::LOGICAL;
+	if (deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY) {
+		type = DataMoveType::PHYSICAL;
+	}
+	if (type != DataMoveType::PHYSICAL && SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT) {
+		type = DataMoveType::PHYSICAL_EXP;
+	}
+
+	return type;
+}
+
 // For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
 // with rd. If there exist, cancel them by cancelling their actors and reducing the src servers' busyness of those
 // canceled inflight relocateData. Launch the relocation for the rd.
@@ -1069,11 +1093,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						const bool enabled =
-						    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                               AssignEmptyRange::False,
-						                               EnablePhysicalShardMove(enabled));
+						                               newDataMoveType(),
+						                               rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1658,10 +1681,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					const bool enabled =
-					    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 					rd.dataMoveId = newDataMoveId(
-					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
+					    physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType(), rd.dmReason);
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
@@ -1905,7 +1926,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("Reason", rd.reason.toString())
 					    .detail("DataMoveReason", static_cast<int>(rd.dmReason))
 					    .detail("DataMoveID", rd.dataMoveId)
-					    .detail("PhysicalShardMove", physicalShardMoveEnabled(rd.dataMoveId));
+					    .detail("DataMoveType", getDataMoveType(rd.dataMoveId));
 					if (now() - startTime > 600) {
 						TraceEvent(SevWarnAlways, "RelocateShardTooLong")
 						    .detail("Duration", now() - startTime)
