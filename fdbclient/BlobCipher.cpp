@@ -1114,25 +1114,29 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 	StringRef encryptBuf = makeString(plaintextLen, arena);
 	uint8_t* ciphertext = mutateString(encryptBuf);
 
-	int bytes{ 0 };
-	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytes{ 0 };
+		if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
+			TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
+			    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("EncryptDomainId", textCipherKey->getDomainId());
+			throw encrypt_ops_error();
+		}
 
-	// Padding is not needed for AES CTR mode, so EncryptUpdate() should encrypt all the data at once.
-	if (bytes != plaintextLen) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
-		    .detail("PlaintextLen", plaintextLen)
-		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
-	}
+		// Padding is not needed for AES CTR mode, so EncryptUpdate() should encrypt all the data at once.
+		if (bytes != plaintextLen) {
+			TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
+			    .detail("PlaintextLen", plaintextLen)
+			    .detail("EncryptedBufLen", bytes);
+			throw encrypt_ops_error();
+		}
 
-	// EVP_CIPHER_CTX_reset(ctx) is called after EncryptUpdate() to make sure the same encryptor
-	// `EncryptBlobCipherAes265Ctr` could be reused to encrypt multiple text. Otherwise,
-	// ctx = EVP_CIPHER_CTX_new() is required before calling encrypt().
+		// EVP_CIPHER_CTX_reset(ctx) is called after EncryptUpdate() to make sure the same encryptor
+		// `EncryptBlobCipherAes265Ctr` could be reused to encrypt multiple text. Otherwise,
+		// ctx = EVP_CIPHER_CTX_new() is required before calling encrypt().
+	} else {
+		memcpy(ciphertext, plaintext, plaintextLen);
+	}
 
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
@@ -1160,20 +1164,22 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		startTime = timer_monotonic();
 	}
 
-	int bytes{ 0 };
-	if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytes{ 0 };
+		if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
+			TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
+			    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("EncryptDomainId", textCipherKey->getDomainId());
+			throw encrypt_ops_error();
+		}
 
-	// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
-	if (bytes != plaintextLen) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
-		    .detail("PlaintextLen", plaintextLen)
-		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
+		// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
+		if (bytes != plaintextLen) {
+			TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
+			    .detail("PlaintextLen", plaintextLen)
+			    .detail("EncryptedBufLen", bytes);
+			throw encrypt_ops_error();
+		}
 	}
 
 	// Ensure encryption header authToken details sanity
@@ -1208,19 +1214,23 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	Reference<EncryptBuf> encryptBuf = makeReference<EncryptBuf>(plaintextLen, arena);
 	uint8_t* ciphertext = encryptBuf->begin();
 
-	int bytes{ 0 };
-	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytes{ 0 };
+		if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
+			TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
+			    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("EncryptDomainId", textCipherKey->getDomainId());
+			throw encrypt_ops_error();
+		}
 
-	if (bytes != plaintextLen) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
-		    .detail("PlaintextLen", plaintextLen)
-		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
+		if (bytes != plaintextLen) {
+			TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
+			    .detail("PlaintextLen", plaintextLen)
+			    .detail("EncryptedBufLen", bytes);
+			throw encrypt_ops_error();
+		}
+	} else {
+		memcpy(ciphertext, plaintext, plaintextLen);
 	}
 
 	updateEncryptHeader(ciphertext, plaintextLen, header);
@@ -1253,20 +1263,22 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	memset(reinterpret_cast<uint8_t*>(header), 0, sizeof(BlobCipherEncryptHeader));
 
-	int bytes{ 0 };
-	if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytes{ 0 };
+		if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
+			TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
+			    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("EncryptDomainId", textCipherKey->getDomainId());
+			throw encrypt_ops_error();
+		}
 
-	// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
-	if (bytes != plaintextLen) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
-		    .detail("PlaintextLen", plaintextLen)
-		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
+		// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
+		if (bytes != plaintextLen) {
+			TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
+			    .detail("PlaintextLen", plaintextLen)
+			    .detail("EncryptedBufLen", bytes);
+			throw encrypt_ops_error();
+		}
 	}
 
 	updateEncryptHeader(plaintext, plaintextLen, header);
@@ -1452,19 +1464,24 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
 	StringRef decrypted = makeString(ciphertextLen, arena);
 
 	uint8_t* plaintext = mutateString(decrypted);
-	int bytesDecrypted{ 0 };
-	if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, ciphertextLen)) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
 
-	if (bytesDecrypted != ciphertextLen) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
-		    .detail("CiphertextLen", ciphertextLen)
-		    .detail("DecryptedBufLen", bytesDecrypted);
-		throw encrypt_ops_error();
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytesDecrypted{ 0 };
+		if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, ciphertextLen)) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
+			    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("EncryptDomainId", textCipherKey->getDomainId());
+			throw encrypt_ops_error();
+		}
+
+		if (bytesDecrypted != ciphertextLen) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
+			    .detail("CiphertextLen", ciphertextLen)
+			    .detail("DecryptedBufLen", bytesDecrypted);
+			throw encrypt_ops_error();
+		}
+	} else {
+		memcpy(plaintext, ciphertext, ciphertextLen);
 	}
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && decryptTime) {
@@ -1580,19 +1597,23 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 	}
 
 	uint8_t* plaintext = decrypted->begin();
-	int bytesDecrypted{ 0 };
-	if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, ciphertextLen)) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
-		    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-		    .detail("EncryptDomainId", header.cipherTextDetails.encryptDomainId);
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytesDecrypted{ 0 };
+		if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, ciphertextLen)) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
+			    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
+			    .detail("EncryptDomainId", header.cipherTextDetails.encryptDomainId);
+			throw encrypt_ops_error();
+		}
 
-	if (bytesDecrypted != ciphertextLen) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
-		    .detail("CiphertextLen", ciphertextLen)
-		    .detail("DecryptedBufLen", bytesDecrypted);
-		throw encrypt_ops_error();
+		if (bytesDecrypted != ciphertextLen) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
+			    .detail("CiphertextLen", ciphertextLen)
+			    .detail("DecryptedBufLen", bytesDecrypted);
+			throw encrypt_ops_error();
+		}
+	} else {
+		memcpy(plaintext, ciphertext, ciphertextLen);
 	}
 
 	decrypted->setLogicalSize(ciphertextLen);
@@ -1635,20 +1656,22 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		ASSERT(authTokensValidationDone);
 	}
 
-	int bytesDecrypted{ 0 };
-	if (!EVP_DecryptUpdate(ctx, ciphertext, &bytesDecrypted, ciphertext, ciphertextLen)) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
-		    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-		    .detail("EncryptDomainId", header.cipherTextDetails.encryptDomainId);
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytesDecrypted{ 0 };
+		if (!EVP_DecryptUpdate(ctx, ciphertext, &bytesDecrypted, ciphertext, ciphertextLen)) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
+			    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
+			    .detail("EncryptDomainId", header.cipherTextDetails.encryptDomainId);
+			throw encrypt_ops_error();
+		}
 
-	// Padding should be 0 for AES CTR mode, so DecryptUpdate() should decrypt all the data
-	if (bytesDecrypted != ciphertextLen) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
-		    .detail("CiphertextLen", ciphertextLen)
-		    .detail("DecryptedBufLen", bytesDecrypted);
-		throw encrypt_ops_error();
+		// Padding should be 0 for AES CTR mode, so DecryptUpdate() should decrypt all the data
+		if (bytesDecrypted != ciphertextLen) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
+			    .detail("CiphertextLen", ciphertextLen)
+			    .detail("DecryptedBufLen", bytesDecrypted);
+			throw encrypt_ops_error();
+		}
 	}
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && decryptTime) {
@@ -1677,20 +1700,22 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 	EncryptAuthTokenAlgo authTokenAlgo;
 	validateEncryptHeader(ciphertext, ciphertextLen, headerRef, &authTokenMode, &authTokenAlgo);
 
-	int bytesDecrypted{ 0 };
-	if (!EVP_DecryptUpdate(ctx, ciphertext, &bytesDecrypted, ciphertext, ciphertextLen)) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
+	if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+		int bytesDecrypted{ 0 };
+		if (!EVP_DecryptUpdate(ctx, ciphertext, &bytesDecrypted, ciphertext, ciphertextLen)) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
+			    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("EncryptDomainId", textCipherKey->getDomainId());
+			throw encrypt_ops_error();
+		}
 
-	// Padding should be 0 for AES CTR mode, so DecryptUpdate() should decrypt all the data
-	if (bytesDecrypted != ciphertextLen) {
-		TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
-		    .detail("CiphertextLen", ciphertextLen)
-		    .detail("DecryptedBufLen", bytesDecrypted);
-		throw encrypt_ops_error();
+		// Padding should be 0 for AES CTR mode, so DecryptUpdate() should decrypt all the data
+		if (bytesDecrypted != ciphertextLen) {
+			TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
+			    .detail("CiphertextLen", ciphertextLen)
+			    .detail("DecryptedBufLen", bytesDecrypted);
+			throw encrypt_ops_error();
+		}
 	}
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && decryptTime) {

@@ -1947,12 +1947,14 @@ void encryptionAtRestPlaintextMarkerCheck() {
 				while (std::getline(f, buf)) {
 					// SOMEDAY: using 'std::boyer_moore_horspool_searcher' would significantly improve search
 					// time
-					if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
-						TraceEvent(SevError, "EncryptionAtRestPlaintextMarkerCheckPanic")
-						    .detail("Filename", itr->path().string())
-						    .detail("LineBuf", buf)
-						    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());
-						success = false;
+					if (!ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
+						if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
+							TraceEvent(SevError, "EncryptionAtRestPlaintextMarkerCheckPanic")
+							    .detail("Filename", itr->path().string())
+							    .detail("LineBuf", buf)
+							    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());
+							success = false;
+						}
 					}
 					count++;
 				}
