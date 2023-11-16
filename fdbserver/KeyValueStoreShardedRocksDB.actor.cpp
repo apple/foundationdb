@@ -775,7 +775,7 @@ rocksdb::DBOptions getOptions() {
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
-	options.max_background_jobs = SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS;
+	options.max_background_jobs = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 
 	// The following two fields affect how archived logs will be deleted.
 	// 1. If both set to 0, logs will be deleted asap and will not get into
@@ -2843,7 +2843,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                         rocksdb::DB* db,
 		                         std::vector<std::pair<uint32_t, KeyRange>>* deletes,
 		                         bool sample) {
-			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+			if (SERVER_KNOBS->SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
 				DeleteVisitor dv(deletes);
 				rocksdb::Status s = batch->Iterate(&dv);
 				if (!s.ok()) {
