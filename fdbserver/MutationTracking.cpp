@@ -67,6 +67,15 @@ TraceEvent debugMutationEnabled(const char* context, Version version, MutationRe
 	return TraceEvent();
 }
 
+TraceEvent debugEncrptedMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
+	ASSERT(mutation.type == mutation.Encrypted);
+	MutationRef fmutation = Standalone(mutation);
+	Arena tempArena;
+	ArenaReader reader(tempArena, mutation.param2, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+	reader >> fmutation;
+	return debugMutationEnabled(context, version, fmutation, id);
+}
+
 TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys, UID id) {
 	return debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end), id);
 }
@@ -117,7 +126,11 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 
 #if MUTATION_TRACKING_ENABLED
 TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id) {
-	return debugMutationEnabled(context, version, mutation, id);
+	if (mutation.type == mutation.Encrypted) {
+		return debugEncrptedMutationEnabled(context, version, mutation, id);
+	} else {
+		return debugMutationEnabled(context, version, mutation, id);
+	}
 }
 TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys, UID id) {
 	return debugKeyRangeEnabled(context, version, keys, id);
