@@ -523,7 +523,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               2 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,                 20 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,                     36 ); // RocksDB default.
-	init( ROCKSDB_MAX_TOTAL_WAL_SIZE,                              0 ); // RocksDB default.
+	init( ROCKSDB_MAX_TOTAL_WAL_SIZE, isSimulated? 256 <<20 : 1 << 30 ); // 1GB.
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 10.0 : 300.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
@@ -533,8 +533,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
  	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
  	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
  	init( ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE,               true );
- 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); if( randomize && BUGGIFY )   ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
-	init( ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT,                false ); if ( randomize && BUGGIFY ) ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT = true;
+ 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); if ( randomize && BUGGIFY ) ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
+	init( ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT,                 true );
 	init( ROCKSDB_COMPACTION_PRI,                                  3 ); // kMinOverlappingRatio, RocksDB default. 
 	init( ROCKSDB_WAL_RECOVERY_MODE,                               2 ); // kPointInTimeRecovery, RocksDB default.
 	init( ROCKSDB_TARGET_FILE_SIZE_BASE,                           0 ); // If 0, pick RocksDB default.
@@ -547,9 +547,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
 	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 	init (ROCKSDB_MAX_LOG_FILE_SIZE,                         10485760 ); // 10MB.
-	init (ROCKSDB_KEEP_LOG_FILE_NUM,                             200 ); // Keeps 2GB log per storage server.
-	init (ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    false ); if (isSimulated) ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN = deterministicRandom()->coinflip(); 
-	init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 false ); if (isSimulated) ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN = deterministicRandom()->coinflip();
+	init (ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
+	init (ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                     true ); 
+	init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                  true );
 	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
 	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
 	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
@@ -563,6 +563,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                    6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,                16 << 20); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                1 ); // RocksDB default.
+	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,             true );
+	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                        4 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
