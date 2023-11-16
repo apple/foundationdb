@@ -28,6 +28,36 @@ const KeyRangeRef persistMoveInShardKeys =
 const KeyRef persistMoveInUpdatesPrefix = PERSIST_PREFIX "MoveInShardUpdates/"_sr;
 } // namespace
 
+ThroughputLimiter::ThroughputLimiter(int64_t cap)
+  : cap(cap), bytes(0), lastSettleSec(now()), nextAvailableSec(now()), readyFuture(Void()) {}
+
+Future<Void> ThroughputLimiter::ready() {
+	if (cap <= 0 || now() >= nextAvailableSec) {
+		return Void();
+	}
+	return delay(nextAvailableSec - now());
+}
+
+void ThroughputLimiter::addBytes(int64_t bytes) {
+	this->bytes += bytes;
+}
+
+void ThroughputLimiter::settle() {
+	if (cap <= 0) {
+		return;
+	}
+	const double ts = now();
+	if (ts < this->nextAvailableSec) {
+		return;
+	}
+
+	const double delta = static_cast<double>(this->bytes) / cap;
+	this->nextAvailableSec = delta + this->lastSettleSec;
+
+	this->bytes = 0;
+	this->lastSettleSec = ts;
+}
+
 KeyRange persistMoveInShardsKeyRange() {
 	return persistMoveInShardKeys;
 }

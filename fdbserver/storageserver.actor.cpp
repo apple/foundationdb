@@ -1340,6 +1340,8 @@ public:
 	int64_t fetchKeysTotalCommitBytes;
 	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
+	ThroughputLimiter fetchKeysLimiter;
+
 	FlowLock serveFetchCheckpointParallelismLock;
 
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
@@ -1654,7 +1656,7 @@ public:
 	    updateEagerReads(nullptr), fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismChangeFeedLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_CHANGE_FEED),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
-	    fetchKeysTotalCommitBytes(0),
+	    fetchKeysTotalCommitBytes(0), fetchKeysLimiter(SERVER_KNOBS->STORAGE_FETCH_KEYS_RATE_LIMIT),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
 	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
@@ -8567,12 +8569,23 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 					totalBytes += expectedBlockSize;
 
+					if (!data->fetchKeysLimiter.ready().isReady()) {
+						TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID);
+						state double ts = now();
+						wait(data->fetchKeysLimiter.ready());
+						TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
+						    .detail("KeyRange", shard->keys)
+						    .detail("Delay", now() - ts);
+					}
+
 					// Write this_block to storage
 					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
 					state Key blockEnd =
 					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
 					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
 					wait(data->storage.replaceRange(blockRange, blockData));
+
+					data->fetchKeysLimiter.addBytes(expectedBlockSize);
 
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
@@ -12165,6 +12178,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (!data->fetchKeysBudgetUsed.get()) {
 			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
 		}
+
+		data->fetchKeysLimiter.settle();
 	}
 }
 

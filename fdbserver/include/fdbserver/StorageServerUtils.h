@@ -94,6 +94,22 @@ struct MoveInShardMetaData {
 	}
 };
 
+class ThroughputLimiter {
+public:
+	ThroughputLimiter(int64_t cap);
+
+	Future<Void> ready();
+	void addBytes(int64_t bytes);
+	void settle();
+
+private:
+	int64_t cap;
+	int64_t bytes;
+	double lastSettleSec;
+	double nextAvailableSec;
+	Future<Void> readyFuture;
+};
+
 KeyRange persistMoveInShardsKeyRange();
 
 KeyRange persistUpdatesKeyRange(const UID& id);
