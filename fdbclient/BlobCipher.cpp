@@ -2312,7 +2312,10 @@ void testNoAuthMode(const int minDomainId) {
 	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
 	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-	ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
+	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+		ASSERT_EQ(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
+	else
+		ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
 	ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 	ASSERT_EQ(header.flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 	ASSERT_EQ(header.flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
@@ -2682,7 +2685,10 @@ void testSingleAuthMode(const int minDomainId) {
 	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
 	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-	ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
+	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+		ASSERT_EQ(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
+	else
+		ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
 	ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 	ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
 	ASSERT_EQ(header.flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
@@ -2908,7 +2914,10 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 	ASSERT_EQ(encryptedBuf.size(), bufLen);
-	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
+	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+		ASSERT_EQ(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
+	else
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	ASSERT_EQ(headerRef.flagsVersion(), CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 	ASSERT_EQ(headerRef.algoHeaderVersion(), algoHeaderVersion);
 
@@ -2921,7 +2930,10 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	// validate IV
 	AesCtrWithAuth<Params> withAuth = std::get<AesCtrWithAuth<Params>>(headerRef.algoHeader);
 	ASSERT_EQ(memcmp(&iv[0], &withAuth.v1.iv[0], AES_256_IV_LENGTH), 0);
-	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
+	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+		ASSERT_EQ(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
+	else
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	// validate cipherKey details
 	ASSERT_EQ(withAuth.v1.cipherTextDetails.encryptDomainId, cipherKey->getDomainId());
 	ASSERT_EQ(withAuth.v1.cipherTextDetails.baseCipherId, cipherKey->getBaseCipherId());
