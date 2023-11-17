@@ -163,12 +163,10 @@ template <class F>
 struct AwaitableResume<F, Void, false> {
 	[[maybe_unused]] void await_resume() {
 		auto self = static_cast<F*>(this);
-		if (self->resumeImpl()) {
-			if (self->future.isError()) {
-				throw self->future.getError();
-			}
+		self->resumeImpl();
+		if (self->future.isError()) {
+			throw self->future.getError();
 		}
-		return;
 	}
 };
 

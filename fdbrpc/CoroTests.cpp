@@ -1351,6 +1351,8 @@ Future<Void> actor_throw_test(std::stringstream& ss) {
 
 	LifetimeLogger ll(ss, 0);
 
+	co_await delay(0);
+
 	throw io_error();
 
 	ss << "after throw. ";

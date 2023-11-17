@@ -31,6 +31,9 @@
 #include <memory>
 #include <iostream>
 
+using namespace std::literals::string_literals;
+using namespace std::literals::string_view_literals;
+
 NetworkAddress serverAddress;
 
 enum TutorialWellKnownEndpoints {
@@ -44,12 +47,6 @@ enum TutorialWellKnownEndpoints {
 Future<Void> simpleTimer() {
 	// we need to remember the time when we first
 	// started.
-	// This needs to be a state-variable because
-	// we will use it in different parts of the
-	// actor. If you don't understand how state
-	// variables work, it is a good idea to remove
-	// the state keyword here and look at the
-	// generated C++ code from the actor compiler.
 	double start_time = g_network->now();
 	loop {
 		co_await delay(1.0);
@@ -432,12 +429,8 @@ Future<Void> fdbClientStream() {
 	Key next;
 	int64_t bytes = 0;
 	Future<Void> logFuture = logThroughput(&bytes, &next);
-	Future<Void> onError;
 	loop {
-		if (onError.isValid()) {
-			co_await onError;
-			onError = Future<Void>();
-		}
+		Future<Void> onError;
 		PromiseStream<Standalone<RangeResultRef>> results;
 		try {
 			Future<Void> stream = tx.getRangeStream(results,
@@ -457,6 +450,7 @@ Future<Void> fdbClientStream() {
 			}
 			onError = tx.onError(e);
 		}
+		co_await onError;
 	}
 }
 
@@ -470,13 +464,9 @@ bool transaction_done(void) {
 
 template <class DB, class Fun>
 Future<Void> runTransactionWhile(DB const& db, Fun f) {
-	Future<Void> onError;
 	Transaction tr(db);
 	loop {
-		if (onError.isValid()) {
-			co_await onError;
-			onError = Future<Void>();
-		}
+		Future<Void> onError;
 		try {
 			if (transactionDone(co_await f(&tr))) {
 				co_return;
@@ -484,6 +474,7 @@ Future<Void> runTransactionWhile(DB const& db, Fun f) {
 		} catch (Error& e) {
 			onError = tr.onError(e);
 		}
+		co_await onError;
 	}
 }
 
@@ -603,6 +594,7 @@ AsyncGenerator<Optional<StringRef>> readLines(Reference<IAsyncFile> file) {
 				co_yield lastLine;
 				lastLine = {};
 				arena = Arena();
+				co_return;
 			}
 		}
 		StringRef block = optionalBlock.get();
@@ -625,13 +617,10 @@ AsyncGenerator<Optional<StringRef>> readLines(Reference<IAsyncFile> file) {
 			}
 		}
 	}
-
-	if (!lastLine.empty()) {
-		co_yield lastLine;
-	}
 }
 
 Future<Void> testReadLines() {
+	auto path = "/etc/hosts"s;
 	auto file = co_await IAsyncFileSystem::filesystem()->open(
 	    "/Users/mpilman/Projects/frostdb/flow/include/flow/flow.h", IAsyncFile::OPEN_READWRITE, 0640);
 	auto lines = readLines(file);

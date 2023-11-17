@@ -1,6 +1,7 @@
 # Coroutines in Flow
 
 * [Introduction](#Introduction)
+* [Coroutines vs ACTORs](#coroutines-vs-actors)
 * [Basic Types](#basic-types)
 * [Choose-When](#choose-when)
     * [Execution in when-expressions](#execution-in-when-expressions)
@@ -37,6 +38,13 @@ Future<double> simpleCoroutine() {
 
 This document assumes some familiarity with Flow. As of today, actors and coroutines
 can be freely mixed, but new code should be written using coroutines.
+
+## Coroutines vs ACTORs
+
+It is important to understand that C++ coroutine support doesn't change anything in Flow: they are not a replacement
+of Flow but they replace the actor compiler with a C++ compiler. This means, that the network loop, all Flow types,
+the RPC layer, and the simulator all remain unchanged. A coroutine simply returns a special `SAV<T>` which has handle
+to a coroutine.
 
 ## Basic Types
 
@@ -624,8 +632,8 @@ struct Foo : IFoo {
 };
 ```
 
-This boilerplate is necessary, because `ACTOR`s can't be class members since the actual code is moved into a different
-struct which.
+This boilerplate is necessary, because `ACTOR`s can't be class members: the actor compiler will generate another
+`struct` and move the code there -- so `this` will point to the actor state and not to the class instance.
 
 With C++ coroutines, this limitation goes away. So a cleaner (and slightly more efficient) implementation of the above
 is:
@@ -686,3 +694,7 @@ Future<Void> someActor() {
 If the struct `SomeStruct` would initialize its primitive members explicitly (for example by using `int a = 0;` and
 `bool b = false`) this would be a non-issue. And explicit initialization is probably the right fix here. Sadly, it
 doesn't seem like UBSAN finds these kind of subtle bugs.
+
+Another difference is, that if a `state` variables might be initialized twice: once at the creation of the actor using
+the default constructor and a second time at the point where the variable is initialized in the code. With C++
+coroutines we now get the expected behavior, which is better, but nonetheless a potential behavior change.
