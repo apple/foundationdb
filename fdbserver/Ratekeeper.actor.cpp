@@ -777,6 +777,20 @@ void Ratekeeper::updateCommitCostEstimation(
 	}
 }
 
+static std::string getIgnoredZonesReasons(
+    std::set<Optional<Standalone<StringRef>>>& ignoredMachines,
+    std::map<Optional<Standalone<StringRef>>, std::set<limitReason_t>>& zoneReasons) {
+	std::string ignoredZoneReasons;
+	for (auto zone : ignoredMachines) {
+		ignoredZoneReasons += zone.get().toString() + " [";
+		for (auto reason : zoneReasons[zone]) {
+			ignoredZoneReasons += std::to_string(reason) + " ";
+		}
+		ignoredZoneReasons += "] ";
+	}
+	return ignoredZoneReasons.length() ? ignoredZoneReasons : "None";
+}
+
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// double controlFactor = ;  // dt / eFoldingTime
 
@@ -802,6 +816,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	std::multimap<int64_t, StorageQueueInfo const*> storageDurabilityLagReverseIndex;
 
 	std::map<UID, limitReason_t> ssReasons;
+	std::map<Optional<Standalone<StringRef>>, std::set<limitReason_t>> zoneReasons;
 
 	bool printRateKeepLimitReasonDetails =
 	    SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
@@ -945,6 +960,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		ssReasons[ss.id] = ssLimitReason;
+		zoneReasons[ss.locality.zoneId()].insert(ssLimitReason);
 	}
 
 	tagThrottler->updateThrottling(storageQueueInfo);
@@ -1386,6 +1402,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    .detail("LimitingStorageServerVersionLag", limitingVersionLag)
 		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
+		    .detail("IgnoredZonesReasons", getIgnoredZonesReasons(ignoredMachines, zoneReasons))
 		    .detail("TagsAutoThrottled", tagThrottler->autoThrottleCount())
 		    .detail("TagsAutoThrottledBusyRead", tagThrottler->busyReadTagCount())
 		    .detail("TagsAutoThrottledBusyWrite", tagThrottler->busyWriteTagCount())
