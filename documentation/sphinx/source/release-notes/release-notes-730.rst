@@ -4,6 +4,30 @@
 Release Notes
 #############
 
+7.3.27
+======
+* Same as 7.3.26 release with AVX disabled.
+
+7.3.26
+======
+* Updated RocskDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
+* Changed RocksDB rate limiter to all IO. `(PR #11016) <https://github.com/apple/foundationdb/pull/11016>`_
+* Added ``fdb_c_apiversion.g.h`` to OSX package. `(PR #11042) <https://github.com/apple/foundationdb/pull/11042>`_
+* Added write traffic metrics to ddMetricsGetRange. `(PR #10998) <https://github.com/apple/foundationdb/pull/10998>`_
+* Fixed several locality-based exclusion bugs. `(PR #11024) <https://github.com/apple/foundationdb/pull/11024>`_, `(PR #11007) <https://github.com/apple/foundationdb/pull/11007>`_, and `(PR #11005) <https://github.com/apple/foundationdb/pull/11005>`_
+* Fixed the null pointer issue in proxy setup. `(PR #11039) <https://github.com/apple/foundationdb/pull/11039>`_
+
+7.3.25
+======
+* Same as 7.3.24 release with AVX enabled.
+
+7.3.24
+======
+* Released with AVX disabled.
+* Added support for large shard. `(PR#10965) <https://github.com/apple/foundationdb/pull/10965>`_
+* Fixed perpetual wiggle locality match regex. `(PR#10973) <https://github.com/apple/foundationdb/pull/10973>`_
+* Added a knob to throttle perpetual wiggle data move. `(PR#10957) <https://github.com/apple/foundationdb/pull/10957>`_
+
 7.3.19
 ======
 * Same as 7.3.18 release with AVX enabled.
