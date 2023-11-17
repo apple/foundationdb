@@ -2312,7 +2312,7 @@ void testNoAuthMode(const int minDomainId) {
 	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
 	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+	if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
 		ASSERT_EQ(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
 	else
 		ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
@@ -2685,7 +2685,7 @@ void testSingleAuthMode(const int minDomainId) {
 	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
 	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+	if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
 		ASSERT_EQ(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
 	else
 		ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
@@ -2914,7 +2914,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 	ASSERT_EQ(encryptedBuf.size(), bufLen);
-	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+	if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
 		ASSERT_EQ(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	else
 		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
@@ -2930,7 +2930,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	// validate IV
 	AesCtrWithAuth<Params> withAuth = std::get<AesCtrWithAuth<Params>>(headerRef.algoHeader);
 	ASSERT_EQ(memcmp(&iv[0], &withAuth.v1.iv[0], AES_256_IV_LENGTH), 0);
-	if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+	if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
 		ASSERT_EQ(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	else
 		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
