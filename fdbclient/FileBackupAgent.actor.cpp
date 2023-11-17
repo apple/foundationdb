@@ -3448,6 +3448,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				}
 
 				// The task may be restarted. Set the watch if started key has NOT been set.
+				// why we do not check the value, i.e. true or false?
 				if (!taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}

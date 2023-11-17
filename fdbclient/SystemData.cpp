@@ -1191,6 +1191,21 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
+// Value encodeAllWorkerStartedValue(Version v) {
+// 	BinaryWriter wr(Unversioned());
+// 	wr << v;
+// 	return wr.toValue();
+// }
+
+// Version decodeAllWorkerStartedValue(const ValueRef& value) {
+// 	Version v = 0;
+// 	BinaryReader reader(value, IncludeVersion());
+// 	if (value.size() > 0) {
+// 		reader >> v;
+// 	}
+// 	return v;
+// }
+
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
 }

@@ -193,6 +193,7 @@ struct BackupData {
 					    wait(config.startedBackupWorkers().get(tr));
 					workers = tmp;
 					if (!updated) {
+						// add this worker's info into "workers" vector
 						if (workers.present()) {
 							workers.get().emplace_back(self->recruitedEpoch, (int64_t)self->tag.id);
 						} else {
@@ -218,7 +219,8 @@ struct BackupData {
 							tags.insert(p.second);
 						}
 						if (self->totalTags == tags.size()) {
-							config.allWorkerStarted().set(tr, true);
+							// first set it to 0 to indicate all worker has been started, then get the commit version of this txn and set the version
+							config.allWorkerStarted().set(tr, 0);
 							allUpdated = true;
 						} else {
 							// monitor all workers' updates
@@ -237,11 +239,16 @@ struct BackupData {
 
 						updated = true; // Only set to true after commit.
 						if (allUpdated) {
+							Version commitVersion = tr->getCommittedVersion();
+							tr->reset();
+							config.allWorkerStarted().set(tr, commitVersion);
+							wait(tr->commit());
 							break;
 						}
 						wait(watchFuture);
 						tr->reset();
 					} else {
+						// update startedBackupWorkers's value to "workers"
 						ASSERT(workers.present() && workers.get().size() > 0);
 						config.startedBackupWorkers().set(tr, workers.get());
 						wait(tr->commit());
@@ -532,9 +539,13 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 							shouldExit = false;
 						}
 						BackupConfig config(uid);
+						// Optional<Version> taskStarted = wait(config.allWorkerStarted().get(tr)); this does not compile
+						// transform the Value to Version, what's the best way?
 						Optional<Value> taskStarted = wait(tr.get(config.allWorkerStarted().key));
+						Version v = Tuple::unpack(taskStarted.get()).getInt(0);
 						if (taskStarted.present()) {
-							TraceEvent("Hfu5TaskPresent").detail("V", taskStarted.get()).log();
+							TraceEvent("Hfu5TaskPresent").detail("V", v).detail("Saved", self->savedVersion).log();
+							self->savedVersion = std::max(self->savedVersion, v);
 						}
 						i++;
 						if (i == size) {
@@ -543,6 +554,7 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 					}
 					self->exitEarly = shouldExit;
 					self->onBackupChanges(uidVersions);
+					// hfu5: it returns when backupStarted key is set
 					if (present || !watch)
 						return true;
 				} else {
@@ -578,7 +590,7 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 
 			state std::vector<Future<Optional<Version>>> prevVersions;
 			state std::vector<BackupConfig> versionConfigs;
-			state std::vector<Future<Optional<bool>>> allWorkersReady;
+			state std::vector<Future<Optional<Version>>> allWorkersReady;
 			for (const auto& [uid, version] : savedLogVersions) {
 				versionConfigs.emplace_back(uid);
 				prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
@@ -588,7 +600,7 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 			wait(waitForAll(prevVersions) && waitForAll(allWorkersReady));
 
 			for (int i = 0; i < prevVersions.size(); i++) {
-				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get())
+				if (!allWorkersReady[i].get().present() || allWorkersReady[i].get().get() <= 0)
 					continue;
 
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
@@ -1048,6 +1060,8 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 	    .log();
 	loop {
 		state Future<bool> present = monitorBackupStartedKeyChanges(self, !keyPresent, /*watch=*/true);
+		// NOOP mode is quitted once each backup worker found out the `backupStartedKey` is set
+		// so it is always earlier than the allWorkerStarted
 		if (keyPresent) {
 			TraceEvent("Hfu5StartPull", self->myId)
 			    .detail("SavedVersion", self->savedVersion)
