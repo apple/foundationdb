@@ -621,8 +621,7 @@ AsyncGenerator<Optional<StringRef>> readLines(Reference<IAsyncFile> file) {
 
 Future<Void> testReadLines() {
 	auto path = "/etc/hosts"s;
-	auto file = co_await IAsyncFileSystem::filesystem()->open(
-	    "/Users/mpilman/Projects/frostdb/flow/include/flow/flow.h", IAsyncFile::OPEN_READWRITE, 0640);
+	auto file = co_await IAsyncFileSystem::filesystem()->open(path, IAsyncFile::OPEN_READWRITE, 0640);
 	auto lines = readLines(file);
 	for (int i = 0; true; ++i) {
 		auto line = co_await lines();
