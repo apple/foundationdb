@@ -308,7 +308,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		// validate encrypted buffer size and contents (not matching with plaintext)
 		ASSERT_EQ(encrypted->getLogicalSize(), len);
-		if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+		if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
 			ASSERT_EQ(memcmp(encrypted->begin(), payload, len), 0);
 		else
 			ASSERT_NE(memcmp(encrypted->begin(), payload, len), 0);
@@ -356,7 +356,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		ASSERT_EQ(encrypted.size(), len);
 		ASSERT_EQ(headerRef->flagsVersion(), CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
-		if (ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+		if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
 			ASSERT_EQ(memcmp(encrypted.begin(), payload, len), 0);
 		else
 			ASSERT_NE(memcmp(encrypted.begin(), payload, len), 0);
