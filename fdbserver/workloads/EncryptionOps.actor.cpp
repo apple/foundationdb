@@ -308,7 +308,10 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		// validate encrypted buffer size and contents (not matching with plaintext)
 		ASSERT_EQ(encrypted->getLogicalSize(), len);
-		ASSERT_NE(memcmp(encrypted->begin(), payload, len), 0);
+		if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+			ASSERT_EQ(memcmp(encrypted->begin(), payload, len), 0);
+		else
+			ASSERT_NE(memcmp(encrypted->begin(), payload, len), 0);
 		ASSERT_EQ(header->flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
@@ -353,7 +356,10 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		ASSERT_EQ(encrypted.size(), len);
 		ASSERT_EQ(headerRef->flagsVersion(), CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
-		ASSERT_NE(memcmp(encrypted.begin(), payload, len), 0);
+		if (g_network->isSimulated() && ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER)
+			ASSERT_EQ(memcmp(encrypted.begin(), payload, len), 0);
+		else
+			ASSERT_NE(memcmp(encrypted.begin(), payload, len), 0);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 		return encrypted;
