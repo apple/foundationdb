@@ -324,8 +324,16 @@ public:
 				GetHotShardsRequest getReq;
 				GetHotShardsReply reply = wait(self->storageServerInterfaces[ssi].getHotShards.getReply(getReq));
 
-				setReq.throttledShards.insert(
-				    setReq.throttledShards.end(), reply.hotShards.begin(), reply.hotShards.end());
+				// Backup's restore range can't be throttled, otherwise restore would fail,
+				// i.e., "ApplyMutationsError".
+				KeyRangeRef applyMutationRange("\xfe\xff\xfe"_sr, "\xfe\xff\xff\xff"_sr);
+				for (const auto& shard : reply.hotShards) {
+					if (!shard.intersects(applyMutationRange)) {
+						setReq.throttledShards.push_back(shard);
+					} else {
+						TraceEvent("IgnoreHotShard").detail("Shard", shard);
+					}
+				}
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
 				continue;
