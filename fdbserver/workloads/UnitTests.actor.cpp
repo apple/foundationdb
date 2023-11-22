@@ -25,6 +25,7 @@
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
 void forceLinkFlowTests();
+void forceLinkCoroTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
@@ -95,6 +96,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkIndexedSetTests();
 		forceLinkDequeTests();
 		forceLinkFlowTests();
+		forceLinkCoroTests();
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();

@@ -874,6 +874,20 @@ public:
 			destroy();
 	}
 
+	// this is only used for C++ coroutines
+	void finishSendErrorAndDelPromiseRef() {
+		if (promises == 1 && !futures) {
+			// No one is left to receive the value, so we can just die
+			destroy();
+			return;
+		}
+		while (Callback<T>::next != this)
+			Callback<T>::next->error(this->error_state);
+
+		if (!--promises && !futures)
+			destroy();
+	}
+
 	void addPromiseRef() { promises++; }
 	void addFutureRef() { futures++; }
 
@@ -1610,5 +1624,6 @@ void bindDeterministicRandomToOpenssl();
 #pragma clang diagnostic pop
 #endif
 
+#include "flow/Coroutines.h"
 #include "flow/genericactors.actor.h"
 #endif

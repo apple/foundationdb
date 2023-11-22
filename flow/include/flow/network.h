@@ -115,6 +115,7 @@ struct NetworkInfo {
 	FlowLock* handshakeLock;
 
 	NetworkInfo();
+	~NetworkInfo();
 };
 
 class IEventFD : public ReferenceCounted<IEventFD> {
