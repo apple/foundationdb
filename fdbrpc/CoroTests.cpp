@@ -1695,8 +1695,10 @@ std::string rndFileName() {
 
 Future<Void> testReadLines() {
 	auto filename = rndFileName();
-	auto file = co_await IAsyncFileSystem::filesystem()->open(
-	    filename, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0640);
+	auto file = co_await IAsyncFileSystem::filesystem()->open(filename,
+	                                                          IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+	                                                              IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+	                                                          0640);
 	auto expectedLines = co_await writeTestFile(file);
 	auto lines = readLines(file);
 	for (int i = 0; i < expectedLines.size(); ++i) {
