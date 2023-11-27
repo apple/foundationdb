@@ -530,11 +530,9 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 					uidVersions = decodeBackupStartedValue(value.get());
 					state TraceEvent e("BackupWorkerGotStartKey", self->myId);
 					state int i = 1;
-					state int size = uidVersions.size();
-					loop {
-						UID uid = uidVersions[i].first;
-						Version version = uidVersions[i].second;
+					for (auto [uid, version] : uidVersions) {
 						e.detail(format("BackupID%d", i), uid).detail(format("Version%d", i), version);
+						i++;
 						if (shouldExit && version < self->endVersion.get()) {
 							shouldExit = false;
 						}
@@ -542,14 +540,10 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 						// Optional<Version> taskStarted = wait(config.allWorkerStarted().get(tr)); this does not compile
 						// transform the Value to Version, what's the best way?
 						Optional<Value> taskStarted = wait(tr.get(config.allWorkerStarted().key));
-						Version v = Tuple::unpack(taskStarted.get()).getInt(0);
 						if (taskStarted.present()) {
+							Version v = Tuple::unpack(taskStarted.get()).getInt(0);
 							TraceEvent("Hfu5TaskPresent").detail("V", v).detail("Saved", self->savedVersion).log();
 							self->savedVersion = std::max(self->savedVersion, v);
-						}
-						i++;
-						if (i == size) {
-							break;
 						}
 					}
 					self->exitEarly = shouldExit;
@@ -600,9 +594,9 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 			wait(waitForAll(prevVersions) && waitForAll(allWorkersReady));
 
 			for (int i = 0; i < prevVersions.size(); i++) {
-				if (!allWorkersReady[i].get().present() || allWorkersReady[i].get().get() <= 0)
+				if (!allWorkersReady[i].get().present() || allWorkersReady[i].get().get() <= 0) {
 					continue;
-
+				}
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevVersions[i].get().present()) {
 					const Version prev = prevVersions[i].get().get();
