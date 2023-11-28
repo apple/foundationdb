@@ -376,6 +376,8 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, enablePSM, shardId);
 			if (!assigned) {
 				TraceEvent(SevError, "ValidateRangeAssignmentCorruptionDetected")
+				    .setMaxFieldLength(-1)
+				    .setMaxEventLength(-1)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Context", context)
 				    .detail("AuditRange", range)
