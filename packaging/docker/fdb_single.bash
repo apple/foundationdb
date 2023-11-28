@@ -71,6 +71,7 @@ function start_fdb () {
               --logdir /var/fdb/logs \
               --locality-zoneid="$(hostname)" \
               --locality-machineid="$(hostname)" \
+              --knob_disable_posix_kernel_aio=1 \
               --class "$FDB_PROCESS_CLASS" &
     fdb_pid=$(jobs -p)
     echo "fdbserver pid is: ${fdb_pid}"
