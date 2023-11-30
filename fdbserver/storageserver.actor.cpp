@@ -8572,11 +8572,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 					totalBytes += expectedBlockSize;
 
-					if (!data->fetchKeysLimiter.ready().isReady() && priority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+					if (shard->reason != DataMovementReason::INVALID &&
+					    priority < SERVER_KNOBS->FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD &&
+					    !data->fetchKeysLimiter.ready().isReady()) {
 						TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID);
 						state double ts = now();
 						wait(data->fetchKeysLimiter.ready());
 						TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
+						    .detail("Priority", priority)
 						    .detail("KeyRange", shard->keys)
 						    .detail("Delay", now() - ts);
 					}
