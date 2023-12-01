@@ -70,6 +70,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/IKeyValueStore.h"
@@ -356,6 +357,7 @@ struct AddingShard : NonCopyable {
 	Future<Void> fetchClient; // holds FetchKeys() actor
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
+	DataMovementReason reason;
 
 	// During the Fetching phase, it saves newer mutations whose version is greater or equal to fetchClient's
 	// fetchVersion, while the shard is still busy catching up with fetchClient. It applies these updates after fetching
@@ -383,12 +385,12 @@ struct AddingShard : NonCopyable {
 
 	Phase phase;
 
-	AddingShard(StorageServer* server, KeyRangeRef const& keys);
+	AddingShard(StorageServer* server, KeyRangeRef const& keys, DataMovementReason reason);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys)
 	  : keys(keys), fetchClient(prev->fetchClient), server(prev->server), transferredVersion(prev->transferredVersion),
-	    fetchVersion(prev->fetchVersion), phase(prev->phase) {}
+	    fetchVersion(prev->fetchVersion), phase(prev->phase), reason(prev->reason) {}
 	~AddingShard() {
 		if (!fetchComplete.isSet())
 			fetchComplete.send(Void());
@@ -426,8 +428,8 @@ public:
 
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr);
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys, DataMovementReason reason) {
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, reason), nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
 		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
@@ -8218,6 +8220,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const double startTime = now();
 	state Version fetchVersion = invalidVersion;
 	state int64_t totalBytes = 0;
+	state int priority = dataMovementPriority(shard->reason);
 
 	state PromiseStream<Key> destroyedFeeds;
 	state FetchKeysMetricReporter metricReporter(fetchKeysID,
@@ -8442,11 +8445,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 					totalBytes += expectedBlockSize;
 
-					if (!data->fetchKeysLimiter.ready().isReady()) {
+					if (shard->reason != DataMovementReason::INVALID &&
+					    priority < SERVER_KNOBS->FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD &&
+					    !data->fetchKeysLimiter.ready().isReady()) {
 						TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID);
 						state double ts = now();
 						wait(data->fetchKeysLimiter.ready());
 						TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
+						    .detail("Priority", priority)
 						    .detail("KeyRange", shard->keys)
 						    .detail("Delay", now() - ts);
 					}
@@ -8520,7 +8526,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
-						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(blockBegin, keys.end)));
+						shard->server->addShard(
+						    ShardInfo::newAdding(data, KeyRangeRef(blockBegin, keys.end), shard->reason));
 					}
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
@@ -8779,8 +8786,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	return Void();
 }
 
-AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
-  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
+AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys, DataMovementReason reason)
+  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious),
+    reason(reason) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -9530,12 +9538,12 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 		res = newNotAssigned(shard.range);
 		break;
 	case StorageServerShard::Adding:
-		res = newAdding(data, shard.range);
+		res = newAdding(data, shard.range, DataMovementReason::INVALID);
 		break;
 	case StorageServerShard::ReadWritePending:
 		TraceEvent(SevDebug, "CancellingAlmostReadyMoveInShard").detail("StorageServerShard", shard.toString());
 		ASSERT(!shard.moveInShardId.present());
-		res = newAdding(data, shard.range);
+		res = newAdding(data, shard.range, DataMovementReason::INVALID);
 		break;
 	case StorageServerShard::MovingIn: {
 		ASSERT(shard.moveInShardId.present());
@@ -9838,7 +9846,7 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
 		else {
 			ASSERT(ranges[i].value->adding);
-			data->addShard(ShardInfo::newAdding(data, ranges[i]));
+			data->addShard(ShardInfo::newAdding(data, ranges[i], ranges[i].value->adding->reason));
 			CODE_PROBE(true, "ChangeServerKeys reFetchKeys");
 		}
 	}
@@ -9891,7 +9899,7 @@ void changeServerKeys(StorageServer* data,
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned() || shard->keys != range)
-					data->addShard(ShardInfo::newAdding(data, range));
+					data->addShard(ShardInfo::newAdding(data, range, dataMoveReason));
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);

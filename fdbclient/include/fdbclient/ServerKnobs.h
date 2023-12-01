@@ -189,6 +189,10 @@ public:
 	// it are default to be 'anonymous' for compatibility.
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
+	// Data fetching rate is throttled if its priority is STRICTLY LOWER than this value. The rate limite is set as
+	// STORAGE_FETCH_KEYS_RATE_LIMIT.
+	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
+
 	// Data distribution
 	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given a array that's descend
 	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
