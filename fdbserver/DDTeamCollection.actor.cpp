@@ -2071,6 +2071,7 @@ public:
 				if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 					TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
 					    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+					    .detail("Primary", self->primary)
 					    .detail("ImbalanceFactor",
 					            SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO ? numSSToBeLoadBytesBalanced
 					                                                                     : ratio)
@@ -2805,6 +2806,7 @@ public:
 							           "tss recruitment cancelled due zero healthy teams");
 
 							TraceEvent(SevWarn, "TSS_RecruitCancelled", self->distributorId)
+							    .detail("Primary", self->primary)
 							    .detail("Reason", tssToRecruit <= 0 ? "TooMany" : "ZeroHealthyTeams");
 							tssState->cancel();
 							tssState = makeReference<TSSPairState>();
@@ -2824,6 +2826,7 @@ public:
 										CODE_PROBE(tssToRecruit < 0, "Killing TSS due to too many TSS");
 										CODE_PROBE(self->zeroHealthyTeams->get(), "Killing TSS due zero healthy teams");
 										TraceEvent(SevWarn, "TSS_DDKill", self->distributorId)
+										    .detail("Primary", self->primary)
 										    .detail("TSSID", tssId)
 										    .detail("Reason",
 										            self->zeroHealthyTeams->get() ? "ZeroHealthyTeams" : "TooMany");
@@ -3004,6 +3007,7 @@ public:
 				if (wiggler->empty()) {
 					// None of the entries in wiggle queue matches the given locality.
 					TraceEvent("PerpetualStorageWiggleEmptyQueue", teamCollection->distributorId)
+					    .detail("Primary", teamCollection->primary)
 					    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
 					    .detail("PerpetualStorageWiggleLocality",
 					            teamCollection->configuration.perpetualStorageWiggleLocality);
