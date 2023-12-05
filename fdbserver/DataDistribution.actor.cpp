@@ -3126,6 +3126,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 						           ssid.toString().c_str());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", audit->coreState.id)
 						    .detail("AuditRange", auditRange)
 						    .detail("ClaimRange", claimRange)
@@ -3143,6 +3145,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 						           mismatchedRangeByServerKey.toString().c_str());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", audit->coreState.id)
 						    .detail("AuditRange", auditRange)
 						    .detail("ClaimRange", claimRange)
@@ -3162,6 +3166,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 						           ssid.toString().c_str());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", audit->coreState.id)
 						    .detail("AuditRange", auditRange)
 						    .detail("ClaimRange", claimRange)
@@ -3185,6 +3191,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				// Return result
 				if (!errors.empty()) {
 					TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+					    .setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
 					    .detail("AuditId", audit->coreState.id)
 					    .detail("AuditRange", auditRange)
 					    .detail("NumErrors", errors.size())
