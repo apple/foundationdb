@@ -5216,6 +5216,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						           data->thisServerID.toString().c_str(),
 						           describe(ownRangesSeenByServerKey).c_str());
 						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("ClaimRange", claimRange)
@@ -5235,6 +5237,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 						           mismatchedRangeByServerKey.toString().c_str(),
 						           mismatchedRangeByKeyServer.toString().c_str());
 						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("ClaimRange", claimRange)
@@ -5258,6 +5262,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					           mismatchedRangeByServerKey.toString().c_str(),
 					           mismatchedRangeByLocalView.toString().c_str());
 					TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
+					    .setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("ClaimRange", claimRange)
@@ -5566,6 +5572,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							               remoteServer.uniqueID.first(),
 							               Traceable<StringRef>::toString(remoteKV.key).c_str());
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+							    .setMaxFieldLength(-1)
+							    .setMaxEventLength(-1)
 							    .detail("AuditId", req.id)
 							    .detail("AuditRange", req.range)
 							    .detail("ErrorMessage", error)
@@ -5582,6 +5590,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							    remoteServer.uniqueID.first(),
 							    Traceable<StringRef>::toString(remoteKV.value).c_str());
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+							    .setMaxFieldLength(-1)
+							    .setMaxEventLength(-1)
 							    .detail("AuditId", req.id)
 							    .detail("AuditRange", req.range)
 							    .detail("ErrorMessage", error)
@@ -5623,6 +5633,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						           Traceable<StringRef>::toString(remote.data[i].key).c_str(),
 						           remoteServer.uniqueID.first());
 						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("ErrorMessage", error)
@@ -5642,6 +5654,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						           data->thisServerID.first(),
 						           Traceable<StringRef>::toString(local.data[i].key).c_str());
 						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
 						    .detail("AuditId", req.id)
 						    .detail("AuditRange", req.range)
 						    .detail("ErrorMessage", error)
@@ -5667,6 +5681,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 				// Return result
 				if (!errors.empty()) {
 					TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
+					    .setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("ErrorCount", errors.size())
