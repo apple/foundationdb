@@ -40,6 +40,24 @@ KeyRange persistUpdatesKeyRange(const UID& id) {
 	return prefixRange(wr.toValue());
 }
 
+Key persistUpdatesKey(const UID& id, const Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(persistMoveInUpdatesPrefix);
+	wr << id;
+	wr.serializeBytes("/"_sr);
+
+	// Big-endian ensures the keys are ordered by version.
+	wr << bigEndian64(static_cast<uint64_t>(version));
+	return wr.toValue();
+}
+
+Version decodePersistUpdateVersion(KeyRef versionKey) {
+	BinaryReader rd(versionKey, Unversioned());
+	uint64_t uv;
+	rd >> uv;
+	return static_cast<Version>(fromBigEndian64(uv));
+}
+
 Key persistMoveInShardKey(const UID& id) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistMoveInShardKeys.begin);
