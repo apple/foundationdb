@@ -1308,16 +1308,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (; i < endPoint; i += increment) {
 			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Cancelled")
-					.detail("Distributed", self->distributed)
-					.detail("ShardCount", ranges.size())
-					.detail("ClientId", self->clientId)
-					.detail("ClientCount", self->clientCount)
-					.detail("CurrentPoint", i)
-					.detail("EndPoint", endPoint)
-					.detail("BeginKey", beginKeyToCheck)
-					.detail("EndKey", endKeyToCheck)
-					.detail("CompleteEndKey", ranges[shardOrder[i]].begin);
-					break;
+				    .detail("Distributed", self->distributed)
+				    .detail("ShardCount", ranges.size())
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("CurrentPoint", i)
+				    .detail("EndPoint", endPoint)
+				    .detail("BeginKey", beginKeyToCheck)
+				    .detail("EndKey", endKeyToCheck)
+				    .detail("CompleteEndKey", ranges[shardOrder[i]].begin);
+				break;
 			}
 			state int shard = shardOrder[i];
 
@@ -1480,16 +1480,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					try {
 						if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
 							TraceEvent("ConsistencyCheck_DataCheckCancelled")
-								.detail("Distributed", self->distributed)
-								.detail("ShardCount", ranges.size())
-								.detail("ClientId", self->clientId)
-								.detail("ClientCount", self->clientCount)
-								.detail("CurrentPoint", i)
-								.detail("EndPoint", endPoint)
-								.detail("BeginKey", beginKeyToCheck)
-								.detail("EndKey", endKeyToCheck)
-								.detail("CompleteEndKey", lastStartSampleKey);
-								break;
+							    .detail("Distributed", self->distributed)
+							    .detail("ShardCount", ranges.size())
+							    .detail("ClientId", self->clientId)
+							    .detail("ClientCount", self->clientCount)
+							    .detail("CurrentPoint", i)
+							    .detail("EndPoint", endPoint)
+							    .detail("BeginKey", beginKeyToCheck)
+							    .detail("EndKey", endKeyToCheck)
+							    .detail("CompleteEndKey", lastStartSampleKey);
+							break;
 						}
 
 						lastSampleKey = lastStartSampleKey;
