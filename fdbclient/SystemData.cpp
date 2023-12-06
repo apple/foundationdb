@@ -611,7 +611,7 @@ void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("SplitIDToDecode", dataMoveId.second());
 	}
-	
+
 	return;
 }
 
