@@ -1266,6 +1266,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			ranges.push_back(range);
 		}
 
+		state Key beginKeyToCheck = ranges[0].begin;
+		state Key endKeyToCheck = ranges[ranges.size() - 1].end;
+
 		state std::vector<int> shardOrder;
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
@@ -1278,25 +1281,29 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		state int endPoint;
 		if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
-			int batchSize = (ranges.size() / self->clientCount) + 1;
+			int batchSize = (shardOrder.size() / self->clientCount) + 1;
 			i = self->clientId * batchSize; // overwrite the starting point i
 			i = std::max(0, i - CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
 			endPoint = (self->clientId + 1) * batchSize;
-			endPoint = std::min(static_cast<int>(ranges.size()),
+			endPoint = std::min(static_cast<int>(shardOrder.size()),
 			                    endPoint + CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
 			increment = 1;
+			// overwrite beginKeyToCheck and endKeyToCheck
+			beginKeyToCheck = ranges[shardOrder[i]].begin;
+			endKeyToCheck = ranges[shardOrder[endPoint - 1]].end;
 		} else {
-			endPoint = ranges.size();
+			endPoint = shardOrder.size();
 		}
 
 		TraceEvent("ConsistencyCheck_StartTask")
+		    .detail("Distributed", self->distributed)
 		    .detail("ShardCount", ranges.size())
 		    .detail("ClientId", self->clientId)
 		    .detail("ClientCount", self->clientCount)
 		    .detail("StartPoint", i)
 		    .detail("EndPoint", endPoint)
-		    .detail("BeginKey", ranges[i].begin)
-		    .detail("EndKey", ranges[endPoint - 1].end);
+		    .detail("BeginKey", beginKeyToCheck)
+		    .detail("EndKey", endKeyToCheck);
 
 		for (; i < endPoint; i += increment) {
 			state int shard = shardOrder[i];
@@ -1436,7 +1443,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// The first client may need to skip the rest of the loop contents if it is just processing this shard to
 			// get a size estimate
-			if (!self->firstClient || shard % (effectiveClientCount * self->shardSampleFactor) == 0) {
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED || !self->firstClient ||
+			    shard % (effectiveClientCount * self->shardSampleFactor) == 0) {
 				state int shardKeys = 0;
 				state int shardBytes = 0;
 				state int sampledBytes = 0;
@@ -1861,12 +1869,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			numCompleteShards++;
 			TraceEvent(SevInfo, "ConsistencyCheck_ShardComplete")
 			    .suppressFor(1.0)
+			    .detail("ClientId", self->clientId)
+			    .detail("ClientCount", self->clientCount)
 			    .detail("Range", range.toString())
 			    .detail("ShardCount", ranges.size())
 			    .detail("NumCompletedShards", numCompleteShards)
 			    .detail("BytesReadInThisRound", bytesReadInthisRound)
 			    .detail("NumSkippedShards", numSkippedShards);
 		}
+
+		TraceEvent("ConsistencyCheck_EndTask")
+		    .detail("Distributed", self->distributed)
+		    .detail("ShardCount", ranges.size())
+		    .detail("ClientId", self->clientId)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("StartPoint", i)
+		    .detail("EndPoint", endPoint)
+		    .detail("BeginKey", beginKeyToCheck)
+		    .detail("EndKey", endKeyToCheck);
 
 		// SOMEDAY: when background data distribution is implemented, include this test
 		// In a quiescent database, check that the sizes of storage servers are roughly the same
