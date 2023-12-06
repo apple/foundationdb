@@ -604,36 +604,14 @@ void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("SplitIDToDecode", dataMoveId.second());
 	}
-	if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason <= DataMovementReason::INVALID) {
+	if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason < DataMovementReason::INVALID) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
 		    .detail("Reason", "WrongDataMoveReasonOutScope")
 		    .detail("Value", dataMoveReason)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("SplitIDToDecode", dataMoveId.second());
 	}
-	if (!emptyRange && assigned) {
-		if (dataMoveReason != DataMovementReason::INVALID) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
-			    .detail("Reason", "WrongDataMoveReason")
-			    .detail("Value", dataMoveReason)
-			    .detail("ExpectedValue", DataMovementReason::INVALID)
-			    .detail("DataMoveID", dataMoveId)
-			    .detail("EmptyRange", emptyRange)
-			    .detail("Assigned", assigned)
-			    .detail("SplitIDToDecode", dataMoveId.second());
-		}
-	} else {
-		if (dataMoveReason == DataMovementReason::INVALID) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
-			    .detail("Reason", "WrongDataMoveReason")
-			    .detail("Value", dataMoveReason)
-			    .detail("ExpectedValue", "Should not be invalid value")
-			    .detail("DataMoveID", dataMoveId)
-			    .detail("EmptyRange", emptyRange)
-			    .detail("Assigned", assigned)
-			    .detail("SplitIDToDecode", dataMoveId.second());
-		}
-	}
+	
 	return;
 }
 
