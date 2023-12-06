@@ -594,8 +594,8 @@ const Value serverKeysValue(const UID& id) {
 
 void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
                               const DataMovementReason& dataMoveReason,
-                              const bool& emptyRange,
                               const bool& assigned,
+                              const bool& emptyRange,
                               const UID& dataMoveId) {
 	if (dataMoveType >= DataMoveType::NUMBER_OF_TYPES || dataMoveType < DataMoveType::LOGICAL) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
