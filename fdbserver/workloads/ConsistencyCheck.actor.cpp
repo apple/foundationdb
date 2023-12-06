@@ -1306,6 +1306,19 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    .detail("EndKey", endKeyToCheck);
 
 		for (; i < endPoint; i += increment) {
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
+				TraceEvent("ConsistencyCheck_Cancelled")
+					.detail("Distributed", self->distributed)
+					.detail("ShardCount", ranges.size())
+					.detail("ClientId", self->clientId)
+					.detail("ClientCount", self->clientCount)
+					.detail("CurrentPoint", i)
+					.detail("EndPoint", endPoint)
+					.detail("BeginKey", beginKeyToCheck)
+					.detail("EndKey", endKeyToCheck)
+					.detail("CompleteEndKey", ranges[shardOrder[i]].begin);
+					break;
+			}
 			state int shard = shardOrder[i];
 
 			state KeyRangeRef range = ranges[shard];
@@ -1465,6 +1478,20 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop {
 					try {
+						if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
+							TraceEvent("ConsistencyCheck_DataCheckCancelled")
+								.detail("Distributed", self->distributed)
+								.detail("ShardCount", ranges.size())
+								.detail("ClientId", self->clientId)
+								.detail("ClientCount", self->clientCount)
+								.detail("CurrentPoint", i)
+								.detail("EndPoint", endPoint)
+								.detail("BeginKey", beginKeyToCheck)
+								.detail("EndKey", endKeyToCheck)
+								.detail("CompleteEndKey", lastStartSampleKey);
+								break;
+						}
+
 						lastSampleKey = lastStartSampleKey;
 
 						// Get the min version of the storage servers
@@ -1883,8 +1910,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    .detail("ShardCount", ranges.size())
 		    .detail("ClientId", self->clientId)
 		    .detail("ClientCount", self->clientCount)
-		    .detail("StartPoint", i)
-		    .detail("EndPoint", endPoint)
 		    .detail("BeginKey", beginKeyToCheck)
 		    .detail("EndKey", endKeyToCheck);
 
