@@ -1889,7 +1889,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					runPreCheck = false;
 					wait(delay(1));
 				} else {
-					TraceEvent(SevWarn, "StartMoveShardsError",  relocationIntervalId)
+					TraceEvent(SevWarn, "StartMoveShardsError", relocationIntervalId)
 					    .errorUnsuppressed(e)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveRange", keys)
@@ -2253,7 +2253,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						                          range,
 						                          allKeys,
 						                          destHasServer ? serverKeysValue(dataMoveId) : serverKeysFalse));
-						TraceEvent(sevDm, "FinishMoveShardsSetServerKeyRange",  relocationIntervalId)
+						TraceEvent(sevDm, "FinishMoveShardsSetServerKeyRange", relocationIntervalId)
 						    .detail("StorageServerID", ssId)
 						    .detail("KeyRange", range)
 						    .detail("ShardID", destHasServer ? dataMoveId : UID());
@@ -2265,10 +2265,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
-						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData",  relocationIntervalId)
+						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString());
 					} else {
-						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete",  relocationIntervalId)
+						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("CurrentRange", range)
 						    .detail("NewDataMoveMetaData", dataMove.toString());
@@ -2280,7 +2280,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						wait(auditLocationMetadataPostCheck(occ, range, "finishMoveShards_postcheck",  relocationIntervalId));
+						wait(auditLocationMetadataPostCheck(
+						    occ, range, "finishMoveShards_postcheck", relocationIntervalId));
 					}
 
 					if (complete) {
