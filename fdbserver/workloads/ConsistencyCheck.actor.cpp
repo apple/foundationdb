@@ -187,10 +187,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
-				TraceEvent("ConsistencyCheck_Suspended").log();
+				TraceEvent("ConsistencyCheck_Suspended")
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
 				wait(self->suspendConsistencyCheck.onChange());
 			}
-			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
+			TraceEvent("ConsistencyCheck_StartingOrResuming")
+			    .detail("Distributed", self->distributed)
+			    .detail("ClientCount", self->clientCount)
+			    .detail("ClientId", self->clientId);
 			choose {
 				when(wait(self->runCheck(cx, self))) {
 					if (!self->indefinite)
@@ -319,7 +325,35 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
+				// bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
+
+				KeyRange rangeToCheck = allKeys;
+				if (CLIENT_KNOBS->CONSISTENCY_CHECK_CUSTOM_RANGE) {
+					Key rangeBegin = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN);
+					if (rangeBegin > allKeys.end) {
+						rangeBegin = allKeys.end;
+					}
+					Key rangeEnd = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END);
+					if (rangeEnd > allKeys.end) {
+						rangeEnd = allKeys.end;
+					}
+					if (rangeBegin < rangeEnd) {
+						rangeToCheck = KeyRangeRef(rangeBegin, rangeEnd);
+					} else if (rangeBegin > rangeEnd) {
+						rangeToCheck = KeyRangeRef(rangeEnd, rangeBegin);
+					} else {
+						rangeToCheck = allKeys;
+					}
+				}
+
+				TraceEvent("ConsistencyCheck_Config")
+				    .detail("RangeToCheck", rangeToCheck)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+
+				bool keyServerResult =
+				    wait(self->getKeyServers(cx, self, keyServerPromise, rangeToCheck.withPrefix(keyServersPrefix)));
 				if (keyServerResult) {
 					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
@@ -1236,13 +1270,35 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
 			shardOrder.push_back(k);
-		if (self->shuffleShards) {
+		if (self->shuffleShards && !CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
 			uint32_t seed = self->sharedRandomNumber + self->repetitions;
 			DeterministicRandom sharedRandom(seed == 0 ? 1 : seed);
 			sharedRandom.randomShuffle(shardOrder);
 		}
 
-		for (; i < ranges.size(); i += increment) {
+		state int endPoint;
+		if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
+			int batchSize = (ranges.size() / self->clientCount) + 1;
+			i = self->clientId * batchSize; // overwrite the starting point i
+			i = std::max(0, i - CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
+			endPoint = (self->clientId + 1) * batchSize;
+			endPoint = std::min(static_cast<int>(ranges.size()),
+			                    endPoint + CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
+			increment = 1;
+		} else {
+			endPoint = ranges.size();
+		}
+
+		TraceEvent("ConsistencyCheck_StartTask")
+		    .detail("ShardCount", ranges.size())
+		    .detail("ClientId", self->clientId)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("StartPoint", i)
+		    .detail("EndPoint", endPoint)
+		    .detail("BeginKey", ranges[i].begin)
+		    .detail("EndKey", ranges[endPoint - 1].end);
+
+		for (; i < endPoint; i += increment) {
 			state int shard = shardOrder[i];
 
 			state KeyRangeRef range = ranges[shard];
