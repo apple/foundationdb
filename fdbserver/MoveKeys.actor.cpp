@@ -1804,7 +1804,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							checkpoint.setState(CheckpointMetaData::Pending);
 							tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
 							dataMove.checkpoints.insert(checkpointId);
-							TraceEvent(sevDm, "InitiatedCheckpoint")
+							TraceEvent(sevDm, "InitiatedCheckpoint", relocationIntervalId)
 							    .detail("CheckpointID", checkpointId.toString())
 							    .detail("Range", rangeIntersectKeys)
 							    .detail("DataMoveID", dataMoveId)
@@ -1839,12 +1839,12 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end) {
 					dataMove.setPhase(DataMoveMetaData::Running);
 					complete = true;
-					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", dataMoveId)
+					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
 				} else {
 					dataMove.setPhase(DataMoveMetaData::Prepare);
-					TraceEvent(sevDm, "StartMoveShardsDataMovePartial", dataMoveId)
+					TraceEvent(sevDm, "StartMoveShardsDataMovePartial", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("CurrentRange", currentKeys)
 					    .detail("DataMoveRange", keys)
@@ -1857,7 +1857,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				wait(tr.commit());
 
-				TraceEvent(sevDm, "DataMoveMetaDataCommit", dataMove.id)
+				TraceEvent(sevDm, "DataMoveMetaDataCommit", relocationIntervalId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("DataMoveKey", dataMoveKeyFor(dataMoveId))
 				    .detail("CommitVersion", tr.getCommittedVersion())
@@ -1883,7 +1883,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					runPreCheck = false;
 					wait(delay(1));
 				} else {
-					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
+					TraceEvent(SevWarn, "StartMoveShardsError", relocationIntervalId)
 					    .errorUnsuppressed(e)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveRange", keys)
@@ -2248,7 +2248,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						                          range,
 						                          allKeys,
 						                          destHasServer ? serverKeysValue(dataMoveId) : serverKeysFalse));
-						TraceEvent(sevDm, "FinishMoveShardsSetServerKeyRange", dataMoveId)
+						TraceEvent(sevDm, "FinishMoveShardsSetServerKeyRange", relocationIntervalId)
 						    .detail("StorageServerID", ssId)
 						    .detail("KeyRange", range)
 						    .detail("ShardID", destHasServer ? dataMoveId : UID());
@@ -2260,10 +2260,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
-						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", dataMoveId)
+						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString());
 					} else {
-						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", dataMoveId)
+						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("CurrentRange", range)
 						    .detail("NewDataMoveMetaData", dataMove.toString());
@@ -2275,7 +2275,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						wait(auditLocationMetadataPostCheck(occ, range, "finishMoveShards_postcheck", dataMoveId));
+						wait(auditLocationMetadataPostCheck(
+						    occ, range, "finishMoveShards_postcheck", relocationIntervalId));
 					}
 
 					if (complete) {
