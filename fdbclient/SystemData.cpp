@@ -594,8 +594,8 @@ const Value serverKeysValue(const UID& id) {
 
 void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
                               const DataMovementReason& dataMoveReason,
-                              const bool& emptyRange,
                               const bool& assigned,
+                              const bool& emptyRange,
                               const UID& dataMoveId) {
 	if (dataMoveType >= DataMoveType::NUMBER_OF_TYPES || dataMoveType < DataMoveType::LOGICAL) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
@@ -604,36 +604,14 @@ void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("SplitIDToDecode", dataMoveId.second());
 	}
-	if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason <= DataMovementReason::INVALID) {
+	if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason < DataMovementReason::INVALID) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
 		    .detail("Reason", "WrongDataMoveReasonOutScope")
 		    .detail("Value", dataMoveReason)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("SplitIDToDecode", dataMoveId.second());
 	}
-	if (!emptyRange && assigned) {
-		if (dataMoveReason != DataMovementReason::INVALID) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
-			    .detail("Reason", "WrongDataMoveReason")
-			    .detail("Value", dataMoveReason)
-			    .detail("ExpectedValue", DataMovementReason::INVALID)
-			    .detail("DataMoveID", dataMoveId)
-			    .detail("EmptyRange", emptyRange)
-			    .detail("Assigned", assigned)
-			    .detail("SplitIDToDecode", dataMoveId.second());
-		}
-	} else {
-		if (dataMoveReason == DataMovementReason::INVALID) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
-			    .detail("Reason", "WrongDataMoveReason")
-			    .detail("Value", dataMoveReason)
-			    .detail("ExpectedValue", "Should not be invalid value")
-			    .detail("DataMoveID", dataMoveId)
-			    .detail("EmptyRange", emptyRange)
-			    .detail("Assigned", assigned)
-			    .detail("SplitIDToDecode", dataMoveId.second());
-		}
-	}
+
 	return;
 }
 

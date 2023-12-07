@@ -1099,6 +1099,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						                               rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
+						    .detail("TrackID", rrs.randomId)
 						    .detail("Range", rrs.keys)
 						    .detail("Reason", rrs.reason.toString())
 						    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
@@ -1433,6 +1434,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							// getting the destination team or we could miss failure notifications for the storage
 							// servers in the destination team
 							TraceEvent("BestTeamNotReady")
+							    .detail("TraceID", rd.randomId)
 							    .detail("TeamCollectionIndex", tciIndex)
 							    .detail("RestoreDataMoveForDest",
 							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest));
@@ -1630,6 +1632,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					destOverloadedCount++;
 					TraceEvent(destOverloadedCount > 50 ? SevInfo : SevDebug, "DestSSBusy", distributorId)
 					    .suppressFor(1.0)
+					    .detail("TraceID", rd.randomId)
 					    .detail("StuckCount", stuckCount)
 					    .detail("DestOverloadedCount", destOverloadedCount)
 					    .detail("TeamCollectionId", tciIndex)
@@ -1647,6 +1650,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					stuckCount++;
 					TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
 					    .suppressFor(1.0)
+					    .detail("TraceID", rd.randomId)
 					    .detail("StuckCount", stuckCount)
 					    .detail("DestOverloadedCount", destOverloadedCount)
 					    .detail("TeamCollectionId", tciIndex)
