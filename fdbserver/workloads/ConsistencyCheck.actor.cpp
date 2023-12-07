@@ -347,6 +347,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				TraceEvent("ConsistencyCheck_Config")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
 				    .detail("RangeToCheck", rangeToCheck)
 				    .detail("Distributed", self->distributed)
 				    .detail("ClientCount", self->clientCount)
@@ -1296,6 +1298,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		TraceEvent("ConsistencyCheck_StartTask")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
 		    .detail("Distributed", self->distributed)
 		    .detail("ShardCount", ranges.size())
 		    .detail("ClientId", self->clientId)
@@ -1308,6 +1312,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (; i < endPoint; i += increment) {
 			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Cancelled")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
 				    .detail("Distributed", self->distributed)
 				    .detail("ShardCount", ranges.size())
 				    .detail("ClientId", self->clientId)
@@ -1480,6 +1486,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					try {
 						if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
 							TraceEvent("ConsistencyCheck_DataCheckCancelled")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
 							    .detail("Distributed", self->distributed)
 							    .detail("ShardCount", ranges.size())
 							    .detail("ClientId", self->clientId)
@@ -1640,6 +1648,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										}
 
 										TraceEvent("ConsistencyCheck_DataInconsistent")
+										    .setMaxEventLength(-1)
+										    .setMaxFieldLength(-1)
 										    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 										    .detail(format("StorageServer%d", firstValidServer).c_str(),
 										            storageServers[firstValidServer].toString())
@@ -1680,6 +1690,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
 								    .errorUnsuppressed(e)
 								    .suppressFor(1.0)
+								    .setMaxEventLength(-1)
+								    .setMaxFieldLength(-1)
 								    .detail("StorageServer", storageServers[j])
 								    .detail("ShardBegin", printable(range.begin))
 								    .detail("ShardEnd", printable(range.end))
@@ -1896,6 +1908,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			numCompleteShards++;
 			TraceEvent(SevInfo, "ConsistencyCheck_ShardComplete")
 			    .suppressFor(1.0)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
 			    .detail("ClientId", self->clientId)
 			    .detail("ClientCount", self->clientCount)
 			    .detail("Range", range.toString())
@@ -1906,6 +1920,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		TraceEvent("ConsistencyCheck_EndTask")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
 		    .detail("Distributed", self->distributed)
 		    .detail("ShardCount", ranges.size())
 		    .detail("ClientId", self->clientId)
