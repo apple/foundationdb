@@ -284,7 +284,6 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 				begin = firstGreaterOrEqual(range.begin);
 				end = firstGreaterOrEqual(range.end);
 				printf("Key range: %s\n", printable(range).c_str());
-				printf("Servers: \n");
 				for (const auto& server : servers) {
 					printf("  %s\n", server.address().toString().c_str());
 				}
