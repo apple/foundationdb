@@ -10224,6 +10224,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer);
 			newEmptyRanges.push_back(range);
 			updatedShards.emplace_back(range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite);
+			data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(data->newestAvailableVersion[range.begin] ==
