@@ -350,8 +350,13 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		KeyRange keys = self->getRandomKeys();
 		std::vector<UID> destTeam = self->getRandomTeam();
 		std::sort(destTeam.begin(), destTeam.end());
+		const UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+		                                     AssignEmptyRange(false),
+		                                     DataMoveType::LOGICAL,
+		                                     DataMovementReason::INVALID,
+		                                     UnassignShard(false));
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			return MoveKeysParams(dataMoveId,
 			                      std::vector<KeyRange>{ keys },
 			                      destTeam,
 			                      destTeam,
@@ -364,7 +369,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			                      self->ddContext.ddEnabledState.get(),
 			                      CancelConflictingDataMoves::True);
 		} else {
-			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			return MoveKeysParams(dataMoveId,
 			                      keys,
 			                      destTeam,
 			                      destTeam,
