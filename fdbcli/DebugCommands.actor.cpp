@@ -186,9 +186,12 @@ bool checkResults(Version version,
 		}
 
 		allSame = false;
-		printf("#%d  %s\n", firstValidServer, servers[firstValidServer].address().toString().c_str());
-		printf("#%d  %s\n", j, servers[j].address().toString().c_str());
-		int currentI = 0, referenceI = 0;
+		printf("#%d  server: %s  key count: %lu\n",
+		       firstValidServer,
+		       servers[firstValidServer].address().toString().c_str(),
+		       reference.data.size());
+		printf("#%d  server: %s  key count: %lu\n", j, servers[j].address().toString().c_str(), current.data.size());
+		size_t currentI = 0, referenceI = 0;
 		while (currentI < current.data.size() || referenceI < reference.data.size()) {
 			if (currentI >= current.data.size()) {
 				printf(" #%d Unique key: %s\n", firstValidServer, printable(reference.data[referenceI].key).c_str());
@@ -203,9 +206,9 @@ bool checkResults(Version version,
 				if (currentKV.key == referenceKV.key) {
 					if (currentKV.value != referenceKV.value) {
 						printf(" Value mismatch key: %s\n", printable(currentKV.key).c_str());
-						currentI++;
-						referenceI++;
 					}
+					currentI++;
+					referenceI++;
 				} else if (currentKV.key < referenceKV.key) {
 					printf(" #%d Unique key: %s\n", j, printable(currentKV.key).c_str());
 					currentI++;
@@ -281,6 +284,7 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 				begin = firstGreaterOrEqual(range.begin);
 				end = firstGreaterOrEqual(range.end);
 				printf("Key range: %s\n", printable(range).c_str());
+				printf("Servers: \n");
 				for (const auto& server : servers) {
 					printf("  %s\n", server.address().toString().c_str());
 				}
