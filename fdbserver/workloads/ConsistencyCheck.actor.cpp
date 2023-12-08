@@ -1290,6 +1290,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			endPoint = std::min(static_cast<int>(shardOrder.size()),
 			                    endPoint + CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
 			increment = 1;
+			// If the start point i is larger than the list boundary, this client needs not run
+			if (i >= endPoint) {
+				TraceEvent("ConsistencyCheck_NoTaskToRun")
+				    .detail("Distributed", self->distributed)
+				    .detail("ShardCount", ranges.size())
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("Repetitions", self->repetitions);
+				wait(delay(600.0) || self->suspendConsistencyCheck.onChange());
+				return true;
+			}
 			// overwrite beginKeyToCheck and endKeyToCheck
 			beginKeyToCheck = ranges[shardOrder[i]].begin;
 			endKeyToCheck = ranges[shardOrder[endPoint - 1]].end;
