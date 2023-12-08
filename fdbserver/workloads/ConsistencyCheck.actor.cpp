@@ -1476,6 +1476,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state Key lastSampleKey;
 				state Key lastStartSampleKey;
 				state int64_t totalReadAmount = 0;
+				state bool completeCheck = true;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
 				state Transaction onErrorTr(
@@ -1483,6 +1484,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop {
+					completeCheck = true;
 					try {
 						if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
 							TraceEvent("ConsistencyCheck_DataCheckCancelled")
@@ -1684,6 +1686,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							// If the data is not available and we aren't relocating this shard
 							else if (!isRelocating) {
+								completeCheck = false;
 								Error e =
 								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
@@ -1706,6 +1709,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
+							} else {
+								completeCheck = false;
 							}
 						}
 
@@ -1783,6 +1788,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						wait(onErrorTr.onError(err));
 						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 					}
+				}
+
+				if (!completeCheck) {
+					TraceEvent(SevWarnAlways, "ConsistencyCheck_ShardNoCompleteCheck")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("ClientId", self->clientId)
+					    .detail("ClientCount", self->clientCount)
+					    .detail("ShardBegin", printable(range.begin))
+					    .detail("ShardEnd", printable(range.end));
 				}
 
 				canSplit = canSplit && sampledBytes - splitBytes >= shardBounds.min.bytes && sampledBytes > splitBytes;
