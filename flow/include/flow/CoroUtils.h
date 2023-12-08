@@ -58,6 +58,7 @@ struct ChooseImplCallback<Parent, Idx, F, Args...>
 	}
 
 	void a_callback_fire(ThisCallback*, ValueType const& value) {
+		getParent()->actor_wait_state = 0;
 		getParent()->removeCallbacks();
 		try {
 			std::get<Idx>(getParent()->functions)(value);
@@ -70,6 +71,7 @@ struct ChooseImplCallback<Parent, Idx, F, Args...>
 	}
 
 	void a_callback_error(ThisCallback*, Error e) {
+		getParent()->actor_wait_state = 0;
 		getParent()->removeCallbacks();
 		getParent()->SAV<Void>::sendErrorAndDelPromiseRef(e);
 	}
@@ -103,12 +105,13 @@ struct ChooseImplActor final : Actor<Void>,
 	                std::tuple<std::function<void(FutureReturnTypeT<Args> const&)>...>&& functions)
 	  : Actor<Void>(), futures(futures), functions(functions) {
 		ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::registerCallbacks();
+		actor_wait_state = 1;
 	}
 
 	void cancel() override {
-		auto waitState = actor_wait_state;
+		const auto waitState = actor_wait_state;
 		actor_wait_state = -1;
-		if (waitState) {
+		if (waitState > 0) {
 			ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::removeCallbacks();
 			SAV<Void>::sendErrorAndDelPromiseRef(actor_cancelled());
 		}
