@@ -1307,7 +1307,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    .detail("StartPoint", i)
 		    .detail("EndPoint", endPoint)
 		    .detail("BeginKey", beginKeyToCheck)
-		    .detail("EndKey", endKeyToCheck);
+		    .detail("EndKey", endKeyToCheck)
+		    .detail("Repetitions", self->repetitions)
+		    .trackLatest("ConsistencyCheck_StartTask");
 
 		for (; i < endPoint; i += increment) {
 			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
@@ -1797,7 +1799,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ClientId", self->clientId)
 					    .detail("ClientCount", self->clientCount)
 					    .detail("ShardBegin", printable(range.begin))
-					    .detail("ShardEnd", printable(range.end));
+					    .detail("ShardEnd", printable(range.end))
+					    .detail("Repetitions", self->repetitions)
+					    .trackLatest("ConsistencyCheck_ShardNoCompleteCheck");
 				}
 
 				canSplit = canSplit && sampledBytes - splitBytes >= shardBounds.min.bytes && sampledBytes > splitBytes;
@@ -1942,7 +1946,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    .detail("ClientId", self->clientId)
 		    .detail("ClientCount", self->clientCount)
 		    .detail("BeginKey", beginKeyToCheck)
-		    .detail("EndKey", endKeyToCheck);
+		    .detail("EndKey", endKeyToCheck)
+		    .detail("Repetitions", self->repetitions)
+		    .trackLatest("ConsistencyCheck_EndTask");
 
 		// SOMEDAY: when background data distribution is implemented, include this test
 		// In a quiescent database, check that the sizes of storage servers are roughly the same
