@@ -1914,3 +1914,47 @@ TEST_CASE("/flow/coro/actor") {
 	co_await futureStreamTest();
 	co_await stackMemoryTest();
 }
+
+TEST_CASE("/flow/coro/chooseCancelWaiting") {
+	Promise<Void> voidPromise;
+	Promise<int> intPromise;
+	Future<Void> chooseFuture = Choose()
+	                                .When(voidPromise.getFuture(), [](const Void&) { ASSERT_ABORT(false); })
+	                                .When(intPromise.getFuture(), [](const int&) { ASSERT_ABORT(false); })
+	                                .run();
+	chooseFuture.cancel();
+	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
+	voidPromise.send(Void());
+	intPromise.sendError(end_of_stream());
+	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/chooseCancelReady") {
+	Promise<int> intPromise;
+	int res = 0;
+	Future<Void> chooseFuture = Choose().When(intPromise.getFuture(), [&](const int& val) { res = val; }).run();
+	intPromise.send(5);
+	ASSERT(chooseFuture.isReady());
+	ASSERT(res == 5);
+	chooseFuture.cancel();
+	ASSERT(chooseFuture.isReady());
+	return Void();
+}
+
+TEST_CASE("/flow/coro/chooseRepeatedCancel") {
+	Promise<Void> voidPromise;
+	Promise<int> intPromise;
+	Future<Void> chooseFuture = Choose()
+	                                .When(voidPromise.getFuture(), [](const Void&) { ASSERT_ABORT(false); })
+	                                .When(intPromise.getFuture(), [](const int&) { ASSERT_ABORT(false); })
+	                                .run();
+	chooseFuture.cancel();
+	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
+	chooseFuture.cancel();
+	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
+	voidPromise.sendError(end_of_stream());
+	intPromise.send(3);
+	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
+	return Void();
+}
