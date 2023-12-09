@@ -747,7 +747,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		TraceEvent(SevWarnAlways, "SkippedDataMove", self->distributorId)
 		    .detail("DataMovePriority", SERVER_KNOBS->PRIORITY_MERGE_SHARD)
 		    .detail("TargetRange", mergeRange);
-
 	}
 
 	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD));
