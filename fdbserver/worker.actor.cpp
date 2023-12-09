@@ -3155,6 +3155,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
 		TraceEvent("StartingFDBD")
+		    .detail("ProcessClass", processClass.toString())
 		    .detail("ZoneID", localities.zoneId())
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)

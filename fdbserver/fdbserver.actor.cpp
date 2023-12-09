@@ -2181,7 +2181,7 @@ int main(int argc, char* argv[]) {
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_CONSISTENCY_CHECK,
-			                       TEST_HERE,
+			                       CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED ? TEST_ON_TESTERS : TEST_HERE,
 			                       1,
 			                       opts.testFile,
 			                       StringRef(),
