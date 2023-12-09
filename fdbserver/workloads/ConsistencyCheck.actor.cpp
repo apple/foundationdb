@@ -187,10 +187,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
-				TraceEvent("ConsistencyCheck_Suspended").log();
+				TraceEvent("ConsistencyCheck_Suspended")
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
 				wait(self->suspendConsistencyCheck.onChange());
 			}
-			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
+			TraceEvent("ConsistencyCheck_StartingOrResuming")
+			    .detail("Distributed", self->distributed)
+			    .detail("ClientCount", self->clientCount)
+			    .detail("ClientId", self->clientId);
 			choose {
 				when(wait(self->runCheck(cx, self))) {
 					if (!self->indefinite)
@@ -319,7 +325,37 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
+				// bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
+
+				KeyRange rangeToCheck = allKeys;
+				if (CLIENT_KNOBS->CONSISTENCY_CHECK_CUSTOM_RANGE) {
+					Key rangeBegin = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN);
+					if (rangeBegin > allKeys.end) {
+						rangeBegin = allKeys.end;
+					}
+					Key rangeEnd = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END);
+					if (rangeEnd > allKeys.end) {
+						rangeEnd = allKeys.end;
+					}
+					if (rangeBegin < rangeEnd) {
+						rangeToCheck = KeyRangeRef(rangeBegin, rangeEnd);
+					} else if (rangeBegin > rangeEnd) {
+						rangeToCheck = KeyRangeRef(rangeEnd, rangeBegin);
+					} else {
+						rangeToCheck = allKeys;
+					}
+				}
+
+				TraceEvent("ConsistencyCheck_Config")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("RangeToCheck", rangeToCheck)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+
+				bool keyServerResult =
+				    wait(self->getKeyServers(cx, self, keyServerPromise, rangeToCheck.withPrefix(keyServersPrefix)));
 				if (keyServerResult) {
 					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
@@ -1232,17 +1268,76 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			ranges.push_back(range);
 		}
 
+		state Key beginKeyToCheck = ranges[0].begin;
+		state Key endKeyToCheck = ranges[ranges.size() - 1].end;
+
 		state std::vector<int> shardOrder;
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
 			shardOrder.push_back(k);
-		if (self->shuffleShards) {
+		if (self->shuffleShards && !CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
 			uint32_t seed = self->sharedRandomNumber + self->repetitions;
 			DeterministicRandom sharedRandom(seed == 0 ? 1 : seed);
 			sharedRandom.randomShuffle(shardOrder);
 		}
 
-		for (; i < ranges.size(); i += increment) {
+		state int endPoint;
+		if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
+			int batchSize = (shardOrder.size() / self->clientCount) + 1;
+			i = self->clientId * batchSize; // overwrite the starting point i
+			i = std::max(0, i - CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
+			endPoint = (self->clientId + 1) * batchSize;
+			endPoint = std::min(static_cast<int>(shardOrder.size()),
+			                    endPoint + CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
+			increment = 1;
+			// If the start point i is larger than the list boundary, this client needs not run
+			if (i >= endPoint) {
+				TraceEvent("ConsistencyCheck_NoTaskToRun")
+				    .detail("Distributed", self->distributed)
+				    .detail("ShardCount", ranges.size())
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("Repetitions", self->repetitions);
+				wait(delay(600.0) || self->suspendConsistencyCheck.onChange());
+				return true;
+			}
+			// overwrite beginKeyToCheck and endKeyToCheck
+			beginKeyToCheck = ranges[shardOrder[i]].begin;
+			endKeyToCheck = ranges[shardOrder[endPoint - 1]].end;
+		} else {
+			endPoint = shardOrder.size();
+		}
+
+		TraceEvent("ConsistencyCheck_StartTask")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Distributed", self->distributed)
+		    .detail("ShardCount", ranges.size())
+		    .detail("ClientId", self->clientId)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("StartPoint", i)
+		    .detail("EndPoint", endPoint)
+		    .detail("BeginKey", beginKeyToCheck)
+		    .detail("EndKey", endKeyToCheck)
+		    .detail("Repetitions", self->repetitions)
+		    .trackLatest("ConsistencyCheck_StartTask");
+
+		for (; i < endPoint; i += increment) {
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
+				TraceEvent("ConsistencyCheck_Cancelled")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Distributed", self->distributed)
+				    .detail("ShardCount", ranges.size())
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("CurrentPoint", i)
+				    .detail("EndPoint", endPoint)
+				    .detail("BeginKey", beginKeyToCheck)
+				    .detail("EndKey", endKeyToCheck)
+				    .detail("CompleteEndKey", ranges[shardOrder[i]].begin);
+				break;
+			}
 			state int shard = shardOrder[i];
 
 			state KeyRangeRef range = ranges[shard];
@@ -1380,7 +1475,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// The first client may need to skip the rest of the loop contents if it is just processing this shard to
 			// get a size estimate
-			if (!self->firstClient || shard % (effectiveClientCount * self->shardSampleFactor) == 0) {
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED || !self->firstClient ||
+			    shard % (effectiveClientCount * self->shardSampleFactor) == 0) {
 				state int shardKeys = 0;
 				state int shardBytes = 0;
 				state int sampledBytes = 0;
@@ -1393,6 +1489,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state Key lastSampleKey;
 				state Key lastStartSampleKey;
 				state int64_t totalReadAmount = 0;
+				state bool completeCheck = true;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
 				state Transaction onErrorTr(
@@ -1400,7 +1497,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop {
+					completeCheck = true;
 					try {
+						if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
+							TraceEvent("ConsistencyCheck_DataCheckCancelled")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
+							    .detail("Distributed", self->distributed)
+							    .detail("ShardCount", ranges.size())
+							    .detail("ClientId", self->clientId)
+							    .detail("ClientCount", self->clientCount)
+							    .detail("CurrentPoint", i)
+							    .detail("EndPoint", endPoint)
+							    .detail("BeginKey", beginKeyToCheck)
+							    .detail("EndKey", endKeyToCheck)
+							    .detail("CompleteEndKey", lastStartSampleKey);
+							break;
+						}
+
 						lastSampleKey = lastStartSampleKey;
 
 						// Get the min version of the storage servers
@@ -1549,6 +1663,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										}
 
 										TraceEvent("ConsistencyCheck_DataInconsistent")
+										    .setMaxEventLength(-1)
+										    .setMaxFieldLength(-1)
 										    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 										    .detail(format("StorageServer%d", firstValidServer).c_str(),
 										            storageServers[firstValidServer].toString())
@@ -1583,12 +1699,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							// If the data is not available and we aren't relocating this shard
 							else if (!isRelocating) {
+								completeCheck = false;
 								Error e =
 								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
 								    .errorUnsuppressed(e)
 								    .suppressFor(1.0)
+								    .setMaxEventLength(-1)
+								    .setMaxFieldLength(-1)
 								    .detail("StorageServer", storageServers[j])
 								    .detail("ShardBegin", printable(range.begin))
 								    .detail("ShardEnd", printable(range.end))
@@ -1603,6 +1722,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									self->testFailure("Storage server unavailable");
 									return false;
 								}
+							} else {
+								completeCheck = false;
 							}
 						}
 
@@ -1680,6 +1801,18 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						wait(onErrorTr.onError(err));
 						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 					}
+				}
+
+				if (!completeCheck) {
+					TraceEvent(SevWarnAlways, "ConsistencyCheck_ShardNoCompleteCheck")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("ClientId", self->clientId)
+					    .detail("ClientCount", self->clientCount)
+					    .detail("ShardBegin", printable(range.begin))
+					    .detail("ShardEnd", printable(range.end))
+					    .detail("Repetitions", self->repetitions)
+					    .trackLatest("ConsistencyCheck_ShardNoCompleteCheck");
 				}
 
 				canSplit = canSplit && sampledBytes - splitBytes >= shardBounds.min.bytes && sampledBytes > splitBytes;
@@ -1805,12 +1938,28 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			numCompleteShards++;
 			TraceEvent(SevInfo, "ConsistencyCheck_ShardComplete")
 			    .suppressFor(1.0)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("ClientId", self->clientId)
+			    .detail("ClientCount", self->clientCount)
 			    .detail("Range", range.toString())
 			    .detail("ShardCount", ranges.size())
 			    .detail("NumCompletedShards", numCompleteShards)
 			    .detail("BytesReadInThisRound", bytesReadInthisRound)
 			    .detail("NumSkippedShards", numSkippedShards);
 		}
+
+		TraceEvent("ConsistencyCheck_EndTask")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Distributed", self->distributed)
+		    .detail("ShardCount", ranges.size())
+		    .detail("ClientId", self->clientId)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("BeginKey", beginKeyToCheck)
+		    .detail("EndKey", endKeyToCheck)
+		    .detail("Repetitions", self->repetitions)
+		    .trackLatest("ConsistencyCheck_EndTask");
 
 		// SOMEDAY: when background data distribution is implemented, include this test
 		// In a quiescent database, check that the sizes of storage servers are roughly the same
