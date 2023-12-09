@@ -4655,7 +4655,11 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 	return Optional<MutationRef>();
 }
 
-bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar, const UID& logId) {
+bool convertAtomicOp(MutationRef& m,
+                     StorageServer::VersionedData const& data,
+                     UpdateEagerReadInfo* eager,
+                     Arena& ar,
+                     const UID& logId) {
 	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
 	if (m.type != MutationRef::ClearRange && m.type != MutationRef::SetValue) {
 		Optional<StringRef> oldVal;
