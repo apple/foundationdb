@@ -1304,7 +1304,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				    .detail("RelocationID", relocateShardInterval.pairID);
 			}
 
-			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
+			if (!SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
+			}
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
@@ -1436,7 +1438,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					}
 
 					self->bytesWritten += metrics.bytes;
-					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
+					if (!SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+						self->shardsAffectedByTeamFailure->finishMove(rd.keys);
+					}
 					relocationComplete.send(rd);
 					if (rd.priority == SERVER_KNOBS->PRIORITY_MANUAL_SHARD_SPLIT) {
 						TraceEvent(SevInfo, "ManualShardSplitDDRelocatorComplete", distributorId)
@@ -1509,6 +1513,11 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
                                          TraceEvent* traceEvent) {
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
+		return false;
+	}
+
+	if (!SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+		traceEvent->detail("RebalanceTeamDisabled", true);
 		return false;
 	}
 

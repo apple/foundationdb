@@ -1469,6 +1469,10 @@ ACTOR Future<Void> moveKeys(Database cx,
                             bool hasRemote,
                             UID relocationIntervalId,
                             const DDEnabledState* ddEnabledState) {
+	if (SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+		wait(delay(3 * SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL));
+	}
+
 	ASSERT(destinationTeam.size());
 	std::sort(destinationTeam.begin(), destinationTeam.end());
 

@@ -546,30 +546,60 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		int skipRange = deterministicRandom()->randomInt(0, numShards);
 		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
-		for (int i = 0; i < skipRange; i++)
-			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
-		restartShardTrackers(self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]));
-		for (int i = numShards - 1; i > skipRange; i--)
-			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
+		if (SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+			for (int i = 0; i < skipRange; i++) {
+				KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+				self->output.send(RelocateShard(r, priority));
+			}
+			for (int i = numShards - 1; i > skipRange; i--) {
+				KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+				self->output.send(RelocateShard(r, priority));
+			}
+			if (doManualSplit) {
+				// If manual shard split, we move all shards out of the team
+				KeyRangeRef r(splitKeys[skipRange], splitKeys[skipRange + 1]);
+				self->output.send(RelocateShard(r, priority));
+			}
 
-		for (int i = 0; i < skipRange; i++) {
-			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
-			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, priority));
-		}
-		for (int i = numShards - 1; i > skipRange; i--) {
-			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
-			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, priority));
-		}
-		if (doManualSplit) {
-			// If manual shard split, we move all shards out of the team
-			KeyRangeRef r(splitKeys[skipRange], splitKeys[skipRange + 1]);
-			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, priority));
-		}
+			self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+			TraceEvent(SevWarnAlways, "SkippedDataMove", self->distributorId)
+			    .detail("DataMovePriority", priority)
+			    .detail("Begin", keys.begin)
+			    .detail("End", keys.end)
+			    .detail("MaxBytes", shardBounds.max.bytes)
+			    .detail("MetricsBytes", metrics.bytes)
+			    .detail("Bandwidth",
+			            bandwidthStatus == BandwidthStatusHigh     ? "High"
+			            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
+			                                                       : "Low")
+			    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+			    .detail("NumShards", numShards);
+		} else {
+			for (int i = 0; i < skipRange; i++)
+				restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
+			restartShardTrackers(self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]));
+			for (int i = numShards - 1; i > skipRange; i--)
+				restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
 
-		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+			for (int i = 0; i < skipRange; i++) {
+				KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+				self->shardsAffectedByTeamFailure->defineShard(r);
+				self->output.send(RelocateShard(r, priority));
+			}
+			for (int i = numShards - 1; i > skipRange; i--) {
+				KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+				self->shardsAffectedByTeamFailure->defineShard(r);
+				self->output.send(RelocateShard(r, priority));
+			}
+			if (doManualSplit) {
+				// If manual shard split, we move all shards out of the team
+				KeyRangeRef r(splitKeys[skipRange], splitKeys[skipRange + 1]);
+				self->shardsAffectedByTeamFailure->defineShard(r);
+				self->output.send(RelocateShard(r, priority));
+			}
+
+			self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+		}
 	} else {
 		wait(delay(1.0, TaskPriority::DataDistribution)); // In case the reason the split point was off was due to a
 		                                                  // discrepancy between storage servers
@@ -707,11 +737,19 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	    .detail("LastLowBandwidthStartTime", lastLowBandwidthStartTime)
 	    .detail("ShardCount", shardCount);
 
-	if (mergeRange.begin < systemKeys.begin) {
-		self->systemSizeEstimate -= systemBytes;
+	if (!SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+		if (mergeRange.begin < systemKeys.begin) {
+			self->systemSizeEstimate -= systemBytes;
+		}
+		restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
+		self->shardsAffectedByTeamFailure->defineShard(mergeRange);
+	} else {
+		TraceEvent(SevWarnAlways, "SkippedDataMove", self->distributorId)
+		    .detail("DataMovePriority", SERVER_KNOBS->PRIORITY_MERGE_SHARD)
+		    .detail("TargetRange", mergeRange);
+
 	}
-	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
-	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
+
 	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD));
 
 	// We are about to be cancelled by the call to restartShardTrackers

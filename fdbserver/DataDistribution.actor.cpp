@@ -697,7 +697,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if (initData->shards[shard].hasDest) {
+				if (initData->shards[shard].hasDest && !SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+					// The ongoing data move is ignored if EMERGENCY_DISABLE_DATA_MOVE.
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.

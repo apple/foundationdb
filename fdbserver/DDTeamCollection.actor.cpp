@@ -1022,17 +1022,28 @@ public:
 							RelocateShard rs;
 							rs.keys = shards[i];
 							rs.priority = maxPriority;
-
 							self->output.send(rs);
-							TraceEvent("SendRelocateToDDQueue", self->distributorId)
-							    .suppressFor(1.0)
-							    .detail("ServerPrimary", self->primary)
-							    .detail("ServerTeam", team->getDesc())
-							    .detail("KeyBegin", rs.keys.begin)
-							    .detail("KeyEnd", rs.keys.end)
-							    .detail("Priority", rs.priority)
-							    .detail("ServerTeamFailedMachines", team->size() - serversLeft)
-							    .detail("ServerTeamOKMachines", serversLeft);
+							if (SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
+								TraceEvent(SevWarnAlways, "SkippedDataMove", self->distributorId)
+								    .suppressFor(1.0)
+								    .detail("ServerPrimary", self->primary)
+								    .detail("ServerTeam", team->getDesc())
+								    .detail("KeyBegin", rs.keys.begin)
+								    .detail("KeyEnd", rs.keys.end)
+								    .detail("Priority", rs.priority)
+								    .detail("ServerTeamFailedMachines", team->size() - serversLeft)
+								    .detail("ServerTeamOKMachines", serversLeft);
+							} else {
+								TraceEvent("SendRelocateToDDQueue", self->distributorId)
+								    .suppressFor(1.0)
+								    .detail("ServerPrimary", self->primary)
+								    .detail("ServerTeam", team->getDesc())
+								    .detail("KeyBegin", rs.keys.begin)
+								    .detail("KeyEnd", rs.keys.end)
+								    .detail("Priority", rs.priority)
+								    .detail("ServerTeamFailedMachines", team->size() - serversLeft)
+								    .detail("ServerTeamOKMachines", serversLeft);
+							}
 						}
 					} else {
 						if (logTeamEvents) {

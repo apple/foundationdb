@@ -142,6 +142,7 @@ public:
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
 	bool USE_OLD_NEEDED_SERVERS;
+	bool EMERGENCY_DISABLE_DATA_MOVE;
 
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
