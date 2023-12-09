@@ -1516,11 +1516,6 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 		return false;
 	}
 
-	if (!SERVER_KNOBS->EMERGENCY_DISABLE_DATA_MOVE) {
-		traceEvent->detail("RebalanceTeamDisabled", true);
-		return false;
-	}
-
 	Promise<int64_t> req;
 	self->getAverageShardBytes.send(req);
 
