@@ -562,7 +562,10 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 			startReq = req;
 			if (!startResult.present()) {
 				try {
-					TraceEvent("TestStarting", workIface.id()).detail("Workload", workload->description());
+					TraceEvent("TestStarting", workIface.id())
+					    .detail("Workload", workload->description())
+					    .detail("ClientCount", workload->clientCount)
+					    .detail("ClientId", workload->clientId);
 					wait(workload->start(cx) || databaseError);
 					startResult = Void();
 				} catch (Error& e) {
@@ -949,9 +952,11 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
 	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+	// options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef(LiteralStringRef("distributed"),
+	                                   StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED ? "true" : "false")));
 	spec.options.push_back_deep(spec.options.arena(), options);
-
 	state double start = now();
 	state bool lastRun = false;
 	loop {
@@ -1659,6 +1664,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             Optional<TenantName> defaultTenant) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
+	TraceEvent("RunTests").detail("TestOnServers", at == TEST_ON_SERVERS);
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
 	state std::vector<WorkerDetails> workers;
 
@@ -1749,8 +1755,11 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
+		// options.push_back_deep(options.arena(),
+		//                        KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
 		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+		                       KeyValueRef(LiteralStringRef("distributed"),
+		                                   StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED ? "true" : "false")));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));
