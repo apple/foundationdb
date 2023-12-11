@@ -1137,7 +1137,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	ACTOR Future<std::vector<std::pair<KeyRange, Value>>> getKeyLocationsForRangeList(Database cx,
 	                                                                                  std::vector<KeyRange> ranges,
-																					  ConsistencyCheckWorkload* self) {
+	                                                                                  ConsistencyCheckWorkload* self) {
 		state std::vector<std::pair<KeyRange, Value>> res;
 		state Transaction tr(cx);
 		state int idx = 0;
@@ -2090,16 +2090,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (failedRangesToCheck.size() > 0) {
 				wait(delay(60.0)); // Backoff 1 min
 				state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForFailedRanges =
-			    	wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck, self));
+				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck, self));
 				TraceEvent(SevInfo, "ConsistencyCheck_StartHandlingFailedRanges")
-					.setMaxEventLength(-1)
-					.setMaxFieldLength(-1)
-					.detail("FailedCollectedRangeCount", failedRangesToCheck.size())
-					.detail("FailedShardCount", shardLocationPairListForFailedRanges.size())
-					.detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-					.detail("Distributed", self->distributed)
-					.detail("ClientId", self->clientId)
-					.detail("ClientCount", self->clientCount);
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
+				    .detail("FailedShardCount", shardLocationPairListForFailedRanges.size())
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount);
 				if (consistencyCheckEpoch < CLIENT_KNOBS->CONSISTENCY_CHECK_RETRY_DEPTH_MAX) {
 					wait(::success(self->checkDataConsistency(cx,
 					                                          shardLocationPairListForFailedRanges,
@@ -2121,6 +2121,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						    .detail("ClientCount", self->clientCount)
 						    .detail("BeginKey", printable(missedRange.first.begin))
 						    .detail("EndKey", printable(missedRange.first.end));
+					}
+					if (g_network->isSimulated()) {
+						self->testFailure("Retry too many times");
+						return false;
 					}
 				}
 			} // Otherwise, no failure, we are good to go
