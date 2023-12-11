@@ -363,7 +363,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("PerformTSSCheck", self->performTSSCheck)
 					    .detail("PerformCacheCheck", self->performCacheCheck);
 					state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForDistributed =
-					    wait(self->getKeyLocationsForRangeList(cx, { allKeys }, self));
+					    wait(self->getKeyLocationsForRangeList(cx, { rangeToCheck }, self));
 					// Check that each failed shard has the same data on all storage servers that it resides on
 					wait(::success(self->checkDataConsistency(cx,
 					                                          shardLocationPairListForDistributed,
@@ -1336,6 +1336,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			rateLimitForThisRound = self->rateLimitMax;
 		}
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound")
+		    .detail("Distributed", self->distributed)
+		    .detail("ClientId", self->clientId)
+		    .detail("ClientCount", self->clientCount)
 		    .detail("RateLimit", rateLimitForThisRound)
 		    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
 		    .detail("ShardLocationPairList", shardLocationPairList.size());

@@ -1014,8 +1014,10 @@ ACTOR Future<bool> runTest(Database cx,
 			fprintf(stderr, "ERROR: Test timed out after %d seconds.\n", spec.timeout);
 			testResults.failures = testers.size();
 			testResults.successes = 0;
-		} else
+		} else {
+			TraceEvent(SevWarnAlways, "TestFailure").error(e).detail("Reason", e.what());
 			throw;
+		}
 	}
 
 	state bool ok = testResults.ok();
