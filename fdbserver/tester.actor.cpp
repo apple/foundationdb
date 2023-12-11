@@ -592,6 +592,9 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					TraceEvent("TestChecking", workIface.id()).detail("Workload", workload->description());
 					bool check = wait(timeoutError(workload->check(cx), workload->getCheckTimeout()));
 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
+					TraceEvent("TestChecked", workIface.id())
+					    .detail("Workload", workload->description())
+					    .detail("Result", (!startResult.present() || !startResult.get().isError()) && check);
 				} catch (Error& e) {
 					checkResult = operation_failed(); // was: checkResult = false;
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
@@ -960,11 +963,13 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	state double start = now();
 	state bool lastRun = false;
 	loop {
+		TraceEvent("ConsistencyCheckWorkLoadLoopBegin");
 		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator.connectionFailuresDisableDuration = connectionFailures;
 			}
+			TraceEvent("ConsistencyCheckWorkLoadEnd");
 			return Void();
 		}
 		if (now() - start > softTimeLimit) {
@@ -972,7 +977,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 			                               KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
 		}
-
+		TraceEvent("ConsistencyCheckWorkLoadRepairDC");
 		wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
 	}
 }
