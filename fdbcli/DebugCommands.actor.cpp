@@ -186,11 +186,18 @@ bool checkResults(Version version,
 		}
 
 		allSame = false;
-		printf("#%d  server: %s  key count: %lu\n",
+		printf("#%d  server: %s  key count: %lu, cached: %d, more: %d\n",
 		       firstValidServer,
 		       servers[firstValidServer].address().toString().c_str(),
-		       reference.data.size());
-		printf("#%d  server: %s  key count: %lu\n", j, servers[j].address().toString().c_str(), current.data.size());
+		       reference.data.size(),
+		       reference.cached,
+		       +reference.more);
+		printf("#%d  server: %s  key count: %lu, cached: %d, more: %dn",
+		       j,
+		       servers[j].address().toString().c_str(),
+		       current.data.size(),
+		       current.cached,
+		       current.more);
 		size_t currentI = 0, referenceI = 0;
 		while (currentI < current.data.size() || referenceI < reference.data.size()) {
 			if (currentI >= current.data.size()) {
