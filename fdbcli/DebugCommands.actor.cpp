@@ -246,9 +246,6 @@ bool checkResults(Version version,
 		}
 	}
 
-	if (!allSame)
-		return false;
-
 	if (firstValidServer >= 0 && replies[firstValidServer].get().get().more) {
 		const VectorRef<KeyValueRef>& result = replies[firstValidServer].get().get().data;
 		printf("Warning: Consistency check was incomplete, last key of server %d that was checked: %s\n",
@@ -259,7 +256,8 @@ bool checkResults(Version version,
 		printf("Same at version %ld\n", version);
 		begin = end; // signal that we're done
 	}
-	return true;
+
+	return allSame;
 }
 
 // The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
