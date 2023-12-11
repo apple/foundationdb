@@ -63,48 +63,49 @@ extern bool g_crashOnError;
 namespace file_converter {
 
 void printDecodeUsage() {
-	std::cout << "Decoder for FoundationDB backup mutation logs.\n"
-	             "Usage: fdbdecode  [OPTIONS]\n"
-	             "  -r, --container URL\n"
-	             "                 Backup container URL, e.g., file:///some/path/.\n"
-	             "  -i, --input    FILE\n"
-	             "                 Log file filter, only matched files are decoded.\n"
-	             "  --log          Enables trace file logging for the CLI session.\n"
-	             "  --logdir PATH  Specifes the output directory for trace files. If\n"
-	             "                 unspecified, defaults to the current directory. Has\n"
-	             "                 no effect unless --log is specified.\n"
-	             "  --loggroup     LOG_GROUP\n"
-	             "                 Sets the LogGroup field with the specified value for all\n"
-	             "                 events in the trace output (defaults to `default').\n"
-	             "  --trace-format FORMAT\n"
-	             "                 Select the format of the trace files, xml (the default) or json.\n"
-	             "                 Has no effect unless --log is specified.\n"
-	             "  --crash        Crash on serious error.\n"
-	             "  --blob-credentials FILE\n"
-	             "                 File containing blob credentials in JSON format.\n"
-	             "                 The same credential format/file fdbbackup uses.\n"
-	             "  -t, --file-type [log|range|both]\n"
-	             "                 Specifies the backup file type to decode.\n"
+	std::cout
+	    << "Decoder for FoundationDB backup mutation logs.\n"
+	       "Usage: fdbdecode  [OPTIONS]\n"
+	       "  -r, --container URL\n"
+	       "                 Backup container URL, e.g., file:///some/path/.\n"
+	       "  -i, --input    FILE\n"
+	       "                 Log file filter, only matched files are decoded.\n"
+	       "  --log          Enables trace file logging for the CLI session.\n"
+	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n"
+	       "  --loggroup     LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n"
+	       "  --trace-format FORMAT\n"
+	       "                 Select the format of the trace files, xml (the default) or json.\n"
+	       "                 Has no effect unless --log is specified.\n"
+	       "  --crash        Crash on serious error.\n"
+	       "  --blob-credentials FILE\n"
+	       "                 File containing blob credentials in JSON format.\n"
+	       "                 The same credential format/file fdbbackup uses.\n"
+	       "  -t, --file-type [log|range|both]\n"
+	       "                 Specifies the backup file type to decode.\n"
 #ifndef TLS_DISABLED
 	    TLS_HELP
 #endif
-	             "  --build-flags  Print build information and exit.\n"
-	             "  --list-only    Print file list and exit.\n"
-	             "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
-	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
-	             "  --filters PREFIX_FILTER_FILE\n"
-	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
-	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
-	             "  --hex-prefix   HEX_PREFIX\n"
-	             "                 The prefix specified in HEX format, e.g., --hex-prefix \"\\\\x05\\\\x01\".\n"
-	             "  --begin-version-filter BEGIN_VERSION\n"
-	             "                 The version range's begin version (inclusive) for filtering.\n"
-	             "  --end-version-filter END_VERSION\n"
-	             "                 The version range's end version (exclusive) for filtering.\n"
-	             "  --knob-KNOBNAME KNOBVALUE\n"
-	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
-	             "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
-	             "\n";
+	       "  --build-flags  Print build information and exit.\n"
+	       "  --list-only    Print file list and exit.\n"
+	       "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
+	       "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
+	       "  --filters PREFIX_FILTER_FILE\n"
+	       "                 A file containing a list of prefix or range filters in HEX format separated by \";\",\n"
+	       "                 e.g., \"\\x05\\x01;\\x15\\x2b;\\x01\\x05-\\x01\\x06\"\n"
+	       "  --hex-prefix   HEX_PREFIX\n"
+	       "                 The prefix specified in HEX format, e.g., --hex-prefix \"\\\\x05\\\\x01\".\n"
+	       "  --begin-version-filter BEGIN_VERSION\n"
+	       "                 The version range's begin version (inclusive) for filtering.\n"
+	       "  --end-version-filter END_VERSION\n"
+	       "                 The version range's end version (exclusive) for filtering.\n"
+	       "  --knob-KNOBNAME KNOBVALUE\n"
+	       "                 Changes a knob value. KNOBNAME should be lowercase.\n"
+	       "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
+	       "\n";
 	return;
 }
 
@@ -125,6 +126,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	bool save_file_locally = false;
 	bool validate_filters = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
+	std::vector<KeyRange> ranges; // Key ranges for filtering
 	// more efficient data structure for intersection queries than "prefixes"
 	fileBackup::RangeMapFilters filters;
 	Version beginVersionFilter = 0;
@@ -140,7 +142,12 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 
 	bool overlap(Version version) const { return version >= beginVersionFilter && version < endVersionFilter; }
 
-	void updateRangeMap() { filters.updateFilters(prefixes); }
+	void updateRangeMap() {
+		if (!ranges.empty()) {
+			filters = fileBackup::RangeMapFilters(ranges);
+		}
+		filters.updateFilters(prefixes);
+	}
 
 	bool matchFilters(const MutationRef& m) const {
 		bool match = filters.match(m);
@@ -158,6 +165,22 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRange range(KeyRangeRef(m.param1, m.param2));
 				KeyRange range2 = prefixRange(StringRef(prefix));
+				if (range.intersects(range2)) {
+					ASSERT(match);
+					return true;
+				}
+			} else {
+				ASSERT(false);
+			}
+		}
+		for (const auto& range : ranges) {
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				if (range.contains(m.param1)) {
+					ASSERT(match);
+					return true;
+				}
+			} else if (m.type == MutationRef::ClearRange) {
+				KeyRange range2(KeyRangeRef(m.param1, m.param2));
 				if (range.intersects(range2)) {
 					ASSERT(match);
 					return true;
@@ -234,6 +257,9 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		if (!prefixes.empty()) {
 			s.append(", KeyPrefixes: ").append(printable(describe(prefixes)));
 		}
+		if (!ranges.empty()) {
+			s.append(", KeyRanges: ").append(printable(describe(ranges)));
+		}
 		for (const auto& [knob, value] : knobs) {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
 		}
@@ -304,9 +330,12 @@ std::string decode_hex_string(std::string line, bool& err) {
 }
 
 // Parses and returns a ";" separated HEX encoded strings. So the ";" in
-// the string should be escaped as "\;".
+// the string should be escaped as "\x3b". Filters can also be specified
+// as a "begin-end" range, where "begin" and "end" are HEX encoded strings,
+// and will be inserted into the argument "ranges".
+// So the "-" in the range should be escaped as "\x2d".
 // Sets "err" to true if there is any parsing error.
-std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
+std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err, std::vector<KeyRange>& ranges) {
 	std::vector<std::string> results;
 	err = false;
 
@@ -316,19 +345,39 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 		if (end == line.npos) {
 			end = line.size();
 		}
-		auto prefix = decode_hex_string(line.substr(p, end - p), err);
-		if (err) {
-			return results;
+		auto current = line.substr(p, end - p);
+		int dash = current.find_first_of('-');
+		if (dash != current.npos) {
+			// found a range
+			auto begin = current.substr(0, dash);
+			auto end = current.substr(dash + 1);
+			begin = decode_hex_string(begin, err);
+			if (err) {
+				std::cerr << "ERROR: parsing range begin failed. Range is: " << current << "\n";
+				return results;
+			}
+			end = decode_hex_string(end, err);
+			if (err) {
+				std::cerr << "ERROR: parsing range end failed. Range is: " << current << "\n";
+				return results;
+			}
+			ranges.emplace_back(KeyRangeRef(begin, end));
+		} else {
+			// found a single prefix
+			auto prefix = decode_hex_string(current, err);
+			if (err) {
+				return results;
+			}
+			results.push_back(prefix);
 		}
-		results.push_back(prefix);
 		p = end + 1;
 	}
 	return results;
 }
 
-std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
+std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err, std::vector<KeyRange>& ranges) {
 	std::string line = readFileBytes(filename, 64 * 1024 * 1024);
-	return parsePrefixesLine(line, err);
+	return parsePrefixesLine(line, err, ranges);
 }
 
 int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
@@ -381,7 +430,7 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			break;
 
 		case OPT_FILTERS:
-			param->prefixes = parsePrefixFile(args->OptionArg(), err);
+			param->prefixes = parsePrefixFile(args->OptionArg(), err, param->ranges);
 			if (err) {
 				throw std::runtime_error("ERROR:" + std::string(args->OptionArg()) + "contains invalid prefix(es)");
 			}
