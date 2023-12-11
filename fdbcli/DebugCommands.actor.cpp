@@ -293,8 +293,8 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 					GetKeyValuesRequest req;
 					req.begin = begin;
 					req.end = end;
-					req.limit = 1e4;
-					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+					req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
+					req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
 					req.version = version;
 					req.tags = TagSet();
 
