@@ -1013,6 +1013,7 @@ public:
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
+	std::deque<MutationRef> constructedData;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -10679,7 +10680,7 @@ private:
 
 				TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
 				    .detail("FeedID", changeFeedId)
-				    .detail("Range", changeFeedRange)
+				    .detail("Rangze", changeFeedRange)
 				    .detail("EmptyVersion", feed->second->emptyVersion);
 
 				auto rs = data->keyChangeFeed.modify(changeFeedRange);
@@ -10855,6 +10856,20 @@ private:
 					throw worker_removed();
 				}
 			}
+		} else if (m.param1.substr(1).startsWith(constructDataKey)) {
+			MutationRef constructedMutation;
+			constructedMutation.type = MutationRef::SetValue;
+			TraceEvent("DANCONSTRUCTSS2").detail("S", constructedMutation.param1.size());
+			std::tuple<uint64_t, uint64_t, uint64_t> t = decodeConstructKeys(m.param1.substr(1));
+			uint64_t first_element, second_element, third_element;
+			std::tie(first_element, second_element, third_element) = t;
+			constructedMutation.param1 = "\xbf/constructData/"_sr; // encodeConstructKeys(first_element);
+			constructedMutation.param2 = encodeConstructValue(23);
+			data->constructedData.push_back(constructedMutation);
+			TraceEvent("DANCONSTRUCTSS")
+			    .detail("F1", first_element)
+			    .detail("F2", second_element)
+			    .detail("F3", third_element);
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11333,6 +11348,17 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .suppressFor(10.0)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
+
+					if (data->constructedData.size()) {
+						MutationRef constructedMutation = data->constructedData.front();
+						TraceEvent("DANPULL").detail("T", constructedMutation.param1);
+						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
+						data->constructedData.pop_front();
+						mutationBytes += constructedMutation.totalSize();
+						data->counters.mutationBytes += constructedMutation.totalSize();
+						data->counters.logicalBytesInput += constructedMutation.expectedSize();
+						++data->counters.mutations;
+					}
 					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
 					if (ver == data->initialClusterVersion) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).log();

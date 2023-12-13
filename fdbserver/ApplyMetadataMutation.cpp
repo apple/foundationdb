@@ -574,6 +574,28 @@ private:
 		    .detail("LogRangeEnd", logRangeEnd);
 	}
 
+	void checkSetConstructKeys(MutationRef m) {
+		// add tags for all shards in range
+		// or could broadcast to all SS (allTags), and any irrelevant would ignore
+		if (!m.param1.startsWith(globalKeysPrefix)) {
+			return;
+		}
+		if (!toCommit) {
+			return;
+		}
+
+		if (m.param1.startsWith(constructDataKey)) {
+			std::tuple<uint64_t, uint64_t, uint64_t> t = decodeConstructKeys(m.param1);
+			uint64_t first_element, second_element, third_element;
+			std::tie(first_element, second_element, third_element) = t;
+			TraceEvent("DANHERE")
+			    .detail("F1", first_element)
+			    .detail("F2", second_element)
+			    .detail("F3", third_element)
+			    .detail("S", m.param1.size());
+		}
+	}
+
 	void checkSetGlobalKeys(MutationRef m) {
 		if (!m.param1.startsWith(globalKeysPrefix)) {
 			return;
@@ -1354,6 +1376,7 @@ public:
 				checkSetApplyMutationsEndRange(m);
 				checkSetApplyMutationsKeyVersionMapRange(m);
 				checkSetLogRangesRange(m);
+				checkSetConstructKeys(m);
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);

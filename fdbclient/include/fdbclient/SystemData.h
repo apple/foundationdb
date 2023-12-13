@@ -505,6 +505,7 @@ extern const KeyRef primaryLocalityKey;
 extern const KeyRef primaryLocalityPrivateKey;
 extern const KeyRef fastLoggingEnabled;
 extern const KeyRef fastLoggingEnabledPrivateKey;
+extern const KeyRef constructDataKey;
 
 extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 
@@ -543,6 +544,10 @@ Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath);
 // Returns a key prefixed with the specified key with
 // the given uid encoded at the end
 Key uidPrefixKey(KeyRef keyPrefix, UID logUid);
+
+extern std::tuple<uint64_t, uint64_t, uint64_t> decodeConstructKeys(KeyRef keyValue);
+extern Value encodeConstructKeys(uint64_t keyNum);
+extern Value encodeConstructValue(uint64_t seed);
 
 /// Apply mutations constant variables
 
