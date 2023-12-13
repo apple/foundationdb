@@ -958,7 +958,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	// options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("distributed"),
-	                                   StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED ? "true" : "false")));
+	                                   StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE ? "true" : "false")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 	state double start = now();
 	state bool lastRun = false;
@@ -1766,7 +1766,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		//                        KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("distributed"),
-		                                   StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED ? "true" : "false")));
+		                                   StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE ? "true" : "false")));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));

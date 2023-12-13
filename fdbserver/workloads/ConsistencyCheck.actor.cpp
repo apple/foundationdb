@@ -203,7 +203,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("Repetitions", self->repetitions);
 			choose {
 				when(wait(self->runCheck(cx, self))) {
-					if (!self->indefinite || CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_TIME_CHECK) {
+					if (!self->indefinite || CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+						// When consistency checker is distributed, repeated running
+						// can miss ranges, so we exit here
 						TraceEvent("ConsistencyCheck_Exit")
 						    .detail("Distributed", self->distributed)
 						    .detail("ClientCount", self->clientCount)
@@ -334,7 +336,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						self->testFailure("Coordinators incorrect");
 				}
 
-				if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
+				if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 					state KeyRange rangeToCheck = allKeys;
 					Key rangeBegin = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN);
 					if (rangeBegin > allKeys.end) {
@@ -1323,7 +1325,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                        ConsistencyCheckWorkload* self,
 	                                        int consistencyCheckEpoch) {
 		if (consistencyCheckEpoch > 0) {
-			ASSERT(CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && CLIENT_KNOBS->CONSISTENCY_CHECK_COMPLETE_CHECK);
+			ASSERT(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE);
 		}
 		// Stores the total number of bytes on each storage server
 		// In a distributed test, this will be an estimated size
@@ -1345,8 +1347,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		              static_cast<int>(ceil(self->bytesReadInPreviousRound /
 		                                    (float)CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		if (consistencyCheckEpoch > 0 ||
-		    CLIENT_KNOBS->CONSISTENCY_CHECK_AGGRESSIVE_RUN) { // We set max speed when retrying failed ranges or
-			                                                  // aggressive check is on
+		    CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) { // We set max speed when retrying failed ranges or
+			                                                  // distributed among testers
 			rateLimitForThisRound = self->rateLimitMax;
 		}
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound")
@@ -1385,14 +1387,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
 			shardOrder.push_back(k);
-		if (self->shuffleShards && !CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
+		if (self->shuffleShards && !CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 			uint32_t seed = self->sharedRandomNumber + self->repetitions;
 			DeterministicRandom sharedRandom(seed == 0 ? 1 : seed);
 			sharedRandom.randomShuffle(shardOrder);
 		}
 
 		state int endPoint;
-		if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
+		if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 			if (consistencyCheckEpoch == 0) {
 				int batchSize = (shardOrder.size() / self->clientCount) + 1;
 				i = self->clientId * batchSize; // overwrite the starting point i
@@ -1443,7 +1445,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		                                            : "ConsistencyCheck_StartFailedTask");
 
 		for (; i < endPoint; i += increment) {
-			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Cancelled")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
@@ -1596,7 +1598,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// The first client may need to skip the rest of the loop contents if it is just processing this shard to
 			// get a size estimate
-			if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED || !self->firstClient ||
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE || !self->firstClient ||
 			    shard % (effectiveClientCount * self->shardSampleFactor) == 0) {
 				state int shardKeys = 0;
 				state int shardBytes = 0;
@@ -1619,7 +1621,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop {
 					try {
-						if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && self->suspendConsistencyCheck.get()) {
+						if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && self->suspendConsistencyCheck.get()) {
 							TraceEvent("ConsistencyCheck_DataCheckCancelled")
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
@@ -1842,7 +1844,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 
 								completeCheck = false;
-								if (CLIENT_KNOBS->CONSISTENCY_CHECK_COMPLETE_CHECK) {
+								if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 									failedRanges.insert(Standalone(KeyRangeRef(req.begin.getKey(), req.end.getKey())),
 									                    true);
 									break; // Will retry later
@@ -1856,7 +1858,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							} else {
 								completeCheck = false;
-								if (CLIENT_KNOBS->CONSISTENCY_CHECK_COMPLETE_CHECK) {
+								if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 									failedRanges.insert(Standalone(KeyRangeRef(req.begin.getKey(), req.end.getKey())),
 									                    true);
 									break; // Will retry later
@@ -1941,7 +1943,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				if (!completeCheck) {
-					TraceEvent(CLIENT_KNOBS->CONSISTENCY_CHECK_COMPLETE_CHECK ? SevInfo : SevWarn,
+					TraceEvent(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE ? SevInfo : SevWarn,
 					           "ConsistencyCheck_ShardFailed")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
@@ -1968,7 +1970,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				}
 
-				if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED) {
+				if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 					continue; // Bypass following check not-relevant to userdata/metadata consistency
 				}
 
@@ -2093,7 +2095,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		if (CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED && CLIENT_KNOBS->CONSISTENCY_CHECK_COMPLETE_CHECK) {
+		if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 			failedRanges.coalesce(allKeys);
 			state std::vector<KeyRange> failedRangesToCheck;
 			state KeyRangeMap<bool>::Ranges failedRangesList = failedRanges.ranges();
