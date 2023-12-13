@@ -1348,7 +1348,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		                                    (float)CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
 		if (consistencyCheckEpoch > 0 ||
 		    CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) { // We set max speed when retrying failed ranges or
-			                                                  // distributed among testers
+			                                               // distributed among testers
 			rateLimitForThisRound = self->rateLimitMax;
 		}
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound")
