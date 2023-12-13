@@ -1845,8 +1845,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 								completeCheck = false;
 								if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
-									failedRanges.insert(Standalone(KeyRangeRef(req.begin.getKey(), req.end.getKey())),
-									                    true);
 									break; // Will retry later
 								}
 
@@ -1859,14 +1857,29 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							} else {
 								completeCheck = false;
 								if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
-									failedRanges.insert(Standalone(KeyRangeRef(req.begin.getKey(), req.end.getKey())),
-									                    true);
 									break; // Will retry later
 								}
 							}
 						}
 
-						if (firstValidServer >= 0) {
+						if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && !completeCheck) {
+							// Add remaining range of the shard to failedRanges,
+							// which will be retried later
+							failedRanges.insert(range, true);
+							TraceEvent(SevInfo, "ConsistencyCheck_ShardAddedToRetry")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
+							    .detail("ClientId", self->clientId)
+							    .detail("ClientCount", self->clientCount)
+							    .detail("ShardBegin", printable(range.begin))
+							    .detail("ShardEnd", printable(range.end))
+							    .detail("Repetitions", self->repetitions)
+							    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+							    .trackLatest("ConsistencyCheck_ShardAddedToRetry");
+							break; // skip the entire shard, retry later
+						}
+
+						if (firstValidServer >= 0 && !CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 							VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
 							// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 							// shard size estimate
