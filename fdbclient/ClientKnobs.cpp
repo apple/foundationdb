@@ -258,7 +258,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-	init( CONSISTENCY_CHECK_URGENT_MODE,           true ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_URGENT_MODE = false;
+	init( CONSISTENCY_CHECK_URGENT_MODE,           true );
 	init( CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM, 50 ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM = 1;
 	init( CONSISTENCY_CHECK_RETRY_DEPTH_MAX,        100 ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_RETRY_DEPTH_MAX = 10;
 	init( CONSISTENCY_CHECK_RANGE_BEGIN,             "" ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_RANGE_BEGIN = "a";
