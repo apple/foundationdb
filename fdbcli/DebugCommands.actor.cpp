@@ -192,18 +192,33 @@ bool checkResults(Version version,
 		}
 
 		allSame = false;
-		printf("#%d  server: %s  key count: %lu\n",
+		printf("#%d  server: %s  key count: %lu, cached: %d, more: %d\n",
 		       firstValidServer,
 		       servers[firstValidServer].address().toString().c_str(),
-		       reference.data.size());
-		printf("#%d  server: %s  key count: %lu\n", j, servers[j].address().toString().c_str(), current.data.size());
+		       reference.data.size(),
+		       reference.cached,
+		       +reference.more);
+		printf("#%d  server: %s  key count: %lu, cached: %d, more: %dn",
+		       j,
+		       servers[j].address().toString().c_str(),
+		       current.data.size(),
+		       current.cached,
+		       current.more);
 		size_t currentI = 0, referenceI = 0;
 		while (currentI < current.data.size() || referenceI < reference.data.size()) {
 			if (currentI >= current.data.size()) {
-				printf(" #%d Unique key: %s\n", firstValidServer, printable(reference.data[referenceI].key).c_str());
+				printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
+				       firstValidServer,
+				       currentI,
+				       referenceI,
+				       printable(reference.data[referenceI].key).c_str());
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
-				printf(" #%d Unique key: %s\n", j, printable(current.data[currentI].key).c_str());
+				printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
+				       j,
+				       currentI,
+				       referenceI,
+				       printable(current.data[currentI].key).c_str());
 				currentI++;
 			} else {
 				KeyValueRef currentKV = current.data[currentI];
@@ -211,32 +226,44 @@ bool checkResults(Version version,
 
 				if (currentKV.key == referenceKV.key) {
 					if (currentKV.value != referenceKV.value) {
-						printf(" Value mismatch key: %s\n", printable(currentKV.key).c_str());
+						printf(" CurrentI: %lu ReferenceI: %lu Value mismatch key: %s\n",
+						       currentI,
+						       referenceI,
+						       printable(currentKV.key).c_str());
 					}
 					currentI++;
 					referenceI++;
 				} else if (currentKV.key < referenceKV.key) {
-					printf(" #%d Unique key: %s\n", j, printable(currentKV.key).c_str());
+					printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
+					       j,
+					       currentI,
+					       referenceI,
+					       printable(currentKV.key).c_str());
 					currentI++;
 				} else {
-					printf(" #%d Unique key: %s\n", firstValidServer, printable(referenceKV.key).c_str());
+					printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
+					       firstValidServer,
+					       currentI,
+					       referenceI,
+					       printable(referenceKV.key).c_str());
 					referenceI++;
 				}
 			}
 		}
 	}
 
-	if (!allSame)
-		return false;
-
 	if (firstValidServer >= 0 && replies[firstValidServer].get().get().more) {
 		const VectorRef<KeyValueRef>& result = replies[firstValidServer].get().get().data;
+		printf("Warning: Consistency check was incomplete, last key of server %d that was checked: %s\n",
+		       firstValidServer,
+		       printable(result[result.size() - 1].key).c_str());
 		begin = firstGreaterThan(result[result.size() - 1].key);
 	} else {
 		printf("Same at version %ld\n", version);
 		begin = end; // signal that we're done
 	}
-	return true;
+
+	return allSame;
 }
 
 // The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
@@ -299,8 +326,8 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 					GetKeyValuesRequest req;
 					req.begin = begin;
 					req.end = end;
-					req.limit = 1e4;
-					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+					req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
+					req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
 					req.version = version;
 					req.tags = TagSet();
 
