@@ -203,7 +203,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("Repetitions", self->repetitions);
 			choose {
 				when(wait(self->runCheck(cx, self))) {
-					if (!self->indefinite) {
+					if (!self->indefinite || CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_TIME_CHECK) {
 						TraceEvent("ConsistencyCheck_Exit")
 						    .detail("Distributed", self->distributed)
 						    .detail("ClientCount", self->clientCount)
@@ -363,7 +363,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("PerformTSSCheck", self->performTSSCheck)
 					    .detail("PerformCacheCheck", self->performCacheCheck);
 					state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForDistributed =
-					    wait(self->getKeyLocationsForRangeList(cx, { rangeToCheck }, self));
+					    wait(self->getKeyLocationsForRangeList(cx, { rangeToCheck }));
 					// Check that each failed shard has the same data on all storage servers that it resides on
 					wait(::success(self->checkDataConsistency(cx,
 					                                          shardLocationPairListForDistributed,
@@ -1136,36 +1136,50 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<std::vector<std::pair<KeyRange, Value>>> getKeyLocationsForRangeList(Database cx,
-	                                                                                  std::vector<KeyRange> ranges,
-	                                                                                  ConsistencyCheckWorkload* self) {
+	                                                                                  std::vector<KeyRange> ranges) {
+		// Get the scope of the input list of ranges
+		state Key beginKeyToReadKeyServer;
+		state Key endKeyToReadKeyServer;
+		for (const auto& range : ranges) {
+			if (beginKeyToReadKeyServer.empty() || range.begin < beginKeyToReadKeyServer) {
+				beginKeyToReadKeyServer = range.begin;
+			}
+			if (endKeyToReadKeyServer.empty() || range.end > endKeyToReadKeyServer) {
+				endKeyToReadKeyServer = range.end;
+			}
+		}
+		// Read KeyServer space within the scope and add shards intersecting with the input ranges
 		state std::vector<std::pair<KeyRange, Value>> res;
 		state Transaction tr(cx);
-		state int idx = 0;
-		for (; idx < ranges.size(); ++idx) {
-			state Key beginKey = ranges[idx].begin;
-			state Key endKey = ranges[idx].end;
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-					RangeResult readResult = wait(krmGetRanges(&tr,
-					                                           keyServersPrefix,
-					                                           rangeToRead,
-					                                           CLIENT_KNOBS->TOO_MANY,
-					                                           GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-					for (int i = 0; i < readResult.size() - 1; ++i) {
-						res.push_back(std::make_pair(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)),
-						                             Standalone(readResult[i].value)));
-						beginKey = readResult[i + 1].key;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
+				RangeResult readResult = wait(krmGetRanges(
+				    &tr, keyServersPrefix, rangeToRead, CLIENT_KNOBS->TOO_MANY, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+				for (int i = 0; i < readResult.size() - 1; ++i) {
+					KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
+					Value valueToCheck = Standalone(readResult[i].value);
+					bool toAdd = false;
+					for (const auto& range : ranges) {
+						if (rangeToCheck.intersects(range) == true) {
+							toAdd = true;
+							break;
+						}
 					}
-					if (beginKey >= ranges[idx].end) {
-						break;
+					if (toAdd == true) {
+						res.push_back(std::make_pair(rangeToCheck, valueToCheck));
 					}
-				} catch (Error& e) {
-					TraceEvent("ConsistencyCheck_RetryGetKeyLocationsForRangeList").error(e);
-					wait(tr.onError(e));
+					beginKeyToReadKeyServer = readResult[i + 1].key;
 				}
+				if (beginKeyToReadKeyServer >= endKeyToReadKeyServer) {
+					break;
+				}
+			} catch (Error& e) {
+				TraceEvent("ConsistencyCheck_RetryGetKeyLocationsForRangeList").error(e);
+				wait(tr.onError(e));
 			}
 		}
 		return res;
@@ -2093,7 +2107,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (failedRangesToCheck.size() > 0) {
 				wait(delay(60.0)); // Backoff 1 min
 				state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForFailedRanges =
-				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck, self));
+				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck));
 				TraceEvent(SevInfo, "ConsistencyCheck_StartHandlingFailedRanges")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)

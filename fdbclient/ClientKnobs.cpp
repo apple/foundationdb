@@ -261,6 +261,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CONSISTENCY_CHECK_DISTRIBUTED,           true );
 	init( CONSISTENCY_CHECK_AGGRESSIVE_RUN,        true );
 	init( CONSISTENCY_CHECK_COMPLETE_CHECK,        true ); // Take effect only when CONSISTENCY_CHECK_DISTRIBUTED = true
+	init( CONSISTENCY_CHECK_ONE_TIME_CHECK,        true );
 	init( CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM, 50 );
 	init( CONSISTENCY_CHECK_RETRY_DEPTH_MAX,        100 ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_RETRY_DEPTH_MAX = 10;
 	init( CONSISTENCY_CHECK_RANGE_BEGIN,             "" ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_RANGE_BEGIN = "a";
