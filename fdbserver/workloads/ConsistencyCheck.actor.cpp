@@ -1930,8 +1930,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						}
 
 						if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && !completeCheck) {
-							// Add remaining range of the shard to failedRanges,
-							// which will be retried later
+							// Add the shard to failedRanges, which will be retried later
 							failedRanges.insert(range, true);
 							TraceEvent(SevInfo, "ConsistencyCheck_ShardAddedToRetry")
 							    .setMaxEventLength(-1)
