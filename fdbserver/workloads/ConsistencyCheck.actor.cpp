@@ -223,6 +223,88 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return Void();
 	}
 
+	std::vector<KeyRange> loadRangesToCheckFromKnob() {
+		std::vector<Key> beginKeys = {
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_A),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_B),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_C),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_D),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_E),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_F),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_G),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_H),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_I),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_J),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_K),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_L),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_M),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_N),
+		};
+		std::vector<Key> endKeys = {
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_A),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_B),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_C),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_D),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_E),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_F),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_G),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_H),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_I),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_J),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_K),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_L),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_M),
+			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_N),
+		};
+		ASSERT(beginKeys.size() == endKeys.size());
+
+		KeyRangeMap<bool> rangeToCheckMap;
+		for (int i = 0; i < beginKeys.size(); i++) {
+			Key rangeBegin = beginKeys[i];
+			Key rangeEnd = endKeys[i];
+			if (rangeBegin.empty() && rangeEnd.empty()) {
+				TraceEvent("ConsistencyCheck_EmptyInputRange")
+				    .detail("Index", i)
+				    .detail("RangeBegin", rangeBegin)
+				    .detail("RangeEnd", rangeEnd);
+				continue;
+			}
+			if (rangeBegin > allKeys.end) {
+				rangeBegin = allKeys.end;
+			}
+			if (rangeEnd > allKeys.end) {
+				rangeEnd = allKeys.end;
+			}
+
+			KeyRange rangeToCheck;
+			if (rangeBegin < rangeEnd) {
+				rangeToCheck = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+			} else if (rangeBegin > rangeEnd) {
+				rangeToCheck = Standalone(KeyRangeRef(rangeEnd, rangeBegin));
+			} else {
+				TraceEvent("ConsistencyCheck_EmptyInputRange")
+				    .detail("Index", i)
+				    .detail("RangeBegin", rangeBegin)
+				    .detail("RangeEnd", rangeEnd);
+				continue;
+			}
+			rangeToCheckMap.insert(rangeToCheck, true);
+		}
+
+		rangeToCheckMap.coalesce(allKeys);
+
+		std::vector<KeyRange> res;
+		for (auto& rangeToCheck : rangeToCheckMap.ranges()) {
+			if (rangeToCheck.value() == false) {
+				continue;
+			}
+			res.push_back(rangeToCheck.range());
+		}
+		return res;
+	}
+
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
 		TEST(self->performQuiescentChecks); // Quiescent consistency check
 		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
@@ -337,26 +419,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
-					state KeyRange rangeToCheck = allKeys;
-					Key rangeBegin = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN);
-					if (rangeBegin > allKeys.end) {
-						rangeBegin = allKeys.end;
-					}
-					Key rangeEnd = StringRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END);
-					if (rangeEnd > allKeys.end) {
-						rangeEnd = allKeys.end;
-					}
-					if (rangeBegin < rangeEnd) {
-						rangeToCheck = KeyRangeRef(rangeBegin, rangeEnd);
-					} else if (rangeBegin > rangeEnd) {
-						rangeToCheck = KeyRangeRef(rangeEnd, rangeBegin);
-					} else {
-						rangeToCheck = allKeys;
-					}
+					std::vector<KeyRange> rangesToCheck = self->loadRangesToCheckFromKnob();
 					TraceEvent("ConsistencyCheck_Config")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
-					    .detail("RangeToCheck", rangeToCheck)
+					    .detail("RangeToCheck", describe(rangesToCheck))
 					    .detail("Indefinite", self->indefinite)
 					    .detail("Distributed", self->distributed)
 					    .detail("ClientCount", self->clientCount)
@@ -365,7 +432,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("PerformTSSCheck", self->performTSSCheck)
 					    .detail("PerformCacheCheck", self->performCacheCheck);
 					state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForDistributed =
-					    wait(self->getKeyLocationsForRangeList(cx, { rangeToCheck }));
+					    wait(self->getKeyLocationsForRangeList(cx, rangesToCheck));
 					// Check that each failed shard has the same data on all storage servers that it resides on
 					wait(::success(self->checkDataConsistency(cx,
 					                                          shardLocationPairListForDistributed,
