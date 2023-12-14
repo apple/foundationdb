@@ -192,7 +192,7 @@ func MustGetAPIVersion() int {
 
 var apiVersion int
 var networkStarted bool
-var networkMutex sync.Mutex
+var networkMutex sync.RWMutex
 
 var openDatabases map[string]Database
 
@@ -201,6 +201,19 @@ func init() {
 }
 
 func startNetwork() error {
+	networkMutex.RLock()
+	if networkStarted {
+		networkMutex.RUnlock()
+		return nil
+	}
+	// release read lock and acquire write lock
+	networkMutex.RUnlock()
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+	if networkStarted {
+		return nil
+	}
+
 	if e := C.fdb_setup_network(); e != 0 {
 		return Error{int(e)}
 	}
@@ -221,9 +234,6 @@ func startNetwork() error {
 // StartNetwork initializes the FoundationDB client networking engine. StartNetwork
 // must not be called more than once.
 func StartNetwork() error {
-	networkMutex.Lock()
-	defer networkMutex.Unlock()
-
 	if apiVersion == 0 {
 		return errAPIVersionUnset
 	}
@@ -264,20 +274,9 @@ func MustOpenDefault() Database {
 // To connect to multiple clusters running at different, incompatible versions,
 // the multi-version client API must be used.
 func OpenDatabase(clusterFile string) (Database, error) {
-	networkMutex.Lock()
-	defer networkMutex.Unlock()
-
-	if apiVersion == 0 {
-		return Database{}, errAPIVersionUnset
-	}
-
-	var e error
-
-	if !networkStarted {
-		e = startNetwork()
-		if e != nil {
-			return Database{}, e
-		}
+	err := startNetwork()
+	if err != nil {
+		return Database{}, err
 	}
 
 	db, ok := openDatabases[clusterFile]
