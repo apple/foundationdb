@@ -2127,7 +2127,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("NumCompletedShards", numCompleteShards)
 					    .detail("NumFailedShards", numFailedShards)
 					    .detail("NumShardThisClient", numShardThisClient)
-					    .detail("NumShardToCheckThisEpoch", numShardToCheck)
+					    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
 					    .detail("ShardBegin", range.begin)
 					    .detail("ShardEnd", range.end)
 					    .detail("Repetitions", self->repetitions)
@@ -2145,7 +2145,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("NumCompletedShards", numCompleteShards)
 					    .detail("NumFailedShards", numFailedShards)
 					    .detail("NumShardThisClient", numShardThisClient)
-					    .detail("NumShardToCheckThisEpoch", numShardToCheck)
+					    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
 					    .detail("BytesReadInThisRound", bytesReadInthisRound)
 					    .detail("NumSkippedShards", numSkippedShards)
 					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
