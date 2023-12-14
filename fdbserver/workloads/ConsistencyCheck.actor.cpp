@@ -43,6 +43,51 @@
 // #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
 
+const std::unordered_map<char, uint8_t> parseCharMap{
+	{ '0', 0 },  { '1', 1 },  { '2', 2 },  { '3', 3 },  { '4', 4 },  { '5', 5 },  { '6', 6 },  { '7', 7 },
+	{ '8', 8 },  { '9', 9 },  { 'a', 10 }, { 'b', 11 }, { 'c', 12 }, { 'd', 13 }, { 'e', 14 }, { 'f', 15 },
+	{ 'A', 10 }, { 'B', 11 }, { 'C', 12 }, { 'D', 13 }, { 'E', 14 }, { 'F', 15 },
+};
+
+Key getKeyFromString(const std::string& str) {
+	Key emptyKey;
+	if (str.size() == 0) {
+		return emptyKey;
+	}
+	if (str.size() % 4 != 0) {
+		TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Reason", "WrongLength")
+		    .detail("InputStr", str);
+		throw internal_error();
+	}
+	std::vector<uint8_t> byteList;
+	for (int i = 0; i < str.size(); i += 4) {
+		if (str.at(i + 0) != '\\' || str.at(i + 1) != 'x') {
+			TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Reason", "WrongBytePrefix")
+			    .detail("InputStr", str);
+			throw internal_error();
+		}
+		const char first = str.at(i + 2);
+		const char second = str.at(i + 3);
+		if (parseCharMap.count(first) == 0 || parseCharMap.count(second) == 0) {
+			TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Reason", "WrongByteContent")
+			    .detail("InputStr", str);
+			throw internal_error();
+		}
+		uint8_t parsedValue = parseCharMap.at(first) * 16 + parseCharMap.at(second);
+		byteList.push_back(parsedValue);
+	}
+	return Standalone(StringRef(byteList.data(), byteList.size()));
+}
+
 struct ConsistencyCheckWorkload : TestWorkload {
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
 	bool performQuiescentChecks;
@@ -224,57 +269,71 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	std::vector<KeyRange> loadRangesToCheckFromKnob() {
-		std::vector<Key> beginKeys = {
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_A),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_B),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_C),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_D),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_E),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_F),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_G),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_H),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_I),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_J),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_K),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_L),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_M),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_MORE_N),
+		// Load string from knob
+		std::vector<std::string> beginKeyStrs = {
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_0,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_1,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_2,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_3,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_4,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_5,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_6,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_7,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_8,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_9,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_10, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_11,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_12, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_13,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_14, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_15,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_16, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_17,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_18, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_19,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_20, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_21,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_22, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_23,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_24, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_25,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_26,
 		};
-		std::vector<Key> endKeys = {
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_A),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_B),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_C),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_D),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_E),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_F),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_G),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_H),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_I),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_J),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_K),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_L),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_M),
-			KeyRef(CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_MORE_N),
+		std::vector<std::string> endKeyStrs = {
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_0,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_1,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_2,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_3,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_4,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_5,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_6,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_7,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_8,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_9,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_10, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_11,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_12, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_13,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_14, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_15,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_16, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_17,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_18, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_19,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_20, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_21,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_22, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_23,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_24, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_25,
+			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_26,
 		};
+
+		// Get keys from strings
+		std::vector<Key> beginKeys;
+		for (const auto& beginKeyStr : beginKeyStrs) {
+			Key key = getKeyFromString(beginKeyStr);
+			beginKeys.push_back(key);
+		}
+		std::vector<Key> endKeys;
+		for (const auto& endKeyStr : endKeyStrs) {
+			Key key = getKeyFromString(endKeyStr);
+			endKeys.push_back(key);
+		}
 		ASSERT(beginKeys.size() == endKeys.size());
 
+		// Get ranges
 		KeyRangeMap<bool> rangeToCheckMap;
 		for (int i = 0; i < beginKeys.size(); i++) {
 			Key rangeBegin = beginKeys[i];
 			Key rangeEnd = endKeys[i];
 			if (rangeBegin.empty() && rangeEnd.empty()) {
-				TraceEvent("ConsistencyCheck_EmptyInputRange")
-				    .detail("Index", i)
-				    .detail("RangeBegin", rangeBegin)
-				    .detail("RangeEnd", rangeEnd);
 				continue;
 			}
 			if (rangeBegin > allKeys.end) {
 				rangeBegin = allKeys.end;
 			}
 			if (rangeEnd > allKeys.end) {
+				TraceEvent("ConsistencyCheck_ReverseInputRange")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Index", i)
+				    .detail("RangeBegin", rangeBegin)
+				    .detail("RangeEnd", rangeEnd);
 				rangeEnd = allKeys.end;
 			}
 
@@ -285,6 +344,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				rangeToCheck = Standalone(KeyRangeRef(rangeEnd, rangeBegin));
 			} else {
 				TraceEvent("ConsistencyCheck_EmptyInputRange")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
 				    .detail("Index", i)
 				    .detail("RangeBegin", rangeBegin)
 				    .detail("RangeEnd", rangeEnd);
@@ -296,11 +357,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		rangeToCheckMap.coalesce(allKeys);
 
 		std::vector<KeyRange> res;
-		for (auto& rangeToCheck : rangeToCheckMap.ranges()) {
-			if (rangeToCheck.value() == false) {
-				continue;
+		for (auto rangeToCheck : rangeToCheckMap.ranges()) {
+			if (rangeToCheck.value() == true) {
+				res.push_back(rangeToCheck.range());
 			}
-			res.push_back(rangeToCheck.range());
+		}
+		TraceEvent e("ConsistencyCheck_LoadedInputRange");
+		e.setMaxEventLength(-1);
+		e.setMaxFieldLength(-1);
+		for (int i = 0; i < res.size(); i++) {
+			e.detail("RangeBegin" + std::to_string(i), res[i].begin);
+			e.detail("RangeEnd" + std::to_string(i), res[i].end);
 		}
 		return res;
 	}
@@ -432,7 +499,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("PerformTSSCheck", self->performTSSCheck)
 					    .detail("PerformCacheCheck", self->performCacheCheck);
 					state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForDistributed =
-					    wait(self->getKeyLocationsForRangeList(cx, rangesToCheck));
+					    wait(self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
 					// Check that each failed shard has the same data on all storage servers that it resides on
 					wait(::success(self->checkDataConsistency(cx,
 					                                          shardLocationPairListForDistributed,
@@ -1205,18 +1272,25 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<std::vector<std::pair<KeyRange, Value>>> getKeyLocationsForRangeList(Database cx,
-	                                                                                  std::vector<KeyRange> ranges) {
+	                                                                                  std::vector<KeyRange> ranges,
+	                                                                                  ConsistencyCheckWorkload* self) {
 		// Get the scope of the input list of ranges
 		state Key beginKeyToReadKeyServer;
 		state Key endKeyToReadKeyServer;
-		for (const auto& range : ranges) {
-			if (beginKeyToReadKeyServer.empty() || range.begin < beginKeyToReadKeyServer) {
-				beginKeyToReadKeyServer = range.begin;
+		for (int i = 0; i < ranges.size(); i++) {
+			if (i == 0 || ranges[i].begin < beginKeyToReadKeyServer) {
+				beginKeyToReadKeyServer = ranges[i].begin;
 			}
-			if (endKeyToReadKeyServer.empty() || range.end > endKeyToReadKeyServer) {
-				endKeyToReadKeyServer = range.end;
+			if (i == 0 || ranges[i].end > endKeyToReadKeyServer) {
+				endKeyToReadKeyServer = ranges[i].end;
 			}
 		}
+		TraceEvent("ConsistencyCheck_GetKeyLocationsForRangeList")
+		    .detail("Ops", "Input")
+		    .detail("RangeBegin", beginKeyToReadKeyServer)
+		    .detail("RangeEnd", endKeyToReadKeyServer)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId);
 		// Read KeyServer space within the scope and add shards intersecting with the input ranges
 		state std::vector<std::pair<KeyRange, Value>> res;
 		state Transaction tr(cx);
@@ -1247,7 +1321,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					break;
 				}
 			} catch (Error& e) {
-				TraceEvent("ConsistencyCheck_RetryGetKeyLocationsForRangeList").error(e);
+				TraceEvent("ConsistencyCheck_RetryGetKeyLocationsForRangeList")
+				    .error(e)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
 				wait(tr.onError(e));
 			}
 		}
@@ -1430,7 +1507,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 		state bool testResult = true;
+		state int64_t numShardThisClient = -1;
+		state int64_t numShardToCheck = -1;
 		state int64_t numCompleteShards = 0;
+		state int64_t numFailedShards = 0;
 		state int64_t numSkippedShards = 0;
 		state KeyRangeMap<bool> failedRanges; // Used to collect failed ranges in the current checkDataConsistency
 		// Which will be used to start the next consistencyCheckEpoch of the checkDataConsistency
@@ -1447,9 +1527,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			ranges.push_back(shardLocationPairList[k].first); // Add shard range to ranges
 		}
 
-		state Key beginKeyToCheck = ranges[0].begin;
-		state Key endKeyToCheck = ranges[ranges.size() - 1].end;
-
 		state std::vector<int> shardOrder;
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
@@ -1463,6 +1540,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int endPoint;
 		if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
 			if (consistencyCheckEpoch == 0) {
+				// Decide which ranges are assigned
 				int batchSize = (shardOrder.size() / self->clientCount) + 1;
 				i = self->clientId * batchSize; // overwrite the starting point i
 				i = std::max(0, i - CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
@@ -1472,44 +1550,64 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				increment = 1;
 				// If the start point i is larger than the list boundary, this client needs not run
 				if (i >= endPoint) {
-					TraceEvent("ConsistencyCheck_NoTaskToRun")
+					TraceEvent("ConsistencyCheck_ClientExit")
+					    .detail("Reason", "No task assigned")
 					    .detail("Distributed", self->distributed)
 					    .detail("ShardCount", ranges.size())
 					    .detail("ClientId", self->clientId)
 					    .detail("ClientCount", self->clientCount)
 					    .detail("Repetitions", self->repetitions);
-					wait(delay(600.0) || self->suspendConsistencyCheck.onChange());
 					return true;
 				}
-				// overwrite beginKeyToCheck and endKeyToCheck
-				beginKeyToCheck = ranges[shardOrder[i]].begin;
-				endKeyToCheck = ranges[shardOrder[endPoint - 1]].end;
+
+				// Logging range assignment
+				KeyRangeMap<bool> rangeAssignmentMap;
+				std::vector<KeyRange> rangeAssignmentList;
+				// Decide assigned ranges to log
+				for (int idx = i; idx < endPoint; idx += increment) {
+					rangeAssignmentMap.insert(ranges[shardOrder[idx]], true);
+				}
+				rangeAssignmentMap.coalesce(allKeys);
+				for (auto& assignedRange : rangeAssignmentMap.ranges()) {
+					if (assignedRange.value() == true) {
+						rangeAssignmentList.push_back(assignedRange.range());
+					}
+				}
+				numShardThisClient = (endPoint - i) / increment;
+				TraceEvent e("ConsistencyCheck_StartTask");
+				e.setMaxEventLength(-1);
+				e.setMaxFieldLength(-1);
+				e.detail("Distributed", self->distributed);
+				e.detail("ShardCount", ranges.size());
+				e.detail("ClientId", self->clientId);
+				e.detail("ClientCount", self->clientCount);
+				e.detail("StartPoint", i);
+				e.detail("EndPoint", endPoint);
+				e.detail("Repetitions", self->repetitions);
+				e.detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				for (int idx = 0; idx < rangeAssignmentList.size(); idx++) {
+					e.detail("RangeToCheckBegin" + std::to_string(idx), rangeAssignmentList[idx].begin);
+					e.detail("RangeToCheckEnd" + std::to_string(idx), rangeAssignmentList[idx].end);
+				}
+				e.trackLatest("ConsistencyCheck_StartTask");
 			} else { // consistencyCheckEpoch > 0 when handling failure ranges
 				i = 0;
 				increment = 1;
 				endPoint = shardOrder.size();
-				beginKeyToCheck = Key();
-				endKeyToCheck = Key();
+				TraceEvent("ConsistencyCheck_RetryFailedTask")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Distributed", self->distributed)
+				    .detail("RetryShardCount", ranges.size())
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("Repetitions", self->repetitions)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .trackLatest("ConsistencyCheck_RetryFailedTask");
 			}
 		} else {
 			endPoint = shardOrder.size();
 		}
-
-		TraceEvent(consistencyCheckEpoch == 0 ? "ConsistencyCheck_StartTask" : "ConsistencyCheck_StartFailedTask")
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("Distributed", self->distributed)
-		    .detail("ShardCount", ranges.size())
-		    .detail("ClientId", self->clientId)
-		    .detail("ClientCount", self->clientCount)
-		    .detail("StartPoint", i)
-		    .detail("EndPoint", endPoint)
-		    .detail("BeginKey", beginKeyToCheck)
-		    .detail("EndKey", endKeyToCheck)
-		    .detail("Repetitions", self->repetitions)
-		    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-		    .trackLatest(consistencyCheckEpoch == 0 ? "ConsistencyCheck_StartTask"
-		                                            : "ConsistencyCheck_StartFailedTask");
 
 		for (; i < endPoint; i += increment) {
 			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && self->suspendConsistencyCheck.get()) {
@@ -1520,13 +1618,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ShardCount", ranges.size())
 				    .detail("ClientId", self->clientId)
 				    .detail("ClientCount", self->clientCount)
-				    .detail("CurrentPoint", i)
-				    .detail("EndPoint", endPoint)
-				    .detail("BeginKey", beginKeyToCheck)
-				    .detail("EndKey", endKeyToCheck)
 				    .detail("CompleteEndKey", ranges[shardOrder[i]].begin);
 				break;
 			}
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+				numShardToCheck = (endPoint - i) / increment;
+			}
+
 			state int shard = shardOrder[i];
 
 			state KeyRangeRef range = ranges[shard];
@@ -1696,10 +1794,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							    .detail("ShardCount", ranges.size())
 							    .detail("ClientId", self->clientId)
 							    .detail("ClientCount", self->clientCount)
-							    .detail("CurrentPoint", i)
-							    .detail("EndPoint", endPoint)
-							    .detail("BeginKey", beginKeyToCheck)
-							    .detail("EndKey", endKeyToCheck)
 							    .detail("CompleteEndKey", lastStartSampleKey);
 							break;
 						}
@@ -1937,8 +2031,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							    .setMaxFieldLength(-1)
 							    .detail("ClientId", self->clientId)
 							    .detail("ClientCount", self->clientCount)
-							    .detail("ShardBegin", printable(range.begin))
-							    .detail("ShardEnd", printable(range.end))
+							    .detail("ShardBegin", range.begin)
+							    .detail("ShardEnd", range.end)
 							    .detail("Repetitions", self->repetitions)
 							    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
 							    .trackLatest("ConsistencyCheck_ShardAddedToRetry");
@@ -2022,17 +2116,22 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				if (!completeCheck) {
+					numFailedShards++;
 					TraceEvent(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE ? SevInfo : SevWarn,
 					           "ConsistencyCheck_ShardFailed")
+					    .suppressFor(1.0)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("ClientId", self->clientId)
 					    .detail("ClientCount", self->clientCount)
-					    .detail("ShardBegin", printable(range.begin))
-					    .detail("ShardEnd", printable(range.end))
+					    .detail("NumCompletedShards", numCompleteShards)
+					    .detail("NumFailedShards", numFailedShards)
+					    .detail("NumShardThisClient", numShardThisClient)
+					    .detail("NumShardToCheckThisEpoch", numShardToCheck)
+					    .detail("ShardBegin", range.begin)
+					    .detail("ShardEnd", range.end)
 					    .detail("Repetitions", self->repetitions)
-					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-					    .trackLatest("ConsistencyCheck_ShardCheckFailedRange");
+					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				} else {
 					numCompleteShards++;
 					TraceEvent(SevInfo, "ConsistencyCheck_ShardComplete")
@@ -2041,9 +2140,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .setMaxFieldLength(-1)
 					    .detail("ClientId", self->clientId)
 					    .detail("ClientCount", self->clientCount)
-					    .detail("Range", range.toString())
+					    .detail("Range", range)
 					    .detail("ShardCount", ranges.size())
 					    .detail("NumCompletedShards", numCompleteShards)
+					    .detail("NumFailedShards", numFailedShards)
+					    .detail("NumShardThisClient", numShardThisClient)
+					    .detail("NumShardToCheckThisEpoch", numShardToCheck)
 					    .detail("BytesReadInThisRound", bytesReadInthisRound)
 					    .detail("NumSkippedShards", numSkippedShards)
 					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
@@ -2188,7 +2290,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (failedRangesToCheck.size() > 0) {
 				wait(delay(60.0)); // Backoff 1 min
 				state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForFailedRanges =
-				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck));
+				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck, self));
 				TraceEvent(SevInfo, "ConsistencyCheck_StartHandlingFailedRanges")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
@@ -2258,8 +2360,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("ShardCount", ranges.size())
 			    .detail("ClientId", self->clientId)
 			    .detail("ClientCount", self->clientCount)
-			    .detail("BeginKey", beginKeyToCheck)
-			    .detail("EndKey", endKeyToCheck)
 			    .detail("Repetitions", self->repetitions)
 			    .trackLatest("ConsistencyCheck_EndTask");
 			self->bytesReadInPreviousRound =
