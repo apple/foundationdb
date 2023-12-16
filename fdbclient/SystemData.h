@@ -24,6 +24,7 @@
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
+#include "fdbclient/ConsistencyCheck.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
@@ -76,6 +77,15 @@ const Key checkpointKeyFor(UID checkpointID);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
+
+extern const KeyRangeRef consistencyCheckAssignmentKeys;
+extern const KeyRef consistencyCheckAssignmentPrefix;
+const Key consistencyCheckAssignmentPrefixFor(int clientId);
+extern const KeyRangeRef consistencyCheckProgressKeys;
+extern const KeyRef consistencyCheckProgressPrefix;
+extern const KeyRef consistencyCheckerIdKey;
+const Value consistencyCheckerStateValue(const ConsistencyCheckState& ccState);
+ConsistencyCheckState decodeConsistencyCheckerStateValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD

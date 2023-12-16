@@ -249,9 +249,8 @@ public:
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
-	bool CONSISTENCY_CHECK_URGENT_MODE; // Require Tester Process::Class
+	bool CONSISTENCY_CHECK_URGENT_MODE_FORCE_INIT; // Available in urgent mode
 	int CONSISTENCY_CHECK_RETRY_DEPTH_MAX; // Available in urgent mode
-	int CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM; // Available in urgent mode
 	std::string CONSISTENCY_CHECK_RANGE_BEGIN_0; // Available in urgent mode
 	std::string CONSISTENCY_CHECK_RANGE_END_0; // Available in urgent mode
 	std::string CONSISTENCY_CHECK_RANGE_BEGIN_1; // Available in urgent mode

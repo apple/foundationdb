@@ -978,6 +978,7 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 namespace {
 enum class ServerRole {
 	ConsistencyCheck,
+	ConsistencyCheckUrgent,
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
@@ -1229,6 +1230,8 @@ private:
 					role = ServerRole::KVFileDump;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
+				else if (!strcmp(sRole, "consistencycheckUrgent"))
+					role = ServerRole::ConsistencyCheckUrgent;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
 				else if (!strcmp(sRole, "flowprocess"))
@@ -2177,12 +2180,22 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::ConsistencyCheck) {
 			setupRunLoopProfiler();
-
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_CONSISTENCY_CHECK,
-			                       CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE ? TEST_ON_TESTERS : TEST_HERE,
+			                       TEST_HERE,
 			                       1,
+			                       opts.testFile,
+			                       StringRef(),
+			                       opts.localities));
+			g_network->run();
+		} else if (role == ServerRole::ConsistencyCheckUrgent) {
+			setupRunLoopProfiler();
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			f = stopAfter(runTests(opts.connectionFile,
+			                       TEST_TYPE_CONSISTENCY_CHECK_URGENT,
+			                       TEST_ON_TESTERS,
+			                       opts.minTesterCount,
 			                       opts.testFile,
 			                       StringRef(),
 			                       opts.localities));

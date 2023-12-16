@@ -242,6 +242,35 @@ CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 	return checkpoint;
 }
 
+const KeyRangeRef consistencyCheckAssignmentKeys =
+    KeyRangeRef("\xff/consistency_check_assign/"_sr, "\xff/consistency_check_assign0"_sr);
+const KeyRef consistencyCheckAssignmentPrefix = consistencyCheckAssignmentKeys.begin;
+
+const Key consistencyCheckAssignmentPrefixFor(int clientId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(consistencyCheckAssignmentPrefix);
+	wr << clientId;
+	wr.serializeBytes("/"_sr);
+	return wr.toValue();
+}
+
+const KeyRangeRef consistencyCheckProgressKeys =
+    KeyRangeRef("\xff/consistency_check_progress/"_sr, "\xff/consistency_check_progress0"_sr);
+const KeyRef consistencyCheckProgressPrefix = consistencyCheckProgressKeys.begin;
+
+const KeyRef consistencyCheckerIdKey = "\xff/consistency_checker_id/"_sr;
+
+const Value consistencyCheckerStateValue(const ConsistencyCheckState& ccState) {
+	return ObjectWriter::toValue(ccState, IncludeVersion());
+}
+
+ConsistencyCheckState decodeConsistencyCheckerStateValue(const ValueRef& value) {
+	ConsistencyCheckState ccState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(ccState);
+	return ccState;
+}
+
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
