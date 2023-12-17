@@ -981,6 +981,311 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	}
 }
 
+ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
+                                                                 std::vector<TesterInterface> testers,
+                                                                 TestSpec spec,
+                                                                 Optional<TenantName> defaultTenant,
+                                                                 int64_t consistencyCheckerId) {
+	TraceEvent("ConsistencyCheckUrgent_Dispatch")
+	    .detail("WorkloadTitle", spec.title)
+	    .detail("TesterCount", testers.size())
+	    .detail("TestTimeout", spec.timeout)
+	    .detail("ConsistencyCheckerId", consistencyCheckerId);
+
+	state std::vector<Future<WorkloadInterface>> workRequests;
+	for (int i = 0; i < testers.size(); i++) {
+		WorkloadRequest req;
+		req.title = spec.title;
+		req.useDatabase = spec.useDB;
+		req.timeout = spec.timeout;
+		req.databasePingDelay = spec.useDB ? spec.databasePingDelay : 0.0;
+		req.options = spec.options;
+		req.clientId = i;
+		req.clientCount = testers.size();
+		req.sharedRandomNumber = consistencyCheckerId;
+		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
+		workRequests.push_back(testers[i].recruitments.getReply(req));
+	}
+
+	TraceEvent("ConsistencyCheckUrgent_SetupStart")
+	    .detail("WorkloadTitle", spec.title)
+	    .detail("TesterCount", testers.size())
+	    .detail("TestTimeout", spec.timeout)
+	    .detail("ConsistencyCheckerId", consistencyCheckerId);
+
+	state std::vector<WorkloadInterface> workloads = wait(getAll(workRequests));
+	state double waitForFailureTime = g_network->isSimulated() ? 24 * 60 * 60 : 60;
+	if (spec.phases & TestWorkload::SETUP) {
+		state std::vector<Future<ErrorOr<Void>>> setups;
+		setups.reserve(workloads.size());
+		for (int i = 0; i < workloads.size(); i++)
+			setups.push_back(workloads[i].setup.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
+		wait(waitForAll(setups));
+	}
+
+	TraceEvent("ConsistencyCheckUrgent_SetupComplete")
+	    .detail("WorkloadTitle", spec.title)
+	    .detail("TesterCount", testers.size())
+	    .detail("TestTimeout", spec.timeout)
+	    .detail("ConsistencyCheckerId", consistencyCheckerId);
+
+	if (spec.phases & TestWorkload::EXECUTION) {
+		TraceEvent("TestStarting").detail("WorkloadTitle", spec.title);
+		printf("running test (%s)...\n", printable(spec.title).c_str());
+		state std::vector<Future<ErrorOr<Void>>> starts;
+		starts.reserve(workloads.size());
+		for (int i = 0; i < workloads.size(); i++)
+			starts.push_back(workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
+		wait(waitForAll(starts));
+	}
+
+	TraceEvent("ConsistencyCheckUrgent_WorkloadComplete")
+	    .detail("WorkloadTitle", spec.title)
+	    .detail("TesterCount", testers.size())
+	    .detail("TestTimeout", spec.timeout)
+	    .detail("ConsistencyCheckerId", consistencyCheckerId);
+
+	return Void();
+}
+
+ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::vector<KeyRange> ranges) {
+	// Get the scope of the input list of ranges
+	state Key beginKeyToReadKeyServer;
+	state Key endKeyToReadKeyServer;
+	for (int i = 0; i < ranges.size(); i++) {
+		if (i == 0 || ranges[i].begin < beginKeyToReadKeyServer) {
+			beginKeyToReadKeyServer = ranges[i].begin;
+		}
+		if (i == 0 || ranges[i].end > endKeyToReadKeyServer) {
+			endKeyToReadKeyServer = ranges[i].end;
+		}
+	}
+	TraceEvent("ConsistencyCheckUrgent_GetConsistencyCheckShards")
+	    .detail("RangeBegin", beginKeyToReadKeyServer)
+	    .detail("RangeEnd", endKeyToReadKeyServer);
+	// Read KeyServer space within the scope and add shards intersecting with the input ranges
+	state std::vector<KeyRange> res;
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
+			RangeResult readResult = wait(krmGetRanges(
+			    &tr, keyServersPrefix, rangeToRead, CLIENT_KNOBS->TOO_MANY, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			for (int i = 0; i < readResult.size() - 1; ++i) {
+				KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
+				Value valueToCheck = Standalone(readResult[i].value);
+				bool toAdd = false;
+				for (const auto& range : ranges) {
+					if (rangeToCheck.intersects(range) == true) {
+						toAdd = true;
+						break;
+					}
+				}
+				if (toAdd == true) {
+					res.push_back(rangeToCheck);
+				}
+				beginKeyToReadKeyServer = readResult[i + 1].key;
+			}
+			if (beginKeyToReadKeyServer >= endKeyToReadKeyServer) {
+				break;
+			}
+		} catch (Error& e) {
+			TraceEvent("ConsistencyCheckUrgent_GetConsistencyCheckShardsRetry").error(e);
+			wait(tr.onError(e));
+		}
+	}
+	return res;
+}
+
+ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
+                                                      int minTestersExpected) {
+	// Recruit workers
+	state int flags = GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
+	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
+	state std::vector<WorkerDetails> workers;
+	loop {
+		choose {
+			when(std::vector<WorkerDetails> w =
+			         wait(cc->get().present()
+			                  ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
+			                  : Never())) {
+				if (w.size() >= minTestersExpected) {
+					workers = w;
+					break;
+				}
+				wait(delay(SERVER_KNOBS->WORKER_POLL_DELAY));
+			}
+			when(wait(cc->onChange())) {}
+			when(wait(testerTimeout)) {
+				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
+				throw timed_out();
+			}
+		}
+	}
+	state std::vector<TesterInterface> ts;
+	ts.reserve(workers.size());
+	for (int i = 0; i < workers.size(); i++)
+		ts.push_back(workers[i].interf.testerInterface);
+	return ts;
+}
+
+ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
+                                                   Database cx,
+                                                   Optional<std::vector<TesterInterface>> testers,
+                                                   int minTestersExpected,
+                                                   TestSpec testSpec,
+                                                   Optional<TenantName> defaultTenant,
+                                                   int64_t consistencyCheckerId) {
+	state int round = 0;
+	// Load ranges to check from progress metadata
+	state std::vector<KeyRange> rangesToCheck;
+	wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+	if (rangesToCheck.size() == 0) {
+		// If no range to check in progress data
+		// We load the range from knob
+		rangesToCheck = loadRangesToCheckFromKnob();
+		TraceEvent e("ConsistencyCheckUrgent_Start");
+		e.setMaxEventLength(-1);
+		e.setMaxFieldLength(-1);
+		e.detail("ConsistencyCheckerId", consistencyCheckerId);
+		for (int i = 0; i < rangesToCheck.size(); i++) {
+			e.detail("RangeToCheckBegin" + std::to_string(i), rangesToCheck[i].begin);
+			e.detail("RangeToCheckEnd" + std::to_string(i), rangesToCheck[i].end);
+		}
+		wait(initConsistencyCheckMetadata(cx, rangesToCheck, consistencyCheckerId));
+	} else {
+		TraceEvent("ConsistencyCheckUrgent_Resume")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId)
+		    .detail("RangesToCheckCount", rangesToCheck.size());
+	}
+
+	TraceEvent("ConsistencyCheckUrgent_Initialized").detail("ConsistencyCheckerId", consistencyCheckerId);
+
+	state std::vector<TesterInterface> ts;
+	loop {
+		ts.clear();
+		if (!testers.present()) {
+			wait(store(ts, getTesters(cc, minTestersExpected)));
+		} else {
+			ts = testers.get();
+		}
+		TraceEvent("ConsistencyCheckUrgent_GoTTesters")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId)
+		    .detail("Round", round)
+		    .detail("TesterCount", ts.size());
+
+		// Load shards to check from keyserver space
+		state std::vector<KeyRange> shardsToCheck = wait(getConsistencyCheckShards(cx, rangesToCheck));
+		TraceEvent("ConsistencyCheckUrgent_GotShardsToCheck")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId)
+		    .detail("Round", round)
+		    .detail("TesterCount", ts.size())
+		    .detail("ShardCount", shardsToCheck.size())
+		    .detail("RangesToCheck", describe(rangesToCheck))
+		    .detail("Shards", describe(shardsToCheck));
+		// Assign shards to testers
+		state std::unordered_map<int, std::vector<KeyRange>> assignment;
+		int batchSize = shardsToCheck.size() / ts.size() + 1;
+		for (int i = 0; i < shardsToCheck.size(); i++) {
+			assignment[i / batchSize].push_back(shardsToCheck[i]);
+		}
+		state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
+		for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
+			TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("ClientId", assignIt->first)
+			    .detail("Shards", assignIt->second.size());
+			wait(persistConsistencyCheckAssignment(cx, assignIt->first, assignIt->second));
+		}
+		TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
+		e.detail("ConsistencyCheckerId", consistencyCheckerId);
+		e.detail("Round", round);
+		e.detail("TesterCount", ts.size());
+		e.detail("ShardCountTotal", shardsToCheck.size());
+		for (const auto& [clientId, assignedShards] : assignment) {
+			e.detail("Client" + std::to_string(clientId), assignedShards.size());
+		}
+		// Run test and wait for testers complete/fail
+		try {
+			wait(dispatchMonitorUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+		}
+		TraceEvent("ConsistencyCheckUrgent_RoundComplete")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId)
+		    .detail("Round", round);
+		round++;
+
+		// Load progress metadata. If no unfinished range, exit; otherwise, continue
+		rangesToCheck.clear();
+		wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+		if (rangesToCheck.size() == 0) {
+			TraceEvent("ConsistencyCheckUrgent_Complete")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("Round", round);
+			wait(clearConsistencyCheckMetadata(cx));
+			TraceEvent("ConsistencyCheckUrgent_MetadataCleared")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("Round", round);
+			break;
+		} else {
+			TraceEvent("ConsistencyCheckUrgent_Continue")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("Round", round)
+			    .detail("RangesToCheckCount", rangesToCheck.size());
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
+                                             std::vector<TesterInterface> testers,
+                                             double softTimeLimit,
+                                             double databasePingDelay,
+                                             Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state TestSpec spec;
+	Standalone<VectorRef<KeyValueRef>> options;
+	spec.title = LiteralStringRef("ConsistencyCheck");
+	spec.databasePingDelay = databasePingDelay;
+	spec.timeout = 32000;
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef(LiteralStringRef("performCacheCheck"), LiteralStringRef("false")));
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef(LiteralStringRef("performTSSCheck"), LiteralStringRef("false")));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("true")));
+	spec.options.push_back_deep(spec.options.arena(), options);
+	loop {
+		TraceEvent("ConsistencyCheckUrgent_LoopBegin").detail("ConsistencyCheckerId", consistencyCheckerId);
+		try {
+			wait(runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(),
+			                                     cx,
+			                                     testers,
+			                                     1,
+			                                     spec,
+			                                     Optional<TenantName>(),
+			                                     consistencyCheckerId));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+		}
+		TraceEvent("ConsistencyCheckUrgent_RepairDC");
+		wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+	}
+	return Void();
+}
+
 ACTOR Future<bool> runTest(Database cx,
                            std::vector<TesterInterface> testers,
                            TestSpec spec,
@@ -1036,6 +1341,8 @@ ACTOR Future<bool> runTest(Database cx,
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
 			try {
+				wait(timeoutError(checkConsistencyUrgentSim(cx, testers, 18000, spec.databasePingDelay, dbInfo),
+				                  20000.0));
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 				wait(timeoutError(checkConsistency(cx,
 				                                   testers,
@@ -1703,188 +2010,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	return Void();
 }
 
-ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::vector<KeyRange> ranges) {
-	// Get the scope of the input list of ranges
-	state Key beginKeyToReadKeyServer;
-	state Key endKeyToReadKeyServer;
-	for (int i = 0; i < ranges.size(); i++) {
-		if (i == 0 || ranges[i].begin < beginKeyToReadKeyServer) {
-			beginKeyToReadKeyServer = ranges[i].begin;
-		}
-		if (i == 0 || ranges[i].end > endKeyToReadKeyServer) {
-			endKeyToReadKeyServer = ranges[i].end;
-		}
-	}
-	TraceEvent("ConsistencyCheck_GetConsistencyCheckShards")
-	    .detail("RangeBegin", beginKeyToReadKeyServer)
-	    .detail("RangeEnd", endKeyToReadKeyServer);
-	// Read KeyServer space within the scope and add shards intersecting with the input ranges
-	state std::vector<KeyRange> res;
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
-			RangeResult readResult = wait(krmGetRanges(
-			    &tr, keyServersPrefix, rangeToRead, CLIENT_KNOBS->TOO_MANY, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-			for (int i = 0; i < readResult.size() - 1; ++i) {
-				KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
-				Value valueToCheck = Standalone(readResult[i].value);
-				bool toAdd = false;
-				for (const auto& range : ranges) {
-					if (rangeToCheck.intersects(range) == true) {
-						toAdd = true;
-						break;
-					}
-				}
-				if (toAdd == true) {
-					res.push_back(rangeToCheck);
-				}
-				beginKeyToReadKeyServer = readResult[i + 1].key;
-			}
-			if (beginKeyToReadKeyServer >= endKeyToReadKeyServer) {
-				break;
-			}
-		} catch (Error& e) {
-			TraceEvent("ConsistencyCheck_GetConsistencyCheckShardsRetry").error(e);
-			wait(tr.onError(e));
-		}
-	}
-	return res;
-}
-
-ACTOR Future<Void> runConsistencyCheckerUrgent(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
-                                               Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
-                                               std::vector<TestSpec> tests,
-                                               int minTestersExpected,
-                                               StringRef startingConfiguration,
-                                               LocalityData locality,
-                                               Optional<TenantName> defaultTenant,
-                                               uint64_t consistencyCheckerId) {
-	state Database cx;
-	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
-	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
-	cx = openDBOnServer(dbInfo);
-	cx->defaultTenant = defaultTenant;
-	state int round = 0;
-	TraceEvent("ConsistencyChecker_RunUrgentStart").detail("ConsistencyCheckerId", consistencyCheckerId);
-
-	// Load ranges to check from progress metadata
-	state std::vector<KeyRange> rangesToCheck;
-	wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
-	if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE_FORCE_INIT || rangesToCheck.size() == 0) {
-		// If force to start with blank or no range to check in progress data
-		// We load the range from knob
-		rangesToCheck = loadRangesToCheckFromKnob();
-		TraceEvent e("ConsistencyChecker_RunUrgentStart");
-		e.setMaxEventLength(-1);
-		e.setMaxFieldLength(-1);
-		e.detail("ConsistencyCheckerId", consistencyCheckerId);
-		for (int i = 0; i < rangesToCheck.size(); i++) {
-			e.detail("RangeToCheckBegin" + std::to_string(i), rangesToCheck[i].begin);
-			e.detail("RangeToCheckEnd" + std::to_string(i), rangesToCheck[i].end);
-		}
-		wait(initConsistencyCheckMetadata(cx, rangesToCheck, consistencyCheckerId));
-	} else {
-		TraceEvent("ConsistencyChecker_RunUrgentResume")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("WorkerCount", workers.size())
-		    .detail("RangesToCheckCount", rangesToCheck.size());
-	}
-
-	TraceEvent("ConsistencyChecker_RunUrgentInitialized").detail("ConsistencyCheckerId", consistencyCheckerId);
-
-	loop {
-		// Recruit workers
-		state int flags = GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
-		state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
-		state std::vector<WorkerDetails> workers;
-		loop {
-			choose {
-				when(std::vector<WorkerDetails> w =
-				         wait(cc->get().present()
-				                  ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
-				                  : Never())) {
-					if (w.size() >= minTestersExpected) {
-						workers = w;
-						break;
-					}
-					wait(delay(SERVER_KNOBS->WORKER_POLL_DELAY));
-				}
-				when(wait(cc->onChange())) {}
-				when(wait(testerTimeout)) {
-					TraceEvent(SevError, "TesterRecruitmentTimeout").log();
-					throw timed_out();
-				}
-			}
-		}
-		TraceEvent("ConsistencyChecker_RunUrgentGotWorkers")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("Round", round)
-		    .detail("WorkerCount", workers.size());
-		state std::vector<TesterInterface> ts;
-		ts.reserve(workers.size());
-		for (int i = 0; i < workers.size(); i++)
-			ts.push_back(workers[i].interf.testerInterface);
-
-		// Load shards to check from keyserver space
-		state std::vector<KeyRange> shardsToCheck = wait(getConsistencyCheckShards(cx, rangesToCheck));
-		TraceEvent("ConsistencyChecker_RunUrgentGotShardsToCheck")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("Round", round)
-		    .detail("WorkerCount", workers.size())
-		    .detail("ShardCount", shardsToCheck.size());
-		// Assign shards to workers
-		state std::unordered_map<int, std::vector<KeyRange>> assignment;
-		int batchSize = shardsToCheck.size() / workers.size() + 1;
-		for (int i = 0; i < shardsToCheck.size(); i++) {
-			assignment[i / batchSize].push_back(shardsToCheck[i]);
-		}
-		state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
-		for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
-			if (assignIt->second.size() == 0) {
-				TraceEvent("ConsistencyCheck_ClientAssignedNoTask")
-				    .detail("ConsistencyCheckerId", consistencyCheckerId)
-				    .detail("ClientId", assignIt->first);
-				continue;
-			}
-			wait(persistConsistencyCheckAssignment(cx, assignIt->first, assignIt->second));
-		}
-		TraceEvent e("ConsistencyChecker_RunUrgentPersistAssignment");
-		e.detail("ConsistencyCheckerId", consistencyCheckerId);
-		e.detail("Round", round);
-		e.detail("WorkerCount", workers.size());
-		e.detail("ShardCountTotal", shardsToCheck.size());
-		for (const auto& [clientId, assignedShards] : assignment) {
-			e.detail("Client" + std::to_string(clientId), assignedShards.size());
-		}
-		// Run tests and wait for tester complete/fail
-		wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant));
-		TraceEvent("ConsistencyChecker_RunUrgentRoundComplete")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("Round", round);
-		round++;
-
-		// Load progress metadata. If no unfinished range, exit; otherwise, continue
-		rangesToCheck.clear();
-		wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
-		if (rangesToCheck.size() == 0) {
-			TraceEvent("ConsistencyChecker_RunUrgentComplete")
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("Round", round);
-			break;
-		} else {
-			TraceEvent("ConsistencyChecker_RunUrgentContinue")
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("Round", round)
-			    .detail("RangesToCheckCount", rangesToCheck.size());
-		}
-	}
-	return Void();
-}
-
 /**
  * \brief Set up testing environment and run the given tests on a cluster.
  *
@@ -1929,28 +2054,27 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(reportErrors(monitorLeader(connRecord, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
-	state uint64_t consistencyCheckerId = 0;
+	state int64_t consistencyCheckerId = 0;
 
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK_URGENT) {
-		while (consistencyCheckerId == 0)
-			consistencyCheckerId = deterministicRandom()->randomUInt64();
+		consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 		// consistencyCheckerId must be not 0, indicating this is in urgent mode of consistency checker
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
-		spec.title = LiteralStringRef("ConsistencyCheckUrgent");
+		spec.title = LiteralStringRef("ConsistencyCheck");
 		spec.databasePingDelay = 0;
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
 		spec.waitForQuiescenceEnd = false;
 		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
 		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheckUrgent")));
-		options.push_back_deep(
-		    options.arena(),
-		    KeyValueRef(LiteralStringRef("consistencyCheckerId"), StringRef(std::to_string(consistencyCheckerId))));
+		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("true")));
+		options.push_back_deep(
+		    options.arena(),
+		    KeyValueRef(LiteralStringRef("distributed"),
+		                LiteralStringRef("false"))); // The distribution mechanism does not rely on this flag
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("false")));
@@ -1970,9 +2094,6 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
-		options.push_back_deep(
-		    options.arena(),
-		    KeyValueRef(LiteralStringRef("consistencyCheckerId"), StringRef(std::to_string(consistencyCheckerId))));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
 		options.push_back_deep(options.arena(),
@@ -2030,15 +2151,19 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(testSet.overrideKnobs);
 	Future<Void> tests;
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK_URGENT) {
-		tests = reportErrors(runConsistencyCheckerUrgent(cc,
-		                                                 ci,
-		                                                 testSet.testSpecs,
-		                                                 minTestersExpected,
-		                                                 startingConfiguration,
-		                                                 locality,
-		                                                 defaultTenant,
-		                                                 consistencyCheckerId),
-		                     "runConsistencyCheckerUrgent");
+		state Database cx;
+		state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
+		state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
+		cx = openDBOnServer(dbInfo);
+		cx->defaultTenant = defaultTenant;
+		tests = reportErrors(runConsistencyCheckerUrgentCore(cc,
+		                                                     cx,
+		                                                     Optional<std::vector<TesterInterface>>(),
+		                                                     minTestersExpected,
+		                                                     testSet.testSpecs[0],
+		                                                     defaultTenant,
+		                                                     consistencyCheckerId),
+		                     "runConsistencyCheckerUrgentCore");
 	} else if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);

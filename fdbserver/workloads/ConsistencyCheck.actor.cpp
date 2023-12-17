@@ -97,7 +97,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	Future<Void> monitorConsistencyCheckSettingsActor;
 
-	uint64_t consistencyCheckerId;
+	int64_t consistencyCheckerId;
 
 	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		performQuiescentChecks = getOption(options, LiteralStringRef("performQuiescentChecks"), false);
@@ -110,7 +110,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
-		consistencyCheckerId = getOption(options, LiteralStringRef("consistencyCheckerId"), (uint64_t)0);
+		consistencyCheckerId = sharedRandomNumber;
 		suspendConsistencyCheck.set(true);
 
 		success = true;
@@ -1975,6 +1975,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						} catch (Error& e) {
 							if (e.code() == error_code_key_not_found ||
 							    e.code() == error_code_consistency_check_task_outdated) {
+								TraceEvent(SevInfo, "Zhe").errorUnsuppressed(e);
 								return testResult;
 							} else {
 								throw e;

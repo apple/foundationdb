@@ -115,6 +115,25 @@ ACTOR Future<Void> initConsistencyCheckMetadata(Database cx,
 	return Void();
 }
 
+ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.clear(consistencyCheckAssignmentKeys);
+			tr.clear(consistencyCheckProgressKeys);
+			tr.clear(consistencyCheckerIdKey);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e) && delay(10.0));
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx) {
 	state std::vector<KeyRange> res;
 	state Transaction tr(cx);
