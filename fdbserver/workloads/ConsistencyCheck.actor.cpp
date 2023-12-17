@@ -112,6 +112,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
 		consistencyCheckerId = sharedRandomNumber;
 		suspendConsistencyCheck.set(true);
+		TraceEvent("ConsistencyCheck_WorkloadReceived").detail("ClientCount", clientCount).detail("ClientId", clientId);
 
 		success = true;
 
@@ -148,7 +149,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		TraceEvent("ConsistencyCheck").log();
-		return _start(cx, this);
+		if (consistencyCheckerId != 0) { // consistencyCheckerId is set when urgent mode
+			return _startUrgent(cx, this);
+		} else {
+			return _start(cx, this);
+		}
 	}
 
 	Future<bool> check(Database const& cx) override { return success; }
@@ -188,38 +193,62 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> _startUrgent(Database cx, ConsistencyCheckWorkload* self) {
+		TraceEvent("ConsistencyCheck_Start")
+		    .detail("Mode", "Urgent")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+		    .detail("Distributed", self->distributed)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId)
+		    .detail("Indefinite", self->indefinite)
+		    .detail("Repetitions", self->repetitions);
+		wait(self->runCheck(cx, self));
+		TraceEvent("ConsistencyCheck_Exit")
+		    .detail("Mode", "Urgent")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+		    .detail("Distributed", self->distributed)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId)
+		    .detail("Indefinite", self->indefinite)
+		    .detail("Repetitions", self->repetitions);
+		return Void();
+	}
+
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Suspended")
+				    .detail("Mode", "Normal")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("Distributed", self->distributed)
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId)
 				    .detail("Indefinite", self->indefinite)
-				    .detail("Repetitions", self->repetitions);
+				    .detail("Repetitions", self->repetitions)
+				    .detail("SuspendConsistencyCheck", self->suspendConsistencyCheck.get());
 				wait(self->suspendConsistencyCheck.onChange());
 			}
 			TraceEvent("ConsistencyCheck_StartingOrResuming")
+			    .detail("Mode", "Normal")
 			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("Distributed", self->distributed)
 			    .detail("ClientCount", self->clientCount)
 			    .detail("ClientId", self->clientId)
 			    .detail("Indefinite", self->indefinite)
-			    .detail("Repetitions", self->repetitions);
+			    .detail("Repetitions", self->repetitions)
+			    .detail("SuspendConsistencyCheck", self->suspendConsistencyCheck.get());
 			choose {
 				when(wait(self->runCheck(cx, self))) {
-					if (!self->indefinite ||
-					    (self->consistencyCheckerId != 0)) { // self->consistencyCheckerId != 0 when urgent mode
-						// When consistency checker is distributed, repeated running
-						// can miss ranges, so we exit here
+					if (!self->indefinite) {
 						TraceEvent("ConsistencyCheck_Exit")
+						    .detail("Mode", "Normal")
 						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 						    .detail("Distributed", self->distributed)
 						    .detail("ClientCount", self->clientCount)
 						    .detail("ClientId", self->clientId)
 						    .detail("Indefinite", self->indefinite)
-						    .detail("Repetitions", self->repetitions);
+						    .detail("Repetitions", self->repetitions)
+						    .detail("SuspendConsistencyCheck", self->suspendConsistencyCheck.get());
 						break;
 					}
 					self->repetitions++;
@@ -245,7 +274,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		TEST(self->performQuiescentChecks); // Quiescent consistency check
 		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
 
-		if (self->firstClient || self->distributed) {
+		if (self->firstClient || self->distributed || self->consistencyCheckerId != 0) {
 			try {
 				state DatabaseConfiguration configuration;
 				state std::map<UID, StorageServerInterface> tssMapping;

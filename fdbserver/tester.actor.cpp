@@ -1219,7 +1219,6 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		TraceEvent("ConsistencyCheckUrgent_RoundComplete")
 		    .detail("ConsistencyCheckerId", consistencyCheckerId)
 		    .detail("Round", round);
-		round++;
 
 		// Load progress metadata. If no unfinished range, exit; otherwise, continue
 		rangesToCheck.clear();
@@ -1238,6 +1237,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RangesToCheckCount", rangesToCheck.size());
+			round++;
 		}
 	}
 	return Void();
