@@ -1013,7 +1013,7 @@ public:
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
-	std::deque<MutationRef> constructedData;
+	std::deque<std::pair<Standalone<StringRef>, Standalone<StringRef>>> constructedData;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -10857,19 +10857,34 @@ private:
 				}
 			}
 		} else if (m.param1.substr(1).startsWith(constructDataKey)) {
-			MutationRef constructedMutation;
-			constructedMutation.type = MutationRef::SetValue;
-			TraceEvent("DANCONSTRUCTSS2").detail("S", constructedMutation.param1.size());
-			std::tuple<uint64_t, uint64_t, uint64_t> t = decodeConstructKeys(m.param1.substr(1));
-			uint64_t first_element, second_element, third_element;
-			std::tie(first_element, second_element, third_element) = t;
-			constructedMutation.param1 = "\xbf/constructData/"_sr; // encodeConstructKeys(first_element);
-			constructedMutation.param2 = encodeConstructValue(23);
-			data->constructedData.push_back(constructedMutation);
+			std::tuple<Standalone<StringRef>, uint64_t, uint64_t> t = decodeConstructKeys(m.param2);
+			std::pair<Standalone<StringRef>, Standalone<StringRef>> m;
+			uint64_t second_element, third_element;
+			std::tie(m.first, second_element, third_element) = t;
+			// constructedMutation.param1 = first_element;
+			m.second = "23"_sr; // ;//encodeConstructValue(23);
+			data->constructedData.push_back(m);
 			TraceEvent("DANCONSTRUCTSS")
-			    .detail("F1", first_element)
+			    .detail("F1", data->constructedData.front().first)
 			    .detail("F2", second_element)
 			    .detail("F3", third_element);
+			//              int seed=0; // from constructData
+			//              for (int key=0; key<numKeys; key++) {
+			//                      MutationRef constructedMutation;
+			//                      constructedMutation.type = MutationRef::SetValue;
+			//                      constructedMutation.param1 = "\xbf/constructData/"_sr;
+			//                      // append 'key' to param1
+			//                      for (int v=0; v < sizeValue; v++) {
+			//                              // append random char to param2
+			//                              const char *param2_value = "23";
+			//                              constructedMutation.param2 = param2_value;
+			//                      }
+			//                      data->constructedData.push_back(constructedMutation);
+			//                      TraceEvent("DANCONSTRUCTSS")
+			//                              .detail("F1", firstKey)
+			//                              .detail("F2", sizeValue)
+			//                              .detail("F3", numKeys);
+			//              }
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11350,7 +11365,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 
 					if (data->constructedData.size()) {
-						MutationRef constructedMutation = data->constructedData.front();
+						MutationRef constructedMutation;
+						constructedMutation.type = MutationRef::SetValue;
+						constructedMutation.param1 = data->constructedData.front().first;
+						constructedMutation.param2 = data->constructedData.front().second;
 						TraceEvent("DANPULL").detail("T", constructedMutation.param1);
 						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
 						data->constructedData.pop_front();

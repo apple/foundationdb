@@ -1341,26 +1341,22 @@ Key uidPrefixKey(KeyRef keyPrefix, UID logUid) {
 	return bw.toValue();
 }
 
-std::tuple<uint64_t, uint64_t, uint64_t> decodeConstructKeys(KeyRef keyValue) {
-	uint64_t start, stop, length;
-	BinaryReader rd(keyValue.removePrefix(constructDataKey), Unversioned());
-	rd >> start;
-	start = stop = length = 0;
-	rd >> stop;
-	rd >> length;
-	return std::make_tuple(start, stop, length);
+std::tuple<Standalone<StringRef>, uint64_t, uint64_t> decodeConstructKeys(ValueRef value) {
+	StringRef keyStart;
+	uint64_t keySize, keyCount;
+	BinaryReader rd(value, Unversioned());
+	rd >> keyStart;
+	rd >> keySize;
+	rd >> keyCount;
+	return std::make_tuple(keyStart, keySize, keyCount);
 }
 
-Value encodeConstructKeys(uint64_t keyNum) {
+Value encodeConstructValue(StringRef keyStart, uint64_t keySize, uint64_t keyCount, uint64_t seed) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes("\xbf/constructData/"_sr);
-	wr << bigEndian64(keyNum);
-	return wr.toValue();
-}
-
-Value encodeConstructValue(uint64_t seed) {
-	BinaryWriter wr(Unversioned());
-	wr << bigEndian64(seed);
+	wr << keyStart;
+	wr << keySize;
+	wr << keyCount;
+	//	wr << seed;
 	return wr.toValue();
 }
 
