@@ -1877,6 +1877,23 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								}
 
 							} else {
+								if (!rangeResult.present()) {
+									TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+									    .suppressFor(1.0)
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
+									    .detail("Reason", "rangeResultNotPresent")
+									    .detail("IsTSS", storageServerInterfaces[j].isTss())
+									    .detail("SSID", storageServerInterfaces[j].id());
+								} else if (rangeResult.get().error.present()) {
+									TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+									    .suppressFor(1.0)
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
+									    .detail("Reason", rangeResult.get().error.get().what())
+									    .detail("IsTSS", storageServerInterfaces[j].isTss())
+									    .detail("SSID", storageServerInterfaces[j].id());
+								}
 								completeCheck = false;
 								if (self->consistencyCheckerId != 0) {
 									break; // Will retry later
@@ -2160,12 +2177,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			state KeyRangeMap<bool>::Ranges failedRangesList = failedRanges.ranges();
 			state KeyRangeMap<bool>::iterator failedRangesIter = failedRangesList.begin();
 			for (; failedRangesIter != failedRangesList.end(); ++failedRangesIter) {
-				if (failedRangesIter->value() == false) {
-					continue; // No failure, so bypass the range
+				if (failedRangesIter->value()) {
+					failedRangesToCheck.push_back(failedRangesIter->range());
 				}
-				failedRangesToCheck.push_back(failedRangesIter->range());
 			}
-			if (failedRangesToCheck.size() > 0) {
+			if (failedRangesToCheck.size() > 0) { // Retry for any failed shard
 				wait(delay(60.0)); // Backoff 1 min
 				state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForFailedRanges =
 				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck, self));
@@ -2186,28 +2202,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					                                          tssMapping,
 					                                          self,
 					                                          consistencyCheckEpoch + 1)));
-				} else {
-					// We give up retrying when retry too many times
-					for (const auto& missedRange : shardLocationPairListForFailedRanges) {
-						TraceEvent(SevWarnAlways, "ConsistencyCheck_MissingRange")
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-						    .detail("Reason", "MaxRetryDepthReached")
-						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-						    .detail("Distributed", self->distributed)
-						    .detail("ShardCount", ranges.size())
-						    .detail("ClientId", self->clientId)
-						    .detail("ClientCount", self->clientCount)
-						    .detail("BeginKey", printable(missedRange.first.begin))
-						    .detail("EndKey", printable(missedRange.first.end));
-					}
-					if (g_network->isSimulated()) {
-						self->testFailure("Retry too many times");
-						return false;
-					}
 				}
-			} // Otherwise, no failure, we are good to go
+				// We give up retrying when retry too many times
+				// The failed ranges will be picked up by the next round
+			}
 		}
 
 		// SOMEDAY: when background data distribution is implemented, include this test

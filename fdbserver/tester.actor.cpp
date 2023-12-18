@@ -1138,7 +1138,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    int minTestersExpected,
                                                    TestSpec testSpec,
                                                    Optional<TenantName> defaultTenant,
-                                                   int64_t consistencyCheckerId) {
+                                                   int64_t consistencyCheckerId,
+                                                   Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state int round = 0;
 	// Load ranges to check from progress metadata
 	state std::vector<KeyRange> rangesToCheck;
@@ -1189,8 +1190,15 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		// Assign shards to testers
 		wait(clearConsistencyCheckAssignment(cx)); // Clear existing assignment
 		state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
-		int batchSize = shardsToCheck.size() / ts.size() + 1;
-		for (int i = 0; i < shardsToCheck.size(); i++) {
+		int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
+		int64_t startingPoint = 0;
+		if (shardsToCheck.size() > batchSize * ts.size()) {
+			startingPoint = deterministicRandom()->randomInt64(0, shardsToCheck.size() - batchSize * ts.size());
+		}
+		for (int i = startingPoint; i < shardsToCheck.size(); i++) {
+			if (i / batchSize > ts.size() - 1) {
+				break; // Fill up all testers
+			}
 			assignment[i / batchSize].push_back(shardsToCheck[i]);
 		}
 		state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
@@ -1239,6 +1247,10 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RangesToCheckCount", rangesToCheck.size());
+			if (g_network->isSimulated()) {
+				TraceEvent("ConsistencyCheckUrgent_RepairDC");
+				wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+			}
 			round++;
 		}
 	}
@@ -1275,7 +1287,8 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 			                                     1,
 			                                     spec,
 			                                     Optional<TenantName>(),
-			                                     consistencyCheckerId));
+			                                     consistencyCheckerId,
+			                                     dbInfo));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -2164,7 +2177,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		                                                     minTestersExpected,
 		                                                     testSet.testSpecs[0],
 		                                                     defaultTenant,
-		                                                     consistencyCheckerId),
+		                                                     consistencyCheckerId,
+		                                                     dbInfo),
 		                     "runConsistencyCheckerUrgentCore");
 	} else if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
