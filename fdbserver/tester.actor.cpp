@@ -1148,7 +1148,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		wait(clearConsistencyCheckMetadata(cx));
 		TraceEvent("ConsistencyCheckUrgent_InitMetadataCleared").log();
 	}
-	state int round = 0;
+
+	// Init
 	// Load ranges to check from progress metadata
 	state std::vector<KeyRange> rangesToCheck;
 	wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
@@ -1174,116 +1175,144 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		TraceEvent("ConsistencyCheckUrgent_Resume").detail("RangesToCheckCount", rangesToCheck.size());
 	}
 
-	state std::vector<TesterInterface> ts;
+	// Main loop
+	state int retryTimes = 0;
+	state int round = 0;
+	state int64_t consistencyCheckerId;
 	loop {
-		// Decide consistencyCheckerId -- each assignment corresponds to a unique consistencyCheckerId
-		state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
-
-		// Get testers
-		ts.clear();
-		if (!testers.present()) {
-			wait(store(ts, getTesters(cc, minTestersExpected)));
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-				throw operation_failed(); // Introduce random failure
-			}
-		} else {
-			ts = testers.get();
-		}
-		TraceEvent("ConsistencyCheckUrgent_GoTTesters")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("Round", round)
-		    .detail("TesterCount", ts.size());
-
-		// Load shards to check from keyserver space
-		state std::vector<KeyRange> shardsToCheck = wait(getConsistencyCheckShards(cx, rangesToCheck));
-		TraceEvent("ConsistencyCheckUrgent_GotShardsToCheck")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("Round", round)
-		    .detail("TesterCount", ts.size())
-		    .detail("ShardCount", shardsToCheck.size())
-		    .detail("RangesToCheck", describe(rangesToCheck))
-		    .detail("Shards", describe(shardsToCheck));
-
-		// Assign shards to testers
-		wait(initConsistencyCheckAssignmentMetadata(cx, consistencyCheckerId));
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-			throw operation_failed(); // Introduce random failure
-		}
-		state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
-		int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
-		int startingPoint = 0;
-		if (shardsToCheck.size() > batchSize * ts.size()) {
-			startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * ts.size());
-		}
-		for (int i = startingPoint; i < shardsToCheck.size(); i++) {
-			int testerIdx = (i - startingPoint) / batchSize;
-			if (testerIdx > ts.size() - 1) {
-				break; // Filled up all testers
-			}
-			assignment[testerIdx].push_back(shardsToCheck[i]);
-		}
-		state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
-		for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
-			TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("ClientId", assignIt->first)
-			    .detail("ShardsCount", assignIt->second.size())
-			    .detail("Shards", describe(assignIt->second));
-			wait(persistConsistencyCheckAssignment(
-			    cx, assignIt->first, assignIt->second, consistencyCheckerId)); // Persist assignment
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-				throw operation_failed(); // Introduce random failure
-			}
-		}
-		TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
-		e.detail("ConsistencyCheckerId", consistencyCheckerId);
-		e.detail("Round", round);
-		e.detail("TesterCount", ts.size());
-		e.detail("ShardCountTotal", shardsToCheck.size());
-		for (const auto& [clientId, assignedShards] : assignment) {
-			e.detail("Client" + std::to_string(clientId), assignedShards.size());
-		}
-
-		// Run test and wait for testers complete/fail
 		try {
-			wait(dispatchMonitorUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId));
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-		}
-		TraceEvent("ConsistencyCheckUrgent_RoundComplete")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("Round", round);
-
-		// Load progress metadata. If no unfinished range, exit; otherwise, continue
-		rangesToCheck.clear();
-		wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-			throw operation_failed(); // Introduce random failure
-		}
-		if (rangesToCheck.size() == 0) {
-			TraceEvent("ConsistencyCheckUrgent_Complete")
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("Round", round);
-			wait(clearConsistencyCheckMetadata(cx));
+			// Load ranges to check
+			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
-			TraceEvent("ConsistencyCheckUrgent_MetadataCleared")
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("Round", round);
-			break;
-		} else {
-			TraceEvent("ConsistencyCheckUrgent_Continue")
+
+			// Decide consistencyCheckerId -- each assignment corresponds to a unique consistencyCheckerId
+			consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+
+			// Get testers
+			state std::vector<TesterInterface> ts;
+			if (!testers.present()) {
+				wait(store(ts, getTesters(cc, minTestersExpected)));
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+					throw operation_failed(); // Introduce random failure
+				}
+			} else {
+				ts = testers.get();
+			}
+			TraceEvent("ConsistencyCheckUrgent_GoTTesters")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
-			    .detail("RangesToCheckCount", rangesToCheck.size());
-			if (g_network->isSimulated()) {
-				TraceEvent("ConsistencyCheckUrgent_RepairDC");
-				wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+			    .detail("RetryTimes", retryTimes)
+			    .detail("TesterCount", ts.size());
+
+			// Load shards to check from keyserver space
+			state std::vector<KeyRange> shardsToCheck = wait(getConsistencyCheckShards(cx, rangesToCheck));
+			TraceEvent("ConsistencyCheckUrgent_GotShardsToCheck")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("Round", round)
+			    .detail("RetryTimes", retryTimes)
+			    .detail("TesterCount", ts.size())
+			    .detail("ShardCount", shardsToCheck.size())
+			    .detail("RangesToCheck", describe(rangesToCheck))
+			    .detail("Shards", describe(shardsToCheck));
+
+			// Assign shards to testers
+			wait(initConsistencyCheckAssignmentMetadata(cx, consistencyCheckerId));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
 			}
-			round++;
+			state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
+			int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
+			int startingPoint = 0;
+			if (shardsToCheck.size() > batchSize * ts.size()) {
+				startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * ts.size());
+			}
+			for (int i = startingPoint; i < shardsToCheck.size(); i++) {
+				int testerIdx = (i - startingPoint) / batchSize;
+				if (testerIdx > ts.size() - 1) {
+					break; // Filled up all testers
+				}
+				assignment[testerIdx].push_back(shardsToCheck[i]);
+			}
+			state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
+			for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
+				TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round)
+				    .detail("ClientId", assignIt->first)
+				    .detail("ShardsCount", assignIt->second.size())
+				    .detail("Shards", describe(assignIt->second));
+				wait(persistConsistencyCheckAssignment(
+				    cx, assignIt->first, assignIt->second, consistencyCheckerId)); // Persist assignment
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+					throw operation_failed(); // Introduce random failure
+				}
+			}
+			TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
+			e.detail("ConsistencyCheckerId", consistencyCheckerId);
+			e.detail("Round", round);
+			e.detail("RetryTimes", retryTimes);
+			e.detail("TesterCount", ts.size());
+			e.detail("ShardCountTotal", shardsToCheck.size());
+			for (const auto& [clientId, assignedShards] : assignment) {
+				e.detail("Client" + std::to_string(clientId), assignedShards.size());
+			}
+
+			// Run test and wait for testers complete/fail
+			wait(dispatchMonitorUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
+			TraceEvent("ConsistencyCheckUrgent_RoundWorkloadComplete")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("RetryTimes", retryTimes)
+			    .detail("Round", round);
+
+			// Load progress metadata. If no unfinished range, exit; otherwise, continue
+			rangesToCheck.clear();
+			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
+			if (rangesToCheck.size() == 0) {
+				TraceEvent("ConsistencyCheckUrgent_Complete")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				wait(clearConsistencyCheckMetadata(cx));
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+					throw operation_failed(); // Introduce random failure
+				}
+				TraceEvent("ConsistencyCheckUrgent_MetadataCleared")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				break;
+			} else {
+				TraceEvent("ConsistencyCheckUrgent_Continue")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round)
+				    .detail("RangesToCheckCount", rangesToCheck.size());
+				if (g_network->isSimulated()) {
+					TraceEvent("ConsistencyCheckUrgent_RepairDC");
+					wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+				}
+				round++;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent("ConsistencyCheckUrgent_RetriableFailure")
+			    .errorUnsuppressed(e)
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("RetryTimes", retryTimes)
+			    .detail("Round", round);
+			wait(delay(10.0));
+			retryTimes++;
 		}
 	}
 	return Void();
@@ -1299,6 +1328,7 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
 	spec.timeout = 32000;
+	spec.phases = TestWorkload::SETUP | TestWorkload::EXECUTION;
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(),
@@ -2112,6 +2142,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
 		spec.waitForQuiescenceEnd = false;
+		spec.phases = TestWorkload::SETUP | TestWorkload::EXECUTION;
 		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
