@@ -1468,6 +1468,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				} catch (Error& e) {
 					if (e.code() == error_code_key_not_found ||
 					    e.code() == error_code_consistency_check_task_outdated) {
+						TraceEvent(SevWarn, "ConsistencyCheckUrgent_ExitChecking")
+						    .error(e)
+						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+						    .detail("ClientId", self->clientId)
+						    .detail("ClientCount", self->clientCount)
+						    .detail("ShardCount", shardLocationPairList.size())
+						    .detail("NumCompletedShards", numCompleteShards)
+						    .detail("NumFailedShards", numFailedShards)
+						    .detail("NumShardThisClient", numShardThisClient)
+						    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
+						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 						return Void();
 					} else {
 						throw e;
@@ -1481,6 +1492,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				} catch (Error& e) {
 					if (e.code() == error_code_key_not_found ||
 					    e.code() == error_code_consistency_check_task_outdated) {
+						TraceEvent(SevWarn, "ConsistencyCheckUrgent_ExitChecking")
+						    .error(e)
+						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+						    .detail("ClientId", self->clientId)
+						    .detail("ClientCount", self->clientCount)
+						    .detail("ShardCount", shardLocationPairList.size())
+						    .detail("NumCompletedShards", numCompleteShards)
+						    .detail("NumFailedShards", numFailedShards)
+						    .detail("NumShardThisClient", numShardThisClient)
+						    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
+						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 						return Void();
 					} else {
 						throw e;
@@ -1723,6 +1745,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				} catch (Error& e) {
 					if (e.code() == error_code_key_not_found ||
 					    e.code() == error_code_consistency_check_task_outdated) {
+						TraceEvent(SevWarn, "ConsistencyCheckUrgent_ExitChecking")
+						    .error(e)
+						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+						    .detail("ClientId", self->clientId)
+						    .detail("ClientCount", self->clientCount)
+						    .detail("ShardCount", shardLocationPairList.size())
+						    .detail("NumCompletedShards", numCompleteShards)
+						    .detail("NumFailedShards", numFailedShards)
+						    .detail("NumShardThisClient", numShardThisClient)
+						    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
+						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 						return Void();
 					} else {
 						throw e;
