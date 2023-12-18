@@ -1187,7 +1187,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		    .detail("RangesToCheck", describe(rangesToCheck))
 		    .detail("Shards", describe(shardsToCheck));
 		// Assign shards to testers
-		state std::unordered_map<int, std::vector<KeyRange>> assignment;
+		wait(clearConsistencyCheckAssignment(cx)); // Clear existing assignment
+		state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
 		int batchSize = shardsToCheck.size() / ts.size() + 1;
 		for (int i = 0; i < shardsToCheck.size(); i++) {
 			assignment[i / batchSize].push_back(shardsToCheck[i]);
@@ -1197,8 +1198,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("ClientId", assignIt->first)
-			    .detail("Shards", assignIt->second.size());
-			wait(persistConsistencyCheckAssignment(cx, assignIt->first, assignIt->second));
+			    .detail("ShardsCount", assignIt->second.size())
+			    .detail("Shards", describe(assignIt->second));
+			wait(persistConsistencyCheckAssignment(cx, assignIt->first, assignIt->second)); // Persist assignment
 		}
 		TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
 		e.detail("ConsistencyCheckerId", consistencyCheckerId);

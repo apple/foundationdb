@@ -42,6 +42,8 @@ ACTOR Future<Void> initConsistencyCheckMetadata(Database cx,
 
 ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx);
 
+ACTOR Future<Void> clearConsistencyCheckAssignment(Database cx);
+
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx);
 
 ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx, int clientId, std::vector<KeyRange> assignedRanges);

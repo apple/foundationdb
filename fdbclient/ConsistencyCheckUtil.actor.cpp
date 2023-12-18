@@ -44,11 +44,14 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Data
 					ConsistencyCheckState ccState = decodeConsistencyCheckerStateValue(res_[i].value);
 					if (ccState.getAssignment() == ConsistencyCheckAssignment::Assigned) {
 						res.push_back(currentRange);
+						TraceEvent("Zhe").detail("CurrentRange", currentRange);
 					}
 				}
 				rangeToReadBegin = res_[i + 1].key;
 			}
-			break;
+			if (rangeToReadBegin >= rangeToReadEnd) {
+				break;
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -74,6 +77,9 @@ ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, 
 			                 range,
 			                 consistencyCheckerStateValue(ConsistencyCheckState(ConsistencyCheckPhase::Complete))));
 			wait(tr.commit());
+			TraceEvent("ConsistencyCheckUrgent_PersistProgress")
+			    .detail("Range", range)
+			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -134,6 +140,23 @@ ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx) {
 	return Void();
 }
 
+ACTOR Future<Void> clearConsistencyCheckAssignment(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.clear(consistencyCheckAssignmentKeys);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e) && delay(10.0));
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx) {
 	state std::vector<KeyRange> res;
 	state Transaction tr(cx);
@@ -160,7 +183,9 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Databa
 				}
 				rangeToReadBegin = res_[i + 1].key;
 			}
-			break;
+			if (rangeToReadBegin >= rangeToReadEnd) {
+				break;
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -182,6 +207,9 @@ ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx, int clientId, 
 			}
 			assignedRangesMap.coalesce(allKeys);
 			for (auto& assignedRange : assignedRangesMap.ranges()) {
+				if (assignedRange.value() == false) {
+					continue;
+				}
 				fs.push_back(krmSetRange(
 				    &tr,
 				    consistencyCheckAssignmentPrefixFor(clientId),
