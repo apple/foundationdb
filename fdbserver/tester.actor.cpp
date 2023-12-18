@@ -1138,7 +1138,6 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    int minTestersExpected,
                                                    TestSpec testSpec,
                                                    Optional<TenantName> defaultTenant,
-                                                   int64_t consistencyCheckerId,
                                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA_EXIT) {
 		wait(clearConsistencyCheckMetadata(cx));
@@ -1160,28 +1159,27 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		// If no range to check in progress data
 		// We load the range from knob
 		rangesToCheck = loadRangesToCheckFromKnob();
+		wait(initConsistencyCheckProgressMetadata(cx, rangesToCheck));
+		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+			throw operation_failed(); // Introduce random failure
+		}
 		TraceEvent e("ConsistencyCheckUrgent_Start");
 		e.setMaxEventLength(-1);
 		e.setMaxFieldLength(-1);
-		e.detail("ConsistencyCheckerId", consistencyCheckerId);
 		for (int i = 0; i < rangesToCheck.size(); i++) {
 			e.detail("RangeToCheckBegin" + std::to_string(i), rangesToCheck[i].begin);
 			e.detail("RangeToCheckEnd" + std::to_string(i), rangesToCheck[i].end);
 		}
-		wait(initConsistencyCheckMetadata(cx, rangesToCheck, consistencyCheckerId));
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-			throw operation_failed(); // Introduce random failure
-		}
 	} else {
-		TraceEvent("ConsistencyCheckUrgent_Resume")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId)
-		    .detail("RangesToCheckCount", rangesToCheck.size());
+		TraceEvent("ConsistencyCheckUrgent_Resume").detail("RangesToCheckCount", rangesToCheck.size());
 	}
-
-	TraceEvent("ConsistencyCheckUrgent_Initialized").detail("ConsistencyCheckerId", consistencyCheckerId);
 
 	state std::vector<TesterInterface> ts;
 	loop {
+		// Decide consistencyCheckerId -- each assignment corresponds to a unique consistencyCheckerId
+		state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+
+		// Get testers
 		ts.clear();
 		if (!testers.present()) {
 			wait(store(ts, getTesters(cc, minTestersExpected)));
@@ -1205,8 +1203,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		    .detail("ShardCount", shardsToCheck.size())
 		    .detail("RangesToCheck", describe(rangesToCheck))
 		    .detail("Shards", describe(shardsToCheck));
+
 		// Assign shards to testers
-		wait(clearConsistencyCheckAssignment(cx)); // Clear existing assignment
+		wait(initConsistencyCheckAssignmentMetadata(cx, consistencyCheckerId));
 		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 			throw operation_failed(); // Introduce random failure
 		}
@@ -1230,7 +1229,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("ClientId", assignIt->first)
 			    .detail("ShardsCount", assignIt->second.size())
 			    .detail("Shards", describe(assignIt->second));
-			wait(persistConsistencyCheckAssignment(cx, assignIt->first, assignIt->second)); // Persist assignment
+			wait(persistConsistencyCheckAssignment(
+			    cx, assignIt->first, assignIt->second, consistencyCheckerId)); // Persist assignment
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
@@ -1243,6 +1243,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		for (const auto& [clientId, assignedShards] : assignment) {
 			e.detail("Client" + std::to_string(clientId), assignedShards.size());
 		}
+
 		// Run test and wait for testers complete/fail
 		try {
 			wait(dispatchMonitorUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId));
@@ -1298,7 +1299,6 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
 	spec.timeout = 32000;
-	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 	options.push_back_deep(options.arena(),
@@ -1310,7 +1310,7 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("true")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 	loop {
-		TraceEvent("ConsistencyCheckUrgent_LoopBegin").detail("ConsistencyCheckerId", consistencyCheckerId);
+		TraceEvent("ConsistencyCheckUrgent_LoopBegin");
 		try {
 			wait(runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(),
 			                                     cx,
@@ -1318,7 +1318,6 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 			                                     1,
 			                                     spec,
 			                                     Optional<TenantName>(),
-			                                     consistencyCheckerId,
 			                                     dbInfo));
 			break;
 		} catch (Error& e) {
@@ -2103,10 +2102,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(reportErrors(monitorLeader(connRecord, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
-	state int64_t consistencyCheckerId = 0;
 
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK_URGENT) {
-		consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 		// consistencyCheckerId must be not 0, indicating this is in urgent mode of consistency checker
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
@@ -2211,7 +2208,6 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		                                                     minTestersExpected,
 		                                                     testSet.testSpecs[0],
 		                                                     defaultTenant,
-		                                                     consistencyCheckerId,
 		                                                     dbInfo),
 		                     "runConsistencyCheckerUrgentCore");
 	} else if (at == TEST_HERE) {

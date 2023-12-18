@@ -58,7 +58,7 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Data
 	return res;
 }
 
-ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, uint64_t consistencyCheckerId) {
+ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, int64_t consistencyCheckerId) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -87,9 +87,7 @@ ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, 
 	return Void();
 }
 
-ACTOR Future<Void> initConsistencyCheckMetadata(Database cx,
-                                                std::vector<KeyRange> rangesToCheck,
-                                                uint64_t consistencyCheckerId) {
+ACTOR Future<Void> initConsistencyCheckAssignmentMetadata(Database cx, int64_t consistencyCheckerId) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -97,6 +95,23 @@ ACTOR Future<Void> initConsistencyCheckMetadata(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.clear(consistencyCheckAssignmentKeys);
+			tr.set(consistencyCheckerIdKey, consistencyCheckerStateValue(ConsistencyCheckState(consistencyCheckerId)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e) && delay(10.0));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx, std::vector<KeyRange> rangesToCheck) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.clear(consistencyCheckProgressKeys);
 			wait(krmSetRange(&tr,
 			                 consistencyCheckProgressPrefix,
@@ -110,7 +125,6 @@ ACTOR Future<Void> initConsistencyCheckMetadata(Database cx,
 				                 consistencyCheckerStateValue(ConsistencyCheckState(
 				                     ConsistencyCheckPhase::Invalid)))); // Mark rangesToCheck as incomplete
 			}
-			tr.set(consistencyCheckerIdKey, consistencyCheckerStateValue(ConsistencyCheckState(consistencyCheckerId)));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -130,23 +144,6 @@ ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx) {
 			tr.clear(consistencyCheckAssignmentKeys);
 			tr.clear(consistencyCheckProgressKeys);
 			tr.clear(consistencyCheckerIdKey);
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e) && delay(10.0));
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> clearConsistencyCheckAssignment(Database cx) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.clear(consistencyCheckAssignmentKeys);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -192,13 +189,22 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Databa
 	return res;
 }
 
-ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx, int clientId, std::vector<KeyRange> assignedRanges) {
+ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx,
+                                                     int clientId,
+                                                     std::vector<KeyRange> assignedRanges,
+                                                     int64_t consistencyCheckerId) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> res_ = wait(tr.get(consistencyCheckerIdKey));
+			if (!res_.present()) {
+				throw key_not_found();
+			} else if (consistencyCheckerId != decodeConsistencyCheckerStateValue(res_.get()).consistencyCheckerId) {
+				throw consistency_check_task_outdated();
+			}
 			KeyRangeMap<bool> assignedRangesMap;
 			std::vector<Future<Void>> fs;
 			for (const auto& assignedRange : assignedRanges) {

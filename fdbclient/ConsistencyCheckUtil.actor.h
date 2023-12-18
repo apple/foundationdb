@@ -34,19 +34,19 @@
 
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Database cx, int clientId);
 
-ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, uint64_t consistencyCheckerId);
+ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, int64_t consistencyCheckerId);
 
-ACTOR Future<Void> initConsistencyCheckMetadata(Database cx,
-                                                std::vector<KeyRange> rangesToCheck,
-                                                uint64_t consistencyCheckerId);
+ACTOR Future<Void> initConsistencyCheckAssignmentMetadata(Database cx, int64_t consistencyCheckerId);
+ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx, std::vector<KeyRange> rangesToCheck);
 
 ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx);
 
-ACTOR Future<Void> clearConsistencyCheckAssignment(Database cx);
-
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx);
 
-ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx, int clientId, std::vector<KeyRange> assignedRanges);
+ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx,
+                                                     int clientId,
+                                                     std::vector<KeyRange> assignedRanges,
+                                                     int64_t consistencyCheckerId);
 
 std::vector<KeyRange> loadRangesToCheckFromKnob();
 
