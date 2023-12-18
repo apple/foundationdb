@@ -1513,7 +1513,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// Step 2: Get server interfaces
 			state std::vector<UID> storageServers = sourceStorageServers; // We check source server
-			TraceEvent("Zhe").detail("Size", storageServers.size());
 			state std::vector<StorageServerInterface> storageServerInterfaces;
 			retryCount = 0;
 			loop {
