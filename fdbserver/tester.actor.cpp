@@ -1144,6 +1144,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	// Load ranges to check from progress metadata
 	state std::vector<KeyRange> rangesToCheck;
 	wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+		throw operation_failed(); // Introduce random failure
+	}
 	if (rangesToCheck.size() == 0) {
 		// If no range to check in progress data
 		// We load the range from knob
@@ -1157,6 +1160,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			e.detail("RangeToCheckEnd" + std::to_string(i), rangesToCheck[i].end);
 		}
 		wait(initConsistencyCheckMetadata(cx, rangesToCheck, consistencyCheckerId));
+		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+			throw operation_failed(); // Introduce random failure
+		}
 	} else {
 		TraceEvent("ConsistencyCheckUrgent_Resume")
 		    .detail("ConsistencyCheckerId", consistencyCheckerId)
@@ -1170,6 +1176,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		ts.clear();
 		if (!testers.present()) {
 			wait(store(ts, getTesters(cc, minTestersExpected)));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
 		} else {
 			ts = testers.get();
 		}
@@ -1189,6 +1198,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		    .detail("Shards", describe(shardsToCheck));
 		// Assign shards to testers
 		wait(clearConsistencyCheckAssignment(cx)); // Clear existing assignment
+		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+			throw operation_failed(); // Introduce random failure
+		}
 		state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
 		int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
 		int64_t startingPoint = 0;
@@ -1209,6 +1221,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("ShardsCount", assignIt->second.size())
 			    .detail("Shards", describe(assignIt->second));
 			wait(persistConsistencyCheckAssignment(cx, assignIt->first, assignIt->second)); // Persist assignment
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
 		}
 		TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
 		e.detail("ConsistencyCheckerId", consistencyCheckerId);
@@ -1233,11 +1248,17 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		// Load progress metadata. If no unfinished range, exit; otherwise, continue
 		rangesToCheck.clear();
 		wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+			throw operation_failed(); // Introduce random failure
+		}
 		if (rangesToCheck.size() == 0) {
 			TraceEvent("ConsistencyCheckUrgent_Complete")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round);
 			wait(clearConsistencyCheckMetadata(cx));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
 			TraceEvent("ConsistencyCheckUrgent_MetadataCleared")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round);
@@ -1294,9 +1315,12 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
+			if (e.code() == error_code_operation_failed) {
+				continue;
+			}
+			TraceEvent("ConsistencyCheckUrgent_RepairDC");
+			wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
 		}
-		TraceEvent("ConsistencyCheckUrgent_RepairDC");
-		wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
 	}
 	return Void();
 }

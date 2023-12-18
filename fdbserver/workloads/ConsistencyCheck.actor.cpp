@@ -1583,7 +1583,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
-			if (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE || SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE) {
+			if (self->consistencyCheckerId == 0 &&
+			    (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE || SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE)) {
+				// We can skip for shard for engine only in normal consistency check where consistencyCheckerId is 0
 				std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
 				    wait(self->getStorageType(storageServerInterfaces));
 
