@@ -1140,6 +1140,15 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    Optional<TenantName> defaultTenant,
                                                    int64_t consistencyCheckerId,
                                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA_EXIT) {
+		wait(clearConsistencyCheckMetadata(cx));
+		TraceEvent("ConsistencyCheckUrgent_InitMetadataClearedExit").log();
+		return Void();
+	}
+	if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA) {
+		wait(clearConsistencyCheckMetadata(cx));
+		TraceEvent("ConsistencyCheckUrgent_InitMetadataCleared").log();
+	}
 	state int round = 0;
 	// Load ranges to check from progress metadata
 	state std::vector<KeyRange> rangesToCheck;
@@ -1203,15 +1212,16 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		}
 		state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
 		int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
-		int64_t startingPoint = 0;
+		int startingPoint = 0;
 		if (shardsToCheck.size() > batchSize * ts.size()) {
-			startingPoint = deterministicRandom()->randomInt64(0, shardsToCheck.size() - batchSize * ts.size());
+			startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * ts.size());
 		}
 		for (int i = startingPoint; i < shardsToCheck.size(); i++) {
-			if (i / batchSize > ts.size() - 1) {
-				break; // Fill up all testers
+			int testerIdx = (i - startingPoint) / batchSize;
+			if (testerIdx > ts.size() - 1) {
+				break; // Filled up all testers
 			}
-			assignment[i / batchSize].push_back(shardsToCheck[i]);
+			assignment[testerIdx].push_back(shardsToCheck[i]);
 		}
 		state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
 		for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {

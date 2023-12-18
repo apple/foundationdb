@@ -44,7 +44,6 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Data
 					ConsistencyCheckState ccState = decodeConsistencyCheckerStateValue(res_[i].value);
 					if (ccState.getAssignment() == ConsistencyCheckAssignment::Assigned) {
 						res.push_back(currentRange);
-						TraceEvent("Zhe").detail("CurrentRange", currentRange);
 					}
 				}
 				rangeToReadBegin = res_[i + 1].key;
