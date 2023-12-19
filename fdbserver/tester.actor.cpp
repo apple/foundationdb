@@ -1021,6 +1021,17 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 		for (int i = 0; i < workloads.size(); i++)
 			setups.push_back(workloads[i].setup.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		wait(waitForAll(setups));
+		for (int i = 0; i < setups.size(); i++) {
+			if (setups[i].isError()) {
+				TraceEvent("ConsistencyCheckUrgent_SetupError")
+				    .errorUnsuppressed(setups[i].getError())
+				    .detail("WorkloadTitle", spec.title)
+				    .detail("ClientId", i)
+				    .detail("ClientCount", testers.size())
+				    .detail("TestTimeout", spec.timeout)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+			}
+		}
 	}
 
 	TraceEvent("ConsistencyCheckUrgent_SetupComplete")
@@ -1037,6 +1048,17 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 		for (int i = 0; i < workloads.size(); i++)
 			starts.push_back(workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		wait(waitForAll(starts));
+		for (int i = 0; i < starts.size(); i++) {
+			if (starts[i].isError()) {
+				TraceEvent("ConsistencyCheckUrgent_StartError")
+				    .errorUnsuppressed(starts[i].getError())
+				    .detail("WorkloadTitle", spec.title)
+				    .detail("ClientId", i)
+				    .detail("ClientCount", testers.size())
+				    .detail("TestTimeout", spec.timeout)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+			}
+		}
 	}
 
 	TraceEvent("ConsistencyCheckUrgent_WorkloadComplete")
