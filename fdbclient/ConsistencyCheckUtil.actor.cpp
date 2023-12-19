@@ -22,7 +22,9 @@
 #include "fdbclient/ConsistencyCheck.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Database cx, int clientId) {
+ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Database cx,
+                                                                            int clientId,
+                                                                            int64_t consistencyCheckerId) {
 	state std::vector<KeyRange> res;
 	state Transaction tr(cx);
 	state Key rangeToReadBegin = allKeys.begin;
@@ -32,6 +34,12 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Data
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> res_ = wait(tr.get(consistencyCheckerIdKey));
+			if (!res_.present()) {
+				throw key_not_found();
+			} else if (consistencyCheckerId != decodeConsistencyCheckerStateValue(res_.get()).consistencyCheckerId) {
+				throw consistency_check_task_outdated();
+			}
 			KeyRange rangeToRead = Standalone(KeyRangeRef(rangeToReadBegin, rangeToReadEnd));
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     consistencyCheckAssignmentPrefixFor(clientId),
@@ -94,26 +102,37 @@ ACTOR Future<Void> initConsistencyCheckAssignmentMetadata(Database cx, int64_t c
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.addReadConflictRange(singleKeyRange(consistencyCheckerIdKey));
+			Optional<Value> res_ = wait(tr.get(consistencyCheckerIdKey));
+			if (!res_.present()) {
+				throw key_not_found();
+			} else if (consistencyCheckerId != decodeConsistencyCheckerStateValue(res_.get()).consistencyCheckerId) {
+				throw consistency_check_task_outdated();
+			}
 			tr.clear(consistencyCheckAssignmentKeys);
-			tr.set(consistencyCheckerIdKey, consistencyCheckerStateValue(ConsistencyCheckState(consistencyCheckerId)));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e) && delay(10.0));
+			wait(tr.onError(e) && delay(5.0));
 		}
 	}
 	return Void();
 }
 
-ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx, std::vector<KeyRange> rangesToCheck) {
+ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx,
+                                                        std::vector<KeyRange> rangesToCheck,
+                                                        int64_t consistencyCheckerId) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.addReadConflictRange(singleKeyRange(consistencyCheckerIdKey));
+			Optional<Value> res_ = wait(tr.get(consistencyCheckerIdKey));
+			if (!res_.present()) {
+				throw key_not_found();
+			} else if (consistencyCheckerId != decodeConsistencyCheckerStateValue(res_.get()).consistencyCheckerId) {
+				throw consistency_check_task_outdated();
+			}
 			tr.clear(consistencyCheckProgressKeys);
 			wait(krmSetRange(&tr,
 			                 consistencyCheckProgressPrefix,
@@ -136,14 +155,36 @@ ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx, std::vector
 	return Void();
 }
 
-ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx) {
+ACTOR Future<Void> persistConsistencyCheckerId(Database cx, int64_t consistencyCheckerId) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.addReadConflictRange(singleKeyRange(consistencyCheckerIdKey));
+			tr.set(consistencyCheckerIdKey, consistencyCheckerStateValue(ConsistencyCheckState(consistencyCheckerId)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e) && delay(10.0));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx, int64_t consistencyCheckerId) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> res_ = wait(tr.get(consistencyCheckerIdKey));
+			if (!res_.present()) {
+				throw key_not_found();
+			} else if (consistencyCheckerId != decodeConsistencyCheckerStateValue(res_.get()).consistencyCheckerId) {
+				throw consistency_check_task_outdated();
+			}
 			tr.clear(consistencyCheckAssignmentKeys);
 			tr.clear(consistencyCheckProgressKeys);
 			tr.clear(consistencyCheckerIdKey);
@@ -156,16 +197,24 @@ ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx) {
 	return Void();
 }
 
-ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx) {
+ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx, int64_t consistencyCheckerId) {
 	state std::vector<KeyRange> res;
+	state int64_t shardCompleted = 0;
 	state Transaction tr(cx);
 	state Key rangeToReadBegin = allKeys.begin;
 	state Key rangeToReadEnd = allKeys.end;
 	loop {
 		try {
+			shardCompleted = 0;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> res_ = wait(tr.get(consistencyCheckerIdKey));
+			if (!res_.present()) {
+				throw key_not_found();
+			} else if (consistencyCheckerId != decodeConsistencyCheckerStateValue(res_.get()).consistencyCheckerId) {
+				throw consistency_check_task_outdated();
+			}
 			KeyRange rangeToRead = Standalone(KeyRangeRef(rangeToReadBegin, rangeToReadEnd));
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     consistencyCheckProgressPrefix,
@@ -178,6 +227,8 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Databa
 					ConsistencyCheckState ccState = decodeConsistencyCheckerStateValue(res_[i].value);
 					if (ccState.getPhase() == ConsistencyCheckPhase::Invalid) {
 						res.push_back(currentRange);
+					} else {
+						shardCompleted++;
 					}
 				}
 				rangeToReadBegin = res_[i + 1].key;
@@ -189,6 +240,10 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Databa
 			wait(tr.onError(e));
 		}
 	}
+	TraceEvent("ConsistencyCheckUrgent_GlobalProgress")
+	    .suppressFor(10.0)
+	    .detail("ConsistencyCheckerId", consistencyCheckerId)
+	    .detail("ShardCompleted", shardCompleted);
 	return res;
 }
 

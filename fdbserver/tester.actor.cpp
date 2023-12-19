@@ -1132,6 +1132,80 @@ ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optiona
 	return ts;
 }
 
+ACTOR Future<std::vector<KeyRange>> runConsistencyCheckerUrgentInit(Database cx, int64_t consistencyCheckerId) {
+	state std::vector<KeyRange> rangesToCheck;
+	state int retryTimes = 0;
+	loop {
+		try {
+			// Persist consistencyCheckerId
+			// The system allows one consistency checker at a time
+			// The unique ID is persisted in metadata, indicating which consistency checker takes effect
+			wait(persistConsistencyCheckerId(cx, consistencyCheckerId)); // Always succeed
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
+
+			// If INIT_CLEAR_METADATA_EXIT mode, the metadata is cleared at beginning
+			if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA ||
+			    CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA_EXIT) {
+				wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
+				TraceEvent("ConsistencyCheckUrgent_MetadataClearedWhenInit")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+				return rangesToCheck;
+			}
+
+			// Load ranges to check from progress metadata
+			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
+
+			// Prepare for the ranges to check and persist consistency checker id
+			if (rangesToCheck.size() == 0) {
+				// If no range to check in progress data
+				// We load the range from knob
+				rangesToCheck = loadRangesToCheckFromKnob();
+				wait(initConsistencyCheckProgressMetadata(cx, rangesToCheck, consistencyCheckerId));
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+					throw operation_failed(); // Introduce random failure
+				}
+				TraceEvent e("ConsistencyCheckUrgent_Start");
+				e.setMaxEventLength(-1);
+				e.setMaxFieldLength(-1);
+				e.detail("ConsistencyCheckerId", consistencyCheckerId);
+				for (int i = 0; i < rangesToCheck.size(); i++) {
+					e.detail("RangeToCheckBegin" + std::to_string(i), rangesToCheck[i].begin);
+					e.detail("RangeToCheckEnd" + std::to_string(i), rangesToCheck[i].end);
+				}
+			} else {
+				TraceEvent("ConsistencyCheckUrgent_Resume")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RangesToCheckCount", rangesToCheck.size());
+			}
+			break;
+
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			} else if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated) {
+				throw e;
+			} else {
+				TraceEvent("ConsistencyCheckUrgent_RetriableFailure")
+				    .errorUnsuppressed(e)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes);
+				if (retryTimes > 50) {
+					throw timed_out();
+				}
+				wait(delay(10.0));
+				retryTimes++;
+			}
+		}
+	}
+
+	return rangesToCheck;
+}
+
 ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
                                                    Database cx,
                                                    Optional<std::vector<TesterInterface>> testers,
@@ -1139,59 +1213,55 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    TestSpec testSpec,
                                                    Optional<TenantName> defaultTenant,
                                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+	state std::vector<KeyRange> rangesToCheck;
+	// Init: enforce consistencyCheckerId and prepare for metadata
+	try {
+		wait(store(rangesToCheck, runConsistencyCheckerUrgentInit(cx, consistencyCheckerId)));
+	} catch (Error& e) {
+		if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated ||
+		    e.code() == error_code_timed_out) {
+			TraceEvent("ConsistencyCheckUrgent_Exit")
+			    .errorUnsuppressed(e)
+			    .detail("Reason", "FailureWhenInit")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId);
+			return Void();
+		} else {
+			throw e;
+		}
+	}
+	// Immediately exit after the clear for INIT_CLEAR_METADATA_EXIT mode
 	if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA_EXIT) {
-		wait(clearConsistencyCheckMetadata(cx));
-		TraceEvent("ConsistencyCheckUrgent_InitMetadataClearedExit").log();
+		TraceEvent("ConsistencyCheckUrgent_Exit")
+		    .detail("Reason", "SuccessClearMetadataWhenInit")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		return Void();
 	}
-	if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA) {
-		wait(clearConsistencyCheckMetadata(cx));
-		TraceEvent("ConsistencyCheckUrgent_InitMetadataCleared").log();
-	}
-
-	// Init
-	// Load ranges to check from progress metadata
-	state std::vector<KeyRange> rangesToCheck;
-	wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
-	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-		throw operation_failed(); // Introduce random failure
-	}
-	if (rangesToCheck.size() == 0) {
-		// If no range to check in progress data
-		// We load the range from knob
-		rangesToCheck = loadRangesToCheckFromKnob();
-		wait(initConsistencyCheckProgressMetadata(cx, rangesToCheck));
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-			throw operation_failed(); // Introduce random failure
-		}
-		TraceEvent e("ConsistencyCheckUrgent_Start");
-		e.setMaxEventLength(-1);
-		e.setMaxFieldLength(-1);
-		for (int i = 0; i < rangesToCheck.size(); i++) {
-			e.detail("RangeToCheckBegin" + std::to_string(i), rangesToCheck[i].begin);
-			e.detail("RangeToCheckEnd" + std::to_string(i), rangesToCheck[i].end);
-		}
-	} else {
-		TraceEvent("ConsistencyCheckUrgent_Resume").detail("RangesToCheckCount", rangesToCheck.size());
-	}
+	// At this point, consistencyCheckerId has the ownership except that another consistency checker overwrites the id
+	// metadata
 
 	// Main loop
 	state int retryTimes = 0;
 	state int round = 0;
-	state int64_t consistencyCheckerId;
+	state std::vector<TesterInterface> ts;
 	loop {
 		try {
 			// Load ranges to check
-			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
-
-			// Decide consistencyCheckerId -- each assignment corresponds to a unique consistencyCheckerId
-			consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+			if (rangesToCheck.size() == 0) {
+				TraceEvent("ConsistencyCheckUrgent_Exit")
+				    .detail("Reason", "Complete")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				return Void();
+			}
 
 			// Get testers
-			state std::vector<TesterInterface> ts;
+			ts.clear();
 			if (!testers.present()) {
 				wait(store(ts, getTesters(cc, minTestersExpected)));
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
@@ -1213,9 +1283,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("Round", round)
 			    .detail("RetryTimes", retryTimes)
 			    .detail("TesterCount", ts.size())
-			    .detail("ShardCount", shardsToCheck.size())
-			    .detail("RangesToCheck", describe(rangesToCheck))
-			    .detail("Shards", describe(shardsToCheck));
+			    .detail("ShardCount", shardsToCheck.size());
 
 			// Assign shards to testers
 			wait(initConsistencyCheckAssignmentMetadata(cx, consistencyCheckerId));
@@ -1227,11 +1295,14 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			int startingPoint = 0;
 			if (shardsToCheck.size() > batchSize * ts.size()) {
 				startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * ts.size());
+				// We randomly pick a set of successive shards:
+				// (1) We want to retry for different shards to avoid repeated failure on the same shards
+				// (2) We want to check successive shards to avoid inefficiency incurred by fragments
 			}
 			for (int i = startingPoint; i < shardsToCheck.size(); i++) {
 				int testerIdx = (i - startingPoint) / batchSize;
 				if (testerIdx > ts.size() - 1) {
-					break; // Filled up all testers
+					break; // Have filled up all testers
 				}
 				assignment[testerIdx].push_back(shardsToCheck[i]);
 			}
@@ -1272,7 +1343,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 
 			// Load progress metadata. If no unfinished range, exit; otherwise, continue
 			rangesToCheck.clear();
-			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx)));
+			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
+			// If rangesToCheck has data, rangesToCheck is for the next round
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
@@ -1281,15 +1353,16 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
 				    .detail("Round", round);
-				wait(clearConsistencyCheckMetadata(cx));
+				wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					throw operation_failed(); // Introduce random failure
 				}
-				TraceEvent("ConsistencyCheckUrgent_MetadataCleared")
+				TraceEvent("ConsistencyCheckUrgent_Exit")
+				    .detail("Reason", "Complete")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
 				    .detail("Round", round);
-				break;
+				return Void(); // Exit
 			} else {
 				TraceEvent("ConsistencyCheckUrgent_Continue")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
@@ -1305,17 +1378,55 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
+			} else if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated) {
+				TraceEvent("ConsistencyCheckUrgent_Exit")
+				    .errorUnsuppressed(e)
+				    .detail("Reason", "ConsistencyCheckerOutdated")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				return Void(); // Exit
+			} else {
+				TraceEvent("ConsistencyCheckUrgent_RetriableFailure")
+				    .errorUnsuppressed(e)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				wait(delay(10.0));
+				retryTimes++;
 			}
-			TraceEvent("ConsistencyCheckUrgent_RetriableFailure")
-			    .errorUnsuppressed(e)
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("RetryTimes", retryTimes)
-			    .detail("Round", round);
-			wait(delay(10.0));
-			retryTimes++;
+		}
+
+		wait(delay(10.0));
+
+		// Decide and enforce the consistencyCheckerId for the next round
+		state int retryTimesForUpdatingCheckerId = 0;
+		loop {
+			try {
+				// Decide and persist consistencyCheckerId for the next round
+				consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+				wait(persistConsistencyCheckerId(cx, consistencyCheckerId));
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+					throw operation_failed(); // Introduce random failure
+				}
+				break; // Continue to the next round
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (retryTimesForUpdatingCheckerId > 50) {
+					TraceEvent("ConsistencyCheckUrgent_Exit")
+					    .errorUnsuppressed(e)
+					    .detail("Reason", "PersistConsistencyCheckerIdFailed")
+					    .detail("ConsistencyCheckerId", consistencyCheckerId)
+					    .detail("Round", round);
+					return Void(); // Exit
+				}
+				wait(delay(1.0));
+				retryTimesForUpdatingCheckerId++;
+			}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,

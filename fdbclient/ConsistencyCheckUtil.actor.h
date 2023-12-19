@@ -32,16 +32,31 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SystemData.h"
 
-ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Database cx, int clientId);
+// Key invariant
+// Only persistConsistencyCheckerId() directly overwrites the consistencyCheckerId
+// Other APIs check the consistencyCheckerId on disk before updating/reading from disk
+// This invariant guarantees that there is at most one consistency checker --- the
+// last checker of overwriting consistencyCheckerIdKey wins.
+// Other checkers will receive consistency_check_task_outdated error and the checker should
+// abort itself.
+
+ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Database cx,
+                                                                            int clientId,
+                                                                            int64_t consistencyCheckerId);
 
 ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, int64_t consistencyCheckerId);
 
 ACTOR Future<Void> initConsistencyCheckAssignmentMetadata(Database cx, int64_t consistencyCheckerId);
-ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx, std::vector<KeyRange> rangesToCheck);
 
-ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx);
+ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx,
+                                                        std::vector<KeyRange> rangesToCheck,
+                                                        int64_t consistencyCheckerId);
 
-ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx);
+ACTOR Future<Void> persistConsistencyCheckerId(Database cx, int64_t consistencyCheckerId);
+
+ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx, int64_t consistencyCheckerId);
+
+ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx, int64_t consistencyCheckerId);
 
 ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx,
                                                      int clientId,
