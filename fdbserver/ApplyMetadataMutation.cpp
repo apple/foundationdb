@@ -585,19 +585,17 @@ private:
 		}
 
 		if (m.param1.startsWith(constructDataKey)) {
-			TraceEvent("DANHERE").detail("V", m.param2);
-			// std::string safeLocality = BinaryReader::fromStringRef<std::string>(m.param2, Unversioned());
-			// TraceEvent("DANHERE2").detail("V",safeLocality);
-
-			std::tuple<Standalone<StringRef>, uint64_t, uint64_t> t = decodeConstructKeys(m.param2);
+			std::string s = "\xcf\xdf";
+			// Value v = encodeConstructValue(s, 100, 0x2ff, 123);
+			// TraceEvent("ConstructDataDebug").detail("V", v);
+			std::tuple<Standalone<StringRef>, uint64_t, uint64_t, uint64_t> t = decodeConstructKeys(m.param2);
 			uint64_t second_element = std::get<1>(t), third_element = std::get<2>(t);
 			Standalone<StringRef> first_element = std::get<0>(t);
-			// m.param2 = encodelConstructValue("\xcf\xdf"_sr, second_element, third_element, 0);
-			TraceEvent("DANHERE")
+			TraceEvent("ConstructData")
+			    .detail("S", m.param2)
 			    .detail("F1", first_element)
 			    .detail("F2", second_element)
-			    .detail("F3", third_element)
-			    .detail("S", m.param2);
+			    .detail("F3", third_element);
 		}
 	}
 

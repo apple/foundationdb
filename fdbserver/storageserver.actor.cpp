@@ -10680,7 +10680,7 @@ private:
 
 				TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
 				    .detail("FeedID", changeFeedId)
-				    .detail("Rangze", changeFeedRange)
+				    .detail("Range", changeFeedRange)
 				    .detail("EmptyVersion", feed->second->emptyVersion);
 
 				auto rs = data->keyChangeFeed.modify(changeFeedRange);
@@ -10857,34 +10857,39 @@ private:
 				}
 			}
 		} else if (m.param1.substr(1).startsWith(constructDataKey)) {
-			std::tuple<Standalone<StringRef>, uint64_t, uint64_t> t = decodeConstructKeys(m.param2);
-			std::pair<Standalone<StringRef>, Standalone<StringRef>> m;
-			uint64_t second_element, third_element;
-			std::tie(m.first, second_element, third_element) = t;
-			// constructedMutation.param1 = first_element;
-			m.second = "23"_sr; // ;//encodeConstructValue(23);
-			data->constructedData.push_back(m);
-			TraceEvent("DANCONSTRUCTSS")
-			    .detail("F1", data->constructedData.front().first)
-			    .detail("F2", second_element)
-			    .detail("F3", third_element);
-			//              int seed=0; // from constructData
-			//              for (int key=0; key<numKeys; key++) {
-			//                      MutationRef constructedMutation;
-			//                      constructedMutation.type = MutationRef::SetValue;
-			//                      constructedMutation.param1 = "\xbf/constructData/"_sr;
-			//                      // append 'key' to param1
-			//                      for (int v=0; v < sizeValue; v++) {
-			//                              // append random char to param2
-			//                              const char *param2_value = "23";
-			//                              constructedMutation.param2 = param2_value;
-			//                      }
-			//                      data->constructedData.push_back(constructedMutation);
-			//                      TraceEvent("DANCONSTRUCTSS")
-			//                              .detail("F1", firstKey)
-			//                              .detail("F2", sizeValue)
-			//                              .detail("F3", numKeys);
-			//              }
+			uint64_t valSize, keyCount, seed;
+			Standalone<StringRef> prefix;
+			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
+			// ASSERT
+			for (auto& r : data->shards.ranges()) {
+				KeyRange keyRange = KeyRange(r.range());
+				if (keyRange.contains(prefix)) {
+					uint8_t keyBuf[prefix.size() + 4];
+					uint8_t* keyPos = prefix.copyTo(keyBuf);
+					uint8_t valBuf[valSize];
+					setThreadLocalDeterministicRandomSeed(seed);
+					uint32_t keyNum = 0;
+					while (++keyNum <= keyCount) {
+						if ((keyNum % 0xff) == 0) {
+							*keyPos++ = 0;
+						}
+						*keyPos = keyNum % 0xff;
+						deterministicRandom()->randomBytes(&valBuf[0], valSize);
+						StringRef key(keyBuf, keyPos - keyBuf + 1);
+						StringRef val(valBuf, valSize);
+						std::pair<Standalone<StringRef>, Standalone<StringRef>> m = { key, val };
+						data->constructedData.push_back(m);
+						TraceEvent("ConstructDataBuilder")
+						    .detail("F1", prefix)
+						    .detail("F2", valSize)
+						    .detail("F3", keyCount)
+						    .detail("F4", seed)
+						    .detail("K", key)
+						    .detail("V", val);
+					}
+					break;
+				}
+			}
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11363,20 +11368,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .suppressFor(10.0)
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
-
-					if (data->constructedData.size()) {
-						MutationRef constructedMutation;
-						constructedMutation.type = MutationRef::SetValue;
-						constructedMutation.param1 = data->constructedData.front().first;
-						constructedMutation.param2 = data->constructedData.front().second;
-						TraceEvent("DANPULL").detail("T", constructedMutation.param1);
-						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
-						data->constructedData.pop_front();
-						mutationBytes += constructedMutation.totalSize();
-						data->counters.mutationBytes += constructedMutation.totalSize();
-						data->counters.logicalBytesInput += constructedMutation.expectedSize();
-						++data->counters.mutations;
-					}
 					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
 					if (ver == data->initialClusterVersion) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).log();
@@ -11413,12 +11404,27 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						++data->counters.atomicMutations;
 						break;
 					}
+					while (data->constructedData.size()) {
+						MutationRef constructedMutation;
+						MutationRefAndCipherKeys encryptedMutation;
+						constructedMutation.type = MutationRef::SetValue;
+						constructedMutation.param1 = data->constructedData.front().first;
+						constructedMutation.param2 = data->constructedData.front().second;
+						TraceEvent("ConstructDataApply").detail("T", constructedMutation.param1);
+						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
+						data->constructedData.pop_front();
+						mutationBytes += constructedMutation.totalSize();
+						data->counters.mutationBytes += constructedMutation.totalSize();
+						data->counters.logicalBytesInput += constructedMutation.expectedSize();
+						++data->counters.mutations;
+					}
 				} else
 					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
 					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 			}
 		}
+
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
 			data->changeFeedVersions.emplace_back(

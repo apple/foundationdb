@@ -545,8 +545,8 @@ Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath);
 // the given uid encoded at the end
 Key uidPrefixKey(KeyRef keyPrefix, UID logUid);
 
-extern std::tuple<Standalone<StringRef>, uint64_t, uint64_t> decodeConstructKeys(ValueRef value);
-extern Value encodeConstructValue(StringRef keyStart, uint64_t keySize, uint64_t keyCount, uint64_t seed);
+extern std::tuple<Standalone<StringRef>, uint64_t, uint64_t, uint64_t> decodeConstructKeys(ValueRef value);
+extern Value encodeConstructValue(StringRef keyStart, uint64_t valSize, uint64_t keyCount, uint64_t seed);
 
 /// Apply mutations constant variables
 
