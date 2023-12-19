@@ -1230,7 +1230,7 @@ private:
 					role = ServerRole::KVFileDump;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
-				else if (!strcmp(sRole, "consistencycheckUrgent"))
+				else if (!strcmp(sRole, "consistencycheckurgent"))
 					role = ServerRole::ConsistencyCheckUrgent;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
