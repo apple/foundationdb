@@ -262,7 +262,7 @@ std::pair<bool, bool> checkResults(Version version,
 		lastEnd = result[result.size() - 1].key; // store to a standalone, otherwise memory will be invalid
 		begin = firstGreaterThan(lastEnd);
 	} else {
-		printf("Same at version %ld\n", version);
+		printf("Consistency check finishes for version %ld\n", version);
 		begin = end; // signal that we're done
 	}
 
