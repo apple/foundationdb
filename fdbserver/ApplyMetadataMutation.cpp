@@ -575,8 +575,9 @@ private:
 	}
 
 	void checkSetConstructKeys(MutationRef m) {
-		// add tags for all shards in range
-		// or could broadcast to all SS (allTags), and any irrelevant would ignore
+		if (!SERVER_KNOBS->GENERATE_DATA_ENABLED) {
+			return;
+		}
 		if (!m.param1.startsWith(globalKeysPrefix)) {
 			return;
 		}
@@ -585,17 +586,34 @@ private:
 		}
 
 		if (m.param1.startsWith(constructDataKey)) {
-			std::string s = "\xcf\xdf";
+			// std::string s = "\xcf\xdf";
 			// Value v = encodeConstructValue(s, 100, 0x2ff, 123);
 			// TraceEvent("ConstructDataDebug").detail("V", v);
-			std::tuple<Standalone<StringRef>, uint64_t, uint64_t, uint64_t> t = decodeConstructKeys(m.param2);
-			uint64_t second_element = std::get<1>(t), third_element = std::get<2>(t);
-			Standalone<StringRef> first_element = std::get<0>(t);
-			TraceEvent("ConstructData")
+
+			uint64_t valSize, keyCount, seed;
+			Standalone<StringRef> prefix;
+			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
+			std::set<Tag> allTags;
+			uint8_t keyBuf[prefix.size() + 4];
+			uint8_t* keyPos = prefix.copyTo(keyBuf);
+			*keyPos++ = '\xff';
+			StringRef keyEnd(keyBuf, keyPos - keyBuf + 1);
+			auto ranges = keyInfo->intersectingRanges(KeyRangeRef(prefix, keyEnd));
+			for (auto it : ranges) {
+				auto& r = it.value();
+				for (auto info : r.src_info) {
+					allTags.insert(info->tag);
+				}
+				for (auto info : r.dest_info) {
+					allTags.insert(info->tag);
+				}
+			}
+			toCommit->addTags(allTags);
+			TraceEvent(SevDebug, "ConstructDataApply")
 			    .detail("S", m.param2)
-			    .detail("F1", first_element)
-			    .detail("F2", second_element)
-			    .detail("F3", third_element);
+			    .detail("Prefix", prefix)
+			    .detail("ValSize", valSize)
+			    .detail("KeyCount", keyCount);
 		}
 	}
 

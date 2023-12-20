@@ -10863,7 +10863,8 @@ private:
 			// ASSERT
 			for (auto& r : data->shards.ranges()) {
 				KeyRange keyRange = KeyRange(r.range());
-				if (keyRange.contains(prefix)) {
+				if (keyRange.contains(prefix) && r.value() &&
+				    (r.value()->adding || r.value()->moveInShard || r.value()->readWrite)) {
 					uint8_t keyBuf[prefix.size() + 4];
 					uint8_t* keyPos = prefix.copyTo(keyBuf);
 					uint8_t valBuf[valSize];
@@ -10875,17 +10876,16 @@ private:
 						}
 						*keyPos = keyNum % 0xff;
 						deterministicRandom()->randomBytes(&valBuf[0], valSize);
-						StringRef key(keyBuf, keyPos - keyBuf + 1);
-						StringRef val(valBuf, valSize);
-						std::pair<Standalone<StringRef>, Standalone<StringRef>> m = { key, val };
-						data->constructedData.push_back(m);
-						TraceEvent("ConstructDataBuilder")
-						    .detail("F1", prefix)
-						    .detail("F2", valSize)
-						    .detail("F3", keyCount)
-						    .detail("F4", seed)
-						    .detail("K", key)
-						    .detail("V", val);
+						data->constructedData.emplace_back(
+						    // std::make_pair<Standalone<StringRef>, Standalone<StringRef>>(
+						    Standalone<StringRef>(StringRef(keyBuf, keyPos - keyBuf + 1)),
+						    Standalone<StringRef>(StringRef(valBuf, valSize)));
+						TraceEvent(SevDebug, "ConstructDataBuilder")
+						    .detail("Prefix", prefix)
+						    .detail("ValSize", valSize)
+						    .detail("KeyCount", keyCount)
+						    .detail("Seed", seed)
+						    .detail("K", StringRef(keyBuf, keyPos - keyBuf + 1));
 					}
 					break;
 				}
@@ -11410,7 +11410,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						constructedMutation.type = MutationRef::SetValue;
 						constructedMutation.param1 = data->constructedData.front().first;
 						constructedMutation.param2 = data->constructedData.front().second;
-						TraceEvent("ConstructDataApply").detail("T", constructedMutation.param1);
+						TraceEvent(SevDebug, "ConstructDataCommit").detail("T", constructedMutation.param1);
 						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
 						data->constructedData.pop_front();
 						mutationBytes += constructedMutation.totalSize();
