@@ -1154,7 +1154,7 @@ ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optiona
 	return ts;
 }
 
-ACTOR Future<std::vector<KeyRange>> runConsistencyCheckerUrgentInit(Database cx, int64_t consistencyCheckerId) {
+ACTOR Future<Void> runConsistencyCheckerUrgentInit(Database cx, int64_t consistencyCheckerId) {
 	state std::vector<KeyRange> rangesToCheck;
 	state int retryTimes = 0;
 	loop {
@@ -1173,10 +1173,11 @@ ACTOR Future<std::vector<KeyRange>> runConsistencyCheckerUrgentInit(Database cx,
 				wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
 				TraceEvent("ConsistencyCheckUrgent_MetadataClearedWhenInit")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId);
-				return rangesToCheck;
+				return Void();
 			}
 
 			// Load ranges to check from progress metadata
+			rangesToCheck.clear();
 			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
@@ -1225,7 +1226,7 @@ ACTOR Future<std::vector<KeyRange>> runConsistencyCheckerUrgentInit(Database cx,
 		}
 	}
 
-	return rangesToCheck;
+	return Void();
 }
 
 ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
@@ -1239,7 +1240,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	state std::vector<KeyRange> rangesToCheck;
 	// Init: enforce consistencyCheckerId and prepare for metadata
 	try {
-		wait(store(rangesToCheck, runConsistencyCheckerUrgentInit(cx, consistencyCheckerId)));
+		wait(runConsistencyCheckerUrgentInit(cx, consistencyCheckerId));
 	} catch (Error& e) {
 		if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated ||
 		    e.code() == error_code_timed_out) {
@@ -1269,6 +1270,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	loop {
 		try {
 			// Load ranges to check
+			rangesToCheck.clear();
 			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
@@ -1335,8 +1337,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				    .detail("RetryTimes", retryTimes)
 				    .detail("Round", round)
 				    .detail("ClientId", assignIt->first)
-				    .detail("ShardsCount", assignIt->second.size())
-				    .detail("Shards", describe(assignIt->second));
+				    .detail("ShardsCount", assignIt->second.size());
 				wait(persistConsistencyCheckAssignment(
 				    cx, assignIt->first, assignIt->second, consistencyCheckerId)); // Persist assignment
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
@@ -1344,6 +1345,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				}
 			}
 			TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
+			e.setMaxEventLength(-1);
+			e.setMaxFieldLength(-1);
 			e.detail("ConsistencyCheckerId", consistencyCheckerId);
 			e.detail("Round", round);
 			e.detail("RetryTimes", retryTimes);
@@ -1419,7 +1422,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			}
 		}
 
-		wait(delay(10.0));
+		wait(delay(10.0)); // Backoff 10 seconds for the next round
 
 		// Decide and enforce the consistencyCheckerId for the next round
 		state int retryTimesForUpdatingCheckerId = 0;

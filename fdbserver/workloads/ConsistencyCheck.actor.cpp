@@ -1724,7 +1724,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
 				    .detail("ShardBegin", range.begin)
 				    .detail("ShardEnd", range.end)
-				    .detail("Repetitions", self->repetitions)
+				    .detail("ReplicaCount", storageServers.size())
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 			} else {
 				numCompleteShards++;
@@ -1740,8 +1740,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientId", self->clientId)
 				    .detail("ClientCount", self->clientCount)
-				    .detail("Range", range)
-				    .detail("ShardCount", shardLocationPairList.size())
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("ReplicaCount", storageServers.size())
 				    .detail("NumCompletedShards", numCompleteShards)
 				    .detail("NumFailedShards", numFailedShards)
 				    .detail("NumShardThisClient", numShardThisClient)
