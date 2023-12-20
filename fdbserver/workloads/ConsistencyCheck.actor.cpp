@@ -1786,8 +1786,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("ShardCount", shardLocationPairList.size())
 			    .detail("ClientId", self->clientId)
 			    .detail("ClientCount", self->clientCount)
-			    .detail("Repetitions", self->repetitions)
-			    .trackLatest("ConsistencyCheck_EndTask");
+			    .detail("Repetitions", self->repetitions);
 		}
 		return Void();
 	}
