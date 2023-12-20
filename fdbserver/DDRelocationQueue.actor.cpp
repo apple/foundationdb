@@ -1469,10 +1469,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						} else {
 							destTeamSelect = TeamSelect::ANY;
 						}
+						PreferLowerReadUtil preferLowerReadTeam =
+						    SERVER_KNOBS->DD_PREFER_LOW_READ_UTIL_TEAM || rd.reason == RelocateReason::REBALANCE_READ
+						        ? PreferLowerReadUtil::True
+						        : PreferLowerReadUtil::False;
 						auto req = GetTeamRequest(destTeamSelect,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
-						                          PreferLowerReadUtil::True,
+						                          preferLowerReadTeam,
 						                          PreferWithinShardLimit::True,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty,
@@ -2282,6 +2286,9 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
 	state const char* eventName = isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 	state int ddPriority = dataMovementPriority(reason);
+	state PreferLowerReadUtil preferLowerReadTeam = readRebalance || SERVER_KNOBS->DD_PREFER_LOW_READ_UTIL_TEAM
+	                                                    ? PreferLowerReadUtil::True
+	                                                    : PreferLowerReadUtil::False;
 	state double rebalancePollingInterval = 0;
 
 	loop {
@@ -2320,10 +2327,11 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                                       PreferLowerReadUtil::False,
 				                                       PreferWithinShardLimit::False,
 				                                       ForReadBalance(readRebalance));
+
 				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                        PreferLowerDiskUtil::True,
 				                                        TeamMustHaveShards::False,
-				                                        PreferLowerReadUtil::True,
+				                                        preferLowerReadTeam,
 				                                        PreferWithinShardLimit::False,
 				                                        ForReadBalance(readRebalance));
 				state Future<SrcDestTeamPair> getTeamFuture =
