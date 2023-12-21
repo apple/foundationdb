@@ -44,23 +44,16 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 	}
 
 	if required && inputInfo.Size() == 0 {
-		return fmt.Errorf("File %s is empty", inputPath)
+		return fmt.Errorf("file %s is empty", inputPath)
 	}
 
-	outputDir := path.Dir(outputPath)
-
-	tempFile, err := os.CreateTemp(outputDir, "")
+	tempFile, err := os.CreateTemp(path.Dir(outputPath), "")
 	if err != nil {
 		return err
 	}
 	defer tempFile.Close()
 
 	_, err = tempFile.ReadFrom(inputFile)
-	if err != nil {
-		return err
-	}
-
-	err = tempFile.Close()
 	if err != nil {
 		return err
 	}
@@ -96,5 +89,6 @@ func CopyFiles(logger logr.Logger, outputDir string, copyDetails map[string]stri
 			return err
 		}
 	}
+
 	return nil
 }
