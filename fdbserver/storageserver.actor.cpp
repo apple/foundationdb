@@ -10869,15 +10869,13 @@ private:
 					uint8_t* keyPos = prefix.copyTo(keyBuf);
 					uint8_t valBuf[valSize];
 					setThreadLocalDeterministicRandomSeed(seed);
-					uint32_t keyNum = 0;
-					while (++keyNum <= keyCount) {
+					for (uint32_t keyNum = 1; keyNum <= keyCount; keyNum += 1) {
 						if ((keyNum % 0xff) == 0) {
 							*keyPos++ = 0;
 						}
 						*keyPos = keyNum % 0xff;
 						deterministicRandom()->randomBytes(&valBuf[0], valSize);
 						data->constructedData.emplace_back(
-						    // std::make_pair<Standalone<StringRef>, Standalone<StringRef>>(
 						    Standalone<StringRef>(StringRef(keyBuf, keyPos - keyBuf + 1)),
 						    Standalone<StringRef>(StringRef(valBuf, valSize)));
 						TraceEvent(SevDebug, "ConstructDataBuilder")
@@ -10885,7 +10883,7 @@ private:
 						    .detail("ValSize", valSize)
 						    .detail("KeyCount", keyCount)
 						    .detail("Seed", seed)
-						    .detail("K", StringRef(keyBuf, keyPos - keyBuf + 1));
+						    .detail("Key", StringRef(keyBuf, keyPos - keyBuf + 1));
 					}
 					break;
 				}
@@ -11404,19 +11402,19 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						++data->counters.atomicMutations;
 						break;
 					}
-					while (data->constructedData.size()) {
-						MutationRef constructedMutation;
+					while (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size()) {
+						// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1);
+						MutationRef constructedMutation(MutationRef::SetValue,
+						                                data->constructedData.front().first,
+						                                data->constructedData.front().second);
 						MutationRefAndCipherKeys encryptedMutation;
-						constructedMutation.type = MutationRef::SetValue;
-						constructedMutation.param1 = data->constructedData.front().first;
-						constructedMutation.param2 = data->constructedData.front().second;
-						TraceEvent(SevDebug, "ConstructDataCommit").detail("T", constructedMutation.param1);
 						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
 						data->constructedData.pop_front();
 						mutationBytes += constructedMutation.totalSize();
 						data->counters.mutationBytes += constructedMutation.totalSize();
 						data->counters.logicalBytesInput += constructedMutation.expectedSize();
 						++data->counters.mutations;
+						++data->counters.setMutations;
 					}
 				} else
 					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)

@@ -588,18 +588,17 @@ private:
 		if (m.param1.startsWith(constructDataKey)) {
 			// std::string s = "\xcf\xdf";
 			// Value v = encodeConstructValue(s, 100, 0x2ff, 123);
-			// TraceEvent("ConstructDataDebug").detail("V", v);
+			// TraceEvent(SevDebug,"ConstructDataDebug").detail("V", v);
 
 			uint64_t valSize, keyCount, seed;
 			Standalone<StringRef> prefix;
 			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
-			std::set<Tag> allTags;
 			uint8_t keyBuf[prefix.size() + 4];
 			uint8_t* keyPos = prefix.copyTo(keyBuf);
-			*keyPos++ = '\xff';
+			*keyPos = '\xff';
 			StringRef keyEnd(keyBuf, keyPos - keyBuf + 1);
-			auto ranges = keyInfo->intersectingRanges(KeyRangeRef(prefix, keyEnd));
-			for (auto it : ranges) {
+			std::set<Tag> allTags;
+			for (auto it : keyInfo->intersectingRanges(KeyRangeRef(prefix, keyEnd))) {
 				auto& r = it.value();
 				for (auto info : r.src_info) {
 					allTags.insert(info->tag);
@@ -609,8 +608,7 @@ private:
 				}
 			}
 			toCommit->addTags(allTags);
-			TraceEvent(SevDebug, "ConstructDataApply")
-			    .detail("S", m.param2)
+			TraceEvent(SevInfo, "ConstructDataRequest")
 			    .detail("Prefix", prefix)
 			    .detail("ValSize", valSize)
 			    .detail("KeyCount", keyCount);
