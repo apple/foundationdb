@@ -4005,12 +4005,22 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			// than the current update loop)
 			Version v = wait(waitForCommittedVersion(cx, resp.version, span.context));
 
-			// False if there is a master failure between getting the response and getting the committed version,
-			// Dependent on SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT
-			if (v - resp.version < 50000000) {
+			// False if there is a master failure between getting the response
+			// and getting the committed version, Dependent on
+			// SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT. Set to around half of the
+			// max versions in flight in an attempt to reliably recognize when
+			// a recovery has occurred, but avoid triggering if it just takes a
+			// little while to get the committed version.
+			bool buggifyRetry = g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.1);
+			CODE_PROBE(buggifyRetry, "Watch buggifying version gap retry");
+			if (v - resp.version < 50'000'000 && !buggifyRetry) {
 				return resp.version;
 			}
 			ver = v;
+
+			if (watchValueID.present()) {
+				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Retry");
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(parameters->tenant.prefix, parameters->key);
