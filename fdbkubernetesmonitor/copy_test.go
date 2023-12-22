@@ -20,6 +20,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path"
 
@@ -276,7 +277,7 @@ var _ = Describe("Testing the copy methods", func() {
 		})
 	})
 
-	When("copying the files from the input directory to the output directory", func() {
+	When("copying the binaries from the input directory to the output directory", func() {
 		var inputBinaryDir, outputBinaryDir string
 		binaries := []string{"fdbserver", "fdbbackup", "fdbrestore"}
 
@@ -295,7 +296,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 			BeforeEach(func() {
 				// Simulate the binary directory
-				GinkgoT().Setenv("TEST_BINARY_DIRECTORY", inputBinaryDir)
+				GinkgoT().Setenv(binaryTestDirectoryEnv, inputBinaryDir)
 
 				var err error
 				copyDetails, _, err = getCopyDetails("", "", "", nil, binaries, nil, nil, "7.1.43")
@@ -310,9 +311,117 @@ var _ = Describe("Testing the copy methods", func() {
 				Expect(path.Join(outputBinaryDir, "7.1", "fdbbackup")).Should(BeAnExistingFile())
 			})
 		})
+	})
 
-		// TODO test case for libraries
+	When("copying the libraries from the input directory to the output directory", func() {
+		var inputLibraryDir, outputLibraryDir string
+		libraries := []string{"7.1", "7.3", "6.3"}
 
-		// TODO test case for not empty file
+		BeforeEach(func() {
+			inputLibraryDir = GinkgoT().TempDir()
+			outputLibraryDir = GinkgoT().TempDir()
+
+			for _, library := range libraries {
+				_, err := os.Create(path.Join(inputLibraryDir, fmt.Sprintf("libfdb_c_%s.so", library)))
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			// Simulate the binary directory
+			GinkgoT().Setenv(libraryTestDirectoryEnv, inputLibraryDir)
+		})
+
+		When("copying the libraries without a primary library", func() {
+			var copyDetails map[string]string
+
+			BeforeEach(func() {
+				var err error
+				copyDetails, _, err = getCopyDetails("", "", "", nil, nil, libraries, nil, "7.1.43")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(copyDetails).To(HaveLen(3))
+				Expect(CopyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+			})
+
+			It("should copy all the files", func() {
+				Expect(path.Join(outputLibraryDir, "libfdb_c_7.1.so")).Should(BeAnExistingFile())
+				Expect(path.Join(outputLibraryDir, "libfdb_c_6.3.so")).Should(BeAnExistingFile())
+				Expect(path.Join(outputLibraryDir, "libfdb_c_7.3.so")).Should(BeAnExistingFile())
+			})
+		})
+
+		When("copying the libraries with a primary library", func() {
+			var copyDetails map[string]string
+
+			BeforeEach(func() {
+				var err error
+				copyDetails, _, err = getCopyDetails("", "7.1", "", nil, nil, libraries, nil, "7.1.43")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(copyDetails).To(HaveLen(3))
+				Expect(CopyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+			})
+
+			It("should copy all the files", func() {
+				Expect(path.Join(outputLibraryDir, "libfdb_c.so")).Should(BeAnExistingFile())
+				Expect(path.Join(outputLibraryDir, "libfdb_c_6.3.so")).Should(BeAnExistingFile())
+				Expect(path.Join(outputLibraryDir, "libfdb_c_7.3.so")).Should(BeAnExistingFile())
+			})
+		})
+
+		When("copying the binaries from the input directory to the output directory", func() {
+			var testInputDir, testOutputDir string
+
+			BeforeEach(func() {
+				testInputDir = GinkgoT().TempDir()
+				testOutputDir = GinkgoT().TempDir()
+
+				_, err := os.Create(path.Join(testInputDir, "testfile"))
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			When("copying the file", func() {
+				var copyDetails map[string]string
+
+				BeforeEach(func() {
+					var err error
+					copyDetails, _, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, nil, "7.1.43")
+					Expect(err).NotTo(HaveOccurred())
+					Expect(copyDetails).To(HaveLen(1))
+					Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+				})
+
+				It("should copy the file", func() {
+					Expect(path.Join(testOutputDir, "testfile")).Should(BeAnExistingFile())
+				})
+			})
+
+			When("the file is required to not be empty", func() {
+				var copyDetails map[string]string
+				var requiredFiles map[string]bool
+
+				BeforeEach(func() {
+					var err error
+					copyDetails, requiredFiles, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, []string{"testfile"}, "7.1.43")
+					Expect(err).NotTo(HaveOccurred())
+					Expect(copyDetails).To(HaveLen(1))
+				})
+
+				When("the file is empty", func() {
+					It("should not copy the file", func() {
+						Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, requiredFiles)).To(HaveOccurred())
+						Expect(path.Join(testOutputDir, "testfile")).NotTo(BeAnExistingFile())
+					})
+				})
+
+				When("the file is not empty", func() {
+					BeforeEach(func() {
+						Expect(os.WriteFile(path.Join(testInputDir, "testfile"), []byte("Hello World"), 0644)).NotTo(HaveOccurred())
+					})
+
+					It("should copy the file", func() {
+						Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, requiredFiles)).NotTo(HaveOccurred())
+						Expect(path.Join(testOutputDir, "testfile")).To(BeAnExistingFile())
+					})
+				})
+			})
+		})
 	})
 })

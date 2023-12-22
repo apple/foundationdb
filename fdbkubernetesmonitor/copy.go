@@ -28,6 +28,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const (
+	libraryTestDirectoryEnv = "TEST_LIBRARY_DIRECTORY"
+	binaryTestDirectoryEnv  = "TEST_BINARY_DIRECTORY"
+)
+
 // versionRegex represents the regex to parse the compact version string.
 var versionRegex = regexp.MustCompile(`^(\d+)\.(\d+)`)
 
@@ -107,13 +112,26 @@ func getCompactVersion(version string) (string, error) {
 	return matches[0], nil
 }
 
+// getBinaryDirectory returns the directory where the binaries are located. This will return `/usr/bin` if the env
+// variable TEST_BINARY_DIRECTORY is unset.
 func getBinaryDirectory() string {
-	binaryDirectory, ok := os.LookupEnv("TEST_BINARY_DIRECTORY")
+	binaryDirectory, ok := os.LookupEnv(binaryTestDirectoryEnv)
 	if ok {
 		return binaryDirectory
 	}
 
 	return "/usr/bin"
+}
+
+// getLibraryPath returns the library where the binaries are located. This will return `/usr/lib/fdb/multiversion` if the env
+// variable TEST_LIBRARY_DIRECTORY is unset.
+func getLibraryPath() string {
+	libraryDirectory, ok := os.LookupEnv(libraryTestDirectoryEnv)
+	if ok {
+		return libraryDirectory
+	}
+
+	return "/usr/lib/fdb/multiversion"
 }
 
 // getCopyDetails will generate the details for all the files that should be copied.
@@ -140,13 +158,14 @@ func getCopyDetails(inputDir string, copyPrimaryLibrary string, binaryOutputDire
 		}
 	}
 
+	libraryPath := getLibraryPath()
 	for _, library := range copyLibraries {
 		libraryName := fmt.Sprintf("libfdb_c_%s.so", library)
-		copyDetails[path.Join("/usr/lib/fdb/multiversion", libraryName)] = libraryName
+		copyDetails[path.Join(libraryPath, libraryName)] = libraryName
 	}
 
 	if copyPrimaryLibrary != "" {
-		copyDetails[fmt.Sprintf("/usr/lib/fdb/multiversion/libfdb_c_%s.so", copyPrimaryLibrary)] = "libfdb_c.so"
+		copyDetails[path.Join(libraryPath, fmt.Sprintf("libfdb_c_%s.so", copyPrimaryLibrary))] = "libfdb_c.so"
 	}
 
 	requiredCopyMap := make(map[string]bool, len(requiredCopyFiles))
