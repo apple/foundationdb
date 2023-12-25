@@ -143,9 +143,6 @@ include(CompileCoverageTool)
 # with the actor compiler, we can now make the flow commands available
 include(FlowCommands)
 
-# needed for the jinga2 dependency in protocol_version.py
-find_package(Jinja2 REQUIRED)
-
 ################################################################################
 # Vexilographer
 ################################################################################

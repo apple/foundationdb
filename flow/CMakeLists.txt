@@ -30,15 +30,35 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ApiVersion.h.cmake ${CMAKE_CURRENT_BI
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/SourceVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/config.h)
 
+set(PROTOCOL_VERSION_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Jinja2)
+if(NOT Jinja2_FOUND)
+  message(STATUS "Jinja2 not found, setting up virtual environment for protocol_version.py")
+  set(PROTOCOL_VERSION_VENV_DIR "${CMAKE_BINARY_DIR}/protocol_version-venv")
+  execute_process(COMMAND "${Python3_EXECUTABLE}" -m venv ${PROTOCOL_VERSION_VENV_DIR})
+  find_program(
+    VENV_Python3_EXECUTABLE
+    NAMES python3 python3.exe
+    PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin REQUIRED
+    NO_DEFAULT_PATH NO_CACHE
+    DOC "Checking Python3 executable in virtual environment")
+  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install --upgrade pip COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r "${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/requirements.txt" COMMAND_ERROR_IS_FATAL ANY)
+  set(PROTOCOL_VERSION_PYTHON_EXECUTABLE "${VENV_Python3_EXECUTABLE}")
+endif()
+
 set(FDB_PROTOCOL_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersions.cmake" CACHE STRING "Protocol version cmake file." FORCE)
 set(FDB_PROTOCOL_VERSION_HEADER_FILE "${CMAKE_CURRENT_BINARY_DIR}/include/flow/ProtocolVersion.h")
 set(FDB_PROTOCOL_VERSION_JAVA_FILE "${CMAKE_CURRENT_BINARY_DIR}/include/flow/ProtocolVersion.java")
 set(FDB_PROTOCOL_VERSION_PYTHON_FILE "${CMAKE_CURRENT_BINARY_DIR}/include/flow/protocol_version.py")
 add_custom_command(
 	OUTPUT ${FDB_PROTOCOL_VERSION_HEADER_FILE}
-	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator cpp --output ${FDB_PROTOCOL_VERSION_HEADER_FILE}
-	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator java --output ${FDB_PROTOCOL_VERSION_JAVA_FILE}
-	COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator python --output ${FDB_PROTOCOL_VERSION_PYTHON_FILE}
+	COMMAND ${PROTOCOL_VERSION_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator cpp --output ${FDB_PROTOCOL_VERSION_HEADER_FILE}
+	COMMAND ${PROTOCOL_VERSION_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator java --output ${FDB_PROTOCOL_VERSION_JAVA_FILE}
+	COMMAND ${PROTOCOL_VERSION_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py --source ${FDB_PROTOCOL_VERSION_FILE} --generator python --output ${FDB_PROTOCOL_VERSION_PYTHON_FILE}
 	DEPENDS
 		${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/protocol_version.py
 		${CMAKE_CURRENT_SOURCE_DIR}/protocolversion/ProtocolVersion.h.template
