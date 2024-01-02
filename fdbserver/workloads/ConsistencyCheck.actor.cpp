@@ -1580,6 +1580,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 						if (!rangeResult.present() || rangeResult.get().error.present()) {
 							valueAvailableToCheck = false;
+							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_GetRangeError");
+							e.detail("ResultPresent", rangeResult.present());
+							if (rangeResult.present()) {
+								e.detail("ErrorPresent", rangeResult.get().error.present());
+								if (rangeResult.get().error.present()) {
+									e.detail("Error", rangeResult.get().error.get().name());
+								}
+							}
 							break;
 						}
 					}
