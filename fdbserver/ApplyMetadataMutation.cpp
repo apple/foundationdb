@@ -593,7 +593,10 @@ private:
 			uint64_t valSize, keyCount, seed;
 			Standalone<StringRef> prefix;
 			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
-			uint8_t keyBuf[prefix.size() + 4];
+			if (keyCount >= UINT16_MAX || valSize >= CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
+				return;
+			}
+			uint8_t keyBuf[prefix.size() + sizeof(uint16_t)];
 			uint8_t* keyPos = prefix.copyTo(keyBuf);
 			*keyPos = '\xff';
 			StringRef keyEnd(keyBuf, keyPos - keyBuf + 1);
@@ -610,8 +613,8 @@ private:
 			toCommit->addTags(allTags);
 			TraceEvent(SevInfo, "ConstructDataRequest")
 			    .detail("Prefix", prefix)
-			    .detail("ValSize", valSize)
-			    .detail("KeyCount", keyCount);
+			    .detail("KeyCount", keyCount)
+			    .detail("ValSize", valSize);
 		}
 	}
 

@@ -10860,12 +10860,12 @@ private:
 			uint64_t valSize, keyCount, seed;
 			Standalone<StringRef> prefix;
 			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
-			// ASSERT
+			ASSERT(keyCount < UINT16_MAX && valSize >= CLIENT_KNOBS->VALUE_SIZE_LIMIT);
 			for (auto& r : data->shards.ranges()) {
 				KeyRange keyRange = KeyRange(r.range());
 				if (keyRange.contains(prefix) && r.value() &&
 				    (r.value()->adding || r.value()->moveInShard || r.value()->readWrite)) {
-					uint8_t keyBuf[prefix.size() + 4];
+					uint8_t keyBuf[prefix.size() + sizeof(uint16_t)];
 					uint8_t* keyPos = prefix.copyTo(keyBuf);
 					uint8_t valBuf[valSize];
 					setThreadLocalDeterministicRandomSeed(seed);
@@ -10878,13 +10878,12 @@ private:
 						data->constructedData.emplace_back(
 						    Standalone<StringRef>(StringRef(keyBuf, keyPos - keyBuf + 1)),
 						    Standalone<StringRef>(StringRef(valBuf, valSize)));
-						TraceEvent(SevDebug, "ConstructDataBuilder")
-						    .detail("Prefix", prefix)
-						    .detail("ValSize", valSize)
-						    .detail("KeyCount", keyCount)
-						    .detail("Seed", seed)
-						    .detail("Key", StringRef(keyBuf, keyPos - keyBuf + 1));
 					}
+					TraceEvent(SevDebug, "ConstructDataBuilder")
+					    .detail("Prefix", prefix)
+					    .detail("KeyCount", keyCount)
+					    .detail("ValSize", valSize)
+					    .detail("Seed", seed);
 					break;
 				}
 			}
@@ -11402,25 +11401,25 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						++data->counters.atomicMutations;
 						break;
 					}
-					while (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size()) {
-						// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1);
-						MutationRef constructedMutation(MutationRef::SetValue,
-						                                data->constructedData.front().first,
-						                                data->constructedData.front().second);
-						MutationRefAndCipherKeys encryptedMutation;
-						updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
-						data->constructedData.pop_front();
-						mutationBytes += constructedMutation.totalSize();
-						data->counters.mutationBytes += constructedMutation.totalSize();
-						data->counters.logicalBytesInput += constructedMutation.expectedSize();
-						++data->counters.mutations;
-						++data->counters.setMutations;
-					}
 				} else
 					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
 					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 			}
+		}
+
+		while (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size()) {
+			MutationRef constructedMutation(
+			    MutationRef::SetValue, data->constructedData.front().first, data->constructedData.front().second);
+			// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1);
+			MutationRefAndCipherKeys encryptedMutation;
+			updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
+			data->constructedData.pop_front();
+			mutationBytes += constructedMutation.totalSize();
+			data->counters.mutationBytes += constructedMutation.totalSize();
+			data->counters.logicalBytesInput += constructedMutation.expectedSize();
+			++data->counters.mutations;
+			++data->counters.setMutations;
 		}
 
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
