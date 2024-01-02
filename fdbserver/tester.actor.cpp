@@ -805,7 +805,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 	state int i = 0;
 	state int success = 0;
 	state int failure = 0;
-	int64_t sharedRandom = deterministicRandom()->randomInt64(0, 10000000);
+	int64_t sharedRandom = deterministicRandom()->randomInt64(0, SERVER_KNOBS->TESTER_SHARED_RANDOM_MAX_PLUS_ONE);
 	for (; i < testers.size(); i++) {
 		WorkloadRequest req;
 		req.title = spec.title;
@@ -1014,17 +1014,27 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 
 	state std::vector<WorkloadInterface> workloads = wait(getAll(workRequests));
+	// workloads follows the same order as workRequests
 	state double waitForFailureTime = g_network->isSimulated() ? 24 * 60 * 60 : 60;
 	if (spec.phases & TestWorkload::SETUP) {
 		state std::vector<Future<ErrorOr<Void>>> setups;
-		setups.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
 			setups.push_back(workloads[i].setup.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		wait(waitForAll(setups));
+		// setups follows the order of workRequests
+		ASSERT(workRequests.size() == setups.size());
 		for (int i = 0; i < setups.size(); i++) {
 			if (setups[i].isError()) {
 				TraceEvent("ConsistencyCheckUrgent_SetupError")
 				    .errorUnsuppressed(setups[i].getError())
+				    .detail("WorkloadTitle", spec.title)
+				    .detail("ClientId", i)
+				    .detail("ClientCount", testers.size())
+				    .detail("TestTimeout", spec.timeout)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+			} else if (setups[i].get().isError()) {
+				TraceEvent("ConsistencyCheckUrgent_SetupError")
+				    .errorUnsuppressed(setups[i].get().getError())
 				    .detail("WorkloadTitle", spec.title)
 				    .detail("ClientId", i)
 				    .detail("ClientCount", testers.size())
@@ -1044,14 +1054,23 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 		TraceEvent("TestStarting").detail("WorkloadTitle", spec.title);
 		printf("running test (%s)...\n", printable(spec.title).c_str());
 		state std::vector<Future<ErrorOr<Void>>> starts;
-		starts.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
 			starts.push_back(workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		wait(waitForAll(starts));
+		// starts follows the order of workRequests
+		ASSERT(workRequests.size() == starts.size());
 		for (int i = 0; i < starts.size(); i++) {
 			if (starts[i].isError()) {
 				TraceEvent("ConsistencyCheckUrgent_StartError")
 				    .errorUnsuppressed(starts[i].getError())
+				    .detail("WorkloadTitle", spec.title)
+				    .detail("ClientId", i)
+				    .detail("ClientCount", testers.size())
+				    .detail("TestTimeout", spec.timeout)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+			} else if (starts[i].get().isError()) {
+				TraceEvent("ConsistencyCheckUrgent_StartError")
+				    .errorUnsuppressed(starts[i].get().getError())
 				    .detail("WorkloadTitle", spec.title)
 				    .detail("ClientId", i)
 				    .detail("ClientCount", testers.size())
@@ -1236,7 +1255,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    TestSpec testSpec,
                                                    Optional<TenantName> defaultTenant,
                                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(
+	    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
 	state std::vector<KeyRange> rangesToCheck;
 	// Init: enforce consistencyCheckerId and prepare for metadata
 	try {
@@ -1396,7 +1416,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				    .detail("RangesToCheckCount", rangesToCheck.size());
 				if (g_network->isSimulated()) {
 					TraceEvent("ConsistencyCheckUrgent_RepairDC");
-					wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+					wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheckUrgent"));
 				}
 				round++;
 			}
@@ -1429,7 +1449,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		loop {
 			try {
 				// Decide and persist consistencyCheckerId for the next round
-				consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
+				consistencyCheckerId = deterministicRandom()->randomInt64(
+				    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
 				wait(persistConsistencyCheckerId(cx, consistencyCheckerId));
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					throw operation_failed(); // Introduce random failure
@@ -1494,7 +1515,7 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 				continue;
 			}
 			TraceEvent("ConsistencyCheckUrgent_RepairDC");
-			wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+			wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheckUrgent"));
 		}
 	}
 	return Void();
@@ -1555,8 +1576,10 @@ ACTOR Future<bool> runTest(Database cx,
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
 			try {
+				// Urgent consistency check
 				wait(timeoutError(checkConsistencyUrgentSim(cx, testers, 18000, spec.databasePingDelay, dbInfo),
 				                  20000.0));
+				// Normal consistency check
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 				wait(timeoutError(checkConsistency(cx,
 				                                   testers,

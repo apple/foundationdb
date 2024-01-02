@@ -110,9 +110,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
-		consistencyCheckerId = sharedRandomNumber;
+		if (sharedRandomNumber >= SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN &&
+		    sharedRandomNumber < SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE) {
+			consistencyCheckerId = sharedRandomNumber; // for urgent mode
+		} else {
+			consistencyCheckerId = 0;
+		}
 		suspendConsistencyCheck.set(true);
-		TraceEvent("ConsistencyCheck_WorkloadReceived").detail("ClientCount", clientCount).detail("ClientId", clientId);
 
 		success = true;
 
@@ -148,8 +152,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("ConsistencyCheck").log();
-		if (consistencyCheckerId != 0) { // consistencyCheckerId is set when urgent mode
+		TraceEvent("ConsistencyCheck").detail("ConsistencyCheckerId", consistencyCheckerId);
+		if (consistencyCheckerId != 0) { // urgent mode
 			return _startUrgent(cx, this);
 		} else {
 			return _start(cx, this);
@@ -1445,6 +1449,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			loop {
 				try {
 					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 					decodeKeyServersValue(UIDtoTagMap,
