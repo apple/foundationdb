@@ -278,8 +278,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	ACTOR Future<Void> runUrgentCheck(Database cx, ConsistencyCheckWorkload* self) {
 		try {
-			std::vector<KeyRange> rangesToCheck =
-			    wait(self->loadRangesFromAssignmentMetadata(cx, self->clientId, self->consistencyCheckerId));
+			state std::vector<KeyRange> rangesToCheck;
+			if (!self->rangesToCheck.present()) {
+				wait(store(rangesToCheck,
+				           self->loadRangesFromAssignmentMetadata(cx, self->clientId, self->consistencyCheckerId)));
+			} else {
+				rangesToCheck = self->rangesToCheck.get(); // In case persisting data is not allowed
+			}
 			if (rangesToCheck.size() == 0) {
 				TraceEvent("ConsistencyCheckUrgent_TesterExit")
 				    .detail("Reason", "AssignedEmptyRangeToCheck")
@@ -287,6 +292,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId);
 				return Void();
+			}
+			if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
+				TraceEvent("ConsistencyCheckUrgent_SimTesterFailure")
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				throw operation_failed(); // mimic tester failure
 			}
 			wait(self->checkDataConsistencyUrgent(cx,
 			                                      rangesToCheck,
@@ -307,8 +318,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId);
+				throw consistency_check_task_failed();
 			} else if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated) {
-				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				TraceEvent("ConsistencyCheckUrgent_TesterExit") // Happens only when persisting data is allowed
 				    .error(e)
 				    .detail("Reason", "ConsistencyCheckerIdOutDated")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -321,6 +333,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId);
+				throw consistency_check_task_failed();
 			}
 		}
 		return Void();
@@ -1491,18 +1504,22 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("Repetitions", self->repetitions)
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				numCompleteShards++;
-				try {
-					wait(self->persistProgress(cx, range, self->consistencyCheckerId));
-				} catch (Error& e) {
-					throw e;
+				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
+					try {
+						wait(self->persistProgress(cx, range, self->consistencyCheckerId));
+					} catch (Error& e) {
+						throw e;
+					}
 				}
 				continue; // Skip to the next shard
 			} else if (sourceStorageServers.size() == 1) {
 				numCompleteShards++;
-				try {
-					wait(self->persistProgress(cx, range, self->consistencyCheckerId));
-				} catch (Error& e) {
-					throw e;
+				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
+					try {
+						wait(self->persistProgress(cx, range, self->consistencyCheckerId));
+					} catch (Error& e) {
+						throw e;
+					}
 				}
 				continue; // Skip to the next shard
 			}
@@ -1727,7 +1744,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (!valueAvailableToCheck) {
 				numFailedShards++;
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardFailed")
-				    .suppressFor(1.0)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -1743,13 +1759,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 			} else {
 				numCompleteShards++;
-				try {
-					wait(self->persistProgress(cx, range, self->consistencyCheckerId));
-				} catch (Error& e) {
-					throw e;
+				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
+					try {
+						wait(self->persistProgress(cx, range, self->consistencyCheckerId));
+					} catch (Error& e) {
+						throw e;
+					}
 				}
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardComplete")
-				    .suppressFor(1.0)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -2448,19 +2465,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				} else {
 					numCompleteShards++;
-					if (self->consistencyCheckerId != 0) {
-						// Persist progress in urgent mode
-						try {
-							wait(self->persistProgress(cx, range, self->consistencyCheckerId));
-						} catch (Error& e) {
-							if (e.code() == error_code_key_not_found ||
-							    e.code() == error_code_consistency_check_task_outdated) {
-								return testResult;
-							} else {
-								throw e;
-							}
-						}
-					}
 					TraceEvent(SevInfo, "ConsistencyCheck_ShardComplete")
 					    .suppressFor(1.0)
 					    .setMaxEventLength(-1)

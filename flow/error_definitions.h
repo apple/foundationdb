@@ -98,6 +98,7 @@ ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
 ERROR( manual_shard_split_failed, 1083, "Manual shard split is failed to trigger")
 ERROR( consistency_check_task_outdated, 1084, "Consistency check task is outdated")
+ERROR( consistency_check_task_failed, 1085, "Consistency check task is failed")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

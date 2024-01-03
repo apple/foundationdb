@@ -20,11 +20,13 @@
 
 #include "fdbclient/ConsistencyCheckUtil.actor.h"
 #include "fdbclient/ConsistencyCheck.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Database cx,
                                                                             int clientId,
                                                                             int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state std::vector<KeyRange> res;
 	state Transaction tr(cx);
 	state Key rangeToReadBegin = allKeys.begin;
@@ -67,6 +69,7 @@ ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromAssignmentMetadata(Data
 }
 
 ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -96,6 +99,7 @@ ACTOR Future<Void> persistConsistencyCheckProgress(Database cx, KeyRange range, 
 }
 
 ACTOR Future<Void> initConsistencyCheckAssignmentMetadata(Database cx, int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -121,6 +125,7 @@ ACTOR Future<Void> initConsistencyCheckAssignmentMetadata(Database cx, int64_t c
 ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx,
                                                         std::vector<KeyRange> rangesToCheck,
                                                         int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -156,6 +161,7 @@ ACTOR Future<Void> initConsistencyCheckProgressMetadata(Database cx,
 }
 
 ACTOR Future<Void> persistConsistencyCheckerId(Database cx, int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -173,6 +179,7 @@ ACTOR Future<Void> persistConsistencyCheckerId(Database cx, int64_t consistencyC
 }
 
 ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx, int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -198,6 +205,7 @@ ACTOR Future<Void> clearConsistencyCheckMetadata(Database cx, int64_t consistenc
 }
 
 ACTOR Future<std::vector<KeyRange>> loadRangesToCheckFromProgressMetadata(Database cx, int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state std::vector<KeyRange> res;
 	state int64_t shardCompleted = 0;
 	state Transaction tr(cx);
@@ -251,6 +259,7 @@ ACTOR Future<Void> persistConsistencyCheckAssignment(Database cx,
                                                      int clientId,
                                                      std::vector<KeyRange> assignedRanges,
                                                      int64_t consistencyCheckerId) {
+	ASSERT(SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA);
 	state Transaction tr(cx);
 	loop {
 		try {

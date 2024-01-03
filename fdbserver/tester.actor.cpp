@@ -49,7 +49,7 @@ WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo) {}
+    dbInfo(r.dbInfo), rangesToCheck(r.rangesToCheck) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -353,6 +353,7 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
+	wcx.rangesToCheck = work.rangesToCheck;
 
 	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
 
@@ -392,6 +393,7 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVa
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
+	wcx.rangesToCheck = work.rangesToCheck;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
 	auto compound = makeReference<CompoundWorkload>(wcx);
@@ -574,7 +576,9 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					startResult = operation_failed();
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
-					TraceEvent(SevError, "TestFailure", workIface.id())
+					TraceEvent(e.code() == error_code_consistency_check_task_failed ? SevWarn : SevError,
+					           "TestFailure",
+					           workIface.id())
 					    .errorUnsuppressed(e)
 					    .detail("Reason", "Error starting workload")
 					    .detail("Workload", workload->description());
@@ -631,6 +635,11 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 			break;
 		}
 	}
+
+	TraceEvent("TestEndAsync", workIface.id())
+	    .detail("Workload", workload->description())
+	    .detail("DatabasePingDelay", databasePingDelay);
+
 	return Void();
 }
 
@@ -817,6 +826,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = sharedRandom;
 		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
+		req.rangesToCheck = Optional<std::vector<KeyRange>>();
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
@@ -981,16 +991,20 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	}
 }
 
-ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
-                                                                 std::vector<TesterInterface> testers,
-                                                                 TestSpec spec,
-                                                                 Optional<TenantName> defaultTenant,
-                                                                 int64_t consistencyCheckerId) {
+ACTOR Future<std::set<int>> dispatchMonitorUrgentConsistencyCheckWorkload(
+    Database cx,
+    std::vector<TesterInterface> testers,
+    TestSpec spec,
+    Optional<TenantName> defaultTenant,
+    int64_t consistencyCheckerId,
+    std::unordered_map<int, std::vector<KeyRange>> assignment) {
 	TraceEvent("ConsistencyCheckUrgent_Dispatch")
 	    .detail("WorkloadTitle", spec.title)
 	    .detail("TesterCount", testers.size())
 	    .detail("TestTimeout", spec.timeout)
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
+
+	state std::set<int> completeClientIds;
 
 	state std::vector<Future<WorkloadInterface>> workRequests;
 	for (int i = 0; i < testers.size(); i++) {
@@ -1004,6 +1018,11 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = consistencyCheckerId;
 		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
+		if (!SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+			req.rangesToCheck = assignment[i];
+		} else {
+			req.rangesToCheck = Optional<std::vector<KeyRange>>();
+		}
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
@@ -1025,7 +1044,7 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 		ASSERT(workRequests.size() == setups.size());
 		for (int i = 0; i < setups.size(); i++) {
 			if (setups[i].isError()) {
-				TraceEvent("ConsistencyCheckUrgent_SetupError")
+				TraceEvent("ConsistencyCheckUrgent_SetupError1")
 				    .errorUnsuppressed(setups[i].getError())
 				    .detail("WorkloadTitle", spec.title)
 				    .detail("ClientId", i)
@@ -1033,7 +1052,7 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 				    .detail("TestTimeout", spec.timeout)
 				    .detail("ConsistencyCheckerId", consistencyCheckerId);
 			} else if (setups[i].get().isError()) {
-				TraceEvent("ConsistencyCheckUrgent_SetupError")
+				TraceEvent("ConsistencyCheckUrgent_SetupError2")
 				    .errorUnsuppressed(setups[i].get().getError())
 				    .detail("WorkloadTitle", spec.title)
 				    .detail("ClientId", i)
@@ -1042,6 +1061,7 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 				    .detail("ConsistencyCheckerId", consistencyCheckerId);
 			}
 		}
+		throwIfError(setups, "ConsistencyCheckUrgent_SetupFailedForWorkload");
 	}
 
 	TraceEvent("ConsistencyCheckUrgent_SetupComplete")
@@ -1061,7 +1081,7 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 		ASSERT(workRequests.size() == starts.size());
 		for (int i = 0; i < starts.size(); i++) {
 			if (starts[i].isError()) {
-				TraceEvent("ConsistencyCheckUrgent_StartError")
+				TraceEvent("ConsistencyCheckUrgent_StartError1")
 				    .errorUnsuppressed(starts[i].getError())
 				    .detail("WorkloadTitle", spec.title)
 				    .detail("ClientId", i)
@@ -1069,24 +1089,30 @@ ACTOR Future<Void> dispatchMonitorUrgentConsistencyCheckWorkload(Database cx,
 				    .detail("TestTimeout", spec.timeout)
 				    .detail("ConsistencyCheckerId", consistencyCheckerId);
 			} else if (starts[i].get().isError()) {
-				TraceEvent("ConsistencyCheckUrgent_StartError")
+				TraceEvent("ConsistencyCheckUrgent_StartError2")
 				    .errorUnsuppressed(starts[i].get().getError())
 				    .detail("WorkloadTitle", spec.title)
 				    .detail("ClientId", i)
 				    .detail("ClientCount", testers.size())
 				    .detail("TestTimeout", spec.timeout)
 				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+			} else {
+				completeClientIds.insert(i);
 			}
 		}
 	}
 
-	TraceEvent("ConsistencyCheckUrgent_WorkloadComplete")
+	for (int i = 0; i < workloads.size(); i++) {
+		workloads[i].stop.send(ReplyPromise<Void>());
+	}
+
+	TraceEvent("ConsistencyCheckUrgent_WorkloadEnd")
 	    .detail("WorkloadTitle", spec.title)
 	    .detail("TesterCount", testers.size())
 	    .detail("TestTimeout", spec.timeout)
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 
-	return Void();
+	return completeClientIds;
 }
 
 ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::vector<KeyRange> ranges) {
@@ -1232,7 +1258,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentInit(Database cx, int64_t consiste
 			} else if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated) {
 				throw e;
 			} else {
-				TraceEvent("ConsistencyCheckUrgent_RetriableFailure")
+				TraceEvent("ConsistencyCheckUrgent_InitWithRetriableFailure")
 				    .errorUnsuppressed(e)
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes);
@@ -1248,6 +1274,64 @@ ACTOR Future<Void> runConsistencyCheckerUrgentInit(Database cx, int64_t consiste
 	return Void();
 }
 
+ACTOR Future<std::unordered_map<int, std::vector<KeyRange>>> makeTaskAssignment(Database cx,
+                                                                                int64_t consistencyCheckerId,
+                                                                                std::vector<KeyRange> shardsToCheck,
+                                                                                int testersCount,
+                                                                                int round) {
+	state std::unordered_map<int, std::vector<KeyRange>> assignment;
+	if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+		wait(initConsistencyCheckAssignmentMetadata(cx, consistencyCheckerId));
+		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+			throw operation_failed(); // Introduce random failure
+		}
+	}
+	int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
+	int startingPoint = 0;
+	if (shardsToCheck.size() > batchSize * testersCount) {
+		startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * testersCount);
+		// We randomly pick a set of successive shards:
+		// (1) We want to retry for different shards to avoid repeated failure on the same shards
+		// (2) We want to check successive shards to avoid inefficiency incurred by fragments
+	}
+	assignment.clear();
+	for (int i = startingPoint; i < shardsToCheck.size(); i++) {
+		int testerIdx = (i - startingPoint) / batchSize;
+		if (testerIdx > testersCount - 1) {
+			break; // Have filled up all testers
+		}
+		assignment[testerIdx].push_back(shardsToCheck[i]);
+	}
+	state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
+	for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
+		TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId)
+		    .detail("Round", round)
+		    .detail("ClientId", assignIt->first)
+		    .detail("ShardsCount", assignIt->second.size());
+		if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+			wait(persistConsistencyCheckAssignment(
+			    cx, assignIt->first, assignIt->second, consistencyCheckerId)); // Persist assignment
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+				throw operation_failed(); // Introduce random failure
+			}
+		}
+	}
+	if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+		TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
+		e.setMaxEventLength(-1);
+		e.setMaxFieldLength(-1);
+		e.detail("ConsistencyCheckerId", consistencyCheckerId);
+		e.detail("Round", round);
+		e.detail("TesterCount", testersCount);
+		e.detail("ShardCountTotal", shardsToCheck.size());
+		for (const auto& [clientId, assignedShards] : assignment) {
+			e.detail("Client" + std::to_string(clientId), assignedShards.size());
+		}
+	}
+	return assignment;
+}
+
 ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
                                                    Database cx,
                                                    Optional<std::vector<TesterInterface>> testers,
@@ -1257,43 +1341,69 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(
 	    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
-	state std::vector<KeyRange> rangesToCheck;
-	// Init: enforce consistencyCheckerId and prepare for metadata
-	try {
-		wait(runConsistencyCheckerUrgentInit(cx, consistencyCheckerId));
-	} catch (Error& e) {
-		if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated ||
-		    e.code() == error_code_timed_out) {
+	state std::vector<KeyRange> rangesToCheck; // get from progress metadata
+	state std::vector<KeyRange> shardsToCheck; // get from keyServer metadata
+	state KeyRangeMap<bool> globalProgressMap; // used to keep track of progress when persisting metadata is not allowed
+	state std::unordered_map<int, std::vector<KeyRange>> assignment; // used to keep track of assignment of tasks
+	state std::vector<TesterInterface> ts; // used to store testers interface
+
+	// Initialization
+	if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+		// In case when persisting metadata is allowed, enforce consistencyCheckerId and prepare for metadata
+		try {
+			wait(runConsistencyCheckerUrgentInit(cx, consistencyCheckerId));
+		} catch (Error& e) {
+			if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated ||
+			    e.code() == error_code_timed_out) {
+				TraceEvent("ConsistencyCheckUrgent_Exit")
+				    .errorUnsuppressed(e)
+				    .detail("Reason", "FailureWhenInit")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId);
+				return Void();
+			} else {
+				throw e;
+			}
+		}
+		// Immediately exit after the clear for INIT_CLEAR_METADATA_EXIT mode
+		if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA_EXIT) {
 			TraceEvent("ConsistencyCheckUrgent_Exit")
-			    .errorUnsuppressed(e)
-			    .detail("Reason", "FailureWhenInit")
+			    .detail("Reason", "SuccessClearMetadataWhenInit")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 			return Void();
-		} else {
-			throw e;
 		}
+		// At this point, consistencyCheckerId has the ownership except that another consistency checker overwrites the
+		// id metadata
+	} else {
+		// In case when persisting metadata is not allowed, prepare for globalProgressMap
+		// globalProgressMap is used to keep track of the global progress of checking
+		globalProgressMap.insert(allKeys, true);
+		rangesToCheck = loadRangesToCheckFromKnob();
+		for (const auto& rangeToCheck : rangesToCheck) {
+			// Mark rangesToCheck as incomplete
+			// Those ranges will be checked
+			globalProgressMap.insert(rangeToCheck, false);
+		}
+		globalProgressMap.coalesce(allKeys);
 	}
-	// Immediately exit after the clear for INIT_CLEAR_METADATA_EXIT mode
-	if (CLIENT_KNOBS->CONSISTENCY_CHECK_INIT_CLEAR_METADATA_EXIT) {
-		TraceEvent("ConsistencyCheckUrgent_Exit")
-		    .detail("Reason", "SuccessClearMetadataWhenInit")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId);
-		return Void();
-	}
-	// At this point, consistencyCheckerId has the ownership except that another consistency checker overwrites the id
-	// metadata
 
 	// Main loop
 	state int retryTimes = 0;
 	state int round = 0;
-	state std::vector<TesterInterface> ts;
 	loop {
 		try {
-			// Load ranges to check
+			// Step 1: Load ranges to check
 			rangesToCheck.clear();
-			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-				throw operation_failed(); // Introduce random failure
+			if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+				wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+					throw operation_failed(); // Introduce random failure
+				}
+			} else {
+				for (auto& range : globalProgressMap.ranges()) {
+					if (!range.value()) { // range that is not finished
+						rangesToCheck.push_back(range.range());
+					}
+				}
 			}
 			if (rangesToCheck.size() == 0) {
 				TraceEvent("ConsistencyCheckUrgent_Exit")
@@ -1304,7 +1414,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				return Void();
 			}
 
-			// Get testers
+			// Step 2: Get testers
 			ts.clear();
 			if (!testers.present()) {
 				wait(store(ts, getTesters(cc, minTestersExpected)));
@@ -1320,8 +1430,10 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("RetryTimes", retryTimes)
 			    .detail("TesterCount", ts.size());
 
-			// Load shards to check from keyserver space
-			state std::vector<KeyRange> shardsToCheck = wait(getConsistencyCheckShards(cx, rangesToCheck));
+			// Step 3: Load shards to check from keyserver space
+			// Shard is the unit for the task assignment
+			shardsToCheck.clear();
+			wait(store(shardsToCheck, getConsistencyCheckShards(cx, rangesToCheck)));
 			TraceEvent("ConsistencyCheckUrgent_GotShardsToCheck")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
@@ -1329,78 +1441,58 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			    .detail("TesterCount", ts.size())
 			    .detail("ShardCount", shardsToCheck.size());
 
-			// Assign shards to testers
-			wait(initConsistencyCheckAssignmentMetadata(cx, consistencyCheckerId));
+			// Step 4: Decide assignment of shards to testers
+			assignment.clear();
+			wait(store(assignment, makeTaskAssignment(cx, consistencyCheckerId, shardsToCheck, ts.size(), round)));
+
+			// Step 5: Run checking on testers
+			std::set<int> completeClients = wait(dispatchMonitorUrgentConsistencyCheckWorkload(
+			    cx, ts, testSpec, defaultTenant, consistencyCheckerId, assignment));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
-			state std::unordered_map<int, std::vector<KeyRange>> assignment; // Generate assignment
-			int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_BATCH_SHARD_COUNT;
-			int startingPoint = 0;
-			if (shardsToCheck.size() > batchSize * ts.size()) {
-				startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * ts.size());
-				// We randomly pick a set of successive shards:
-				// (1) We want to retry for different shards to avoid repeated failure on the same shards
-				// (2) We want to check successive shards to avoid inefficiency incurred by fragments
-			}
-			for (int i = startingPoint; i < shardsToCheck.size(); i++) {
-				int testerIdx = (i - startingPoint) / batchSize;
-				if (testerIdx > ts.size() - 1) {
-					break; // Have filled up all testers
+			if (!SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+				// In case when persisting metadata is not allowed, we use
+				// the complete client to decide which ranges are completed
+				for (const auto& clientId : completeClients) {
+					for (const auto& range : assignment[clientId]) {
+						globalProgressMap.insert(range, true); // Mark the ranges as complete
+					}
 				}
-				assignment[testerIdx].push_back(shardsToCheck[i]);
 			}
-			state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
-			for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
-				TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
-				    .detail("ConsistencyCheckerId", consistencyCheckerId)
-				    .detail("RetryTimes", retryTimes)
-				    .detail("Round", round)
-				    .detail("ClientId", assignIt->first)
-				    .detail("ShardsCount", assignIt->second.size());
-				wait(persistConsistencyCheckAssignment(
-				    cx, assignIt->first, assignIt->second, consistencyCheckerId)); // Persist assignment
+			TraceEvent("ConsistencyCheckUrgent_RoundComplete")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("RetryTimes", retryTimes)
+			    .detail("SucceedTesterCount", completeClients.size())
+			    .detail("SucceedTesters", describe(completeClients))
+			    .detail("TesterCount", ts.size())
+			    .detail("Round", round);
+
+			// Step 6: Check progress: If no unfinished range, exit; otherwise, continue
+			rangesToCheck.clear();
+			if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+				wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
+				// If rangesToCheck has data, rangesToCheck is for the next round
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					throw operation_failed(); // Introduce random failure
 				}
-			}
-			TraceEvent e("ConsistencyCheckUrgent_PersistAssignment");
-			e.setMaxEventLength(-1);
-			e.setMaxFieldLength(-1);
-			e.detail("ConsistencyCheckerId", consistencyCheckerId);
-			e.detail("Round", round);
-			e.detail("RetryTimes", retryTimes);
-			e.detail("TesterCount", ts.size());
-			e.detail("ShardCountTotal", shardsToCheck.size());
-			for (const auto& [clientId, assignedShards] : assignment) {
-				e.detail("Client" + std::to_string(clientId), assignedShards.size());
-			}
-
-			// Run test and wait for testers complete/fail
-			wait(dispatchMonitorUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId));
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-				throw operation_failed(); // Introduce random failure
-			}
-			TraceEvent("ConsistencyCheckUrgent_RoundWorkloadComplete")
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("RetryTimes", retryTimes)
-			    .detail("Round", round);
-
-			// Load progress metadata. If no unfinished range, exit; otherwise, continue
-			rangesToCheck.clear();
-			wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
-			// If rangesToCheck has data, rangesToCheck is for the next round
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-				throw operation_failed(); // Introduce random failure
+			} else {
+				for (auto& range : globalProgressMap.ranges()) {
+					if (!range.value()) { // range that is not finished
+						rangesToCheck.push_back(range.range());
+					}
+				}
 			}
 			if (rangesToCheck.size() == 0) {
 				TraceEvent("ConsistencyCheckUrgent_Complete")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
 				    .detail("Round", round);
-				wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
-				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-					throw operation_failed(); // Introduce random failure
+				if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+					wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
+					if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+						throw operation_failed(); // Introduce random failure
+					}
 				}
 				TraceEvent("ConsistencyCheckUrgent_Exit")
 				    .detail("Reason", "Complete")
@@ -1424,7 +1516,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			} else if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated) {
-				TraceEvent("ConsistencyCheckUrgent_Exit")
+				TraceEvent("ConsistencyCheckUrgent_Exit") // Happens only when persisting data is allowed
 				    .errorUnsuppressed(e)
 				    .detail("Reason", "ConsistencyCheckerOutdated")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
@@ -1432,7 +1524,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				    .detail("Round", round);
 				return Void(); // Exit
 			} else {
-				TraceEvent("ConsistencyCheckUrgent_RetriableFailure")
+				TraceEvent("ConsistencyCheckUrgent_CoreWithRetriableFailure")
 				    .errorUnsuppressed(e)
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
@@ -1445,31 +1537,32 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		wait(delay(10.0)); // Backoff 10 seconds for the next round
 
 		// Decide and enforce the consistencyCheckerId for the next round
-		state int retryTimesForUpdatingCheckerId = 0;
-		loop {
-			try {
-				// Decide and persist consistencyCheckerId for the next round
-				consistencyCheckerId = deterministicRandom()->randomInt64(
-				    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
-				wait(persistConsistencyCheckerId(cx, consistencyCheckerId));
-				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-					throw operation_failed(); // Introduce random failure
+		consistencyCheckerId = deterministicRandom()->randomInt64(SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN,
+		                                                          SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
+		if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+			state int retryTimesForUpdatingCheckerId = 0;
+			loop {
+				try {
+					wait(persistConsistencyCheckerId(cx, consistencyCheckerId));
+					if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+						throw operation_failed(); // Introduce random failure
+					}
+					break; // Continue to the next round
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					if (retryTimesForUpdatingCheckerId > 50) {
+						TraceEvent("ConsistencyCheckUrgent_Exit")
+						    .errorUnsuppressed(e)
+						    .detail("Reason", "PersistConsistencyCheckerIdFailed")
+						    .detail("ConsistencyCheckerId", consistencyCheckerId)
+						    .detail("Round", round);
+						return Void(); // Exit
+					}
+					wait(delay(1.0));
+					retryTimesForUpdatingCheckerId++;
 				}
-				break; // Continue to the next round
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw e;
-				}
-				if (retryTimesForUpdatingCheckerId > 50) {
-					TraceEvent("ConsistencyCheckUrgent_Exit")
-					    .errorUnsuppressed(e)
-					    .detail("Reason", "PersistConsistencyCheckerIdFailed")
-					    .detail("ConsistencyCheckerId", consistencyCheckerId)
-					    .detail("Round", round);
-					return Void(); // Exit
-				}
-				wait(delay(1.0));
-				retryTimesForUpdatingCheckerId++;
 			}
 		}
 	}
@@ -1497,7 +1590,7 @@ ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("true")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 	loop {
-		TraceEvent("ConsistencyCheckUrgent_LoopBegin");
+		TraceEvent("ConsistencyCheckUrgent_SimBegin");
 		try {
 			wait(runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(),
 			                                     cx,

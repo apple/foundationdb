@@ -81,6 +81,8 @@ struct WorkloadRequest {
 
 	VectorRef<VectorRef<KeyValueRef>> options;
 
+	Optional<std::vector<KeyRange>> rangesToCheck; // For consistency checker urgent when persisting data is not allowed
+
 	int clientId; // the "id" of the client receiving the request (0 indexed)
 	int clientCount; // the total number of test clients participating in the workload
 	ReplyPromise<struct WorkloadInterface> reply;
@@ -98,7 +100,8 @@ struct WorkloadRequest {
 		           clientCount,
 		           reply,
 		           defaultTenant,
-		           arena);
+		           arena,
+		           rangesToCheck);
 	}
 };
 
