@@ -326,6 +326,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId);
+			} else if (e.code() == error_code_consistency_check_task_failed) {
+				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				    .error(e)
+				    .detail("Reason", "Retry failed ranges for too many times")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				throw consistency_check_task_failed();
 			} else {
 				TraceEvent("ConsistencyCheckUrgent_TesterExit")
 				    .error(e)
@@ -1803,26 +1811,31 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 		if (failedRangesToCheck.size() > 0) { // Retry for any failed shard
-			wait(delay(60.0)); // Backoff 1 min
-			TraceEvent(SevInfo, "ConsistencyCheckUrgent_StartHandlingFailedRanges")
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
-			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-			    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
-			    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-			    .detail("Distributed", self->distributed)
-			    .detail("ClientId", self->clientId)
-			    .detail("ClientCount", self->clientCount);
 			if (consistencyCheckEpoch < CLIENT_KNOBS->CONSISTENCY_CHECK_RETRY_DEPTH_MAX) {
+				wait(delay(60.0)); // Backoff 1 min
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_RetryFailedRanges")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount);
 				wait(self->checkDataConsistencyUrgent(cx, failedRangesToCheck, self, consistencyCheckEpoch + 1));
+			} else if (self->rangesToCheck.present()) { // In case we are not able to persist progress
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_RetryDepthMax")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount);
+				throw consistency_check_task_failed(); // Notify the checker that this tester is failed
 			}
-			// We give up retrying when retry too many times
+			// When we are able to persist progress, we simply give up retrying when retry too many times
 			// The failed ranges will be picked up by the next round of the consistency checker urgent
 		}
 		if (consistencyCheckEpoch == 0) {
 			TraceEvent("ConsistencyCheckUrgent_EndTask")
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
 			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("Distributed", self->distributed)
 			    .detail("ShardCount", shardLocationPairList.size())
