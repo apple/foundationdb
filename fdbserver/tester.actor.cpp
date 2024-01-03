@@ -1391,7 +1391,13 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	state int round = 0;
 	loop {
 		try {
-			// Step 1: Load ranges to check
+			// Step 1: Load ranges to check, if nothing to run, exit
+			TraceEvent("ConsistencyCheckUrgent_RoundBegin")
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("RetryTimes", retryTimes)
+			    .detail("TesterCount", ts.size())
+			    .detail("Round", round);
+
 			rangesToCheck.clear();
 			if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
 				wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
@@ -1406,6 +1412,16 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				}
 			}
 			if (rangesToCheck.size() == 0) {
+				TraceEvent("ConsistencyCheckUrgent_Complete")
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
+					wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
+					if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
+						throw operation_failed(); // Introduce random failure
+					}
+				}
 				TraceEvent("ConsistencyCheckUrgent_Exit")
 				    .detail("Reason", "Complete")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
@@ -1460,58 +1476,15 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 					}
 				}
 			}
-			TraceEvent("ConsistencyCheckUrgent_RoundComplete")
+			TraceEvent("ConsistencyCheckUrgent_RoundEnd")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("RetryTimes", retryTimes)
 			    .detail("SucceedTesterCount", completeClients.size())
 			    .detail("SucceedTesters", describe(completeClients))
 			    .detail("TesterCount", ts.size())
 			    .detail("Round", round);
+			round++;
 
-			// Step 6: Check progress: If no unfinished range, exit; otherwise, continue
-			rangesToCheck.clear();
-			if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
-				wait(store(rangesToCheck, loadRangesToCheckFromProgressMetadata(cx, consistencyCheckerId)));
-				// If rangesToCheck has data, rangesToCheck is for the next round
-				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-					throw operation_failed(); // Introduce random failure
-				}
-			} else {
-				for (auto& range : globalProgressMap.ranges()) {
-					if (!range.value()) { // range that is not finished
-						rangesToCheck.push_back(range.range());
-					}
-				}
-			}
-			if (rangesToCheck.size() == 0) {
-				TraceEvent("ConsistencyCheckUrgent_Complete")
-				    .detail("ConsistencyCheckerId", consistencyCheckerId)
-				    .detail("RetryTimes", retryTimes)
-				    .detail("Round", round);
-				if (SERVER_KNOBS->CONSISTENCY_CHECK_USE_PERSIST_DATA) {
-					wait(clearConsistencyCheckMetadata(cx, consistencyCheckerId));
-					if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-						throw operation_failed(); // Introduce random failure
-					}
-				}
-				TraceEvent("ConsistencyCheckUrgent_Exit")
-				    .detail("Reason", "Complete")
-				    .detail("ConsistencyCheckerId", consistencyCheckerId)
-				    .detail("RetryTimes", retryTimes)
-				    .detail("Round", round);
-				return Void(); // Exit
-			} else {
-				TraceEvent("ConsistencyCheckUrgent_Continue")
-				    .detail("ConsistencyCheckerId", consistencyCheckerId)
-				    .detail("RetryTimes", retryTimes)
-				    .detail("Round", round)
-				    .detail("RangesToCheckCount", rangesToCheck.size());
-				if (g_network->isSimulated()) {
-					TraceEvent("ConsistencyCheckUrgent_RepairDC");
-					wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheckUrgent"));
-				}
-				round++;
-			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;

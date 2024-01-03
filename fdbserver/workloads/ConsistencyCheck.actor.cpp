@@ -304,7 +304,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			                                      self,
 			                                      /*consistencyCheckEpoch=*/0));
 			TraceEvent("ConsistencyCheckUrgent_TesterExit")
-			    .detail("Reason", "CompleteChecker")
+			    .detail("Reason", "CompleteCheck")
 			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("ClientCount", self->clientCount)
 			    .detail("ClientId", self->clientId);
@@ -1404,15 +1404,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                              std::vector<KeyRange> rangesToCheck,
 	                                              ConsistencyCheckWorkload* self,
 	                                              int consistencyCheckEpoch) {
-		TraceEvent("ConsistencyCheckUrgent_StartTask")
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-		    .detail("RangeToCheck", rangesToCheck.size())
-		    .detail("ClientCount", self->clientCount)
-		    .detail("ClientId", self->clientId)
-		    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
-
 		// Get shard locations of the input rangesToCheck
 		state std::vector<std::pair<KeyRange, Value>> shardLocationPairList;
 		state int retryCount = 0;
@@ -1441,6 +1432,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 		}
+
+		TraceEvent("ConsistencyCheckUrgent_StartTask")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+		    .detail("RangeToCheck", rangesToCheck.size())
+		    .detail("ShardToCheck", shardLocationPairList.size())
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId)
+		    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 
 		// Do consistency check shard by shard
 		state Reference<IRateControl> rateLimiter =
@@ -1513,6 +1512,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 				continue; // Skip to the next shard
 			} else if (sourceStorageServers.size() == 1) {
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_SingleReplica")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("Repetitions", self->repetitions)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				numCompleteShards++;
 				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
 					try {
@@ -1697,8 +1704,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 								    .detail(format("StorageServer%d", firstValidServer).c_str(),
 								            storageServers[firstValidServer].toString())
-								    .detail("ShardBegin", req.begin.getKey())
-								    .detail("ShardEnd", req.end.getKey())
+								    .detail("RangeBegin", req.begin.getKey())
+								    .detail("RangeEnd", req.end.getKey())
 								    .detail("VersionNumber", req.version)
 								    .detail(format("Server%dUniques", j).c_str(), currentUniques)
 								    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
@@ -1711,7 +1718,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								            storageServerInterfaces[j].isTss() ||
 								                    storageServerInterfaces[firstValidServer].isTss()
 								                ? "True"
-								                : "False");
+								                : "False")
+								    .detail("ShardBegin", range.begin)
+								    .detail("ShardEnd", range.end);
 							}
 						}
 					}
