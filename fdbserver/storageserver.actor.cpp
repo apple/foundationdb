@@ -10856,11 +10856,11 @@ private:
 					throw worker_removed();
 				}
 			}
-		} else if (m.param1.substr(1).startsWith(constructDataKey)) {
+		} else if (SERVER_KNOBS->GENERATE_DATA_ENABLED && m.param1.substr(1).startsWith(constructDataKey)) {
 			uint64_t valSize, keyCount, seed;
 			Standalone<StringRef> prefix;
 			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
-			ASSERT(keyCount < UINT16_MAX && valSize >= CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+			ASSERT(prefix.size() > 0 && keyCount < UINT16_MAX && valSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT);
 			for (auto& r : data->shards.ranges()) {
 				KeyRange keyRange = KeyRange(r.range());
 				if (keyRange.contains(prefix) && r.value() &&
@@ -11408,18 +11408,22 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
-		while (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size()) {
-			MutationRef constructedMutation(
-			    MutationRef::SetValue, data->constructedData.front().first, data->constructedData.front().second);
-			// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1);
-			MutationRefAndCipherKeys encryptedMutation;
-			updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
-			data->constructedData.pop_front();
-			mutationBytes += constructedMutation.totalSize();
-			data->counters.mutationBytes += constructedMutation.totalSize();
-			data->counters.logicalBytesInput += constructedMutation.expectedSize();
-			++data->counters.mutations;
-			++data->counters.setMutations;
+		if (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size()) {
+			int mutationCount =
+			    std::min(static_cast<int>(data->constructedData.size()), SERVER_KNOBS->GENERATE_DATA_PER_VERSION_MAX);
+			for (int m = 0; m < mutationCount; m++) {
+				MutationRef constructedMutation(
+				    MutationRef::SetValue, data->constructedData.front().first, data->constructedData.front().second);
+				// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1);
+				MutationRefAndCipherKeys encryptedMutation;
+				updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
+				data->constructedData.pop_front();
+				mutationBytes += constructedMutation.totalSize();
+				data->counters.mutationBytes += constructedMutation.totalSize();
+				data->counters.logicalBytesInput += constructedMutation.expectedSize();
+				++data->counters.mutations;
+				++data->counters.setMutations;
+			}
 		}
 
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);

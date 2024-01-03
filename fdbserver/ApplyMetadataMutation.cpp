@@ -586,14 +586,10 @@ private:
 		}
 
 		if (m.param1.startsWith(constructDataKey)) {
-			// std::string s = "\xcf\xdf";
-			// Value v = encodeConstructValue(s, 100, 0x2ff, 123);
-			// TraceEvent(SevDebug,"ConstructDataDebug").detail("V", v);
-
 			uint64_t valSize, keyCount, seed;
 			Standalone<StringRef> prefix;
 			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
-			if (keyCount >= UINT16_MAX || valSize >= CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
+			if (prefix.size() == 0 || keyCount >= UINT16_MAX || valSize >= CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
 				return;
 			}
 			uint8_t keyBuf[prefix.size() + sizeof(uint16_t)];
