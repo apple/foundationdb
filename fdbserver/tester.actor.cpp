@@ -1478,8 +1478,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			wait(store(assignment, makeTaskAssignment(cx, consistencyCheckerId, shardsToCheck, ts.size(), round)));
 
 			// Step 5: Run checking on testers
-			std::unordered_set<int> completeClients = wait(runUrgentConsistencyCheckWorkload(
-			    cx, ts, testSpec, defaultTenant, consistencyCheckerId, assignment));
+			std::unordered_set<int> completeClients = wait(
+			    runUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId, assignment));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
