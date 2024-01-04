@@ -34,6 +34,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/DeterministicRandom.h"
+#include "fdbclient/ConsistencyCheckUtil.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
@@ -42,51 +43,6 @@
 
 // #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
-
-const std::unordered_map<char, uint8_t> parseCharMap{
-	{ '0', 0 },  { '1', 1 },  { '2', 2 },  { '3', 3 },  { '4', 4 },  { '5', 5 },  { '6', 6 },  { '7', 7 },
-	{ '8', 8 },  { '9', 9 },  { 'a', 10 }, { 'b', 11 }, { 'c', 12 }, { 'd', 13 }, { 'e', 14 }, { 'f', 15 },
-	{ 'A', 10 }, { 'B', 11 }, { 'C', 12 }, { 'D', 13 }, { 'E', 14 }, { 'F', 15 },
-};
-
-Key getKeyFromString(const std::string& str) {
-	Key emptyKey;
-	if (str.size() == 0) {
-		return emptyKey;
-	}
-	if (str.size() % 4 != 0) {
-		TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("Reason", "WrongLength")
-		    .detail("InputStr", str);
-		throw internal_error();
-	}
-	std::vector<uint8_t> byteList;
-	for (int i = 0; i < str.size(); i += 4) {
-		if (str.at(i + 0) != '\\' || str.at(i + 1) != 'x') {
-			TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
-			    .detail("Reason", "WrongBytePrefix")
-			    .detail("InputStr", str);
-			throw internal_error();
-		}
-		const char first = str.at(i + 2);
-		const char second = str.at(i + 3);
-		if (parseCharMap.count(first) == 0 || parseCharMap.count(second) == 0) {
-			TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
-			    .detail("Reason", "WrongByteContent")
-			    .detail("InputStr", str);
-			throw internal_error();
-		}
-		uint8_t parsedValue = parseCharMap.at(first) * 16 + parseCharMap.at(second);
-		byteList.push_back(parsedValue);
-	}
-	return Standalone(StringRef(byteList.data(), byteList.size()));
-}
 
 struct ConsistencyCheckWorkload : TestWorkload {
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
@@ -141,6 +97,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	Future<Void> monitorConsistencyCheckSettingsActor;
 
+	int64_t consistencyCheckerId;
+
 	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		performQuiescentChecks = getOption(options, LiteralStringRef("performQuiescentChecks"), false);
 		performCacheCheck = getOption(options, LiteralStringRef("performCacheCheck"), false);
@@ -152,6 +110,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
+		if (sharedRandomNumber >= SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN &&
+		    sharedRandomNumber < SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE) {
+			consistencyCheckerId = sharedRandomNumber; // for urgent mode
+		} else {
+			consistencyCheckerId = 0;
+		}
 		suspendConsistencyCheck.set(true);
 
 		success = true;
@@ -188,8 +152,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("ConsistencyCheck").log();
-		return _start(cx, this);
+		TraceEvent("ConsistencyCheck").detail("ConsistencyCheckerId", consistencyCheckerId);
+		if (consistencyCheckerId != 0) { // urgent mode
+			return _startUrgent(cx, this);
+		} else {
+			return _start(cx, this);
+		}
 	}
 
 	Future<bool> check(Database const& cx) override { return success; }
@@ -229,34 +197,62 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> _startUrgent(Database cx, ConsistencyCheckWorkload* self) {
+		TraceEvent("ConsistencyCheck_Start")
+		    .detail("Mode", "Urgent")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+		    .detail("Distributed", self->distributed)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId)
+		    .detail("Indefinite", self->indefinite)
+		    .detail("Repetitions", self->repetitions);
+		wait(self->runUrgentCheck(cx, self));
+		TraceEvent("ConsistencyCheck_Exit")
+		    .detail("Mode", "Urgent")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+		    .detail("Distributed", self->distributed)
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId)
+		    .detail("Indefinite", self->indefinite)
+		    .detail("Repetitions", self->repetitions);
+		return Void();
+	}
+
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Suspended")
+				    .detail("Mode", "Normal")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("Distributed", self->distributed)
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId)
 				    .detail("Indefinite", self->indefinite)
-				    .detail("Repetitions", self->repetitions);
+				    .detail("Repetitions", self->repetitions)
+				    .detail("SuspendConsistencyCheck", self->suspendConsistencyCheck.get());
 				wait(self->suspendConsistencyCheck.onChange());
 			}
 			TraceEvent("ConsistencyCheck_StartingOrResuming")
+			    .detail("Mode", "Normal")
+			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("Distributed", self->distributed)
 			    .detail("ClientCount", self->clientCount)
 			    .detail("ClientId", self->clientId)
 			    .detail("Indefinite", self->indefinite)
-			    .detail("Repetitions", self->repetitions);
+			    .detail("Repetitions", self->repetitions)
+			    .detail("SuspendConsistencyCheck", self->suspendConsistencyCheck.get());
 			choose {
 				when(wait(self->runCheck(cx, self))) {
-					if (!self->indefinite || CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
-						// When consistency checker is distributed, repeated running
-						// can miss ranges, so we exit here
+					if (!self->indefinite) {
 						TraceEvent("ConsistencyCheck_Exit")
+						    .detail("Mode", "Normal")
+						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 						    .detail("Distributed", self->distributed)
 						    .detail("ClientCount", self->clientCount)
 						    .detail("ClientId", self->clientId)
 						    .detail("Indefinite", self->indefinite)
-						    .detail("Repetitions", self->repetitions);
+						    .detail("Repetitions", self->repetitions)
+						    .detail("SuspendConsistencyCheck", self->suspendConsistencyCheck.get());
 						break;
 					}
 					self->repetitions++;
@@ -268,108 +264,87 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return Void();
 	}
 
-	std::vector<KeyRange> loadRangesToCheckFromKnob() {
-		// Load string from knob
-		std::vector<std::string> beginKeyStrs = {
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_0,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_1,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_2,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_3,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_4,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_5,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_6,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_7,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_8,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_9,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_10, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_11,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_12, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_13,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_14, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_15,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_16, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_17,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_18, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_19,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_20, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_21,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_22, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_23,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_24, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_25,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_BEGIN_26,
-		};
-		std::vector<std::string> endKeyStrs = {
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_0,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_1,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_2,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_3,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_4,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_5,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_6,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_7,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_8,  CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_9,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_10, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_11,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_12, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_13,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_14, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_15,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_16, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_17,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_18, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_19,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_20, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_21,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_22, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_23,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_24, CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_25,
-			CLIENT_KNOBS->CONSISTENCY_CHECK_RANGE_END_26,
-		};
-
-		// Get keys from strings
-		std::vector<Key> beginKeys;
-		for (const auto& beginKeyStr : beginKeyStrs) {
-			Key key = getKeyFromString(beginKeyStr);
-			beginKeys.push_back(key);
-		}
-		std::vector<Key> endKeys;
-		for (const auto& endKeyStr : endKeyStrs) {
-			Key key = getKeyFromString(endKeyStr);
-			endKeys.push_back(key);
-		}
-		ASSERT(beginKeys.size() == endKeys.size());
-
-		// Get ranges
-		KeyRangeMap<bool> rangeToCheckMap;
-		for (int i = 0; i < beginKeys.size(); i++) {
-			Key rangeBegin = beginKeys[i];
-			Key rangeEnd = endKeys[i];
-			if (rangeBegin.empty() && rangeEnd.empty()) {
-				continue;
-			}
-			if (rangeBegin > allKeys.end) {
-				rangeBegin = allKeys.end;
-			}
-			if (rangeEnd > allKeys.end) {
-				TraceEvent("ConsistencyCheck_ReverseInputRange")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Index", i)
-				    .detail("RangeBegin", rangeBegin)
-				    .detail("RangeEnd", rangeEnd);
-				rangeEnd = allKeys.end;
-			}
-
-			KeyRange rangeToCheck;
-			if (rangeBegin < rangeEnd) {
-				rangeToCheck = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-			} else if (rangeBegin > rangeEnd) {
-				rangeToCheck = Standalone(KeyRangeRef(rangeEnd, rangeBegin));
-			} else {
-				TraceEvent("ConsistencyCheck_EmptyInputRange")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Index", i)
-				    .detail("RangeBegin", rangeBegin)
-				    .detail("RangeEnd", rangeEnd);
-				continue;
-			}
-			rangeToCheckMap.insert(rangeToCheck, true);
-		}
-
-		rangeToCheckMap.coalesce(allKeys);
-
-		std::vector<KeyRange> res;
-		for (auto rangeToCheck : rangeToCheckMap.ranges()) {
-			if (rangeToCheck.value() == true) {
-				res.push_back(rangeToCheck.range());
-			}
-		}
-		TraceEvent e("ConsistencyCheck_LoadedInputRange");
-		e.setMaxEventLength(-1);
-		e.setMaxFieldLength(-1);
-		for (int i = 0; i < res.size(); i++) {
-			e.detail("RangeBegin" + std::to_string(i), res[i].begin);
-			e.detail("RangeEnd" + std::to_string(i), res[i].end);
-		}
+	ACTOR Future<std::vector<KeyRange>> loadRangesFromAssignmentMetadata(Database cx,
+	                                                                     int clientId,
+	                                                                     int64_t consistencyCheckerId) {
+		std::vector<KeyRange> res = wait(loadRangesToCheckFromAssignmentMetadata(cx, clientId, consistencyCheckerId));
 		return res;
+	}
+
+	ACTOR Future<Void> persistProgress(Database cx, KeyRange range, uint64_t consistencyCheckerId) {
+		wait(persistConsistencyCheckProgress(cx, range, consistencyCheckerId));
+		return Void();
+	}
+
+	ACTOR Future<Void> runUrgentCheck(Database cx, ConsistencyCheckWorkload* self) {
+		try {
+			state std::vector<KeyRange> rangesToCheck;
+			if (!self->rangesToCheck.present()) {
+				wait(store(rangesToCheck,
+				           self->loadRangesFromAssignmentMetadata(cx, self->clientId, self->consistencyCheckerId)));
+			} else {
+				rangesToCheck = self->rangesToCheck.get(); // In case persisting data is not allowed
+			}
+			if (rangesToCheck.size() == 0) {
+				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				    .detail("Reason", "AssignedEmptyRangeToCheck")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				return Void();
+			}
+			if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
+				TraceEvent("ConsistencyCheckUrgent_SimTesterFailure")
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				throw operation_failed(); // mimic tester failure
+			}
+			wait(self->checkDataConsistencyUrgent(cx,
+			                                      rangesToCheck,
+			                                      self,
+			                                      /*consistencyCheckEpoch=*/0));
+			TraceEvent("ConsistencyCheckUrgent_TesterExit")
+			    .detail("Reason", "CompleteCheck")
+			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+			    .detail("ClientCount", self->clientCount)
+			    .detail("ClientId", self->clientId);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			} else if (e.code() == error_code_timed_out) {
+				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				    .error(e)
+				    .detail("Reason", "Operation retried too many times")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				throw consistency_check_task_failed();
+			} else if (e.code() == error_code_key_not_found || e.code() == error_code_consistency_check_task_outdated) {
+				TraceEvent("ConsistencyCheckUrgent_TesterExit") // Happens only when persisting data is allowed
+				    .error(e)
+				    .detail("Reason", "ConsistencyCheckerIdOutDated")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+			} else if (e.code() == error_code_consistency_check_task_failed) {
+				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				    .error(e)
+				    .detail("Reason", "Retry failed ranges for too many times")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				throw consistency_check_task_failed();
+			} else {
+				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				    .error(e)
+				    .detail("Reason", "Unknown failure")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				throw consistency_check_task_failed();
+			}
+		}
+		return Void();
 	}
 
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
@@ -484,64 +459,36 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (!coordinatorsCorrect)
 						self->testFailure("Coordinators incorrect");
 				}
+				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers
+				// are
+				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
+				bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
+				if (keyServerResult) {
+					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
+					    keyServerPromise.getFuture().get();
 
-				if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
-					std::vector<KeyRange> rangesToCheck = self->loadRangesToCheckFromKnob();
-					TraceEvent("ConsistencyCheck_Config")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .detail("RangeToCheck", describe(rangesToCheck))
-					    .detail("Indefinite", self->indefinite)
-					    .detail("Distributed", self->distributed)
-					    .detail("ClientCount", self->clientCount)
-					    .detail("ClientId", self->clientId)
-					    .detail("PerformQuiescentChecks", self->performQuiescentChecks)
-					    .detail("PerformTSSCheck", self->performTSSCheck)
-					    .detail("PerformCacheCheck", self->performCacheCheck);
-					state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForDistributed =
-					    wait(self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
-					// Check that each failed shard has the same data on all storage servers that it resides on
-					wait(::success(self->checkDataConsistency(cx,
-					                                          shardLocationPairListForDistributed,
-					                                          configuration,
-					                                          tssMapping,
-					                                          self,
-					                                          /*consistencyCheckEpoch=*/0)));
-
-				} else {
-					// Get a list of key servers; verify that the TLogs and master all agree about who the key servers
-					// are
-					state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>>
-					    keyServerPromise;
-					bool keyServerResult = wait(self->getKeyServers(cx, self, keyServerPromise, keyServersKeys));
-					if (keyServerResult) {
-						state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
-						    keyServerPromise.getFuture().get();
-
-						// Get the locations of all the shards in the database
-						state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
-						bool keyLocationResult = wait(self->getKeyLocations(cx, keyServers, self, keyLocationPromise));
-						if (keyLocationResult) {
-							state Standalone<VectorRef<KeyValueRef>> keyLocations =
-							    keyLocationPromise.getFuture().get();
-							state std::vector<std::pair<KeyRange, Value>> shardLocationPairList;
-							// Check that each shard has the same data on all storage servers that it resides on
-							for (int k = 0; k < keyLocations.size() - 1; k++) {
-								shardLocationPairList.push_back(std::make_pair(
-								    Standalone(KeyRangeRef(keyLocations[k].key, keyLocations[k + 1].key)),
-								    Standalone(keyLocations[k].value)));
-							}
-							wait(::success(self->checkDataConsistency(cx,
-							                                          shardLocationPairList,
-							                                          configuration,
-							                                          tssMapping,
-							                                          self,
-							                                          /*consistencyCheckEpoch=*/0)));
-
-							// Cache consistency check
-							if (self->performCacheCheck)
-								wait(::success(self->checkCacheConsistency(cx, keyLocations, self)));
+					// Get the locations of all the shards in the database
+					state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
+					bool keyLocationResult = wait(self->getKeyLocations(cx, keyServers, self, keyLocationPromise));
+					if (keyLocationResult) {
+						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
+						state std::vector<std::pair<KeyRange, Value>> shardLocationPairList;
+						// Check that each shard has the same data on all storage servers that it resides on
+						for (int k = 0; k < keyLocations.size() - 1; k++) {
+							shardLocationPairList.push_back(
+							    std::make_pair(Standalone(KeyRangeRef(keyLocations[k].key, keyLocations[k + 1].key)),
+							                   Standalone(keyLocations[k].value)));
 						}
+						wait(::success(self->checkDataConsistency(cx,
+						                                          shardLocationPairList,
+						                                          configuration,
+						                                          tssMapping,
+						                                          self,
+						                                          /*consistencyCheckEpoch=*/0)));
+
+						// Cache consistency check
+						if (self->performCacheCheck)
+							wait(::success(self->checkCacheConsistency(cx, keyLocations, self)));
 					}
 				}
 			} catch (Error& e) {
@@ -550,6 +497,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    e.code() == error_code_process_behind)
 					TraceEvent("ConsistencyCheck_Retry")
 					    .error(e) // FIXME: consistency check does not retry in this case
+					    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 					    .detail("Distributed", self->distributed)
 					    .detail("ClientCount", self->clientCount)
 					    .detail("ClientId", self->clientId)
@@ -561,6 +509,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		TraceEvent("ConsistencyCheck_FinishedCheck")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 		    .detail("Distributed", self->distributed)
 		    .detail("ClientCount", self->clientCount)
 		    .detail("ClientId", self->clientId)
@@ -1296,7 +1245,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
@@ -1459,6 +1408,444 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> checkDataConsistencyUrgent(Database cx,
+	                                              std::vector<KeyRange> rangesToCheck,
+	                                              ConsistencyCheckWorkload* self,
+	                                              int consistencyCheckEpoch) {
+		// Get shard locations of the input rangesToCheck
+		state std::vector<std::pair<KeyRange, Value>> shardLocationPairList;
+		state int retryCount = 0;
+		loop {
+			try {
+				shardLocationPairList.clear();
+				wait(store(shardLocationPairList, self->getKeyLocationsForRangeList(cx, rangesToCheck, self)));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_GetKeyLocationListFailed")
+				    .error(e)
+				    .detail("RetryCount", retryCount)
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				wait(delay(5.0));
+				retryCount++;
+				if (retryCount > 50) {
+					throw timed_out();
+				}
+			}
+		}
+
+		TraceEvent("ConsistencyCheckUrgent_StartTask")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+		    .detail("RangeToCheck", rangesToCheck.size())
+		    .detail("ShardToCheck", shardLocationPairList.size())
+		    .detail("ClientCount", self->clientCount)
+		    .detail("ClientId", self->clientId)
+		    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+
+		// Do consistency check shard by shard
+		state Reference<IRateControl> rateLimiter =
+		    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+		state KeyRangeMap<bool> failedRanges; // Used to collect failed ranges in the current checkDataConsistency
+		// Which will be used to start the next consistencyCheckEpoch of the checkDataConsistency
+		state int64_t numShardThisClient = shardLocationPairList.size();
+		state int64_t numShardToCheck = -1;
+		state int64_t numCompleteShards = 0;
+		state int64_t numFailedShards = 0;
+		state int shardIdx = 0;
+		for (; shardIdx < shardLocationPairList.size(); ++shardIdx) {
+			numShardToCheck = numShardThisClient - shardIdx;
+			state KeyRangeRef range = shardLocationPairList[shardIdx].first;
+			// Step 1: Get source server id of the shard
+			state std::vector<UID> sourceStorageServers;
+			state std::vector<UID> destStorageServers;
+			retryCount = 0;
+			loop {
+				try {
+					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+					decodeKeyServersValue(UIDtoTagMap,
+					                      shardLocationPairList[shardIdx].second,
+					                      sourceStorageServers,
+					                      destStorageServers,
+					                      false);
+					break;
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					TraceEvent(SevWarn, "ConsistencyCheckUrgent_GetUIDtoTagMapFailed")
+					    .error(e)
+					    .detail("RetryCount", retryCount)
+					    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+					    .detail("ClientId", self->clientId)
+					    .detail("ClientCount", self->clientCount)
+					    .detail("ShardBegin", range.begin)
+					    .detail("ShardEnd", range.end)
+					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+					wait(delay(5.0));
+					retryCount++;
+					if (retryCount > 50) {
+						throw timed_out();
+					}
+				}
+			}
+
+			if (sourceStorageServers.size() == 0) {
+				TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_EmptySourceServers")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("Repetitions", self->repetitions)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				numCompleteShards++;
+				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
+					try {
+						wait(self->persistProgress(cx, range, self->consistencyCheckerId));
+					} catch (Error& e) {
+						throw e;
+					}
+				}
+				continue; // Skip to the next shard
+			} else if (sourceStorageServers.size() == 1) {
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_SingleReplica")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("Repetitions", self->repetitions)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				numCompleteShards++;
+				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
+					try {
+						wait(self->persistProgress(cx, range, self->consistencyCheckerId));
+					} catch (Error& e) {
+						throw e;
+					}
+				}
+				continue; // Skip to the next shard
+			}
+
+			// Step 2: Get server interfaces
+			state std::vector<UID> storageServers = sourceStorageServers; // We check source server
+			state std::vector<StorageServerInterface> storageServerInterfaces;
+			retryCount = 0;
+			loop {
+				try {
+					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int s = 0; s < storageServers.size(); s++)
+						serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
+					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					for (int s = 0; s < serverListValues.size(); s++) {
+						if (!serverListValues[s].present()) {
+							TraceEvent(SevWarn, "ConsistencyCheckUrgent_GetServerInterfaceFailed")
+							    .detail("SSID", storageServers[s])
+							    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+							    .detail("ClientId", self->clientId)
+							    .detail("ClientCount", self->clientCount)
+							    .detail("ShardBegin", range.begin)
+							    .detail("ShardEnd", range.end)
+							    .detail("Repetitions", self->repetitions)
+							    .detail("RetryCount", retryCount)
+							    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+							throw operation_failed();
+						}
+						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
+					}
+					break;
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					wait(delay(5.0));
+					retryCount++;
+					if (retryCount > 50) {
+						throw timed_out();
+					}
+				}
+			}
+
+			// Step 3: Read a limited number of entries at a time, repeating until all keys in the shard have been read
+			state int64_t totalReadAmount = 0;
+			state bool valueAvailableToCheck = true;
+			state KeySelector begin = firstGreaterOrEqual(range.begin);
+			loop {
+				try {
+					// Get the min version of the storage servers
+					Version version = wait(self->getVersion(cx, self));
+
+					state GetKeyValuesRequest req;
+					req.begin = begin;
+					req.end = firstGreaterOrEqual(range.end);
+					req.limit = 1e4;
+					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+					req.version = version;
+					req.tags = TagSet();
+					req.debugID = debugRandom()->randomUniqueID();
+
+					// Try getting the entries in the specified range
+					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+					state int j = 0;
+					for (j = 0; j < storageServerInterfaces.size(); j++) {
+						resetReply(req);
+						keyValueFutures.push_back(
+						    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+					}
+					wait(waitForAll(keyValueFutures));
+
+					for (j = 0; j < keyValueFutures.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+						if (!rangeResult.present() || rangeResult.get().error.present()) {
+							valueAvailableToCheck = false;
+							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_GetRangeError");
+							e.detail("ResultPresent", rangeResult.present());
+							if (rangeResult.present()) {
+								e.detail("ErrorPresent", rangeResult.get().error.present());
+								if (rangeResult.get().error.present()) {
+									e.detail("Error", rangeResult.get().error.get().name());
+								}
+							}
+							break;
+						}
+					}
+					if (!valueAvailableToCheck) {
+						failedRanges.insert(range, true);
+						TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardAddedToRetry")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+						    .detail("ClientId", self->clientId)
+						    .detail("ClientCount", self->clientCount)
+						    .detail("ShardBegin", range.begin)
+						    .detail("ShardEnd", range.end)
+						    .detail("Repetitions", self->repetitions)
+						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+						break;
+					}
+
+					state int firstValidServer = -1;
+					totalReadAmount = 0;
+					for (j = 0; j < keyValueFutures.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+						ASSERT(rangeResult.present() && !rangeResult.get().error.present());
+
+						state GetKeyValuesReply current = rangeResult.get();
+						totalReadAmount += current.data.expectedSize();
+						// If we haven't encountered a valid storage server yet, then mark this as the baseline
+						// to compare against
+						if (firstValidServer == -1) {
+							firstValidServer = j;
+						} else {
+							// Compare this shard against the first
+							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+							if (current.data != reference.data || current.more != reference.more) {
+								// Data for trace event
+								// The number of keys unique to the current shard
+								int currentUniques = 0;
+								// The number of keys unique to the reference shard
+								int referenceUniques = 0;
+								// The number of keys in both shards with conflicting values
+								int valueMismatches = 0;
+								// The number of keys in both shards with matching values
+								int matchingKVPairs = 0;
+								// Last unique key on the current shard
+								KeyRef currentUniqueKey;
+								// Last unique key on the reference shard
+								KeyRef referenceUniqueKey;
+								// Last value mismatch
+								KeyRef valueMismatchKey;
+
+								// Loop indeces
+								int currentI = 0;
+								int referenceI = 0;
+								while (currentI < current.data.size() || referenceI < reference.data.size()) {
+									if (currentI >= current.data.size()) {
+										referenceUniqueKey = reference.data[referenceI].key;
+										referenceUniques++;
+										referenceI++;
+									} else if (referenceI >= reference.data.size()) {
+										currentUniqueKey = current.data[currentI].key;
+										currentUniques++;
+										currentI++;
+									} else {
+										KeyValueRef currentKV = current.data[currentI];
+										KeyValueRef referenceKV = reference.data[referenceI];
+										if (currentKV.key == referenceKV.key) {
+											if (currentKV.value == referenceKV.value)
+												matchingKVPairs++;
+											else {
+												valueMismatchKey = currentKV.key;
+												valueMismatches++;
+											}
+											currentI++;
+											referenceI++;
+										} else if (currentKV.key < referenceKV.key) {
+											currentUniqueKey = currentKV.key;
+											currentUniques++;
+											currentI++;
+										} else {
+											referenceUniqueKey = referenceKV.key;
+											referenceUniques++;
+											referenceI++;
+										}
+									}
+								}
+
+								TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
+								    .setMaxEventLength(-1)
+								    .setMaxFieldLength(-1)
+								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
+								    .detail(format("StorageServer%d", firstValidServer).c_str(),
+								            storageServers[firstValidServer].toString())
+								    .detail("RangeBegin", req.begin.getKey())
+								    .detail("RangeEnd", req.end.getKey())
+								    .detail("VersionNumber", req.version)
+								    .detail(format("Server%dUniques", j).c_str(), currentUniques)
+								    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
+								    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
+								    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
+								    .detail("ValueMismatches", valueMismatches)
+								    .detail("ValueMismatchKey", valueMismatchKey)
+								    .detail("MatchingKVPairs", matchingKVPairs)
+								    .detail("IsTSS",
+								            storageServerInterfaces[j].isTss() ||
+								                    storageServerInterfaces[firstValidServer].isTss()
+								                ? "True"
+								                : "False")
+								    .detail("ShardBegin", range.begin)
+								    .detail("ShardEnd", range.end);
+							}
+						}
+					}
+
+					// RateKeeping
+					wait(rateLimiter->getAllowance(totalReadAmount));
+
+					// Advance to the next set of entries
+					ASSERT(firstValidServer != -1);
+					if (keyValueFutures[firstValidServer].get().get().more) {
+						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
+						ASSERT(result.size() > 0);
+						begin = firstGreaterThan(result[result.size() - 1].key);
+						ASSERT(begin.getKey() != allKeys.end);
+					} else {
+						break;
+					}
+
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					TraceEvent("ConsistencyCheckUrgent_RetryDataConsistency").error(e);
+					wait(delay(5.0));
+				}
+			}
+
+			// Step 4: if the shard failed to check, add it to retry queue
+			// Otherwise, persist the progress
+			if (!valueAvailableToCheck) {
+				numFailedShards++;
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("NumCompletedShards", numCompleteShards)
+				    .detail("NumFailedShards", numFailedShards)
+				    .detail("NumShardThisClient", numShardThisClient)
+				    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("ReplicaCount", storageServers.size())
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+			} else {
+				numCompleteShards++;
+				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
+					try {
+						wait(self->persistProgress(cx, range, self->consistencyCheckerId));
+					} catch (Error& e) {
+						throw e;
+					}
+				}
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardComplete")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("ReplicaCount", storageServers.size())
+				    .detail("NumCompletedShards", numCompleteShards)
+				    .detail("NumFailedShards", numFailedShards)
+				    .detail("NumShardThisClient", numShardThisClient)
+				    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+			}
+		}
+
+		// For the failed ranges, trigger next epoch of checkDataConsistencyUrgent
+		failedRanges.coalesce(allKeys);
+		state std::vector<KeyRange> failedRangesToCheck;
+		state KeyRangeMap<bool>::Ranges failedRangesList = failedRanges.ranges();
+		state KeyRangeMap<bool>::iterator failedRangesIter = failedRangesList.begin();
+		for (; failedRangesIter != failedRangesList.end(); ++failedRangesIter) {
+			if (failedRangesIter->value()) {
+				failedRangesToCheck.push_back(failedRangesIter->range());
+			}
+		}
+		if (failedRangesToCheck.size() > 0) { // Retry for any failed shard
+			if (consistencyCheckEpoch < CLIENT_KNOBS->CONSISTENCY_CHECK_RETRY_DEPTH_MAX) {
+				wait(delay(60.0)); // Backoff 1 min
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_RetryFailedRanges")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount);
+				wait(self->checkDataConsistencyUrgent(cx, failedRangesToCheck, self, consistencyCheckEpoch + 1));
+			} else if (self->rangesToCheck.present()) { // In case we are not able to persist progress
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_RetryDepthMax")
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("Distributed", self->distributed)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount);
+				throw consistency_check_task_failed(); // Notify the checker that this tester is failed
+			}
+			// When we are able to persist progress, we simply give up retrying when retry too many times
+			// The failed ranges will be picked up by the next round of the consistency checker urgent
+		}
+		if (consistencyCheckEpoch == 0) {
+			TraceEvent("ConsistencyCheckUrgent_EndTask")
+			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+			    .detail("Distributed", self->distributed)
+			    .detail("ShardCount", shardLocationPairList.size())
+			    .detail("ClientId", self->clientId)
+			    .detail("ClientCount", self->clientCount)
+			    .detail("Repetitions", self->repetitions);
+		}
+		return Void();
+	}
+
 	// Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 	// sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
 	// We create a new checkDataConsistency actor for retrying for failed ranges and we do consistencyCheckEpoch++
@@ -1469,7 +1856,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                        ConsistencyCheckWorkload* self,
 	                                        int consistencyCheckEpoch) {
 		if (consistencyCheckEpoch > 0) {
-			ASSERT(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE);
+			ASSERT(self->consistencyCheckerId != 0); // urgent mode
 		}
 		// Stores the total number of bytes on each storage server
 		// In a distributed test, this will be an estimated size
@@ -1490,12 +1877,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		              self->rateLimitMax,
 		              static_cast<int>(ceil(self->bytesReadInPreviousRound /
 		                                    (float)CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
-		if (consistencyCheckEpoch > 0 ||
-		    CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) { // We set max speed when retrying failed ranges or
-			                                               // distributed among testers
+		if (self->consistencyCheckerId != 0) { // We set max speed when urgent mode
 			rateLimitForThisRound = self->rateLimitMax;
 		}
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound")
+		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 		    .detail("Distributed", self->distributed)
 		    .detail("ClientId", self->clientId)
 		    .detail("ClientCount", self->clientCount)
@@ -1531,98 +1917,56 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		shardOrder.reserve(ranges.size());
 		for (int k = 0; k < ranges.size(); k++)
 			shardOrder.push_back(k);
-		if (self->shuffleShards && !CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+
+		if (self->shuffleShards) {
+			ASSERT(self->consistencyCheckerId != 0); // Urgent mode never does shuffle
 			uint32_t seed = self->sharedRandomNumber + self->repetitions;
 			DeterministicRandom sharedRandom(seed == 0 ? 1 : seed);
 			sharedRandom.randomShuffle(shardOrder);
 		}
 
-		state int endPoint;
-		if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+		if (self->consistencyCheckerId != 0) {
+			// In case of the urgent mode, overwrite the i and increment
+			i = 0;
+			increment = 1;
+			int endPoint = shardOrder.size();
+			numShardThisClient = (endPoint - i) / increment;
+			// Logging range assignment
+			KeyRangeMap<bool> rangeAssignmentMap;
+			std::vector<KeyRange> rangeAssignmentList;
+			for (int idx = i; idx < endPoint; idx += increment) {
+				rangeAssignmentMap.insert(ranges[shardOrder[idx]], true);
+			}
+			rangeAssignmentMap.coalesce(allKeys);
+			for (auto& assignedRange : rangeAssignmentMap.ranges()) {
+				if (assignedRange.value() == true) {
+					rangeAssignmentList.push_back(assignedRange.range());
+				}
+			}
+			TraceEvent e(consistencyCheckEpoch == 0 ? "ConsistencyCheck_StartTask"
+			                                        : "ConsistencyCheck_RetryFailedTask");
+			e.setMaxEventLength(-1);
+			e.setMaxFieldLength(-1);
+			e.detail("ConsistencyCheckerId", self->consistencyCheckerId);
+			e.detail("Distributed", self->distributed);
+			e.detail("ShardCount", ranges.size());
+			e.detail("ClientId", self->clientId);
+			e.detail("ClientCount", self->clientCount);
+			e.detail("Repetitions", self->repetitions);
+			e.detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 			if (consistencyCheckEpoch == 0) {
-				// Decide which ranges are assigned
-				int batchSize = (shardOrder.size() / self->clientCount) + 1;
-				i = self->clientId * batchSize; // overwrite the starting point i
-				i = std::max(0, i - CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
-				endPoint = (self->clientId + 1) * batchSize;
-				endPoint = std::min(static_cast<int>(shardOrder.size()),
-				                    endPoint + CLIENT_KNOBS->CONSISTENCY_CHECK_DISTRIBUTED_WIGGLE_ROOM);
-				increment = 1;
-				// If the start point i is larger than the list boundary, this client needs not run
-				if (i >= endPoint) {
-					TraceEvent("ConsistencyCheck_ClientExit")
-					    .detail("Reason", "No task assigned")
-					    .detail("Distributed", self->distributed)
-					    .detail("ShardCount", ranges.size())
-					    .detail("ClientId", self->clientId)
-					    .detail("ClientCount", self->clientCount)
-					    .detail("Repetitions", self->repetitions);
-					return true;
-				}
-
-				// Logging range assignment
-				KeyRangeMap<bool> rangeAssignmentMap;
-				std::vector<KeyRange> rangeAssignmentList;
-				// Decide assigned ranges to log
-				for (int idx = i; idx < endPoint; idx += increment) {
-					rangeAssignmentMap.insert(ranges[shardOrder[idx]], true);
-				}
-				rangeAssignmentMap.coalesce(allKeys);
-				for (auto& assignedRange : rangeAssignmentMap.ranges()) {
-					if (assignedRange.value() == true) {
-						rangeAssignmentList.push_back(assignedRange.range());
-					}
-				}
-				numShardThisClient = (endPoint - i) / increment;
-				TraceEvent e("ConsistencyCheck_StartTask");
-				e.setMaxEventLength(-1);
-				e.setMaxFieldLength(-1);
-				e.detail("Distributed", self->distributed);
-				e.detail("ShardCount", ranges.size());
-				e.detail("ClientId", self->clientId);
-				e.detail("ClientCount", self->clientCount);
-				e.detail("StartPoint", i);
-				e.detail("EndPoint", endPoint);
-				e.detail("Repetitions", self->repetitions);
-				e.detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				for (int idx = 0; idx < rangeAssignmentList.size(); idx++) {
 					e.detail("RangeToCheckBegin" + std::to_string(idx), rangeAssignmentList[idx].begin);
 					e.detail("RangeToCheckEnd" + std::to_string(idx), rangeAssignmentList[idx].end);
 				}
-				e.trackLatest("ConsistencyCheck_StartTask");
-			} else { // consistencyCheckEpoch > 0 when handling failure ranges
-				i = 0;
-				increment = 1;
-				endPoint = shardOrder.size();
-				TraceEvent("ConsistencyCheck_RetryFailedTask")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Distributed", self->distributed)
-				    .detail("RetryShardCount", ranges.size())
-				    .detail("ClientId", self->clientId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("Repetitions", self->repetitions)
-				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-				    .trackLatest("ConsistencyCheck_RetryFailedTask");
 			}
-		} else {
-			endPoint = shardOrder.size();
+			e.trackLatest(consistencyCheckEpoch == 0 ? "ConsistencyCheck_StartTask"
+			                                         : "ConsistencyCheck_RetryFailedTask");
 		}
 
-		for (; i < endPoint; i += increment) {
-			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && self->suspendConsistencyCheck.get()) {
-				TraceEvent("ConsistencyCheck_Cancelled")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Distributed", self->distributed)
-				    .detail("ShardCount", ranges.size())
-				    .detail("ClientId", self->clientId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("CompleteEndKey", ranges[shardOrder[i]].begin);
-				break;
-			}
-			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
-				numShardToCheck = (endPoint - i) / increment;
+		for (; i < shardOrder.size(); i += increment) {
+			if (self->consistencyCheckerId != 0) { // Urgent mode
+				numShardToCheck = (shardOrder.size() - i) / increment;
 			}
 
 			state int shard = shardOrder[i];
@@ -1710,7 +2054,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
-			if (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE || SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE) {
+			if (self->consistencyCheckerId == 0 &&
+			    (SERVER_KNOBS->CONSISTENCY_CHECK_ROCKSDB_ENGINE || SERVER_KNOBS->CONSISTENCY_CHECK_SQLITE_ENGINE)) {
+				// We can skip for shard for engine only in normal consistency check where consistencyCheckerId is 0
 				std::unordered_map<UID, KeyValueStoreType> storageTypeMapping =
 				    wait(self->getStorageType(storageServerInterfaces));
 
@@ -1763,7 +2109,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// The first client may need to skip the rest of the loop contents if it is just processing this shard to
 			// get a size estimate
-			if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE || !self->firstClient ||
+			if (self->consistencyCheckerId != 0 || !self->firstClient ||
 			    shard % (effectiveClientCount * self->shardSampleFactor) == 0) {
 				state int shardKeys = 0;
 				state int shardBytes = 0;
@@ -1786,18 +2132,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop {
 					try {
-						if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && self->suspendConsistencyCheck.get()) {
-							TraceEvent("ConsistencyCheck_DataCheckCancelled")
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("Distributed", self->distributed)
-							    .detail("ShardCount", ranges.size())
-							    .detail("ClientId", self->clientId)
-							    .detail("ClientCount", self->clientCount)
-							    .detail("CompleteEndKey", lastStartSampleKey);
-							break;
-						}
-
 						lastSampleKey = lastStartSampleKey;
 
 						// Get the min version of the storage servers
@@ -2005,7 +2339,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 
 								completeCheck = false;
-								if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+								if (self->consistencyCheckerId != 0) {
 									break; // Will retry later
 								}
 
@@ -2016,19 +2350,38 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								}
 
 							} else {
+								if (!rangeResult.present()) {
+									TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+									    .suppressFor(1.0)
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
+									    .detail("Reason", "rangeResultNotPresent")
+									    .detail("IsTSS", storageServerInterfaces[j].isTss())
+									    .detail("SSID", storageServerInterfaces[j].id());
+								} else if (rangeResult.get().error.present()) {
+									TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+									    .suppressFor(1.0)
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
+									    .detail("Reason", rangeResult.get().error.get().what())
+									    .detail("IsTSS", storageServerInterfaces[j].isTss())
+									    .detail("SSID", storageServerInterfaces[j].id());
+								}
 								completeCheck = false;
-								if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+								if (self->consistencyCheckerId != 0) {
 									break; // Will retry later
 								}
 							}
 						}
 
-						if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE && !completeCheck) {
+						if (self->consistencyCheckerId != 0 && !completeCheck) {
+							// Shard incomplete check in urgent mode
 							// Add the shard to failedRanges, which will be retried later
 							failedRanges.insert(range, true);
 							TraceEvent(SevInfo, "ConsistencyCheck_ShardAddedToRetry")
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
+							    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 							    .detail("ClientId", self->clientId)
 							    .detail("ClientCount", self->clientCount)
 							    .detail("ShardBegin", range.begin)
@@ -2039,7 +2392,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							break; // skip the entire shard, retry later
 						}
 
-						if (firstValidServer >= 0 && !CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+						if (firstValidServer >= 0 && self->consistencyCheckerId == 0) {
 							VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
 							// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 							// shard size estimate
@@ -2117,11 +2470,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				if (!completeCheck) {
 					numFailedShards++;
-					TraceEvent(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE ? SevInfo : SevWarn,
-					           "ConsistencyCheck_ShardFailed")
+					TraceEvent(self->consistencyCheckerId != 0 ? SevInfo : SevWarn, "ConsistencyCheck_ShardFailed")
 					    .suppressFor(1.0)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
+					    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 					    .detail("ClientId", self->clientId)
 					    .detail("ClientCount", self->clientCount)
 					    .detail("NumCompletedShards", numCompleteShards)
@@ -2138,6 +2491,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .suppressFor(1.0)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
+					    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 					    .detail("ClientId", self->clientId)
 					    .detail("ClientCount", self->clientCount)
 					    .detail("Range", range)
@@ -2151,7 +2505,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				}
 
-				if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+				if (self->consistencyCheckerId != 0) { // Urgent mode
 					continue; // Bypass following check not-relevant to userdata/metadata consistency
 				}
 
@@ -2276,24 +2630,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		if (CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_MODE) {
+		if (self->consistencyCheckerId != 0) {
 			failedRanges.coalesce(allKeys);
 			state std::vector<KeyRange> failedRangesToCheck;
 			state KeyRangeMap<bool>::Ranges failedRangesList = failedRanges.ranges();
 			state KeyRangeMap<bool>::iterator failedRangesIter = failedRangesList.begin();
 			for (; failedRangesIter != failedRangesList.end(); ++failedRangesIter) {
-				if (failedRangesIter->value() == false) {
-					continue; // No failure, so bypass the range
+				if (failedRangesIter->value()) {
+					failedRangesToCheck.push_back(failedRangesIter->range());
 				}
-				failedRangesToCheck.push_back(failedRangesIter->range());
 			}
-			if (failedRangesToCheck.size() > 0) {
+			if (failedRangesToCheck.size() > 0) { // Retry for any failed shard
 				wait(delay(60.0)); // Backoff 1 min
 				state std::vector<std::pair<KeyRange, Value>> shardLocationPairListForFailedRanges =
 				    wait(self->getKeyLocationsForRangeList(cx, failedRangesToCheck, self));
 				TraceEvent(SevInfo, "ConsistencyCheck_StartHandlingFailedRanges")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
 				    .detail("FailedShardCount", shardLocationPairListForFailedRanges.size())
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
@@ -2307,27 +2661,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					                                          tssMapping,
 					                                          self,
 					                                          consistencyCheckEpoch + 1)));
-				} else {
-					// We give up retrying when retry too many times
-					for (const auto& missedRange : shardLocationPairListForFailedRanges) {
-						TraceEvent(SevWarnAlways, "ConsistencyCheck_MissingRange")
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("Reason", "MaxRetryDepthReached")
-						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
-						    .detail("Distributed", self->distributed)
-						    .detail("ShardCount", ranges.size())
-						    .detail("ClientId", self->clientId)
-						    .detail("ClientCount", self->clientCount)
-						    .detail("BeginKey", printable(missedRange.first.begin))
-						    .detail("EndKey", printable(missedRange.first.end));
-					}
-					if (g_network->isSimulated()) {
-						self->testFailure("Retry too many times");
-						return false;
-					}
 				}
-			} // Otherwise, no failure, we are good to go
+				// We give up retrying when retry too many times
+				// The failed ranges will be picked up by the next round
+			}
 		}
 
 		// SOMEDAY: when background data distribution is implemented, include this test
@@ -2356,6 +2693,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			TraceEvent("ConsistencyCheck_EndTask")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
+			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("Distributed", self->distributed)
 			    .detail("ShardCount", ranges.size())
 			    .detail("ClientId", self->clientId)

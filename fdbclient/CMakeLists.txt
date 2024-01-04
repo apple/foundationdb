@@ -47,6 +47,9 @@ set(FDBCLIENT_SRCS
   ConfigKnobs.h
   ConfigTransactionInterface.cpp
   ConfigTransactionInterface.h
+  ConsistencyCheck.h
+  ConsistencyCheckUtil.actor.cpp
+  ConsistencyCheckUtil.actor.h
   ConvertUTF.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp

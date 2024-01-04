@@ -824,6 +824,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 	init( CONSISTENCY_CHECK_ROCKSDB_ENGINE,                    false );
 	init( CONSISTENCY_CHECK_SQLITE_ENGINE,                     false );
+	init( TESTER_SHARED_RANDOM_MAX_PLUS_ONE,                10000000 );
+	init( CONSISTENCY_CHECK_ID_MIN, TESTER_SHARED_RANDOM_MAX_PLUS_ONE );
+	init( CONSISTENCY_CHECK_ID_MAX_PLUS_ONE, 10 * TESTER_SHARED_RANDOM_MAX_PLUS_ONE);
+	init( CONSISTENCY_CHECK_USE_PERSIST_DATA,                  false ); if (isSimulated) CONSISTENCY_CHECK_USE_PERSIST_DATA = deterministicRandom()->coinflip();
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
