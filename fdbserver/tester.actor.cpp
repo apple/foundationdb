@@ -991,7 +991,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	}
 }
 
-ACTOR Future<std::unordered_set<int>> dispatchMonitorUrgentConsistencyCheckWorkload(
+ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
     Database cx,
     std::vector<TesterInterface> testers,
     TestSpec spec,
@@ -1001,9 +1001,9 @@ ACTOR Future<std::unordered_set<int>> dispatchMonitorUrgentConsistencyCheckWorkl
 	TraceEvent("ConsistencyCheckUrgent_Dispatch")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
-
 	state double waitForFailureTime = g_network->isSimulated() ? 24 * 60 * 60 : 60;
 
+	// Step 1: Get interfaces for running workloads
 	state std::vector<Future<ErrorOr<WorkloadInterface>>> workRequests;
 	for (int i = 0; i < testers.size(); i++) {
 		WorkloadRequest req;
@@ -1021,12 +1021,13 @@ ACTOR Future<std::unordered_set<int>> dispatchMonitorUrgentConsistencyCheckWorkl
 		} else {
 			req.rangesToCheck = Optional<std::vector<KeyRange>>();
 		}
-		workRequests.push_back(errorOr(timeoutError(testers[i].recruitments.getReply(req), waitForFailureTime)));
+		workRequests.push_back(testers[i].recruitments.getReplyUnlessFailedFor(req, waitForFailureTime, 0));
 		// workRequests follows the order of clientId of assignment
 	}
 	wait(waitForAll(workRequests));
 
-	TraceEvent("ConsistencyCheckUrgent_SetupStart")
+	// Step 2: Setup workloads via the interfaces
+	TraceEvent("ConsistencyCheckUrgent_SetupWorkloads")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 	state std::vector<int> clientIds; // record the clientId for setups/starts
@@ -1050,26 +1051,36 @@ ACTOR Future<std::unordered_set<int>> dispatchMonitorUrgentConsistencyCheckWorkl
 	wait(waitForAll(setups));
 	for (int i = 0; i < setups.size(); i++) {
 		if (setups[i].isError()) {
-			TraceEvent("ConsistencyCheckUrgent_SetupError1")
+			TraceEvent("ConsistencyCheckUrgent_SetupWorkloadError1")
 			    .errorUnsuppressed(setups[i].getError())
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		} else if (setups[i].get().isError()) {
-			TraceEvent("ConsistencyCheckUrgent_SetupError2")
+			TraceEvent("ConsistencyCheckUrgent_SetupWorkloadError2")
 			    .errorUnsuppressed(setups[i].get().getError())
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		}
 	}
-	throwIfError(setups, "ConsistencyCheckUrgent_SetupFailedForWorkload");
-	// Error out if the setup fails
+	try {
+		throwIfError(setups, "ConsistencyCheckUrgent_SetupWorkloadFailed");
+	} catch (Error& e) {
+		// Give up this round if any setup failed
+		for (int i = 0; i < workRequests.size(); i++) {
+			ASSERT(workRequests[i].isReady());
+			if (!workRequests[i].get().isError()) {
+				workRequests[i].get().get().stop.send(ReplyPromise<Void>());
+			}
+		}
+		throw e;
+	}
 
-	TraceEvent("ConsistencyCheckUrgent_SetupComplete")
+	// Step 3: Run workloads via the interfaces
+	TraceEvent("ConsistencyCheckUrgent_RunWorkloads")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
-
 	state std::unordered_set<int> completeClientIds;
 	clientIds.clear();
 	state std::vector<Future<ErrorOr<Void>>> starts;
@@ -1084,26 +1095,27 @@ ACTOR Future<std::unordered_set<int>> dispatchMonitorUrgentConsistencyCheckWorkl
 	wait(waitForAll(starts));
 	for (int i = 0; i < starts.size(); i++) {
 		if (starts[i].isError()) {
-			TraceEvent("ConsistencyCheckUrgent_StartError1")
+			TraceEvent("ConsistencyCheckUrgent_RunWorkloadError1")
 			    .errorUnsuppressed(starts[i].getError())
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		} else if (starts[i].get().isError()) {
-			TraceEvent("ConsistencyCheckUrgent_StartError2")
+			TraceEvent("ConsistencyCheckUrgent_RunWorkloadError2")
 			    .errorUnsuppressed(starts[i].get().getError())
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		} else {
-			TraceEvent("ConsistencyCheckUrgent_ClientComplete")
+			TraceEvent("ConsistencyCheckUrgent_RunWorkloadComplete")
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
-			completeClientIds.insert(clientIds[i]);
+			completeClientIds.insert(clientIds[i]); // Add complete clients
 		}
 	}
 
+	// Step 4: Stop workloads via the interfaces
 	for (int i = 0; i < workRequests.size(); i++) {
 		ASSERT(workRequests[i].isReady());
 		if (!workRequests[i].get().isError()) {
@@ -1111,7 +1123,7 @@ ACTOR Future<std::unordered_set<int>> dispatchMonitorUrgentConsistencyCheckWorkl
 		}
 	}
 
-	TraceEvent("ConsistencyCheckUrgent_WorkloadEnd")
+	TraceEvent("ConsistencyCheckUrgent_DispatchEnd")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 
@@ -1466,7 +1478,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			wait(store(assignment, makeTaskAssignment(cx, consistencyCheckerId, shardsToCheck, ts.size(), round)));
 
 			// Step 5: Run checking on testers
-			std::unordered_set<int> completeClients = wait(dispatchMonitorUrgentConsistencyCheckWorkload(
+			std::unordered_set<int> completeClients = wait(runUrgentConsistencyCheckWorkload(
 			    cx, ts, testSpec, defaultTenant, consistencyCheckerId, assignment));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
