@@ -1190,6 +1190,7 @@ const KeyRef primaryLocalityKey = "\xff/globals/primaryLocality"_sr;
 const KeyRef primaryLocalityPrivateKey = "\xff\xff/globals/primaryLocality"_sr;
 const KeyRef fastLoggingEnabled = "\xff/globals/fastLoggingEnabled"_sr;
 const KeyRef fastLoggingEnabledPrivateKey = "\xff\xff/globals/fastLoggingEnabled"_sr;
+const KeyRef constructDataKey = "\xff/globals/constructData"_sr;
 
 // Whenever configuration changes or DD related system keyspace is changed(e.g.., serverList),
 // actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey.
@@ -1316,6 +1317,26 @@ Key uidPrefixKey(KeyRef keyPrefix, UID logUid) {
 	bw.serializeBytes(keyPrefix);
 	bw << logUid;
 	return bw.toValue();
+}
+
+std::tuple<Standalone<StringRef>, uint64_t, uint64_t, uint64_t> decodeConstructKeys(ValueRef value) {
+	StringRef keyStart;
+	uint64_t valSize, keyCount, seed;
+	BinaryReader rd(value, Unversioned());
+	rd >> keyStart;
+	rd >> valSize;
+	rd >> keyCount;
+	rd >> seed;
+	return std::make_tuple(keyStart, valSize, keyCount, seed);
+}
+
+Value encodeConstructValue(StringRef keyStart, uint64_t valSize, uint64_t keyCount, uint64_t seed) {
+	BinaryWriter wr(Unversioned());
+	wr << keyStart;
+	wr << valSize;
+	wr << keyCount;
+	wr << seed;
+	return wr.toValue();
 }
 
 // Apply mutations constant variables

@@ -847,6 +847,11 @@ public:
 	int64_t HOT_SHARD_THROTTLING_TRACKED;
 	double HOT_SHARD_MONITOR_FREQUENCY;
 
+	// allow generating synthetic data for test clusters
+	bool GENERATE_DATA_ENABLED;
+	// maximum number of synthetic mutations per transaction
+	int GENERATE_DATA_PER_VERSION_MAX;
+
 	double MAX_TRANSACTIONS_PER_BYTE;
 
 	int64_t MIN_AVAILABLE_SPACE;
