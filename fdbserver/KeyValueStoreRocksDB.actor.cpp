@@ -83,13 +83,6 @@ class SharedRocksDBState {
 public:
 	SharedRocksDBState(UID id);
 
-	LatencySample commitLatency;
-	LatencySample commitQueueLatency;
-	LatencySample dbWriteLatency;
-	std::vector<std::shared_ptr<LatencySample>> readLatency;
-	std::vector<std::shared_ptr<LatencySample>> scanLatency;
-	std::vector<std::shared_ptr<LatencySample>> readQueueLatency;
-
 	void setClosing() { this->closing = true; }
 	bool isClosing() const { return this->closing; }
 
@@ -112,33 +105,7 @@ private:
 
 SharedRocksDBState::SharedRocksDBState(UID id)
   : id(id), closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()),
-    readOptions(initialReadOptions()), commitLatency(LatencySample("RocksDBCommitLatency",
-                                                                   id,
-                                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
-    commitQueueLatency(LatencySample("RocksDBCommitQueueLatency",
-                                     id,
-                                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
-    dbWriteLatency(LatencySample("RocksDBWriteLatency",
-                                 id,
-                                 SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                 SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
-	for (int i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; i++) {
-		readLatency.push_back(std::make_shared<LatencySample>(format("RocksDBReadLatency-%d", i),
-		                                                      id,
-		                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY));
-		scanLatency.push_back(std::make_shared<LatencySample>(format("RocksDBScanLatency-%d", i),
-		                                                      id,
-		                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY));
-		readQueueLatency.push_back(std::make_shared<LatencySample>(format("RocksDBReadQueueLatency-%d", i),
-		                                                           id,
-		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY));
-	}
-}
+    readOptions(initialReadOptions()) {}
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
@@ -1363,7 +1330,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				perfContextMetrics->reset();
 			}
 			double commitBeginTime = timer_monotonic();
-			sharedState->commitQueueLatency.addMeasurement(commitBeginTime - a.startTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
@@ -1392,7 +1358,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			double currTime = timer_monotonic();
-			sharedState->dbWriteLatency.addMeasurement(currTime - writeBeginTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_WRITE_HISTOGRAM.toString(), currTime - writeBeginTime));
@@ -1419,7 +1384,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 			currTime = timer_monotonic();
-			sharedState->commitLatency.addMeasurement(currTime - a.startTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_COMMIT_ACTION_HISTOGRAM.toString(), currTime - commitBeginTime));
@@ -1551,7 +1515,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				perfContextMetrics->reset();
 			}
 			const double readBeginTime = timer_monotonic();
-			sharedState->readQueueLatency[threadIndex]->addMeasurement(readBeginTime - a.startTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
@@ -1616,7 +1579,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
 			}
-			sharedState->readLatency[threadIndex]->addMeasurement(endTime - readBeginTime);
 		}
 
 		struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction> {
@@ -1640,7 +1602,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				perfContextMetrics->reset();
 			}
 			const double readBeginTime = timer_monotonic();
-			sharedState->readQueueLatency[threadIndex]->addMeasurement(readBeginTime - a.startTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
@@ -1703,7 +1664,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
 			}
-			sharedState->readLatency[threadIndex]->addMeasurement(endTime - readBeginTime);
 		}
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
@@ -1729,7 +1689,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				perfContextMetrics->reset();
 			}
 			const double readBeginTime = timer_monotonic();
-			sharedState->readQueueLatency[threadIndex]->addMeasurement(readBeginTime - a.startTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
@@ -1823,8 +1782,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			a.result.send(result);
-			// Temporarily not sampling to understand the pattern of readRange results.
-			if (metricPromiseStream) {
+			if (a.getHistograms) {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM.toString(), result.logicalSize()));
 				metricPromiseStream->send(
@@ -1840,7 +1798,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
 			}
-			sharedState->scanLatency[threadIndex]->addMeasurement(endTime - readBeginTime);
 		}
 	};
 
