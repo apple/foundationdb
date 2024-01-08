@@ -11423,13 +11423,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
-		if (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size()) {
+		if (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size() && ver != invalidVersion) {
 			int mutationCount =
 			    std::min(static_cast<int>(data->constructedData.size()), SERVER_KNOBS->GENERATE_DATA_PER_VERSION_MAX);
 			for (int m = 0; m < mutationCount; m++) {
 				MutationRef constructedMutation(
 				    MutationRef::SetValue, data->constructedData.front().first, data->constructedData.front().second);
-				// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1);
+				// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1).detail("V",ver);
 				MutationRefAndCipherKeys encryptedMutation;
 				updater.applyMutation(data, constructedMutation, encryptedMutation, ver, false);
 				data->constructedData.pop_front();
