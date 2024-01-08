@@ -826,6 +826,10 @@ public:
 	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
 	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
 
+	// allow generating synthetic data for test clusters
+	bool GENERATE_DATA_ENABLED;
+	// maximum number of synthetic mutations per transaction
+	int GENERATE_DATA_PER_VERSION_MAX;
 	double MAX_TRANSACTIONS_PER_BYTE;
 
 	int64_t MIN_AVAILABLE_SPACE;

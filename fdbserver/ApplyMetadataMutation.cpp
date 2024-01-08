@@ -574,6 +574,46 @@ private:
 		    .detail("LogRangeEnd", logRangeEnd);
 	}
 
+	void checkSetConstructKeys(MutationRef m) {
+		if (!SERVER_KNOBS->GENERATE_DATA_ENABLED) {
+			return;
+		}
+		if (!m.param1.startsWith(globalKeysPrefix)) {
+			return;
+		}
+		if (!toCommit) {
+			return;
+		}
+
+		if (m.param1.startsWith(constructDataKey)) {
+			uint64_t valSize, keyCount, seed;
+			Standalone<StringRef> prefix;
+			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
+			if (prefix.size() == 0 || keyCount >= UINT16_MAX || valSize >= CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
+				return;
+			}
+			uint8_t keyBuf[prefix.size() + sizeof(uint16_t)];
+			uint8_t* keyPos = prefix.copyTo(keyBuf);
+			*keyPos = '\xff';
+			StringRef keyEnd(keyBuf, keyPos - keyBuf + 1);
+			std::set<Tag> allTags;
+			for (auto it : keyInfo->intersectingRanges(KeyRangeRef(prefix, keyEnd))) {
+				auto& r = it.value();
+				for (auto info : r.src_info) {
+					allTags.insert(info->tag);
+				}
+				for (auto info : r.dest_info) {
+					allTags.insert(info->tag);
+				}
+			}
+			toCommit->addTags(allTags);
+			TraceEvent(SevInfo, "ConstructDataRequest")
+			    .detail("Prefix", prefix)
+			    .detail("KeyCount", keyCount)
+			    .detail("ValSize", valSize);
+		}
+	}
+
 	void checkSetGlobalKeys(MutationRef m) {
 		if (!m.param1.startsWith(globalKeysPrefix)) {
 			return;
