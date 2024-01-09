@@ -158,7 +158,7 @@ public:
 	ACTOR static Future<Void> trackStorageServerQueueInfo(ActorWeakSelfRef<Ratekeeper> self,
 	                                                      StorageServerInterface ssi) {
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->id, ssi.id(), ssi.locality)));
-		TraceEvent("RkTracking", self->id)
+		TraceEvent("RkTrackStorageStart", self->id)
 		    .detail("StorageServer", ssi.id())
 		    .detail("Locality", ssi.locality.toString());
 		try {
@@ -166,9 +166,11 @@ public:
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
+				ASSERT(myQueueInfo != self->storageQueueInfo.end());
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
+					myQueueInfo->value.valid = true;
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -181,6 +183,9 @@ public:
 				                                                    FailureStatus(false)));
 			}
 		} catch (...) {
+			TraceEvent("RkTrackStorageStop", self->id)
+			    .detail("StorageServer", ssi.id())
+			    .detail("Locality", ssi.locality.toString());
 			// including cancellation
 			self->storageQueueInfo.erase(ssi.id());
 			self->storageServerInterfaces.erase(ssi.id());
@@ -241,6 +246,7 @@ public:
 				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
+					myQueueInfo->value.valid = true;
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkTLogDidNotRespond", self->id).detail("TransactionLog", tli.id());
@@ -283,8 +289,6 @@ public:
 				} else {
 					storageServerTrackers.erase(id);
 					self->storageServerInterfaces.erase(id);
-					self->storageQueueInfo.erase(id); // remove the entry if an old storage server is absent
-					self->healthMetrics.storageStats.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
