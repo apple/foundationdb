@@ -773,6 +773,10 @@ public:
 	                                      // When both CONSISTENCY_CHECK_ROCKSDB_ENGINE and
 	                                      // CONSISTENCY_CHECK_SQLITE_ENGINE are set, consistency check only checks for
 	                                      // the rocksdb engine.
+	int64_t TESTER_SHARED_RANDOM_MAX_PLUS_ONE;
+	int64_t CONSISTENCY_CHECK_ID_MIN;
+	int64_t CONSISTENCY_CHECK_ID_MAX_PLUS_ONE;
+	bool CONSISTENCY_CHECK_USE_PERSIST_DATA;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
