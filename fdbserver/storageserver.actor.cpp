@@ -6054,7 +6054,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
 
-	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+	for (; offset < sz && *remainingLimitBytes > 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
@@ -11219,7 +11219,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && msg.checksum != 0) {
-						ASSERT(msg.calculateChecksum() == msg.checksum);
+						const int32_t checksum = msg.calculateChecksum();
+						if (checksum != msg.checksum) {
+							TraceEvent(SevError, "MutationChecksumMismatch", data->thisServerID)
+							    .detail("Mutation", msg)
+							    .detail("ExpectedChecksum", msg.checksum)
+							    .("ActualChecksum", checksum);
+						}
 					}
 				}
 			}
