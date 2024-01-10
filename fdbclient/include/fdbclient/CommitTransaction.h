@@ -91,12 +91,13 @@ struct MutationRef {
 	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
+	uint32_t checksum;
 
 	MutationRef() : type(MAX_ATOMIC_OP) {}
-	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b) {}
-	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b) {}
+	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), checksum(0) {}
+	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b), checksum(0) {}
 	MutationRef(Arena& to, const MutationRef& from)
-	  : type(from.type), param1(to, from.param1), param2(to, from.param2) {}
+	  : type(from.type), param1(to, from.param1), param2(to, from.param2), checksum(from.checksum) {}
 	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
 	int weightedTotalSize() const {
@@ -124,15 +125,20 @@ struct MutationRef {
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			serializer(ar, type, param2, empty);
+			serializer(ar, type, param2, empty, checksum);
 		} else {
-			serializer(ar, type, param1, param2);
+			serializer(ar, type, param1, param2, checksum);
 		}
 		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
 			ASSERT(param1[param1.size() - 1] == '\x00');
 			param2 = param1;
 			param1 = param2.substr(0, param2.size() - 1);
 		}
+	}
+
+	uint32_t checksum() {
+		uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), this->param1.begin(), this->param1.size());
+		return crc32c_append(c, this->param2.begin(), this->param2.size());
 	}
 
 	// An encrypted mutation has type Encrypted, encryption header (which contains encryption metadata) as param1,
