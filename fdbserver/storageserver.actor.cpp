@@ -11217,6 +11217,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						eager.addMutation(msg);
 						dbgLastMessageWasProtocol = false;
 					}
+
+					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && msg.checksum != 0) {
+						ASSERT(msg.calculateChecksum() == msg.checksum);
+					}
 				}
 			}
 

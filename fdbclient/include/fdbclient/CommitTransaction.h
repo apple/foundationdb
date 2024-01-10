@@ -30,6 +30,7 @@
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 
+#include "crc32/crc32c.h"
 #include <unordered_set>
 
 // The versioned message has wire format : -1, version, messages
@@ -123,6 +124,9 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		if (ar.isSerializing && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			checksum = calculateChecksum();
+		}
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
 			serializer(ar, type, param2, empty, checksum);
@@ -136,7 +140,7 @@ struct MutationRef {
 		}
 	}
 
-	uint32_t checksum() {
+	uint32_t calculateChecksum() {
 		uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), this->param1.begin(), this->param1.size());
 		return crc32c_append(c, this->param2.begin(), this->param2.size());
 	}
