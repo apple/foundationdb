@@ -3,5 +3,5 @@ setuptools==65.5.1
 sphinx==5.1.1
 sphinx-bootstrap-theme==0.8.1
 docutils==0.19
-Jinja2==3.1.2
+Jinja2==3.1.3
 urllib3<2
