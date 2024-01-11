@@ -11218,13 +11218,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						dbgLastMessageWasProtocol = false;
 					}
 
-					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && msg.checksum != 0) {
+					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && cloneReader.protocolVersion().hasMutationChecksum() &&
+					    msg.checksum.present()) {
 						const int32_t checksum = msg.calculateChecksum();
-						if (checksum != msg.checksum) {
+						if (checksum != msg.checksum.get()) {
 							TraceEvent(SevError, "MutationChecksumMismatch", data->thisServerID)
 							    .detail("Mutation", msg)
-							    .detail("ExpectedChecksum", msg.checksum)
-							    .("ActualChecksum", checksum);
+							    .detail("ExpectedChecksum", msg.checksum.get())
+							    .detail("ActualChecksum", checksum);
 						}
 					}
 				}

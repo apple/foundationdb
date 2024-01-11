@@ -92,11 +92,12 @@ struct MutationRef {
 	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
-	uint32_t checksum;
+	Optional<uint32_t> checksum;
 
 	MutationRef() : type(MAX_ATOMIC_OP) {}
-	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), checksum(0) {}
-	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b), checksum(0) {}
+	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), checksum(Optional<uint32_t>()) {}
+	MutationRef(Arena& to, Type t, StringRef a, StringRef b)
+	  : type(t), param1(to, a), param2(to, b), checksum(Optional<uint32_t>()) {}
 	MutationRef(Arena& to, const MutationRef& from)
 	  : type(from.type), param1(to, from.param1), param2(to, from.param2), checksum(from.checksum) {}
 	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
@@ -113,10 +114,14 @@ struct MutationRef {
 	}
 
 	std::string toString() const {
-		return format("code: %s param1: %s param2: %s",
+		std::string chs;
+		if (checksum.present())
+			chs = " checksum: " + std::to_string(checksum.get());
+		return format("code: %s param1: %s param2: %s%s",
 		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset",
 		              printable(param1).c_str(),
-		              printable(param2).c_str());
+		              printable(param2).c_str(),
+		              chs.c_str());
 	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
