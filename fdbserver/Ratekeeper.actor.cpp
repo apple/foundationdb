@@ -158,17 +158,28 @@ public:
 	ACTOR static Future<Void> trackStorageServerQueueInfo(ActorWeakSelfRef<Ratekeeper> self,
 	                                                      StorageServerInterface ssi) {
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->id, ssi.id(), ssi.locality)));
-		TraceEvent("RkTracking", self->id)
+		self->healthMetrics.storageStats[ssi.id()] = HealthMetrics::StorageStats();
+		TraceEvent("RkTrackStorageStart", self->id)
 		    .detail("StorageServer", ssi.id())
 		    .detail("Locality", ssi.locality.toString());
-		try {
-			loop {
+
+		loop {
+			try {
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
+				ASSERT(myQueueInfo != self->storageQueueInfo.end());
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
+
+					// Update health stats.
+					auto ssMetrics = self->healthMetrics.storageStats.find(ssi.id());
+					ASSERT(ssMetrics != self->healthMetrics.storageStats.end());
+					ssMetrics->second.storageQueue = myQueueInfo->value.getStorageQueueBytes();
+					ssMetrics->second.storageDurabilityLag = myQueueInfo->value.getDurabilityLag();
+					ssMetrics->second.cpuUsage = reply.get().cpuUsage;
+					ssMetrics->second.diskUsage = reply.get().diskUsage;
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -179,13 +190,21 @@ public:
 				wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
 				     IFailureMonitor::failureMonitor().onStateEqual(ssi.getQueuingMetrics.getEndpoint(),
 				                                                    FailureStatus(false)));
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					self->storageQueueInfo.erase(ssi.id());
+					self->healthMetrics.storageStats.erase(ssi.id());
+					throw;
+				}
+				// Do no stop tracking storage server. The error might be recoverable.
+				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
+				ASSERT(myQueueInfo != self->storageQueueInfo.end());
+				myQueueInfo->value.valid = false;
+				TraceEvent("RkTrackStorageError", self->id)
+				    .detail("StorageServer", ssi.id())
+				    .detail("Locality", ssi.locality.toString())
+				    .errorUnsuppressed(e);
 			}
-		} catch (...) {
-			// including cancellation
-			self->storageQueueInfo.erase(ssi.id());
-			self->storageServerInterfaces.erase(ssi.id());
-			self->healthMetrics.storageStats.erase(ssi.id());
-			throw;
 		}
 	}
 
@@ -221,6 +240,13 @@ public:
 					    .detail("MetricSize", metricSize)
 					    .log();
 				}
+
+				// Storage related stats should be consistent.
+				for (const auto& [id, _] : self->storageServerInterfaces) {
+					ASSERT(self->storageQueueInfo.find(id) != self->storageQueueInfo.end());
+					ASSERT(self->healthMetrics.storageStats.find(id) != self->healthMetrics.storageStats.end());
+				}
+
 				// wait for monitorServerListChange to remove the interface
 				wait(delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY));
 				tr = Transaction(self->db);
@@ -234,13 +260,14 @@ public:
 	ACTOR static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
 		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
-		TraceEvent("RkTracking", self->id).detail("TransactionLog", tli.id());
+		TraceEvent("RkTrackTlog", self->id).detail("TransactionLog", tli.id());
 		try {
 			loop {
 				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
 				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
+					myQueueInfo->value.valid = true;
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkTLogDidNotRespond", self->id).detail("TransactionLog", tli.id());
@@ -252,9 +279,12 @@ public:
 				     IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(),
 				                                                    FailureStatus(false)));
 			}
-		} catch (...) {
+		} catch (Error& e) {
 			// including cancellation
 			self->tlogQueueInfo.erase(myQueueInfo);
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent("RkTrackTlogError", self->id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
+			}
 			throw;
 		}
 	}
@@ -283,8 +313,6 @@ public:
 				} else {
 					storageServerTrackers.erase(id);
 					self->storageServerInterfaces.erase(id);
-					self->storageQueueInfo.erase(id); // remove the entry if an old storage server is absent
-					self->healthMetrics.storageStats.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
@@ -875,12 +903,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
-
-		auto& ssMetrics = healthMetrics.storageStats[ss.id];
-		ssMetrics.storageQueue = storageQueue;
-		ssMetrics.storageDurabilityLag = storageDurabilityLag;
-		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
-		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
 
