@@ -27,6 +27,7 @@
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
+#include <boost/system/error_code.hpp>
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
@@ -168,7 +169,7 @@ public:
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr);
 	void updateNow() { currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
+	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) {
 		globals.resize(std::max(globals.size(), id + 1));
 		globals[id] = v;
@@ -355,7 +356,8 @@ public:
 	virtual void close() { closeSocket(); }
 
 	explicit Connection(boost::asio::io_service& io_service)
-	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service) {}
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service),
+	    failureInjector(FailureInjector::injector()) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios, NetworkAddress addr) {
@@ -394,6 +396,10 @@ public:
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
 		socket.async_write_some(boost::asio::null_buffers(), std::move(p));
+		double clog = failureInjector->getSendDelay(peer_address);
+		if (clog > 0.0) {
+			return delay(clog) && f;
+		}
 		return f;
 	}
 
@@ -403,13 +409,17 @@ public:
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
 		socket.async_read_some(boost::asio::null_buffers(), std::move(p));
+		double clog = failureInjector->getReceiveDelay(peer_address);
+		if (clog > 0.0) {
+			return delay(clog) && f;
+		}
 		return f;
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
 	// be 0)
 	virtual int read(uint8_t* begin, uint8_t* end) {
-		boost::system::error_code err;
+		boost::system::error_code err = failureInjector->rollRandomClose();
 		++g_net2->countReads;
 		size_t toRead = end - begin;
 		size_t size = socket.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
@@ -431,7 +441,9 @@ public:
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0)
 	virtual int write(SendBuffer const* data, int limit) {
-		boost::system::error_code err;
+		bool writeOnInjectedError = deterministicRandom()->coinflip();
+		boost::system::error_code err =
+		    writeOnInjectedError ? boost::system::error_code() : failureInjector->rollRandomClose();
 		++g_net2->countWrites;
 
 		size_t sent = socket.write_some(
@@ -472,6 +484,7 @@ private:
 	UID id;
 	tcp::socket socket;
 	NetworkAddress peer_address;
+	FailureInjector* failureInjector;
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1762,6 +1775,43 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 	}
 
 	return N2::g_net2;
+}
+
+boost::system::error_code FailureInjector::rollRandomClose() const {
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES && injectConnectionFailures &&
+	    deterministicRandom()->random01() < .000005) {
+		return boost::system::errc::make_error_code(boost::system::errc::network_reset);
+	}
+	return boost::system::error_code();
+}
+
+void FailureInjector::clogFor(const Optional<NetworkAddress>& peer, double time) {
+	if (peer.present()) {
+		auto& until = clogConnection[peer.get()];
+		until = std::max(until, now() + time);
+	} else {
+		clogAllUntil = std::max(clogAllUntil, now() + time);
+	}
+}
+
+double FailureInjector::getReceiveDelay(const NetworkAddress& peer) {
+	if (!FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+		return 0.0;
+	}
+	auto iter = clogConnection.find(peer);
+	auto until = clogAllUntil;
+	if (iter != clogConnection.end()) {
+		until = std::max(until, iter->second);
+		if (iter->second < now()) {
+			clogConnection.erase(iter);
+		}
+	}
+	return std::max(0.0, until - now());
+}
+
+double FailureInjector::getSendDelay(const NetworkAddress& peer) {
+	// for now receive and send do the same thing
+	return getReceiveDelay(peer);
 }
 
 struct TestGVR {

@@ -1322,6 +1322,10 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+		TraceEvent(SevWarnAlways, "ChaosFeaturesEnabled");
+	}
+
 	folder = abspath(folder);
 
 	if (metricsPrefix.size() > 0) {
@@ -1577,6 +1581,19 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					TraceEvent("ProcessReboot");
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
+				}
+			}
+			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
+				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+					if (req.injectNetworkFailures.present()) {
+						FailureInjector::injector()->setConnectionFailures(req.injectNetworkFailures.get());
+					}
+					if (req.clog.present()) {
+						FailureInjector::injector()->clogFor(req.clog.get().address, req.clog.get().time);
+					}
+					req.reply.send(Void());
+				} else {
+					req.reply.sendError(client_invalid_operation());
 				}
 			}
 			when(ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture())) {

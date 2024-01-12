@@ -26,6 +26,7 @@
 #include <string>
 #include <stdint.h>
 #include <variant>
+#include <unordered_map>
 #include "boost/asio.hpp"
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
@@ -455,7 +456,8 @@ public:
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
 		enClientFailureMonitor = 12,
-		enSQLiteInjectedError = 13
+		enSQLiteInjectedError = 13,
+		enFailureInjector = 14
 	};
 
 	virtual void longTaskCheck(const char* name) {}
@@ -580,6 +582,36 @@ public:
 		return static_cast<INetworkConnections*>((void*)g_network->global(INetwork::enNetworkConnections));
 	}
 	// Returns the interface that should be used to make and accept socket connections
+};
+
+struct FailureInjector : FastAllocated<FailureInjector> {
+	static FailureInjector* injector() {
+		auto res = g_network->global(INetwork::enFailureInjector);
+		if (!res) {
+			res = new FailureInjector();
+			g_network->setGlobal(INetwork::enFailureInjector, res);
+		}
+		return static_cast<FailureInjector*>(res);
+	}
+
+	boost::system::error_code rollRandomClose() const;
+
+	void setConnectionFailures(bool enabled) { injectConnectionFailures = enabled; }
+
+	double getSendDelay(NetworkAddress const& peer);
+	double getReceiveDelay(NetworkAddress const& peer);
+
+	void clogFor(Optional<NetworkAddress> const& peer, double time);
+
+private: // members
+	// like in simulation, we want to default to true for this one
+	bool injectConnectionFailures = true;
+	double clogAllUntil = 0.0;
+	std::unordered_map<NetworkAddress, double> clogConnection;
+
+private: // construction
+	FailureInjector() = default;
+	FailureInjector(FailureInjector const&) = delete;
 };
 
 #endif

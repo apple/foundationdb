@@ -141,6 +141,7 @@ set(FDBSERVER_SRCS
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
   workloads/Downgrade.actor.cpp
+  workloads/DropConnections.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
