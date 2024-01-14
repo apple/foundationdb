@@ -310,7 +310,7 @@ Key getKeyFromString(const std::string& str) {
 		return emptyKey;
 	}
 	if (str.size() % 4 != 0) {
-		TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
+		TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Reason", "WrongLength")
@@ -320,7 +320,7 @@ Key getKeyFromString(const std::string& str) {
 	std::vector<uint8_t> byteList;
 	for (int i = 0; i < str.size(); i += 4) {
 		if (str.at(i + 0) != '\\' || str.at(i + 1) != 'x') {
-			TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
+			TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Reason", "WrongBytePrefix")
@@ -330,7 +330,7 @@ Key getKeyFromString(const std::string& str) {
 		const char first = str.at(i + 2);
 		const char second = str.at(i + 3);
 		if (parseCharMap.count(first) == 0 || parseCharMap.count(second) == 0) {
-			TraceEvent(SevWarnAlways, "ConsistencyCheck_GetKeyFromStringError")
+			TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Reason", "WrongByteContent")
@@ -403,7 +403,7 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 			rangeBegin = allKeys.end;
 		}
 		if (rangeEnd > allKeys.end) {
-			TraceEvent("ConsistencyCheck_ReverseInputRange")
+			TraceEvent("ConsistencyCheckUrgent_ReverseInputRange")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Index", i)
@@ -418,7 +418,7 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 		} else if (rangeBegin > rangeEnd) {
 			rangeToCheck = Standalone(KeyRangeRef(rangeEnd, rangeBegin));
 		} else {
-			TraceEvent("ConsistencyCheck_EmptyInputRange")
+			TraceEvent("ConsistencyCheckUrgent_EmptyInputRange")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Index", i)
@@ -437,7 +437,7 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 			res.push_back(rangeToCheck.range());
 		}
 	}
-	TraceEvent e("ConsistencyCheck_LoadedInputRange");
+	TraceEvent e("ConsistencyCheckUrgent_LoadedInputRange");
 	e.setMaxEventLength(-1);
 	e.setMaxFieldLength(-1);
 	for (int i = 0; i < res.size(); i++) {

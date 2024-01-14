@@ -710,11 +710,45 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
-	TraceEvent("StartingTesterServerCore", interf.id());
+	// Dedicated to consistencyCheckerUrgent
+	// At any time, we only allow at most 1 consistency checker workload on a server
+	state std::pair<int64_t, Future<Void>> consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>());
+
+	TraceEvent(SevInfo, "StartingTesterServerCore", interf.id());
 	loop choose {
 		when(wait(workerFatalError)) {}
+		when(wait(consistencyCheckerUrgentTester.second.isValid() ? consistencyCheckerUrgentTester.second : Never())) {
+			ASSERT(consistencyCheckerUrgentTester.first != 0);
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerWorkloadEnd", interf.id())
+			    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first);
+			consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>()); // reset
+		}
 		when(WorkloadRequest work = waitNext(interf.recruitments.getFuture())) {
-			addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
+			if (work.sharedRandomNumber > SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN &&
+			    work.sharedRandomNumber < SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE) {
+				// The workload is a consistency checker urgent workload
+				if (work.sharedRandomNumber == consistencyCheckerUrgentTester.first) {
+					TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerDuplicatedRequest", interf.id())
+					    .detail("ConsistencyCheckerId", work.sharedRandomNumber)
+					    .detail("ClientId", work.clientId)
+					    .detail("ClientCount", work.clientCount);
+				} else if (consistencyCheckerUrgentTester.second.isValid() &&
+				           !consistencyCheckerUrgentTester.second.isReady()) {
+					TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_ServerConflict", interf.id())
+					    .detail("ExistingConsistencyCheckerId", consistencyCheckerUrgentTester.first)
+					    .detail("ArrivingConsistencyCheckerId", work.sharedRandomNumber)
+					    .detail("ClientId", work.clientId)
+					    .detail("ClientCount", work.clientCount);
+				}
+				consistencyCheckerUrgentTester =
+				    std::make_pair(work.sharedRandomNumber, testerServerWorkload(work, ccr, dbInfo, locality));
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerWorkloadStart", interf.id())
+				    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
+				    .detail("ClientId", work.clientId)
+				    .detail("ClientCount", work.clientCount);
+			} else {
+				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
+			}
 		}
 	}
 }
@@ -1036,8 +1070,9 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 	for (int i = 0; i < workRequests.size(); i++) {
 		ASSERT(workRequests[i].isReady());
 		if (workRequests[i].get().isError()) {
+			Error e = workRequests[i].get().getError();
 			TraceEvent("ConsistencyCheckUrgent_FailedToContactToClient")
-			    .error(workRequests[i].get().getError())
+			    .error(e)
 			    .detail("TesterCount", testers.size())
 			    .detail("TesterId", i)
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
@@ -1119,7 +1154,19 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 	for (int i = 0; i < workRequests.size(); i++) {
 		ASSERT(workRequests[i].isReady());
 		if (!workRequests[i].get().isError()) {
+			TraceEvent("ConsistencyCheckUrgent_RunWorkloadStopSignal")
+			    .detail("State", "Succeed")
+			    .detail("ClientId", i)
+			    .detail("ClientCount", testers.size())
+			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 			workRequests[i].get().get().stop.send(ReplyPromise<Void>());
+			// This signal is not reliable but acceptable
+		} else {
+			TraceEvent("ConsistencyCheckUrgent_RunWorkloadStopSignal")
+			    .detail("State", "Not issue since the interface is failed to fetch")
+			    .detail("ClientId", i)
+			    .detail("ClientCount", testers.size())
+			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		}
 	}
 
