@@ -1100,8 +1100,15 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 		}
 	}
 	try {
-		throwIfError(setups, "ConsistencyCheckUrgent_SetupWorkloadFailed");
+		for (auto& setup : setups) {
+			if (setup.isError()) {
+				throw setup.getError();
+			} else if (setup.get().isError()) {
+				throw setup.get().getError();
+			}
+		}
 	} catch (Error& e) {
+		TraceEvent(SevWarn, "ConsistencyCheckUrgent_SetupWorkloadFailed").error(e);
 		// Give up this round if any setup failed
 		for (int i = 0; i < workRequests.size(); i++) {
 			ASSERT(workRequests[i].isReady());
