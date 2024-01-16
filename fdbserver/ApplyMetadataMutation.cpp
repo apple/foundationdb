@@ -613,6 +613,14 @@ private:
 		writeMutation(privatized);
 	}
 
+	void checkClientInfo(MutationRef m) {
+		if (!m.param1.startsWith(fdbClientInfoPrefixRange.begin)) {
+			return;
+		}
+
+		TraceEvent("ApplyMetaDataMutationCheckClientInfo").detail("Key", m.param1);
+	}
+
 	// Generates private mutations for the target storage server, instructing it to create a checkpoint.
 	void checkSetCheckpointKeys(MutationRef m) {
 		if (!m.param1.startsWith(checkpointPrefix)) {
@@ -1323,6 +1331,8 @@ public:
 			if (toCommit) {
 				toCommit->addTransactionInfo(spanContext);
 			}
+
+			checkClientInfo(m);
 
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
 				checkSetKeyServersPrefix(m);
