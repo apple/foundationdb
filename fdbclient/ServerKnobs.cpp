@@ -566,6 +566,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                1 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,             true );
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                        4 );
+	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,                   isSimulated? 16 * 1024 : 134217728 /* 128MB */);
+	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
+	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,     33554432 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
