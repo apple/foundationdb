@@ -198,8 +198,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _startUrgent(Database cx, ConsistencyCheckWorkload* self) {
-		TraceEvent("ConsistencyCheck_Start")
-		    .detail("Mode", "Urgent")
+		TraceEvent("ConsistencyCheckUrgent_Start")
 		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 		    .detail("Distributed", self->distributed)
 		    .detail("ClientCount", self->clientCount)
@@ -207,8 +206,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    .detail("Indefinite", self->indefinite)
 		    .detail("Repetitions", self->repetitions);
 		wait(self->runUrgentCheck(cx, self));
-		TraceEvent("ConsistencyCheck_Exit")
-		    .detail("Mode", "Urgent")
+		TraceEvent("ConsistencyCheckUrgent_Exit")
 		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 		    .detail("Distributed", self->distributed)
 		    .detail("ClientCount", self->clientCount)
@@ -222,7 +220,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			while (self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Suspended")
-				    .detail("Mode", "Normal")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("Distributed", self->distributed)
 				    .detail("ClientCount", self->clientCount)
@@ -233,7 +230,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				wait(self->suspendConsistencyCheck.onChange());
 			}
 			TraceEvent("ConsistencyCheck_StartingOrResuming")
-			    .detail("Mode", "Normal")
 			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("Distributed", self->distributed)
 			    .detail("ClientCount", self->clientCount)
@@ -1582,6 +1578,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 			// Step 3: Read a limited number of entries at a time, repeating until all keys in the shard have been read
 			state int64_t totalReadAmount = 0;
+			state int64_t shardReadAmount = 0;
+			state int64_t shardKeyCompared = 0;
 			state bool valueAvailableToCheck = true;
 			state KeySelector begin = firstGreaterOrEqual(range.begin);
 			loop {
@@ -1617,8 +1615,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							if (rangeResult.present()) {
 								e.detail("ErrorPresent", rangeResult.get().error.present());
 								if (rangeResult.get().error.present()) {
-									e.detail("Error", rangeResult.get().error.get().name());
+									e.detail("Error", rangeResult.get().error.get().what());
 								}
+							} else {
+								e.detail("ResultNotPresentWithError", rangeResult.getError().what());
 							}
 							break;
 						}
@@ -1650,6 +1650,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// to compare against
 						if (firstValidServer == -1) {
 							firstValidServer = j;
+							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+							shardKeyCompared += current.data.size();
 						} else {
 							// Compare this shard against the first
 							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
@@ -1736,6 +1738,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// RateKeeping
 					wait(rateLimiter->getAllowance(totalReadAmount));
 
+					shardReadAmount += totalReadAmount;
+
 					// Advance to the next set of entries
 					ASSERT(firstValidServer != -1);
 					if (keyValueFutures[firstValidServer].get().get().more) {
@@ -1773,7 +1777,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ShardBegin", range.begin)
 				    .detail("ShardEnd", range.end)
 				    .detail("ReplicaCount", storageServers.size())
-				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("ShardBytesRead", shardReadAmount)
+				    .detail("ShardKeysCompared", shardKeyCompared);
 			} else {
 				numCompleteShards++;
 				if (!self->rangesToCheck.present()) { // In case we are able to persist progress
@@ -1796,7 +1802,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("NumFailedShards", numFailedShards)
 				    .detail("NumShardThisClient", numShardThisClient)
 				    .detail("NumShardToCheckThisEpoch", numShardToCheck - 1)
-				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
+				    .detail("ShardBytesRead", shardReadAmount)
+				    .detail("ShardKeysCompared", shardKeyCompared);
 			}
 		}
 
