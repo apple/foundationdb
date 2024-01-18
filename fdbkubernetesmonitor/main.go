@@ -21,6 +21,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -45,18 +46,18 @@ var (
 	logPath                 string
 	executionModeString     string
 	outputDir               string
-	copyFiles               []string
-	copyBinaries            []string
-	binaryOutputDirectory   string
-	copyLibraries           []string
-	copyPrimaryLibrary      string
-	requiredCopyFiles       []string
 	mainContainerVersion    string
 	currentContainerVersion string
 	additionalEnvFile       string
+	binaryOutputDirectory   string
+	listenAddress           string
+	copyPrimaryLibrary      string
+	requiredCopyFiles       []string
+	copyFiles               []string
+	copyBinaries            []string
+	copyLibraries           []string
 	processCount            int
 	enablePprof             bool
-	listenAddress           string
 )
 
 type executionMode string
@@ -130,7 +131,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof)
+		StartMonitor(context.Background(), logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
@@ -179,7 +180,7 @@ func getCopyDetails() (map[string]string, map[string]bool, error) {
 		fullFilePath := path.Join(inputDir, filePath)
 		_, present := copyDetails[fullFilePath]
 		if !present {
-			return nil, nil, fmt.Errorf("File %s is required, but is not in the --copy-file list", filePath)
+			return nil, nil, fmt.Errorf("file %s is required, but is not in the --copy-file list", filePath)
 		}
 		requiredCopyMap[fullFilePath] = true
 	}
@@ -189,8 +190,9 @@ func getCopyDetails() (map[string]string, map[string]bool, error) {
 
 func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 	var customEnvironment = make(map[string]string)
-	environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
 	if additionalEnvFile != "" {
+		environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
+
 		file, err := os.Open(additionalEnvFile)
 		if err != nil {
 			return nil, err

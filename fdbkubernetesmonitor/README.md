@@ -4,6 +4,12 @@ This package provides a launcher program for running FoundationDB in Kubernetes.
 
 ## Testing
 
+### Unit tests
+
+You can run the unit tests by running `go test ./...` from this directory.
+
+### Manual testing
+
 To test this, run the following commands from the root of the FoundationDB
 repository:
 
