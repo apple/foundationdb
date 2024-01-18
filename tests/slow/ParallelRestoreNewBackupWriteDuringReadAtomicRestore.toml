@@ -2,6 +2,9 @@
 StderrSeverity = 30
 allowDefaultTenant = false
 
+[[knobs]]
+enable_mutation_checksum = false
+
 [[test]]
 testTitle = 'WriteDuringReadTest'
 clearAfterTest = false
