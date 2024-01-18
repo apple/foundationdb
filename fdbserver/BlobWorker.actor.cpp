@@ -585,8 +585,8 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			fmt::print("Updating granule {0} split state from {1} {2} -> {3}\n",
 			           currentGranuleID.toString(),
 			           parentGranuleID.toString(),
-			           currentState,
-			           newState);
+			           static_cast<int>(currentState),
+			           static_cast<int>(newState));
 		}
 
 		Key myStateKey = blobGranuleSplitKeyFor(parentGranuleID, currentGranuleID);
@@ -631,8 +631,8 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 		fmt::print("Ignoring granule {0} split state from {1} {2} -> {3}\n",
 		           currentGranuleID.toString(),
 		           parentGranuleID.toString(),
-		           currentState,
-		           newState);
+		           static_cast<int>(currentState),
+		           static_cast<int>(newState));
 	}
 
 	return Void();
@@ -5442,7 +5442,7 @@ ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWo
 					           assignReq.keyRange.end.printable(),
 					           assignReq.managerEpoch,
 					           assignReq.managerSeqno,
-					           assignReq.type);
+					           static_cast<int>(assignReq.type));
 				}
 
 				if (self->managerEpochOk(assignReq.managerEpoch)) {
