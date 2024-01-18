@@ -279,21 +279,20 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 	state bool checkAll = false; // do not return on first error, continue checking all keys
 	state KeyRange toCheck = backupLogKeys;
 
-	if (tokens.size() == 2 && tokens[1] == "ALL"_sr) {
-		printf("Checking all keys for corruption...\n");
-		checkAll = true;
-	}
-	if (tokens.size() == 2 && tokens[1] == "help"_sr) {
-		printf("checkall [ALL]|[<KEY> <KEY2>]\n"
-		       "Check inconsistency in a keyspace by comparing all replicas and print any corruptions.\n"
-		       "The default behavior is to stop on the first shard where corruption is found and the\n"
-		       "default keyspace is \\xff\\x02/blog/.\n"
-		       "The default keyspace can be changed by specifying a range. Note this is intended to check\n"
-		       "a small range of keys, not the entire database (consider consistencycheck for that purpose).\n");
-		return false;
-	}
 	if (tokens.size() == 3) {
 		toCheck = KeyRangeRef(tokens[1], tokens[2]);
+	} else if (tokens.size() == 4 && tokens[3] == "all"_sr) {
+		toCheck = KeyRangeRef(tokens[1], tokens[2]);
+		checkAll = true;
+	} else {
+		printf(
+		    "checkall [<KEY> <KEY2>] (all)\n"
+		    "Check inconsistency of the input range by comparing all replicas and print any corruptions.\n"
+		    "The default behavior is to stop on the first subrange where corruption is found\n"
+		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
+		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
+		    "for that purpose).\n");
+		return false;
 	}
 
 	loop {
