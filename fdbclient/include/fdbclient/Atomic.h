@@ -311,6 +311,8 @@ inline void transformVersionstampMutation(MutationRef& mutation,
 	}
 
 	mutation.type = MutationRef::SetValue;
+
+	mutation.renewChecksum();
 }
 
 #endif

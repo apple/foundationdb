@@ -99,7 +99,7 @@ struct MutationRef {
 	MutationRef(Arena& to, Type t, StringRef a, StringRef b)
 	  : type(t), param1(to, a), param2(to, b), checksum(Optional<uint32_t>()) {}
 	MutationRef(Arena& to, const MutationRef& from)
-	  : type(from.type), param1(to, from.param1), param2(to, from.param2), checksum(from.checksum) {}
+	  : type(from.type), param1(to, from.param1), param2(to, from.param2), checksum(Optional<uint32_t>()) {}
 	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
 	int weightedTotalSize() const {
@@ -113,15 +113,17 @@ struct MutationRef {
 		}
 	}
 
+	Type getType() const { return static_cast<Type>(this->type); }
+
 	std::string toString() const {
 		std::string chs;
 		if (checksum.present())
-			chs = " checksum: " + std::to_string(checksum.get());
-		return format("code: %s param1: %s param2: %s%s",
+			chs = "checksum: " + std::to_string(checksum.get()) + " ";
+		return format("%scode: %s param1: %s param2: %s",
+		              chs.c_str(),
 		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset",
 		              printable(param1).c_str(),
-		              printable(param2).c_str(),
-		              chs.c_str());
+		              printable(param2).c_str());
 	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
@@ -129,14 +131,32 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.isSerializing && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
-			checksum = calculateChecksum();
+		if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
+		    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			if (!checksum.present()) {
+				checksum = calculateChecksum();
+				// TraceEvent(SevInfo, "InitChecksum").detail("Mutation", this->toString());
+			} else {
+				if (checksum != calculateChecksum()) {
+					TraceEvent(SevError, "ChecksumFailure")
+					    .detail("Mutation", this->toString())
+					    .detail("ActualChecksum", calculateChecksum());
+				}
+			}
 		}
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			serializer(ar, type, param2, empty, checksum);
+			if (ar.protocolVersion().hasMutationChecksum()) {
+				serializer(ar, type, param2, empty, checksum);
+			} else {
+				serializer(ar, type, param2, empty);
+			}
 		} else {
-			serializer(ar, type, param1, param2, checksum);
+			if (ar.protocolVersion().hasMutationChecksum()) {
+				serializer(ar, type, param1, param2, checksum);
+			} else {
+				serializer(ar, type, param1, param2);
+			}
 		}
 		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
 			ASSERT(param1[param1.size() - 1] == '\x00');
@@ -149,6 +169,8 @@ struct MutationRef {
 		uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), this->param1.begin(), this->param1.size());
 		return crc32c_append(c, this->param2.begin(), this->param2.size());
 	}
+
+	void renewChecksum() { this->checksum = this->calculateChecksum(); }
 
 	// An encrypted mutation has type Encrypted, encryption header (which contains encryption metadata) as param1,
 	// and the payload as param2. It can be serialize/deserialize as normal mutation, but can only be used after
