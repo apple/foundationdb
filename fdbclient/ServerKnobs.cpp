@@ -566,6 +566,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                1 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,             true );
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                        4 );
+	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,                   isSimulated? 16 * 1024 : 134217728 /* 128MB */);
+	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
+	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,     33554432 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -802,6 +805,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,                     0.0); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
 	init (STORAGE_FETCH_KEYS_DELAY,	                             0.0 ); if ( randomize && BUGGIFY ) { STORAGE_FETCH_KEYS_DELAY = deterministicRandom()->random01() * 5.0; }
 	init (STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET,                false ); if (isSimulated) STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET = deterministicRandom()->coinflip();
+	init (STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY,               3600 * 2 ); if (isSimulated) STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY = 20.0;
+	init (STORAGE_ROCKSDB_LOG_TTL,                    3600 * 24 * 15 ); if (isSimulated) STORAGE_ROCKSDB_LOG_TTL = 3600.0;
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
 	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;

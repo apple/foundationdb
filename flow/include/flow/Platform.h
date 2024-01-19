@@ -316,6 +316,9 @@ bool directoryExists(std::string const& path);
 // Returns size of file in bytes
 int64_t fileSize(std::string const& filename);
 
+// Returns last modified time of the file.
+time_t fileModifiedTime(const std::string& filename);
+
 // Returns true if file is deleted, false if it was not found, throws platform_error() otherwise
 // Consider using IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need durability!
 bool deleteFile(std::string const& filename);
