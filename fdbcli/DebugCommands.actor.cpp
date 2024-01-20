@@ -164,125 +164,133 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 CommandFactory getallCommandFactory("getall");
 
 // check that all replies are the same. Update begin to the next key to check
-std::pair<bool, bool> checkResults(Version version,
-                                   const std::vector<StorageServerInterface>& servers,
-                                   const std::vector<Future<ErrorOr<GetKeyValuesReply>>>& replies,
-                                   KeySelectorRef& begin,
-                                   const KeySelectorRef& end,
-                                   Key& lastEnd) {
+// checkResults keeps invariants:
+// (1) hasMore = true if any server has more data not read yet
+// (2) nextBeginKey is the minimal key returned from all servers
+// (3) checkResults reports inconsistency of keys only before the nextBeginKey if hasMore=true
+// Therefore, whether to proceed to the next round depends on hasMore
+// If there is a next round, it starts from the minimal key returned from all servers
+std::tuple<bool, bool, Key> checkResults(Version version,
+                                         const std::vector<StorageServerInterface>& servers,
+                                         const std::vector<Future<ErrorOr<GetKeyValuesReply>>>& replies) {
+	// Decide comparison scope
+	Key claimEndKey; // used for the next round exists
+	bool hasMore = false;
+	for (int j = 0; j < replies.size(); j++) {
+		auto reply = replies[j].get();
+		if (reply.isError()) {
+			printf("checkResults error: %s\n", reply.getError().what());
+			throw reply.getError();
+		} else if (reply.get().error.present()) {
+			printf("checkResults error: %s\n", reply.get().error.get().what());
+			throw reply.get().error.get();
+		}
+		GetKeyValuesReply current = reply.get();
+		if (current.data.size() == 0) {
+			continue; // Ignore if no data has replied
+		}
+		if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
+			claimEndKey = current.data[current.data.size() - 1].key;
+		}
+		hasMore = hasMore || current.more;
+	}
+	ASSERT(!claimEndKey.empty());
+
+	// Compare servers
 	bool allSame = true;
 	int firstValidServer = -1;
 	for (int j = 0; j < replies.size(); j++) {
 		auto reply = replies[j].get();
-		if (!reply.present() || reply.get().error.present()) {
-			printf("Error from %s: %s\n",
-			       servers[j].address().toString().c_str(),
-			       reply.present() ? reply.get().error.get().what() : "no reply");
-			continue;
-		}
-		GetKeyValuesReply current = reply.get();
+		ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
 		if (firstValidServer == -1) {
 			firstValidServer = j;
-			continue;
+			continue; // always select the first server as reference
 		}
+		// compare reference and current
+		GetKeyValuesReply current = reply.get();
 		GetKeyValuesReply reference = replies[firstValidServer].get().get();
-
-		// compare the two replicas
 		if (current.data == reference.data && current.more == reference.more) {
 			continue;
 		}
 
+		// Detecting corrupted keys for any mismatching replies between current and reference servers
 		allSame = false;
-		printf("#%d  server: %s  key count: %lu, cached: %d, more: %d\n",
-		       firstValidServer,
-		       servers[firstValidServer].address().toString().c_str(),
-		       reference.data.size(),
-		       reference.cached,
-		       +reference.more);
-		printf("#%d  server: %s  key count: %lu, cached: %d, more: %dn",
-		       j,
-		       servers[j].address().toString().c_str(),
-		       current.data.size(),
-		       current.cached,
-		       current.more);
 		size_t currentI = 0, referenceI = 0;
 		while (currentI < current.data.size() || referenceI < reference.data.size()) {
+			if (hasMore &&
+			    (reference.data[referenceI].key >= claimEndKey || current.data[currentI].key >= claimEndKey)) {
+				// If there will be a next round and the key is out of claimEndKey
+				// We will delay the detection to the next round
+				break;
+			}
 			if (currentI >= current.data.size()) {
-				printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
-				       firstValidServer,
+				printf("UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+				       servers[firstValidServer].address().toString().c_str(),
+				       servers[j].address().toString().c_str(),
 				       currentI,
 				       referenceI,
+				       version,
 				       printable(reference.data[referenceI].key).c_str());
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
-				printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
-				       j,
+				printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+				       servers[j].address().toString().c_str(),
+				       servers[firstValidServer].address().toString().c_str(),
 				       currentI,
 				       referenceI,
+				       version,
 				       printable(current.data[currentI].key).c_str());
 				currentI++;
 			} else {
 				KeyValueRef currentKV = current.data[currentI];
 				KeyValueRef referenceKV = reference.data[referenceI];
-
 				if (currentKV.key == referenceKV.key) {
 					if (currentKV.value != referenceKV.value) {
-						printf(" CurrentI: %lu ReferenceI: %lu Value mismatch key: %s\n",
+						printf("MismatchValue %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
+						       "UniqueKey %s\n",
+						       servers[firstValidServer].address().toString().c_str(),
+						       servers[j].address().toString().c_str(),
 						       currentI,
 						       referenceI,
+						       version,
 						       printable(currentKV.key).c_str());
 					}
 					currentI++;
 					referenceI++;
 				} else if (currentKV.key < referenceKV.key) {
-					printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
-					       j,
+					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+					       servers[j].address().toString().c_str(),
+					       servers[firstValidServer].address().toString().c_str(),
 					       currentI,
 					       referenceI,
+					       version,
 					       printable(currentKV.key).c_str());
 					currentI++;
 				} else {
-					printf(" #%d CurrentI: %lu ReferenceI: %lu Unique key: %s\n",
-					       firstValidServer,
+					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+					       servers[firstValidServer].address().toString().c_str(),
+					       servers[j].address().toString().c_str(),
 					       currentI,
 					       referenceI,
-					       printable(referenceKV.key).c_str());
+					       version,
+					       printable(currentKV.key).c_str());
 					referenceI++;
 				}
 			}
 		}
 	}
-
-	bool hasMore = firstValidServer >= 0 && replies[firstValidServer].get().get().more;
-	if (hasMore) {
-		const VectorRef<KeyValueRef>& result = replies[firstValidServer].get().get().data;
-		printf("Warning: Consistency check was incomplete, last key of server %d that was checked: %s\n",
-		       firstValidServer,
-		       printable(result[result.size() - 1].key).c_str());
-		lastEnd = result[result.size() - 1].key; // store to a standalone, otherwise memory will be invalid
-		begin = firstGreaterThan(lastEnd);
-	} else {
-		printf("Consistency check finishes for version %ld\n", version);
-		begin = end; // signal that we're done
-	}
-
-	return std::make_pair(allSame, hasMore);
+	return std::make_tuple(allSame, hasMore, claimEndKey);
 }
 
 // The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
 ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
-	// ignore tokens for now
 	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
-	state int i = 0;
-	state Version version;
-	state KeySelectorRef begin, end;
-	state bool checkAll = false; // do not return on first error, continue checking all keys
-	state KeyRange toCheck = backupLogKeys;
-
+	state bool checkAll = false; // If set, do not return on first error, continue checking all keys
+	state KeyRange inputRange;
 	if (tokens.size() == 3) {
-		toCheck = KeyRangeRef(tokens[1], tokens[2]);
+		inputRange = KeyRangeRef(tokens[1], tokens[2]);
 	} else if (tokens.size() == 4 && tokens[3] == "all"_sr) {
-		toCheck = KeyRangeRef(tokens[1], tokens[2]);
+		inputRange = KeyRangeRef(tokens[1], tokens[2]);
 		checkAll = true;
 	} else {
 		printf(
@@ -294,78 +302,97 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		    "for that purpose).\n");
 		return false;
 	}
+	if (inputRange.empty()) {
+		return true;
+	}
 
+	// At this point, we have a non-empty inputRange to check
 	loop {
-		printf("Start checking range: %s\n", printable(toCheck).c_str());
 		try {
+			printf("Start checking for range: %s\n", printable(inputRange).c_str());
+			// Get SS interface for each shard of the inputRange
 			state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, toCheck));
-
+			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, inputRange));
 			if (!foundKeyServers) {
-				printf("key server locations for %s not found, retrying in 1s...\n", printable(toCheck).c_str());
+				printf("key server locations for %s not found, retrying in 1s...\n", printable(inputRange).c_str());
 				wait(delay(1.0));
 				continue;
 			}
-
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();
-			state Key lastEnd; // this is to hold the Key having the value of next begin
-			for (i = 0; i < keyServers.size(); i++) { // for each key range
-				state KeyRange range = keyServers[i].first;
-				range = range & toCheck;
-				if (range.empty()) {
+
+			// Checking each shard
+			state int i = 0;
+			for (; i < keyServers.size(); i++) { // for each shard
+				state KeyRange rangeToCheck = keyServers[i].first;
+				rangeToCheck = rangeToCheck & inputRange; // Only check the shard part within the inputRange
+				if (rangeToCheck.empty()) {
 					continue;
 				}
 				const auto& servers = keyServers[i].second;
-				begin = firstGreaterOrEqual(range.begin);
-				end = firstGreaterOrEqual(range.end);
-				printf("Key range: %s\n", printable(range).c_str());
+				state Key beginKeyToCheck = rangeToCheck.begin;
+				printf("Key range to check: %s\n", printable(rangeToCheck).c_str());
 				for (const auto& server : servers) {
 					printf("  %s\n", server.address().toString().c_str());
 				}
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
 				state bool hasMore = true;
 				state int round = 0;
+				state Version version;
 				while (hasMore) {
 					wait(store(version, getVersion(cx)));
 					replies.clear();
-					printf("round %d, begin Key: %s\n", round, printable(begin.toString()).c_str());
+					printf("Round %d: %s - %s\n",
+					       round,
+					       printable(beginKeyToCheck.toString()).c_str(),
+					       printable(rangeToCheck.end.toString()).c_str());
 					for (const auto& s : keyServers[i].second) { // for each storage server
 						GetKeyValuesRequest req;
-						req.begin = begin;
-						req.end = end;
+						req.begin = firstGreaterOrEqual(beginKeyToCheck);
+						req.end = firstGreaterOrEqual(rangeToCheck.end);
 						req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
 						req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
-						req.version = version;
+						req.version = version; // all replica should read at the same version
 						req.tags = TagSet();
 						replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
-					// printf("waiting for %lu replies at version: %ld\n", keyServers[i].second.size(), version);
 					wait(waitForAll(replies));
-					// if there are more results, continue checking in the same shard
-					auto p = checkResults(version, keyServers[i].second, replies, begin, end, lastEnd);
-					bool allSame = p.first;
-					hasMore = p.second;
-					printf("AllSame %d, hasMore %d, checkAll %d\n", allSame, hasMore, checkAll);
+					// checkResults keeps invariants:
+					// (1) hasMore = true if any server has more data not read yet
+					// (2) nextBeginKey is the minimal key returned from all servers
+					// (3) checkResults reports inconsistency of keys only before the nextBeginKey if hasMore=true
+					// Therefore, whether to proceed to the next round depends on hasMore
+					// If there is a next round, it starts from the minimal key returned from all servers
+					auto res = checkResults(version, keyServers[i].second, replies);
+					bool allSame = std::get<0>(res);
+					hasMore = std::get<1>(res);
+					Key nextBeginKey = std::get<2>(res);
+					// Using claimEndKey for the current round as the nextBeginKey for the next round
+					// Note that claimEndKey is not compared in the current round
+					// This key will be compared in the next round
+					printf("Result: compared %s - %s\n",
+					       printable(beginKeyToCheck.toString()).c_str(),
+					       printable(nextBeginKey.toString()).c_str());
+					beginKeyToCheck = nextBeginKey;
+					printf("allSame %d, hasMore %d, checkAll %d\n", allSame, hasMore, checkAll);
 					if (!allSame && !checkAll) {
 						return false;
 					}
 					round++;
 				}
-				if (begin == end) {
-					// this shard is done, signaled by begin == end
-					toCheck = KeyRangeRef(range.end, toCheck.end);
-				}
 			}
+			break;
+
 		} catch (Error& e) {
-			printf("Retrying for error: %s\n", e.what());
+			printf("Error: %s", e.what());
 			wait(onErrorTr.onError(e));
-		}
-		if (toCheck.begin == toCheck.end) {
-			return true;
+			printf(", retrying in 1s...\n");
 		}
 		wait(delay(1.0));
 	}
+
+	printf("Checking complete.\n");
+	return true;
 }
 
 CommandFactory checkallCommandFactory("checkall");
