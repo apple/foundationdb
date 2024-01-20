@@ -224,7 +224,9 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 				break;
 			}
 			if (currentI >= current.data.size()) {
-				printf("UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+				// ServerA(1), ServerB(0): 1 indicates that ServerA has the key while 0 indicates that ServerB does not
+				// have the key
+				printf("UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
 				       servers[firstValidServer].address().toString().c_str(),
 				       servers[j].address().toString().c_str(),
 				       currentI,
@@ -233,7 +235,7 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 				       printable(reference.data[referenceI].key).c_str());
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
-				printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+				printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
 				       servers[j].address().toString().c_str(),
 				       servers[firstValidServer].address().toString().c_str(),
 				       currentI,
@@ -247,7 +249,7 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 				if (currentKV.key == referenceKV.key) {
 					if (currentKV.value != referenceKV.value) {
 						printf("MismatchValue %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
-						       "UniqueKey %s\n",
+						       "Key %s\n",
 						       servers[firstValidServer].address().toString().c_str(),
 						       servers[j].address().toString().c_str(),
 						       currentI,
@@ -258,7 +260,7 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 					currentI++;
 					referenceI++;
 				} else if (currentKV.key < referenceKV.key) {
-					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
 					       servers[j].address().toString().c_str(),
 					       servers[firstValidServer].address().toString().c_str(),
 					       currentI,
@@ -267,13 +269,13 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 					       printable(currentKV.key).c_str());
 					currentI++;
 				} else {
-					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, UniqueKey %s\n",
+					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
 					       servers[firstValidServer].address().toString().c_str(),
 					       servers[j].address().toString().c_str(),
 					       currentI,
 					       referenceI,
 					       version,
-					       printable(currentKV.key).c_str());
+					       printable(referenceKV.key).c_str());
 					referenceI++;
 				}
 			}
@@ -357,17 +359,11 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 						replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
 					wait(waitForAll(replies));
-					// checkResults keeps invariants:
-					// (1) hasMore = true if any server has more data not read yet
-					// (2) nextBeginKey is the minimal key returned from all servers
-					// (3) checkResults reports inconsistency of keys only before the nextBeginKey if hasMore=true
-					// Therefore, whether to proceed to the next round depends on hasMore
-					// If there is a next round, it starts from the minimal key returned from all servers
 					auto res = checkResults(version, keyServers[i].second, replies);
 					bool allSame = std::get<0>(res);
 					hasMore = std::get<1>(res);
 					Key nextBeginKey = std::get<2>(res);
-					// Using claimEndKey for the current round as the nextBeginKey for the next round
+					// Using claimEndKey of the current round as the nextBeginKey for the next round
 					// Note that claimEndKey is not compared in the current round
 					// This key will be compared in the next round
 					printf("Result: compared %s - %s\n",
