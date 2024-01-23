@@ -30,9 +30,9 @@ Developers interested in using FoundationDB can get started by downloading and i
 Developers on an OS for which there is no binary package, or who would like
 to start hacking on the code, can get started by compiling from source.
 
-The official docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build) which has all dependencies installed. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository.](https://github.com/FoundationDB/fdb-build-support).
+The official docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build), which has all dependencies installed. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository](https://github.com/FoundationDB/fdb-build-support).
 
-To build outside the official docker image you'll need at least these dependencies:
+To build outside of the official docker image, you'll need at least these dependencies:
 
 1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
 1. Install [Mono](https://www.mono-project.com/download/stable/)
