@@ -194,7 +194,10 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 		}
 		hasMore = hasMore || current.more;
 	}
-	ASSERT(!claimEndKey.empty());
+	if (claimEndKey.empty()) {
+		printf("checkResults error: claimEndKey is empty\nPlease re-run the checkall.\n");
+		throw operation_failed();
+	}
 
 	// Compare servers
 	bool allSame = true;
@@ -226,7 +229,8 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 			if (currentI >= current.data.size()) {
 				// ServerA(1), ServerB(0): 1 indicates that ServerA has the key while 0 indicates that ServerB does not
 				// have the key
-				printf("UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
+				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
+				       "%s\n",
 				       servers[firstValidServer].address().toString().c_str(),
 				       servers[j].address().toString().c_str(),
 				       currentI,
@@ -235,7 +239,8 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 				       printable(reference.data[referenceI].key).c_str());
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
-				printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
+				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
+				       "%s\n",
 				       servers[j].address().toString().c_str(),
 				       servers[firstValidServer].address().toString().c_str(),
 				       currentI,
@@ -248,7 +253,8 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 				KeyValueRef referenceKV = reference.data[referenceI];
 				if (currentKV.key == referenceKV.key) {
 					if (currentKV.value != referenceKV.value) {
-						printf("MismatchValue %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
+						printf("Inconsistency: MismatchValue, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
+						       "Version %ld, "
 						       "Key %s\n",
 						       servers[firstValidServer].address().toString().c_str(),
 						       servers[j].address().toString().c_str(),
@@ -260,7 +266,8 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 					currentI++;
 					referenceI++;
 				} else if (currentKV.key < referenceKV.key) {
-					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
+					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
+					       "Key %s\n",
 					       servers[j].address().toString().c_str(),
 					       servers[firstValidServer].address().toString().c_str(),
 					       currentI,
@@ -269,7 +276,8 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 					       printable(currentKV.key).c_str());
 					currentI++;
 				} else {
-					printf("UniqueKey %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key %s\n",
+					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
+					       "Key %s\n",
 					       servers[firstValidServer].address().toString().c_str(),
 					       servers[j].address().toString().c_str(),
 					       currentI,
@@ -305,6 +313,7 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		return false;
 	}
 	if (inputRange.empty()) {
+		printf("Input empty range: %s.\nImmediately exit.\n", printable(inputRange).c_str());
 		return true;
 	}
 
