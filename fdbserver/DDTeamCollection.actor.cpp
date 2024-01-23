@@ -2309,6 +2309,7 @@ public:
 						// healthyZone is now overloaded for DD diabling purpose, which does not timeout
 						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
 						healthyZoneTimeout = Never();
+						self->healthyZone.set(p.first);
 					} else if (p.second > tr.getReadVersion().get()) {
 						double timeoutSeconds =
 						    (p.second - tr.getReadVersion().get()) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
