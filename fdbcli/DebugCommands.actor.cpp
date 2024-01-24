@@ -170,58 +170,31 @@ CommandFactory getallCommandFactory("getall");
 // (3) checkResults reports inconsistency of keys only before the nextBeginKey if hasMore=true
 // Therefore, whether to proceed to the next round depends on hasMore
 // If there is a next round, it starts from the minimal key returned from all servers
-std::tuple<bool, bool, Key> checkResults(Version version,
-                                         const std::vector<StorageServerInterface>& servers,
-                                         const std::vector<Future<ErrorOr<GetKeyValuesReply>>>& replies) {
-	// Decide comparison scope
-	Key claimEndKey; // used for the next round exists
-	bool hasMore = false;
-	for (int j = 0; j < replies.size(); j++) {
-		auto reply = replies[j].get();
-		if (reply.isError()) {
-			printf("checkResults error: %s\n", reply.getError().what());
-			throw reply.getError();
-		} else if (reply.get().error.present()) {
-			printf("checkResults error: %s\n", reply.get().error.get().what());
-			throw reply.get().error.get();
-		}
-		GetKeyValuesReply current = reply.get();
-		if (current.data.size() == 0) {
-			continue; // Ignore if no data has replied
-		}
-		if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
-			claimEndKey = current.data[current.data.size() - 1].key;
-		}
-		hasMore = hasMore || current.more;
-	}
-	if (claimEndKey.empty()) {
-		printf("checkResults error: claimEndKey is empty\nPlease re-run the checkall.\n");
-		throw operation_failed();
-	}
-
+bool checkResults(Version version,
+                  bool hasMore,
+                  Key claimEndKey,
+                  const std::vector<StorageServerInterface>& servers,
+                  const std::vector<GetKeyValuesReply>& replies) {
 	// Compare servers
 	bool allSame = true;
 	int firstValidServer = -1;
 	for (int j = 0; j < replies.size(); j++) {
-		auto reply = replies[j].get();
-		ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
 		if (firstValidServer == -1) {
 			firstValidServer = j;
 			continue; // always select the first server as reference
 		}
 		// compare reference and current
-		GetKeyValuesReply current = reply.get();
-		GetKeyValuesReply reference = replies[firstValidServer].get().get();
+		GetKeyValuesReply current = replies[j];
+		GetKeyValuesReply reference = replies[firstValidServer];
 		if (current.data == reference.data && current.more == reference.more) {
 			continue;
 		}
-
 		// Detecting corrupted keys for any mismatching replies between current and reference servers
 		allSame = false;
 		size_t currentI = 0, referenceI = 0;
 		while (currentI < current.data.size() || referenceI < reference.data.size()) {
-			if (hasMore &&
-			    (reference.data[referenceI].key >= claimEndKey || current.data[currentI].key >= claimEndKey)) {
+			if (hasMore && ((referenceI < reference.data.size() && reference.data[referenceI].key >= claimEndKey) ||
+			                (currentI < current.data.size() && current.data[currentI].key >= claimEndKey))) {
 				// If there will be a next round and the key is out of claimEndKey
 				// We will delay the detection to the next round
 				break;
@@ -289,35 +262,15 @@ std::tuple<bool, bool, Key> checkResults(Version version,
 			}
 		}
 	}
-	return std::make_tuple(allSame, hasMore, claimEndKey);
+	return allSame;
 }
 
-// The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
-ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
-	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
-	state bool checkAll = false; // If set, do not return on first error, continue checking all keys
-	state KeyRange inputRange;
-	if (tokens.size() == 3) {
-		inputRange = KeyRangeRef(tokens[1], tokens[2]);
-	} else if (tokens.size() == 4 && tokens[3] == "all"_sr) {
-		inputRange = KeyRangeRef(tokens[1], tokens[2]);
-		checkAll = true;
-	} else {
-		printf(
-		    "checkall [<KEY> <KEY2>] (all)\n"
-		    "Check inconsistency of the input range by comparing all replicas and print any corruptions.\n"
-		    "The default behavior is to stop on the first subrange where corruption is found\n"
-		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
-		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
-		    "for that purpose).\n");
-		return false;
-	}
-	if (inputRange.empty()) {
-		printf("Input empty range: %s.\nImmediately exit.\n", printable(inputRange).c_str());
-		return true;
-	}
+ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll);
 
-	// At this point, we have a non-empty inputRange to check
+// Return whether inconsistency is detected in the inputRange
+ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
+	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
+	state bool consistent = true;
 	loop {
 		try {
 			printf("Start checking for range: %s\n", printable(inputRange).c_str());
@@ -344,7 +297,7 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 				state Key beginKeyToCheck = rangeToCheck.begin;
 				printf("Key range to check: %s\n", printable(rangeToCheck).c_str());
 				for (const auto& server : servers) {
-					printf("  %s\n", server.address().toString().c_str());
+					printf("\t%s\n", server.address().toString().c_str());
 				}
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
 				state bool hasMore = true;
@@ -368,19 +321,68 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 						replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
 					wait(waitForAll(replies));
-					auto res = checkResults(version, keyServers[i].second, replies);
-					bool allSame = std::get<0>(res);
-					hasMore = std::get<1>(res);
-					Key nextBeginKey = std::get<2>(res);
-					// Using claimEndKey of the current round as the nextBeginKey for the next round
-					// Note that claimEndKey is not compared in the current round
-					// This key will be compared in the next round
-					printf("Result: compared %s - %s\n",
-					       printable(beginKeyToCheck.toString()).c_str(),
-					       printable(nextBeginKey.toString()).c_str());
-					beginKeyToCheck = nextBeginKey;
-					printf("allSame %d, hasMore %d, checkAll %d\n", allSame, hasMore, checkAll);
-					if (!allSame && !checkAll) {
+
+					// Decide comparison scope
+					Key claimEndKey; // used for the next round if hasMore == true
+					Key maxEndKey;
+					hasMore = false; // re-calculate hasMore according to replies
+					for (int j = 0; j < replies.size(); j++) {
+						auto reply = replies[j].get();
+						if (reply.isError()) {
+							printf("checkResults error: %s\n", reply.getError().what());
+							throw reply.getError();
+						} else if (reply.get().error.present()) {
+							printf("checkResults error: %s\n", reply.get().error.get().what());
+							throw reply.get().error.get();
+						}
+						GetKeyValuesReply current = reply.get();
+						if (current.data.size() == 0) {
+							continue; // Ignore if no data has replied
+						}
+						if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
+							claimEndKey = current.data[current.data.size() - 1].key;
+						}
+						if (maxEndKey.empty() || current.data[current.data.size() - 1].key > maxEndKey) {
+							maxEndKey = current.data[current.data.size() - 1].key;
+						}
+						hasMore = hasMore || current.more;
+					}
+					printf("Compare scope has been decided\n\tBeginKey: %s\n\tEndKey: %s\n\tHasMore: %d\n",
+					       printable(beginKeyToCheck).c_str(),
+					       printable(claimEndKey).c_str(),
+					       hasMore);
+					if (claimEndKey.empty()) {
+						printf("checkResults error: claimEndKey is empty\nPlease re-run the checkall.\n");
+						throw operation_failed();
+					} else if ((beginKeyToCheck == claimEndKey) && hasMore) {
+						// In case rangeBegin == claimEndKey == next beginKeyToCheck
+						// we spawn a new checkall for a smaller range in this case
+						state KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
+						printf("Spawn new checkall for range %s\n", printable(spawnedRangeToCheck).c_str());
+						bool allSame = wait(doCheckAll(cx, spawnedRangeToCheck, checkAll));
+						beginKeyToCheck = spawnedRangeToCheck.end;
+						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
+					} else {
+						std::vector<GetKeyValuesReply> keyValueReplies;
+						for (int j = 0; j < replies.size(); j++) {
+							auto reply = replies[j].get();
+							ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
+							keyValueReplies.push_back(reply.get());
+						}
+						// keyServers and keyValueReplies must follow the same order
+						bool allSame =
+						    checkResults(version, hasMore, claimEndKey, keyServers[i].second, keyValueReplies);
+						// Using claimEndKey of the current round as the nextBeginKey for the next round
+						// Note that claimEndKey is not compared in the current round
+						// This key will be compared in the next round
+						printf("Result: compared %s - %s\n",
+						       printable(beginKeyToCheck.toString()).c_str(),
+						       printable(claimEndKey.toString()).c_str());
+						beginKeyToCheck = claimEndKey;
+						printf("allSame %d, hasMore %d, checkAll %d\n", allSame, hasMore, checkAll);
+						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
+					}
+					if (!consistent && !checkAll) {
 						return false;
 					}
 					round++;
@@ -395,8 +397,35 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		}
 		wait(delay(1.0));
 	}
+	return consistent;
+}
 
-	printf("Checking complete.\n");
+// The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
+ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
+	state bool checkAll = false; // If set, do not return on first error, continue checking all keys
+	state KeyRange inputRange;
+	if (tokens.size() == 3) {
+		inputRange = KeyRangeRef(tokens[1], tokens[2]);
+	} else if (tokens.size() == 4 && tokens[3] == "all"_sr) {
+		inputRange = KeyRangeRef(tokens[1], tokens[2]);
+		checkAll = true;
+	} else {
+		printf(
+		    "checkall [<KEY> <KEY2>] (all)\n"
+		    "Check inconsistency of the input range by comparing all replicas and print any corruptions.\n"
+		    "The default behavior is to stop on the first subrange where corruption is found\n"
+		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
+		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
+		    "for that purpose).\n");
+		return false;
+	}
+	if (inputRange.empty()) {
+		printf("Input empty range: %s.\nImmediately exit.\n", printable(inputRange).c_str());
+		return false;
+	}
+	// At this point, we have a non-empty inputRange to check
+	bool res = wait(doCheckAll(cx, inputRange, checkAll));
+	printf("Checking complete. AllSame: %d\n", res);
 	return true;
 }
 
