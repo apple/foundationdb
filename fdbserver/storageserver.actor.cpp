@@ -13785,6 +13785,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 
 				req.reply.send(reply);
 			}
+			when(GetStorageCheckSumRequest req = waitNext(ssi.getCheckSum.getFuture())) {
+				TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", ssi.id());
+				req.reply.sendError(not_implemented());
+			}
 			when(wait(self->actors.getResult())) {}
 		}
 	}

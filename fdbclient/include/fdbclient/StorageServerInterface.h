@@ -124,6 +124,7 @@ struct StorageServerInterface {
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
 	RequestStream<struct AuditStorageRequest> auditStorage;
 	RequestStream<struct GetHotShardsRequest> getHotShards;
+	RequestStream<struct GetStorageCheckSumRequest> getCheckSum;
 
 private:
 	bool acceptingRequests;
@@ -201,6 +202,8 @@ public:
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
 				getHotShards =
 				    RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
+				getCheckSum =
+				    RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -254,6 +257,7 @@ public:
 		streams.push_back(updateCommitCostRequest.getReceiver());
 		streams.push_back(auditStorage.getReceiver());
 		streams.push_back(getHotShards.getReceiver());
+		streams.push_back(getCheckSum.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1263,6 +1267,60 @@ struct GetHotShardsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
+	}
+};
+
+enum class CheckSumMethod : uint8_t {
+	Invalid = 0,
+};
+
+struct CheckSumMetaData {
+	constexpr static FileIdentifier file_identifier = 3828142;
+	KeyRange range;
+	Version version;
+	StringRef checkSumValue;
+
+	CheckSumMetaData() {}
+	CheckSumMetaData(KeyRange range, Version version, StringRef checkSumValue)
+	  : range(range), version(version), checkSumValue(checkSumValue) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, version, checkSumValue);
+	}
+};
+
+struct GetStorageCheckSumReply {
+	constexpr static FileIdentifier file_identifier = 3828143;
+	std::vector<CheckSumMetaData> checkSums;
+	uint8_t checkSumMethod;
+
+	GetStorageCheckSumReply() {}
+	GetStorageCheckSumReply(const std::vector<CheckSumMetaData>& checkSums, CheckSumMethod checkSumMethod)
+	  : checkSums(checkSums), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkSums, checkSumMethod);
+	}
+};
+
+struct GetStorageCheckSumRequest {
+	constexpr static FileIdentifier file_identifier = 3828144;
+	std::vector<std::pair<KeyRange, Optional<Version>>> ranges;
+	Optional<UID> actionId;
+	uint8_t checkSumMethod;
+	ReplyPromise<GetStorageCheckSumReply> reply;
+
+	GetStorageCheckSumRequest() {}
+	GetStorageCheckSumRequest(const std::vector<std::pair<KeyRange, Optional<Version>>>& ranges,
+	                          Optional<UID> actionId,
+	                          CheckSumMethod checkSumMethod)
+	  : ranges(ranges), actionId(actionId), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ranges, actionId, checkSumMethod, reply);
 	}
 };
 
