@@ -13533,6 +13533,14 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
+			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
+				TraceEvent(SevError, "GetHotShardsHasNotImplemented", ssi.id());
+				req.reply.sendError(not_implemented());
+			}
+			when(GetStorageCheckSumRequest req = waitNext(ssi.getCheckSum.getFuture())) {
+				TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", ssi.id());
+				req.reply.sendError(not_implemented());
+			}
 			when(wait(self->actors.getResult())) {}
 		}
 	}
