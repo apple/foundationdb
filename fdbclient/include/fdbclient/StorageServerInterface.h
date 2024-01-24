@@ -1270,6 +1270,10 @@ struct GetHotShardsRequest {
 	}
 };
 
+enum class CheckSumMethod : uint8_t {
+	Invalid = 0,
+};
+
 struct CheckSumMetaData {
 	constexpr static FileIdentifier file_identifier = 3828142;
 	KeyRange range;
@@ -1277,7 +1281,7 @@ struct CheckSumMetaData {
 	StringRef checkSumValue;
 
 	CheckSumMetaData() {}
-	explicit CheckSumMetaData(KeyRange range, Version version, StringRef checkSumValue)
+	CheckSumMetaData(KeyRange range, Version version, StringRef checkSumValue)
 	  : range(range), version(version), checkSumValue(checkSumValue) {}
 
 	template <class Ar>
@@ -1288,14 +1292,16 @@ struct CheckSumMetaData {
 
 struct GetStorageCheckSumReply {
 	constexpr static FileIdentifier file_identifier = 3828143;
-	std::vector<CheckSumMetaData> checkSum;
+	std::vector<CheckSumMetaData> checkSums;
+	uint8_t checkSumMethod;
 
 	GetStorageCheckSumReply() {}
-	explicit GetStorageCheckSumReply(std::vector<CheckSumMetaData> checkSum) : checkSum(checkSum) {}
+	GetStorageCheckSumReply(const std::vector<CheckSumMetaData>& checkSums, CheckSumMethod checkSumMethod)
+	  : checkSums(checkSums), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, checkSum);
+		serializer(ar, checkSums, checkSumMethod);
 	}
 };
 
@@ -1303,15 +1309,18 @@ struct GetStorageCheckSumRequest {
 	constexpr static FileIdentifier file_identifier = 3828144;
 	std::vector<std::pair<KeyRange, Optional<Version>>> ranges;
 	Optional<UID> actionId;
+	uint8_t checkSumMethod;
 	ReplyPromise<GetStorageCheckSumReply> reply;
 
 	GetStorageCheckSumRequest() {}
-	GetStorageCheckSumRequest(std::vector<std::pair<KeyRange, Optional<Version>>> ranges, Optional<UID> actionId)
-	  : ranges(ranges), actionId(actionId) {}
+	GetStorageCheckSumRequest(const std::vector<std::pair<KeyRange, Optional<Version>>>& ranges,
+	                          Optional<UID> actionId,
+	                          CheckSumMethod checkSumMethod)
+	  : ranges(ranges), actionId(actionId), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ranges, actionId, reply);
+		serializer(ar, ranges, actionId, checkSumMethod, reply);
 	}
 };
 
