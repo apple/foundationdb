@@ -2411,7 +2411,7 @@ ACTOR Future<Void> runRestore(Database db,
 			}
 
 			if (verbose) {
-				fmt::print("Ussing target restore version {}\n", targetVersion);
+				fmt::print("Using target restore version {}\n", targetVersion);
 			}
 		}
 
