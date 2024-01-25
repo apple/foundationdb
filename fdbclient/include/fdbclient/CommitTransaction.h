@@ -132,7 +132,6 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 			if (!checksum.present()) {
@@ -148,13 +147,13 @@ struct MutationRef {
 		}
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			if (ar.protocolVersion().hasMutationChecksum()) {
 				serializer(ar, type, param2, empty, checksum);
 			} else {
 				serializer(ar, type, param2, empty);
 			}
 		} else {
-			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			if (ar.protocolVersion().hasMutationChecksum()) {
 				serializer(ar, type, param1, param2, checksum);
 			} else {
 				serializer(ar, type, param1, param2);
