@@ -82,6 +82,9 @@ struct VersionedMessage {
 			// the decrypted mutation.
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
 			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
+			BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+			wr << *m;
+			message = wr.toValue(decryptArena);
 		}
 
 		// Return true if the mutation intersects any legal backup ranges

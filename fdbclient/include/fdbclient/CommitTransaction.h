@@ -29,6 +29,7 @@
 #include "fdbclient/Tracing.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
+#include "flow/UnitTest.h"
 
 #include "crc32/crc32c.h"
 #include <unordered_set>
@@ -131,6 +132,7 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		// if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 			if (!checksum.present()) {
@@ -146,13 +148,13 @@ struct MutationRef {
 		}
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			if (ar.protocolVersion().hasMutationChecksum()) {
+			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 				serializer(ar, type, param2, empty, checksum);
 			} else {
 				serializer(ar, type, param2, empty);
 			}
 		} else {
-			if (ar.protocolVersion().hasMutationChecksum()) {
+			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 				serializer(ar, type, param1, param2, checksum);
 			} else {
 				serializer(ar, type, param1, param2);
@@ -534,5 +536,27 @@ struct EncryptedMutationsAndVersionRef {
 		}
 	};
 };
+
+TEST_CASE("noSim/CommitTransaction/MutationRef") {
+	printf("testing MutationRef encoding/decoding\n");
+	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
+	// BinaryWriter wr(IncludeVersion(ProtocolVersion::withGcTxnGenerations()));
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
+
+	wr << m;
+
+	Standalone<StringRef> value = wr.toValue();
+
+	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withBlobGranule()));
+	// BinaryReader rd(value, IncludeVersion());
+	Standalone<MutationRef> de;
+
+	rd >> de;
+
+	printf("Deserialized mutation: %s\n", de.toString().c_str());
+	printf("testing data move ID encoding/decoding complete\n");
+
+	return Void();
+}
 
 #endif
