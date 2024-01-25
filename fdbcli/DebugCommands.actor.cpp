@@ -266,7 +266,6 @@ bool checkResults(Version version,
 }
 
 ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll);
-
 // Return whether inconsistency is detected in the inputRange
 ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
@@ -284,14 +283,14 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 			}
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();
-
-			// Checking each shard
+			// We partition the entire input range into shards
+			// and we conduct comparison shard by shard
 			state int i = 0;
 			for (; i < keyServers.size(); i++) { // for each shard
 				state KeyRange rangeToCheck = keyServers[i].first;
 				rangeToCheck = rangeToCheck & inputRange; // Only check the shard part within the inputRange
 				if (rangeToCheck.empty()) {
-					continue;
+					continue; // Skip the shard if it is outside of the inputRange
 				}
 				const auto& servers = keyServers[i].second;
 				state Key beginKeyToCheck = rangeToCheck.begin;
@@ -352,11 +351,21 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 					       printable(claimEndKey).c_str(),
 					       hasMore);
 					if (claimEndKey.empty()) {
-						printf("checkResults error: claimEndKey is empty\nPlease re-run the checkall.\n");
-						throw operation_failed();
+						// It is possible that there is clear operation between the prev round and the current round
+						// which result in empty claimEndKey --- nothing to compare
+						// In this case, we simply skip the current shard
+						ASSERT(hasMore == false);
+						continue;
 					} else if ((beginKeyToCheck == claimEndKey) && hasMore) {
-						// In case rangeBegin == claimEndKey == next beginKeyToCheck
-						// we spawn a new checkall for a smaller range in this case
+						// This is a special case: rangeBegin == claimEndKey == next beginKeyToCheck
+						// We separate this case and the third case to solve a corner issue led by the
+						// third code path: the progress will get stuck on repeatedly checking beginKeyToCheck.
+						// In the third code path, if hasMore == true and beginKeyToCheck == claimEndKey,
+						// The next round of beginKeyToCheck (aka claimEndKey) will always be beginKeyToCheck of the
+						// current round. To avoid this issue, we spawn a child checkall on a smaller range
+						// (beginKeyToCheck ~ maxEndKey). This smaller range guarantees that the hasMore is always false
+						// and the child checkall will complete and the global progress will move forward. Once the
+						// child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
 						state KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
 						printf("Spawn new checkall for range %s\n", printable(spawnedRangeToCheck).c_str());
 						bool allSame = wait(doCheckAll(cx, spawnedRangeToCheck, checkAll));
@@ -400,7 +409,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 	return consistent;
 }
 
-// The command is used to check the inconsistency in a keyspace, default is \xff\x02/blog/ keyspace.
+// The command is used to check the data inconsistency of the user input range
 ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
 	state bool checkAll = false; // If set, do not return on first error, continue checking all keys
 	state KeyRange inputRange;
