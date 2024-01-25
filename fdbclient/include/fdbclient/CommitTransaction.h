@@ -130,19 +130,22 @@ struct MutationRef {
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 	bool isValid() const { return type < MAX_ATOMIC_OP; }
 
+	void validateChecksum() {
+		if (checksum.present() && checksum.get() != calculateChecksum()) {
+			TraceEvent(SevError, "ChecksumFailure")
+			    .detail("Mutation", this->toString())
+			    .detail("ActualChecksum", calculateChecksum());
+		}
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 			if (!checksum.present()) {
 				checksum = calculateChecksum();
-				// TraceEvent(SevInfo, "InitChecksum").detail("Mutation", this->toString());
 			} else {
-				if (checksum != calculateChecksum()) {
-					TraceEvent(SevError, "ChecksumFailure")
-					    .detail("Mutation", this->toString())
-					    .detail("ActualChecksum", calculateChecksum());
-				}
+				validateChecksum();
 			}
 		}
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
@@ -163,6 +166,11 @@ struct MutationRef {
 			ASSERT(param1[param1.size() - 1] == '\x00');
 			param2 = param1;
 			param1 = param2.substr(0, param2.size() - 1);
+		}
+
+		if (ar.isDeserializing && ar.protocolVersion().hasMutationChecksum() &&
+		    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			validateChecksum();
 		}
 	}
 
