@@ -156,7 +156,7 @@ struct MutationRef {
 				serializer(ar, type, param2, empty);
 			}
 		} else {
-			if (ar.protocolVersion().hasMutationChecksum()) {
+			if (ar.protocolVersion().hasMutationChecksum() && ar.isSerializing) {
 				serializer(ar, type, param1, param2, checksum);
 			} else {
 				serializer(ar, type, param1, param2);
