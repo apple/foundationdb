@@ -106,7 +106,7 @@ std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
 class SharedRocksDBState {
 public:
-	SharedRocksDBState(cosnt UID id_);
+	SharedRocksDBState(const UID id_);
 
 	const UID id;
 	std::vector<std::shared_ptr<LatencySample>> readLatency;
