@@ -106,24 +106,22 @@ std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
 class SharedRocksDBState {
 public:
-	SharedRocksDBState(UID id);
+	SharedRocksDBState(const UID& id_);
 
+	const UID id;
 	std::vector<std::shared_ptr<LatencySample>> readLatency;
 	std::vector<std::shared_ptr<LatencySample>> scanLatency;
 	std::vector<std::shared_ptr<LatencySample>> readQueueLatency;
 	LatencySample commitLatency;
 	LatencySample commitQueueLatency;
 	LatencySample dbWriteLatency;
-
-private:
-	const UID id;
 };
 
-SharedRocksDBState::SharedRocksDBState(UID id)
-  : id(id), commitLatency(LatencySample("RocksDBCommitLatency",
-                                        id,
-                                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+SharedRocksDBState::SharedRocksDBState(const UID& id_)
+  : id(id_), commitLatency(LatencySample("RocksDBCommitLatency",
+                                         id,
+                                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
     commitQueueLatency(LatencySample("RocksDBCommitQueueLatency",
                                      id,
                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
