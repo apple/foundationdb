@@ -59,10 +59,13 @@ static const char* typeString[] = { "SetValue",
 	                                "AndV2",
 	                                "CompareAndClear",
 	                                "Reserved_For_SpanContextMessage",
+	                                "Reserved_For_OTELSpanContextMessage",
+	                                "Encrypted",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; // 12 is the size of Header in MutationList entries
+	static const uint8_t FLAG_MASK = 128;
 	enum Type : uint8_t {
 		SetValue = 0,
 		ClearRange,
@@ -138,10 +141,19 @@ struct MutationRef {
 		}
 	}
 
+	bool convertType() {
+		uint8_t res = type & FLAG_MASK;
+		TraceEvent(SevVerbose, "MutationConvertType").detail("Mutation", toString()).detail("Converted", res);
+		if (res) {
+			type = type & ~FLAG_MASK;
+			TraceEvent(SevVerbose, "MutationTypeC").detail("Mutation", toString()).detail("MutationType", type);
+		}
+		return (bool)res;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
-		    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+		if (!isEncrypted() && ar.isSerializing && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 			if (!checksum.present()) {
 				checksum = calculateChecksum();
 			} else {
@@ -150,17 +162,66 @@ struct MutationRef {
 		}
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			if (ar.protocolVersion().hasMutationChecksum()) {
-				serializer(ar, type, param2, empty, checksum);
+			if constexpr (is_fb_function<Ar>) {
+				if (ar.protocolVersion().hasMutationChecksum()) {
+					uint8_t sType = type | FLAG_MASK;
+					TraceEvent(SevVerbose, "MutationRefFlatBufferEncoding")
+					    .detail("Mutation", toString())
+					    .detail("SType", sType);
+					serializer(ar, sType, param2, empty, checksum);
+				} else {
+					serializer(ar, type, param1, param2);
+				}
+			} else if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+				uint8_t sType = type | FLAG_MASK;
+				TraceEvent(SevVerbose, "MutationRefEncodingType").detail("Mutation", toString()).detail("SType", sType);
+				serializer(ar, sType, param2, empty, checksum);
+				// serializer(ar, checksum);
 			} else {
 				serializer(ar, type, param2, empty);
 			}
-		} else {
-			if (ar.protocolVersion().hasMutationChecksum() && ar.isSerializing) {
-				serializer(ar, type, param1, param2, checksum);
+		} else if (ar.isSerializing) {
+			if constexpr (is_fb_function<Ar>) {
+				if (ar.protocolVersion().hasMutationChecksum()) {
+					uint8_t sType = type | FLAG_MASK;
+					TraceEvent(SevVerbose, "MutationRefFlatBufferEncoding")
+					    .detail("Mutation", toString())
+					    .detail("SType", sType);
+					serializer(ar, sType, param1, param2, checksum);
+				} else {
+					serializer(ar, type, param1, param2);
+				}
+			} else if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+				uint8_t sType = type | FLAG_MASK;
+				TraceEvent(SevVerbose, "MutationRefEncodingType").detail("Mutation", toString()).detail("SType", sType);
+				serializer(ar, sType, param1, param2, checksum);
+				// serializer(ar, checksum);
 			} else {
 				serializer(ar, type, param1, param2);
 			}
+		} else if (ar.isDeserializing) {
+			if constexpr (is_fb_function<Ar>) {
+				if (ar.protocolVersion().hasMutationChecksum()) {
+					serializer(ar, type, param1, param2, checksum);
+					convertType();
+				} else {
+					serializer(ar, type, param1, param2);
+				}
+			} else if (ar.protocolVersion().hasMutationChecksum()) {
+				serializer(ar, type, param1, param2);
+				TraceEvent(SevVerbose, "MutationRefReadingChecksum")
+				    .detail("Mutation", toString())
+				    .detail("MutationType", type)
+				    .backtrace();
+				if (convertType()) {
+					serializer(ar, checksum);
+					TraceEvent(SevVerbose, "MutationRefReadChecksum").detail("Mutation", toString());
+				}
+			} else {
+				serializer(ar, type, param1, param2);
+			}
+		} else {
+			serializer(ar, type, param1, param2, checksum);
 		}
 		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
 			ASSERT(param1[param1.size() - 1] == '\x00');
@@ -239,7 +300,9 @@ struct MutationRef {
 		Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
 		arena.dependsOn(headerStr.arena());
 		serializedHeader = headerStr;
-		return MutationRef(Encrypted, serializedHeader, payload);
+		MutationRef res(Encrypted, serializedHeader, payload);
+		TraceEvent(SevVerbose, "EncryptMutation").detail("Mutation", toString()).detail("Encrypted", res.toString());
+		return res;
 	}
 
 	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
@@ -276,7 +339,9 @@ struct MutationRef {
 		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptionTime);
 		Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(header);
 		arena.dependsOn(serializedHeader.arena());
-		return MutationRef(Encrypted, serializedHeader, payload);
+		MutationRef res(Encrypted, serializedHeader, payload);
+		TraceEvent(SevVerbose, "EncryptMutation").detail("Mutation", toString()).detail("Encrypted", res.toString());
+		return res;
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
@@ -543,27 +608,5 @@ struct EncryptedMutationsAndVersionRef {
 		}
 	};
 };
-
-TEST_CASE("noSim/CommitTransaction/MutationRef") {
-	printf("testing MutationRef encoding/decoding\n");
-	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
-	// BinaryWriter wr(IncludeVersion(ProtocolVersion::withGcTxnGenerations()));
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
-
-	wr << m;
-
-	Standalone<StringRef> value = wr.toValue();
-
-	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withBlobGranule()));
-	// BinaryReader rd(value, IncludeVersion());
-	Standalone<MutationRef> de;
-
-	rd >> de;
-
-	printf("Deserialized mutation: %s\n", de.toString().c_str());
-	printf("testing data move ID encoding/decoding complete\n");
-
-	return Void();
-}
 
 #endif
