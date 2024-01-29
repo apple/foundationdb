@@ -124,6 +124,15 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 // hidden commands, no help text for now
 CommandFactory getLocationCommandFactory("getlocation");
 
+std::string toHex(Value v) {
+	std::string result;
+	result.reserve(v.size() * 4);
+	for (int i = 0; i < v.size(); i++) {
+		result.append(format("\\x%02x", v[i]));
+	}
+	return result;
+}
+
 // The command is used to get values from all storage servers that have the given key.
 ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version) {
 	if (tokens.size() != 2) {
@@ -152,7 +161,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 				fprintf(stderr, "ERROR: %s %s\n", ssi.c_str(), replies[i].getError().what());
 			} else {
 				Optional<Value> v = replies[i].get().value;
-				printf(" %s %s\n", ssi.c_str(), v.present() ? printable(v.get()).c_str() : "(not found)");
+				printf(" %s %s\n", ssi.c_str(), v.present() ? toHex(v.get()).c_str() : "(not found)");
 			}
 		}
 	} else {
