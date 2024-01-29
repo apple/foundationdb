@@ -295,6 +295,18 @@ public:
 		return all([cpuThreshold](IDataDistributionTeam const& team) { return team.hasLowerCpu(cpuThreshold); });
 	}
 
+	Optional<int64_t> getLongestStorageQueueSize() const override {
+		int64_t maxQueueSize = 0;
+		for (const auto& team : teams) {
+			Optional<int64_t> queueSize = team->getLongestStorageQueueSize();
+			if (!queueSize.present()) {
+				return Optional<int64_t>();
+			}
+			maxQueueSize = std::max(maxQueueSize, queueSize.get());
+		}
+		return maxQueueSize;
+	}
+
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (const auto& team : teams) {
@@ -1484,6 +1496,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
+						req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
 
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&

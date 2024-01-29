@@ -760,6 +760,8 @@ public: // Methods for IStorageMetricsService
 		resp.bytesInputRate = 0;
 		resp.versionLag = 0;
 		resp.lastUpdate = now();
+		resp.bytesDurable = 0;
+		resp.bytesInput = 0;
 		req.reply.send(resp);
 	}
 

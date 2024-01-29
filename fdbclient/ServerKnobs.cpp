@@ -343,6 +343,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_SHARD_TRACKING_LOG_SEVERITY,                          1 );
 	init( ENFORCE_SHARD_COUNT_PER_TEAM,                        false ); if( randomize && BUGGIFY ) ENFORCE_SHARD_COUNT_PER_TEAM = true;
 	init( DESIRED_MAX_SHARDS_PER_TEAM,                          1000 ); if( randomize && BUGGIFY ) DESIRED_MAX_SHARDS_PER_TEAM = 10;
+	init( ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION,           false ); if( randomize && BUGGIFY ) ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION = true;
+	init( DD_TARGET_STORAGE_QUEUE_SIZE, TARGET_BYTES_PER_STORAGE_SERVER/3 ); if( randomize && BUGGIFY ) DD_TARGET_STORAGE_QUEUE_SIZE = TARGET_BYTES_PER_STORAGE_SERVER/10;
 
 	// Large teams are disabled when SHARD_ENCODE_LOCATION_METADATA is enabled
 	init( DD_MAX_SHARDS_ON_LARGE_TEAMS,                          100 ); if( randomize && BUGGIFY ) DD_MAX_SHARDS_ON_LARGE_TEAMS = deterministicRandom()->randomInt(0, 3);
