@@ -27,6 +27,15 @@
 
 namespace fdb_cli {
 
+std::string toHex(StringRef v) {
+	std::string result;
+	result.reserve(v.size() * 4);
+	for (int i = 0; i < v.size(); i++) {
+		result.append(format("\\x%02x", v[i]));
+	}
+	return result;
+}
+
 // Gets a version at which to read from the storage servers
 ACTOR Future<Version> getVersion(Database cx) {
 	loop {
@@ -108,7 +117,7 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 	state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
 	bool found = wait(getKeyServers(cx, keyServersPromise, kr));
 	if (!found) {
-		printf("[%s, %s]locations not found\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+		printf("[%s, %s]locations not found\n", toHex(tokens[1]).c_str(), toHex(tokens[2]).c_str());
 		return false;
 	}
 	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
@@ -124,15 +133,6 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 // hidden commands, no help text for now
 CommandFactory getLocationCommandFactory("getlocation");
 
-std::string toHex(Value v) {
-	std::string result;
-	result.reserve(v.size() * 4);
-	for (int i = 0; i < v.size(); i++) {
-		result.append(format("\\x%02x", v[i]));
-	}
-	return result;
-}
-
 // The command is used to get values from all storage servers that have the given key.
 ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version) {
 	if (tokens.size() != 2) {
@@ -147,7 +147,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 
 	if (loc.locations) {
 		printf("version is %ld\n", version);
-		printf("`%s' is at:\n", printable(tokens[1]).c_str());
+		printf("`%s' is at:\n", toHex(tokens[1]).c_str());
 		state Reference<LocationInfo::Locations> locations = loc.locations->locations();
 		state std::vector<Future<GetValueReply>> replies;
 		for (int i = 0; locations && i < locations->size(); i++) {
@@ -165,7 +165,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 			}
 		}
 	} else {
-		printf("`%s': location not found\n", printable(tokens[1]).c_str());
+		printf("`%s': location not found\n", toHex(tokens[1]).c_str());
 	}
 	return true;
 }
@@ -218,7 +218,7 @@ bool checkResults(Version version,
 				       currentI,
 				       referenceI,
 				       version,
-				       printable(reference.data[referenceI].key).c_str());
+				       toHex(reference.data[referenceI].key).c_str());
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
 				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
@@ -228,7 +228,7 @@ bool checkResults(Version version,
 				       currentI,
 				       referenceI,
 				       version,
-				       printable(current.data[currentI].key).c_str());
+				       toHex(current.data[currentI].key).c_str());
 				currentI++;
 			} else {
 				KeyValueRef currentKV = current.data[currentI];
@@ -243,7 +243,7 @@ bool checkResults(Version version,
 						       currentI,
 						       referenceI,
 						       version,
-						       printable(currentKV.key).c_str());
+						       toHex(currentKV.key).c_str());
 					}
 					currentI++;
 					referenceI++;
@@ -255,7 +255,7 @@ bool checkResults(Version version,
 					       currentI,
 					       referenceI,
 					       version,
-					       printable(currentKV.key).c_str());
+					       toHex(currentKV.key).c_str());
 					currentI++;
 				} else {
 					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
@@ -265,7 +265,7 @@ bool checkResults(Version version,
 					       currentI,
 					       referenceI,
 					       version,
-					       printable(referenceKV.key).c_str());
+					       toHex(referenceKV.key).c_str());
 					referenceI++;
 				}
 			}
@@ -314,10 +314,8 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 				while (hasMore) {
 					wait(store(version, getVersion(cx)));
 					replies.clear();
-					printf("Round %d: %s - %s\n",
-					       round,
-					       printable(beginKeyToCheck.toString()).c_str(),
-					       printable(rangeToCheck.end.toString()).c_str());
+					printf(
+					    "Round %d: %s - %s\n", round, toHex(beginKeyToCheck).c_str(), toHex(rangeToCheck.end).c_str());
 					for (const auto& s : keyServers[i].second) { // for each storage server
 						GetKeyValuesRequest req;
 						req.begin = firstGreaterOrEqual(beginKeyToCheck);
@@ -356,8 +354,8 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						hasMore = hasMore || current.more;
 					}
 					printf("Compare scope has been decided\n\tBeginKey: %s\n\tEndKey: %s\n\tHasMore: %d\n",
-					       printable(beginKeyToCheck).c_str(),
-					       printable(claimEndKey).c_str(),
+					       toHex(beginKeyToCheck).c_str(),
+					       toHex(claimEndKey).c_str(),
 					       hasMore);
 					if (claimEndKey.empty()) {
 						// It is possible that there is clear operation between the prev round and the current round
@@ -393,9 +391,8 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						// Using claimEndKey of the current round as the nextBeginKey for the next round
 						// Note that claimEndKey is not compared in the current round
 						// This key will be compared in the next round
-						printf("Result: compared %s - %s\n",
-						       printable(beginKeyToCheck.toString()).c_str(),
-						       printable(claimEndKey.toString()).c_str());
+						printf(
+						    "Result: compared %s - %s\n", toHex(beginKeyToCheck).c_str(), toHex(claimEndKey).c_str());
 						beginKeyToCheck = claimEndKey;
 						printf("allSame %d, hasMore %d, checkAll %d\n", allSame, hasMore, checkAll);
 						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
