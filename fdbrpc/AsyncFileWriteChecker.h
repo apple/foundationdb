@@ -143,8 +143,9 @@ private:
 #endif
 
 			// For writes, just update the stored sum
+			double millisecondsPerSecond = 1000;
 			if (write) {
-				history.timestamp = (uint32_t)now();
+				history.timestamp = (uint32_t)(now() * millisecondsPerSecond);
 				history.checksum = checksum;
 			} else {
 				if (history.checksum != 0 && history.checksum != checksum) {
@@ -155,7 +156,7 @@ private:
 					    .detail("PageNumber", page)
 					    .detail("ChecksumOfPage", checksum)
 					    .detail("ChecksumHistory", history.checksum)
-					    .detail("LastWriteTime", history.timestamp);
+					    .detail("LastWriteTime", history.timestamp / millisecondsPerSecond);
 					history.checksum = 0;
 				}
 			}
