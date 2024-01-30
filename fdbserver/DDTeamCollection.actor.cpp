@@ -199,7 +199,9 @@ public:
 	// also tries to select a team whose existing team is less than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM.
 	static Optional<Reference<IDataDistributionTeam>> getBestTeam(DDTeamCollection* self,
 	                                                              const GetTeamRequest& req,
-	                                                              bool preferWithinShardLimit) {
+	                                                              bool preferWithinShardLimit,
+	                                                              int& numSkippedSSFailedGetQueueLength,
+	                                                              int& numSkippedSSQueueTooLong) {
 		auto& startIndex = req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
 		if (startIndex >= self->teams.size()) {
 			startIndex = 0;
@@ -218,6 +220,17 @@ public:
 				}
 
 				int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
+				if (req.storageQueueAware) {
+					Optional<int64_t> storageQueueSize = self->teams[currentIndex]->getLongestStorageQueueSize();
+					if (!storageQueueSize.present()) {
+						numSkippedSSFailedGetQueueLength++;
+						continue; // this SS may not healthy, skip
+					} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+						numSkippedSSQueueTooLong++;
+						continue; // this SS storage queue is too long, skip
+					}
+				}
+
 				auto team = ShardsAffectedByTeamFailure::Team(self->teams[currentIndex]->getServerIDs(), self->primary);
 				if ((!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->hasShards(team)) &&
 				    // sort conditions
@@ -254,7 +267,9 @@ public:
 	    DDTeamCollection* self,
 	    const GetTeamRequest& req,
 	    const std::vector<Reference<TCTeamInfo>>& candidates,
-	    bool preferWithinShardLimit) {
+	    bool preferWithinShardLimit,
+	    int& numSkippedSSFailedGetQueueLength,
+	    int& numSkippedSSQueueTooLong) {
 		Optional<Reference<IDataDistributionTeam>> bestOption;
 		int64_t bestLoadBytes = 0;
 		bool wigglingBestOption = false; // best option contains server in paused wiggle state
@@ -272,6 +287,17 @@ public:
 				    self->shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(
 				        candidates[i]->getServerIDs(), self->primary)) > SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM) {
 					continue;
+				}
+
+				if (req.storageQueueAware) {
+					Optional<int64_t> storageQueueSize = candidates[i]->getLongestStorageQueueSize();
+					if (!storageQueueSize.present()) {
+						numSkippedSSFailedGetQueueLength++;
+						continue; // this SS may not healthy, skip
+					} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+						numSkippedSSQueueTooLong++;
+						continue; // this SS storage queue is too long, skip
+					}
 				}
 
 				bestLoadBytes = loadBytes;
@@ -327,6 +353,8 @@ public:
 			}
 
 			Optional<Reference<IDataDistributionTeam>> bestOption;
+			state int numSkippedSSFailedGetQueueLength = 0;
+			state int numSkippedSSQueueTooLong = 0;
 
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
@@ -386,14 +414,22 @@ public:
 			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
 				ASSERT(!bestOption.present());
 				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
-					bestOption = getBestTeam(self, req, /*preferWithinShardLimit=*/true);
+					bestOption = getBestTeam(self,
+					                         req,
+					                         /*preferWithinShardLimit=*/true,
+					                         numSkippedSSFailedGetQueueLength,
+					                         numSkippedSSQueueTooLong);
 					if (!bestOption.present()) {
 						// In case, we may return a team whose shard count is more than DESIRED_MAX_SHARDS_PER_TEAM.
 						TraceEvent("GetBestTeamPreferWithinShardLimitFailed").log();
 					}
 				}
 				if (!bestOption.present()) {
-					bestOption = getBestTeam(self, req, /*preferWithinShardLimit=*/false);
+					bestOption = getBestTeam(self,
+					                         req,
+					                         /*preferWithinShardLimit=*/false,
+					                         numSkippedSSFailedGetQueueLength,
+					                         numSkippedSSQueueTooLong);
 				}
 			} else {
 				ASSERT(!bestOption.present());
@@ -423,6 +459,17 @@ public:
 					            self->shardsAffectedByTeamFailure->hasShards(
 					                ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));
 
+					if (req.storageQueueAware) {
+						Optional<int64_t> storageQueueSize = dest->getLongestStorageQueueSize();
+						if (!storageQueueSize.present()) {
+							numSkippedSSFailedGetQueueLength++;
+							ok = false; // this SS may not healthy, skip
+						} else if (storageQueueSize.get() > SERVER_KNOBS->DD_TARGET_STORAGE_QUEUE_SIZE) {
+							numSkippedSSQueueTooLong++;
+							ok = false; // this SS storage queue is too long, skip
+						}
+					}
+
 					if (ok)
 						randomTeams.push_back(dest);
 					else
@@ -438,7 +485,12 @@ public:
 
 				if (!randomTeams.empty()) {
 					if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
-						bestOption = getBestTeamFromCandidates(self, req, randomTeams, /*preferWithinShardLimit=*/true);
+						bestOption = getBestTeamFromCandidates(self,
+						                                       req,
+						                                       randomTeams,
+						                                       /*preferWithinShardLimit=*/true,
+						                                       numSkippedSSFailedGetQueueLength,
+						                                       numSkippedSSQueueTooLong);
 						if (!bestOption.present()) {
 							// In case, we may return a team whose shard count is more than DESIRED_MAX_SHARDS_PER_TEAM.
 							TraceEvent("GetBestTeamFromCandidatesPreferWithinShardLimitFailed").log();
@@ -446,8 +498,12 @@ public:
 					}
 
 					if (!bestOption.present()) {
-						bestOption =
-						    getBestTeamFromCandidates(self, req, randomTeams, /*preferWithinShardLimit=*/false);
+						bestOption = getBestTeamFromCandidates(self,
+						                                       req,
+						                                       randomTeams,
+						                                       /*preferWithinShardLimit=*/false,
+						                                       numSkippedSSFailedGetQueueLength,
+						                                       numSkippedSSQueueTooLong);
 					}
 				}
 			}
@@ -468,14 +524,23 @@ public:
 				    .detail("Request", req.getDesc())
 				    .detail("HealthyTeams", self->healthyTeamCount)
 				    .detail("PivotCPU", self->teamPivots.pivotCPU)
-				    .detail("PivotDiskSpace", self->teamPivots.pivotAvailableSpaceRatio);
+				    .detail("PivotDiskSpace", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("StorageQueueAware", req.storageQueueAware)
+				    .detail("NumSkippedSSFailedGetQueueLength", numSkippedSSFailedGetQueueLength)
+				    .detail("NumSkippedSSQueueTooLong", numSkippedSSQueueTooLong);
 				// self->traceAllInfo(true);
 			}
 
-			req.reply.send(std::make_pair(bestOption, foundSrc));
+			if (req.storageQueueAware && !bestOption.present()) {
+				req.storageQueueAware = false;
+				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
+			} else {
+				req.reply.send(std::make_pair(bestOption, foundSrc));
+			}
+
 			return Void();
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() != error_code_actor_cancelled && req.reply.canBeSet())
 				req.reply.sendError(e);
 			throw;
 		}
