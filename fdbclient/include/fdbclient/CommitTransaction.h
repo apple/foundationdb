@@ -163,26 +163,25 @@ struct MutationRef {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
 			if constexpr (is_fb_function<Ar>) {
-				if (ar.protocolVersion().hasMutationChecksum()) {
+				if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 					uint8_t sType = type | FLAG_MASK;
 					TraceEvent(SevVerbose, "MutationRefFlatBufferEncoding")
 					    .detail("Mutation", toString())
 					    .detail("SType", sType);
 					serializer(ar, sType, param2, empty, checksum);
 				} else {
-					serializer(ar, type, param1, param2);
+					serializer(ar, type, param2, empty);
 				}
 			} else if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 				uint8_t sType = type | FLAG_MASK;
 				TraceEvent(SevVerbose, "MutationRefEncodingType").detail("Mutation", toString()).detail("SType", sType);
 				serializer(ar, sType, param2, empty, checksum);
-				// serializer(ar, checksum);
 			} else {
 				serializer(ar, type, param2, empty);
 			}
 		} else if (ar.isSerializing) {
 			if constexpr (is_fb_function<Ar>) {
-				if (ar.protocolVersion().hasMutationChecksum()) {
+				if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 					uint8_t sType = type | FLAG_MASK;
 					TraceEvent(SevVerbose, "MutationRefFlatBufferEncoding")
 					    .detail("Mutation", toString())
@@ -195,7 +194,6 @@ struct MutationRef {
 				uint8_t sType = type | FLAG_MASK;
 				TraceEvent(SevVerbose, "MutationRefEncodingType").detail("Mutation", toString()).detail("SType", sType);
 				serializer(ar, sType, param1, param2, checksum);
-				// serializer(ar, checksum);
 			} else {
 				serializer(ar, type, param1, param2);
 			}
