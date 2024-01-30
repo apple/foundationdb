@@ -15,11 +15,9 @@ if(NOT Sphinx_FOUND)
     PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin REQUIRED
     NO_DEFAULT_PATH NO_CACHE
     DOC "Checking Python3 executable in virtual environment")
-  execute_process(
-    COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip
-    COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install --upgrade pip
-    COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r
-            "${SPHINX_DOCUMENT_DIR}/requirements.txt")
+  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install --upgrade pip COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r "${SPHINX_DOCUMENT_DIR}/requirements.txt" COMMAND_ERROR_IS_FATAL ANY)
   set(Sphinx_ROOT "${SPHINX_VENV_DIR}")
   unset(Sphinx_FOUND)
   find_package(Sphinx REQUIRED)
