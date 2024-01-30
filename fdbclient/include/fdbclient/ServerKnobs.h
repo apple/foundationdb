@@ -324,6 +324,8 @@ public:
 	                                               // storage bytes used by a tenant group
 	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
 	                                                  // distributor to fetch the list of tenants over storage quota
+	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // experimental!
+	int64_t DD_TARGET_STORAGE_QUEUE_SIZE;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
