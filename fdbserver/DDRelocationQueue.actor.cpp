@@ -2297,8 +2297,10 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
-	state const char* eventName = isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
+	state const std::string moveType =
+	    isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 	state int ddPriority = dataMovementPriority(reason);
+	state bool mcMove = isDataMovementForMountainChopper(reason);
 	state PreferLowerReadUtil preferLowerReadTeam = readRebalance || SERVER_KNOBS->DD_PREFER_LOW_READ_UTIL_TEAM
 	                                                    ? PreferLowerReadUtil::True
 	                                                    : PreferLowerReadUtil::False;
@@ -2308,10 +2310,6 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
 		state Reference<IDataDistributionTeam> destTeam;
-		state TraceEvent traceEvent(eventName, self->distributorId);
-		traceEvent.suppressFor(5.0)
-		    .detail("PollingInterval", rebalancePollingInterval)
-		    .detail("Rebalance", readRebalance ? "Read" : "Disk");
 
 		// NOTE: the DD throttling relies on DDQueue, so here just trigger the balancer periodically
 		wait(delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch));
@@ -2320,60 +2318,87 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				wait(store(skipCurrentLoop, getSkipRebalanceValue(self->txnProcessor, readRebalance)));
 				lastRead = now();
 			}
-			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			if (skipCurrentLoop) {
 				rebalancePollingInterval =
 				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				TraceEvent("DDRebalancePaused", self->distributorId)
+				    .suppressFor(5.0)
+				    .detail("MoveType", moveType)
+				    .detail("Reason", "Disabled");
 				continue;
-			} else {
-				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 			}
 
-			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
+			if (self->priority_relocations[ddPriority] >= SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
+				rebalancePollingInterval =
+				    std::min(rebalancePollingInterval * 2, SERVER_KNOBS->BG_REBALANCE_MAX_POLLING_INTERVAL);
+				TraceEvent("DDRebalancePaused", self->distributorId)
+				    .suppressFor(5.0)
+				    .detail("MoveType", moveType)
+				    .detail("Reason", "DataMoveLimitReached")
+				    .detail("QueuedRelocations", self->priority_relocations[ddPriority])
+				    .detail("PollingInterval", rebalancePollingInterval);
+				continue;
+			}
 
-			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				bool mcMove = isDataMovementForMountainChopper(reason);
-				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
-				                                       PreferLowerDiskUtil::False,
-				                                       TeamMustHaveShards::True,
-				                                       PreferLowerReadUtil::False,
-				                                       PreferWithinShardLimit::False,
-				                                       ForReadBalance(readRebalance));
+			rebalancePollingInterval =
+			    std::max(rebalancePollingInterval / 2, SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL);
 
-				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
-				                                        PreferLowerDiskUtil::True,
-				                                        TeamMustHaveShards::False,
-				                                        preferLowerReadTeam,
-				                                        PreferWithinShardLimit::False,
-				                                        ForReadBalance(readRebalance));
-				state Future<SrcDestTeamPair> getTeamFuture =
-				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
-				wait(ready(getTeamFuture));
-				sourceTeam = getTeamFuture.get().first;
-				destTeam = getTeamFuture.get().second;
+			state TraceEvent traceEvent(mcMove ? "MountainChopperSample" : "ValleyFillerSample", self->distributorId)
+			    .suppressFor(5.0);
+			GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+			                                       PreferLowerDiskUtil::False,
+			                                       TeamMustHaveShards::True,
+			                                       PreferLowerReadUtil::False,
+			                                       PreferWithinShardLimit::False,
+			                                       ForReadBalance(readRebalance));
 
-				// clang-format off
-				if (sourceTeam.isValid() && destTeam.isValid()) {
-					if (readRebalance) {
-						wait(store(moved,self->rebalanceReadLoad( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
-					} else {
-						wait(store(moved,self->rebalanceTeams( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
-					}
+			GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+			                                        PreferLowerDiskUtil::True,
+			                                        TeamMustHaveShards::False,
+			                                        preferLowerReadTeam,
+			                                        PreferWithinShardLimit::False,
+			                                        ForReadBalance(readRebalance));
+			state Future<SrcDestTeamPair> getTeamFuture =
+			    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
+			wait(ready(getTeamFuture));
+			sourceTeam = getTeamFuture.get().first;
+			destTeam = getTeamFuture.get().second;
+
+			// clang-format off
+			if (sourceTeam.isValid() && destTeam.isValid()) {
+				if (readRebalance) {
+					wait(store(moved,self->rebalanceReadLoad( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+				} else {
+					wait(store(moved,self->rebalanceTeams( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 				}
-				// clang-format on
-				moved ? resetCount = 0 : resetCount++;
+			}
+			// clang-format on
+			traceEvent.detail("Moved", moved).log();
+
+			if (moved) {
+				resetCount = 0;
+				TraceEvent(mcMove ? "MountainChopperMoved" : "ValleyFillerMoved", self->distributorId)
+				    .suppressFor(5.0)
+				    .detail("QueuedRelocations", self->priority_relocations[ddPriority])
+				    .detail("PollingInterval", rebalancePollingInterval);
+			} else {
+				++resetCount;
+				if (resetCount > 30) {
+					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_MAX_POLLING_INTERVAL;
+				}
+				TraceEvent(mcMove ? "MountainChopperSkipped" : "ValleyFillerSkipped", self->distributorId)
+				    .suppressFor(5.0)
+				    .detail("QueuedRelocations", self->priority_relocations[ddPriority])
+				    .detail("ResetCount", resetCount)
+				    .detail("PollingInterval", rebalancePollingInterval);
 			}
 
-			traceEvent.detail("ResetCount", resetCount);
 		} catch (Error& e) {
 			// Log actor_cancelled because it's not legal to suppress an event that's initialized
-			traceEvent.errorUnsuppressed(e);
+			TraceEvent("RebalanceMoveError", self->distributorId).detail("MoveType", moveType).errorUnsuppressed(e);
 			throw;
 		}
-
-		traceEvent.detail("Moved", moved);
-		traceEvent.log();
 	}
 }
 
