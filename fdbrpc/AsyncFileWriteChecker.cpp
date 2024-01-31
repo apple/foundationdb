@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "fdbrpc/AsyncFileWriteChecker.actor.h"
 
 Optional<int> AsyncFileWriteChecker::checksumHistoryBudget = {};
 int AsyncFileWriteChecker::checksumHistoryPageSize = 4096;
+int AsyncFileWriteChecker::pendingChecksumCount = 0;

@@ -1,5 +1,5 @@
 /*
- * AsyncFileWriteChecker.h
+ * AsyncFileWriteChecker.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,6 +17,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#if defined(NO_INTELLISENSE) && !defined(ASYNC_FILE_WRITE_CHECKER_ACTOR_G_H)
+#define ASYNC_FILE_WRITE_CHECKER_ACTOR_G_H
+#include "fdbrpc/AsyncFileWriteChecker.actor.g.h"
+#elif !defined(ASYNC_FILE_WRITE_CHECKER_ACTOR_H)
+#define ASYNC_FILE_WRITE_CHECKER_ACTOR_H
 
 #include "flow/IAsyncFile.h"
 #include "crc32/crc32c.h"
@@ -24,6 +29,15 @@
 #if VALGRIND
 #include <memcheck.h>
 #endif
+
+#include "flow/actorcompiler.h"
+struct ChecksumRequest {
+	void const* data;
+	int length;
+	int64_t offset;
+	ChecksumRequest(void const* initData, int initLength, int64_t initOffset)
+	  : data(initData), length(initLength), offset(initOffset) {}
+};
 
 class AsyncFileWriteChecker : public IAsyncFile, public ReferenceCounted<AsyncFileWriteChecker> {
 public:
@@ -35,8 +49,18 @@ public:
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	Future<int> read(void* data, int length, int64_t offset) override {
 		// Lambda must hold a reference to this to keep it alive until after the read
+		Future<int> readSize = m_f->read(data, length, offset);
 		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
-		return map(m_f->read(data, length, offset), [self, data, offset](int r) {
+		return map(success(readSize) && success(self->fileSize), [self, data, offset, readSize](Void v) {
+			if (!self->reserved) {
+				self->reserved = true;
+				// This would make the vector have a large VMM footprint, but the RSS footprint would only increase
+				// as the space is actually used. This would avoid the copy operation when resize is needed.
+				// However, resize later to a smaller number would not free memory.
+				self->checksumHistory.reserve(std::min<int>(std::max<int>(checksumHistoryBudget.get(), 0),
+				                                            self->fileSize.get() / checksumHistoryPageSize));
+			}
+			int r = readSize.get();
 			self->updateChecksumHistory(false, offset, r, (uint8_t*)data);
 			return r;
 		});
@@ -44,15 +68,33 @@ public:
 	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
 		// Lambda must hold a reference to this to keep it alive until after the read
 		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
-		return map(m_f->readZeroCopy(data, length, offset), [self, data, length, offset](Void r) {
-			self->updateChecksumHistory(false, offset, *length, (uint8_t*)data);
-			return r;
-		});
+		return map(success(m_f->readZeroCopy(data, length, offset)) && success(self->fileSize),
+		           [self, data, length, offset](Void r) {
+			           if (!self->reserved) {
+				           self->reserved = true;
+				           self->checksumHistory.reserve(std::min<int>(std::max<int>(checksumHistoryBudget.get(), 0),
+				                                                       self->fileSize.get() / checksumHistoryPageSize));
+			           }
+			           self->updateChecksumHistory(false, offset, *length, (uint8_t*)data);
+			           return r;
+		           });
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
+		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
 		updateChecksumHistory(true, offset, length, (uint8_t*)data);
-		return m_f->write(data, length, offset);
+		return map(success(m_f->write(data, length, offset)) && success(self->fileSize),
+		           [self, data, length, offset](Void r) {
+			           if (!self->reserved) {
+				           self->reserved = true;
+				           self->checksumHistory.reserve(std::min<int>(std::max<int>(checksumHistoryBudget.get(), 0),
+				                                                       self->fileSize.get() / checksumHistoryPageSize));
+			           }
+			           // try validate checksum by read after write, but not guarantee when it will be done
+			           self->ps.send(ChecksumRequest(data, length, offset));
+			           pendingChecksumCount += 1;
+			           return r;
+		           });
 	}
 
 	Future<Void> truncate(int64_t size) override {
@@ -83,7 +125,7 @@ public:
 		if (!checksumHistoryBudget.present()) {
 			checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
 		}
-
+		fileSize = m_f->size();
 		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some
 		// implementations.
 		checksumHistoryBudget.get() -= checksumHistory.capacity();
@@ -93,6 +135,9 @@ public:
 
 private:
 	Reference<IAsyncFile> m_f;
+	PromiseStream<struct ChecksumRequest> ps;
+	Future<Void> checksumWorker;
+	Future<Void> checksumLogger;
 
 	struct WriteInfo {
 		WriteInfo() : checksum(0), timestamp(0) {}
@@ -101,12 +146,44 @@ private:
 	};
 
 	std::vector<WriteInfo> checksumHistory;
+	Future<int64_t> fileSize;
+	bool reserved = false;
+	bool checksumWorkerStart = false;
 	// This is the most page checksum history blocks we will use across all files.
 	static Optional<int> checksumHistoryBudget;
 	static int checksumHistoryPageSize;
+	// add a queue and an actor, to have the actor sequentially process the queue, log active queue size periodically
+	static int pendingChecksumCount;
+
+	ACTOR Future<Void> runChecksumWorker(AsyncFileWriteChecker* self, FutureStream<ChecksumRequest> checksumStream) {
+		loop {
+			ChecksumRequest req = waitNext(checksumStream);
+			void const* data = req.data;
+			int length = req.length;
+			int64_t offset = req.offset;
+			self->updateChecksumHistory(false, offset, length, (uint8_t*)data);
+			pendingChecksumCount -= 1;
+		}
+	}
+
+	ACTOR Future<Void> runChecksumLogger(AsyncFileWriteChecker* self) {
+		state double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
+		loop {
+			wait(delay(delayDuration));
+			TraceEvent("AsyncFileWriteChecker")
+			    .detail("Delay", delayDuration)
+			    .detail("Filename", self->getFilename())
+			    .detail("PendingChecksumCount", pendingChecksumCount);
+		}
+	}
 
 	// Update or check checksum(s) in history for any full pages covered by this operation
-	void updateChecksumHistory(bool write, int64_t offset, int len, uint8_t* buf) {
+	void updateChecksumHistory(bool updateChecksum, int64_t offset, int len, uint8_t* buf) {
+		if (!checksumWorkerStart) {
+			checksumWorkerStart = true;
+			checksumWorker = runChecksumWorker(this, ps.getFuture());
+			checksumLogger = runChecksumLogger(this);
+		}
 		// Check or set each full block in the the range
 		int page = offset / checksumHistoryPageSize; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
@@ -136,7 +213,7 @@ private:
 		while (page < pageEnd) {
 			uint32_t checksum = crc32c_append(0xab12fd93, start, checksumHistoryPageSize);
 			WriteInfo& history = checksumHistory[page];
-			// printf("%d %d %u %u\n", write, page, checksum, history.checksum);
+			// printf("%d %d %u %u\n", updateChecksum, page, checksum, history.checksum);
 
 #if VALGRIND
 			// It's possible we'll read or write a page where not all of the data is defined, but the checksum of the
@@ -144,9 +221,9 @@ private:
 			VALGRIND_MAKE_MEM_DEFINED_IF_ADDRESSABLE(&checksum, sizeof(uint32_t));
 #endif
 
-			// For writes, just update the stored sum
+			// when updateChecksum is true, just update the stored sum
 			double millisecondsPerSecond = 1000;
-			if (write) {
+			if (updateChecksum) {
 				history.timestamp = (uint32_t)(now() * millisecondsPerSecond);
 				history.checksum = checksum;
 			} else {
@@ -168,3 +245,6 @@ private:
 		}
 	}
 };
+
+#include "flow/unactorcompiler.h"
+#endif
