@@ -459,8 +459,8 @@ struct Counters {
 struct ReadIterator {
 	uint64_t index; // incrementing counter to uniquely identify read iterator.
 	bool inUse;
-	std::shared_ptr<rocksdb::Iterator> iter;
 	double creationTime;
+	std::shared_ptr<rocksdb::Iterator> iter;
 	KeyRange keyRange;
 	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
 	ReadIterator(CF& cf, uint64_t index, DB& db)
@@ -1121,22 +1121,26 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		CF& cf;
 
 		UID id;
-		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
+
+		std::shared_ptr<SharedRocksDBState> sharedState;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
-		int threadIndex;
-		ThreadReturnPromiseStream<std::tuple<int, std::string, double>> metricPromiseStream;
-		std::shared_ptr<SharedRocksDBState> sharedState;
 
-		explicit Writer(DB& db,
-		                CF& cf,
-		                UID id,
-		                std::shared_ptr<SharedRocksDBState> sharedState,
-		                std::shared_ptr<ReadIteratorPool> readIterPool,
-		                std::shared_ptr<PerfContextMetrics> perfContextMetrics,
-		                int threadIndex)
-		  : db(db), cf(cf), id(id), sharedState(sharedState), readIterPool(readIterPool),
-		    perfContextMetrics(perfContextMetrics), threadIndex(threadIndex),
+		int threadIndex;
+
+		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
+
+		ThreadReturnPromiseStream<std::tuple<int, std::string, double>> metricPromiseStream;
+
+		Writer(DB& db_,
+		       CF& cf_,
+		       const UID id_,
+		       const std::shared_ptr<SharedRocksDBState> sharedState_,
+		       const std::shared_ptr<ReadIteratorPool> readIterPool_,
+		       const std::shared_ptr<PerfContextMetrics> perfContextMetrics_,
+		       const int threadIndex_)
+		  : db(db_), cf(cf_), id(id_), sharedState(sharedState_), readIterPool(readIterPool_),
+		    perfContextMetrics(perfContextMetrics_), threadIndex(threadIndex_),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
@@ -1152,7 +1156,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		~Writer() override {
+		virtual ~Writer() override {
 			if (db) {
 				delete db;
 			}
@@ -1395,7 +1399,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				std::set<std::string> columnFamilies{ "default" };
 				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
 				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-				for (const std::string name : columnFamilies) {
+				for (const std::string& name : columnFamilies) {
 					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
 				}
 				s = rocksdb::DestroyDB(a.path, getOptions(), descriptors);
@@ -1756,19 +1760,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
-			int rowLimit, byteLimit;
+			int rowLimit;
+			int byteLimit;
 			ReadType type;
+			Counters& counters;
 			double startTime;
 			bool getHistograms;
 			ThreadReturnPromise<RangeResult> result;
-			Counters& counters;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit, ReadType type, Counters& counters)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), startTime(timer_monotonic()),
-			    counters(counters),
+			ReadRangeAction(KeyRange keys_, int rowLimit_, int byteLimit_, ReadType type_, Counters& counters_)
+			  : keys(keys_), rowLimit(rowLimit_), byteLimit(byteLimit_), type(type_), counters(counters_),
+			    startTime(timer_monotonic()),
 			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE),
 			    result(static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY)) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
+
 		void action(ReadRangeAction& a) {
 			++a.counters.rocksdbReadRangeQueries;
 			bool doPerfContextMetrics =
@@ -1900,11 +1906,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	std::shared_ptr<SharedRocksDBState> sharedState;
 	std::shared_ptr<PerfContextMetrics> perfContextMetrics;
-	rocksdb::ColumnFamilyHandle* defaultFdbCF = nullptr;
-	Reference<IThreadPool> writeThread;
-	Reference<IThreadPool> readThreads;
+	std::shared_ptr<ReadIteratorPool> readIterPool;
+	FlowLock readSemaphore;
+	FlowLock fetchSemaphore;
+
+	int numReadWaiters;
+	int numFetchWaiters;
+
 	std::shared_ptr<RocksDBErrorListener> errorListener;
 	Future<Void> errorFuture;
+
+	rocksdb::ColumnFamilyHandle* defaultFdbCF = nullptr;
+
+	Reference<IThreadPool> writeThread;
+	Reference<IThreadPool> readThreads;
+
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -1913,17 +1929,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	// maximum number of single key deletes in a commit, if ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled.
 	int maxDeletes;
 	Optional<Future<Void>> metrics;
-	FlowLock readSemaphore;
-	int numReadWaiters;
-	FlowLock fetchSemaphore;
-	int numFetchWaiters;
-	std::shared_ptr<ReadIteratorPool> readIterPool;
+
 	std::vector<Future<Void>> actors;
 	Counters counters;
 
-	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-	  : path(path), id(id), sharedState(std::make_shared<SharedRocksDBState>(id)),
-	    perfContextMetrics(new PerfContextMetrics()), readIterPool(new ReadIteratorPool(id, db, defaultFdbCF)),
+	RocksDBKeyValueStore(const std::string& path_, const UID id_)
+	  : path(path_), id(id_), sharedState(std::make_shared<SharedRocksDBState>(id_)),
+	    perfContextMetrics(new PerfContextMetrics()), readIterPool(new ReadIteratorPool(id_, db, defaultFdbCF)),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -2347,7 +2359,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
 				dirs.insert(file.db_path);
 			}
-			for (const std::string dir : dirs) {
+			for (const std::string& dir : dirs) {
 				platform::eraseDirectoryRecursive(dir);
 				TraceEvent("DeleteCheckpointRemovedDir", id)
 				    .detail("CheckpointID", checkpoint.checkpointID)
