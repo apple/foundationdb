@@ -132,7 +132,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( HEALTH_POLL_TIME,                                      1.0 );
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
 	init( DEST_OVERLOADED_DELAY,                                 0.2 );
-	init( BG_REBALANCE_POLLING_INTERVAL,                        10.0 );
+	init( BG_REBALANCE_POLLING_INTERVAL,                         1.0 );
+	init( BG_REBALANCE_MAX_POLLING_INTERVAL,                    10.0 );
 	init( BG_REBALANCE_SWITCH_CHECK_INTERVAL,                    5.0 ); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
 	init( DD_QUEUE_COUNTER_REFRESH_INTERVAL,                    60.0 );
@@ -899,7 +900,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
 	init( READ_SAMPLING_ENABLED,                                false ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
-	init( DD_PREFER_LOW_READ_UTIL_TEAM,                         false );
+	init( DD_PREFER_LOW_READ_UTIL_TEAM,                          true );
 	init( DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,                   120);
 	init( MOVING_WINDOW_SAMPLE_SIZE,                         10000000); // 10MB
 
