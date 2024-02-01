@@ -767,15 +767,15 @@ rocksdb::DBOptions getOptions() {
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	options.atomic_flush = SERVER_KNOBS->ROCKSDB_ATOMIC_FLUSH;
-	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
-		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
+	if (SERVER_KNOBS->SHARDED_ROCKSDB_BACKGROUND_PARALLELISM > 0) {
+		options.IncreaseParallelism(SERVER_KNOBS->SHARDED_ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
 	options.wal_recovery_mode = getWalRecoveryMode();
 	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
-	options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
+	options.max_subcompactions = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
 	options.max_background_jobs = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 
 	// The following two fields affect how archived logs will be deleted.
