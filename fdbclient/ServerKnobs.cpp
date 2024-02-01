@@ -548,20 +548,21 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); 
 	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                         0 );
 	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                  100 );
-	init (ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
-	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
-	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
-	init (ROCKSDB_MAX_LOG_FILE_SIZE,                         10485760 ); // 10MB.
-	init (ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
-	init (ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                     true ); 
-	init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                  true );
-	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
-	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
-	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
-	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
-	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
-	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
-	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                    -1 );
+	init( ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
+	init( ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
+	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
+	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
+	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
+	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                      true ); 
+	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                   true );
+	init( ROCKSDB_FULLFILE_CHECKSUM,                             false ); if ( randomize && BUGGIFY ) ROCKSDB_FULLFILE_CHECKSUM = true;
+	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
+	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
+	init( ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
+	init( SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
+	init( SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
+	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
+	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                    -1 );
 	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE,                   16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE,              1 << 30 ); // 1GB
 	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET,                      64 << 20); // 64MB
