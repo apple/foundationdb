@@ -396,10 +396,10 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			uint64_t totalSize = 0;
 			uint64_t totalCount = 0;
 			for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
-				char buf[1024];
 				std::vector<void*>* frames = i->second.backTrace;
 				std::string backTraceStr;
 #if defined(_WIN32)
+				char buf[1024];
 				for (int j = 1; j < frames->size(); j++) {
 					_snprintf(buf, 1024, "%p ", frames->at(j));
 					backTraceStr += buf;
