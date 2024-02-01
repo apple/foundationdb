@@ -29,7 +29,9 @@
 #include "fdbclient/Tracing.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
+#include "flow/UnitTest.h"
 
+#include "crc32/crc32c.h"
 #include <unordered_set>
 
 // The versioned message has wire format : -1, version, messages
@@ -57,6 +59,8 @@ static const char* typeString[] = { "SetValue",
 	                                "AndV2",
 	                                "CompareAndClear",
 	                                "Reserved_For_SpanContextMessage",
+	                                "Reserved_For_OTELSpanContextMessage",
+	                                "Encrypted",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -91,6 +95,7 @@ struct MutationRef {
 	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
+	Optional<uint32_t> checksum;
 
 	MutationRef() : type(MAX_ATOMIC_OP) {}
 	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b) {}
@@ -117,6 +122,14 @@ struct MutationRef {
 		              printable(param2).c_str());
 	}
 
+	uint8_t typeWithChecksum() const { return this->type | (uint8_t)(128); }
+	void removeChecksum() {
+		ASSERT(param2.size() > 4);
+		type &= ~(uint8_t)(128);
+		param2 = param2.substr(0, param2.size() - 4);
+	}
+	bool withChecksum() const { return this->type & (uint8_t)(128); }
+
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 	bool isValid() const { return type < MAX_ATOMIC_OP; }
 
@@ -124,9 +137,41 @@ struct MutationRef {
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			serializer(ar, type, param2, empty);
+			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+				// serializeWithChecksum(ar, param2, empty);
+				uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
+				crc32c_append(c, param2.begin(), param2.size());
+				if (this->checksum.present()) {
+					ASSERT_EQ(this->checksum.get(), c);
+				} else {
+					this->checksum = c;
+				}
+				StringRef cs = *(StringRef*)&c;
+				uint8_t cType = this->typeWithChecksum();
+				serializer(ar, cType, param2, cs);
+			} else {
+				serializer(ar, type, param2, empty);
+			}
+		} else if (ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
+		           CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			// serializeWithChecksum(ar, param1, param2);
+			uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
+			crc32c_append(c, param2.begin(), param2.size());
+			if (this->checksum.present()) {
+				ASSERT_EQ(this->checksum.get(), c);
+			} else {
+				this->checksum = c;
+			}
+			StringRef cs = *(StringRef*)&c;
+			uint8_t cType = this->typeWithChecksum();
+			Standalone<StringRef> param2WithChecksum = param2.withSuffix(cs);
+			StringRef p2 = param2WithChecksum;
+			serializer(ar, cType, param1, p2);
 		} else {
 			serializer(ar, type, param1, param2);
+		}
+		if (ar.isDeserializing && withChecksum()) {
+			removeChecksum();
 		}
 		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
 			ASSERT(param1[param1.size() - 1] == '\x00');
@@ -134,6 +179,19 @@ struct MutationRef {
 			param1 = param2.substr(0, param2.size() - 1);
 		}
 	}
+
+	// template <class Ar>
+	// void serializeWithChecksum(Ar& ar, StringRef cParam1, StringRef cParam2) {
+	// 	uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
+	// 	crc32c_append(c, param2.begin(), param2.size());
+	// 	if (this->checksum.present()) {
+	// 		ASSERT_EQ(this->checksum.get(), c);
+	// 	} else {
+	// 		this->checksum = c;
+	// 	}
+	// 	StringRef cs = *(StringRef*)&c;
+	// 	serializer(ar, this->typeWithChecksum(), cParam1, cParam2.withSuffix(cs));
+	// }
 
 	// An encrypted mutation has type Encrypted, encryption header (which contains encryption metadata) as param1,
 	// and the payload as param2. It can be serialize/deserialize as normal mutation, but can only be used after
