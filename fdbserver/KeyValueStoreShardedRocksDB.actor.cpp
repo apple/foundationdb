@@ -807,6 +807,11 @@ rocksdb::DBOptions getOptions() {
 	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
 
+	if (SERVER_KNOBS->ROCKSDB_FULLFILE_CHECKSUM) {
+		// We want this sst level checksum for many scenarios, such as compaction, backup, and physicalshardmove
+		// https://github.com/facebook/rocksdb/wiki/Full-File-Checksum-and-Checksum-Handoff
+		options.file_checksum_gen_factory = rocksdb::GetFileChecksumGenCrc32cFactory();
+	}
 	return options;
 }
 
