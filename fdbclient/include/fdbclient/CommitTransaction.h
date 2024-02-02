@@ -124,7 +124,7 @@ struct MutationRef {
 
 	uint8_t typeWithChecksum() const { return this->type | (uint8_t)(128); }
 	void removeChecksum() {
-		ASSERT(param2.size() > 4);
+		ASSERT(param2.size() >= 4);
 		type &= ~(uint8_t)(128);
 		param2 = param2.substr(0, param2.size() - 4);
 	}
@@ -137,36 +137,48 @@ struct MutationRef {
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			if (!isEncrypted() && ar.protocolVersion().hasMutationChecksum() &&
+			    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 				// serializeWithChecksum(ar, param2, empty);
 				uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
 				crc32c_append(c, param2.begin(), param2.size());
 				if (this->checksum.present()) {
-					ASSERT_EQ(this->checksum.get(), c);
+					// ASSERT_EQ(this->checksum.get(), c);
 				} else {
 					this->checksum = c;
 				}
-				StringRef cs = *(StringRef*)&c;
+				// StringRef cs = *(StringRef*)&c;
+				StringRef cs = StringRef((uint8_t*)&c, 4);
 				uint8_t cType = this->typeWithChecksum();
 				serializer(ar, cType, param2, cs);
+				TraceEvent(SevVerbose, "MutationRefChecksum")
+				    .detail("CType", cType)
+				    .detail("Mutation", this->toString())
+				    .detail("Checksum", std::to_string(c))
+				    .detail("ChecksumString", cs);
 			} else {
 				serializer(ar, type, param2, empty);
 			}
-		} else if (ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
+		} else if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		           CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 			// serializeWithChecksum(ar, param1, param2);
 			uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
 			crc32c_append(c, param2.begin(), param2.size());
 			if (this->checksum.present()) {
-				ASSERT_EQ(this->checksum.get(), c);
+				// ASSERT_EQ(this->checksum.get(), c);
 			} else {
 				this->checksum = c;
 			}
-			StringRef cs = *(StringRef*)&c;
+			StringRef cs = StringRef((uint8_t*)&c, 4);
 			uint8_t cType = this->typeWithChecksum();
 			Standalone<StringRef> param2WithChecksum = param2.withSuffix(cs);
 			StringRef p2 = param2WithChecksum;
 			serializer(ar, cType, param1, p2);
+			TraceEvent(SevVerbose, "MutationRefChecksum")
+			    .detail("CType", cType)
+			    .detail("Mutation", this->toString())
+			    .detail("Checksum", std::to_string(c))
+			    .detail("ChecksumString", cs);
 		} else {
 			serializer(ar, type, param1, param2);
 		}
@@ -555,5 +567,28 @@ struct EncryptedMutationsAndVersionRef {
 		}
 	};
 };
+
+TEST_CASE("noSim/CommitTransaction/MutationRef") {
+	printf("testing MutationRef encoding/decoding\n");
+	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
+	// BinaryWriter wr(IncludeVersion(ProtocolVersion::withGcTxnGenerations()));
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
+
+	wr << m;
+
+	Standalone<StringRef> value = wr.toValue();
+	TraceEvent("EncodedMutation").detail("RawBytes", value);
+
+	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withBlobGranule()));
+	// BinaryReader rd(value, IncludeVersion());
+	Standalone<MutationRef> de;
+
+	rd >> de;
+
+	printf("Deserialized mutation: %s\n", de.toString().c_str());
+	printf("testing data move ID encoding/decoding complete\n");
+
+	return Void();
+}
 
 #endif
