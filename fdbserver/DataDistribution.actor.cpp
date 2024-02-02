@@ -1033,6 +1033,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			ASSERT(self->configuration.storageTeamSize > 0);
 
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
+			state PromiseStream<ServerTeamInfo> triggerStorageQueueRebalance;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
@@ -1087,7 +1088,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                                 getShardMetrics.getFuture(),
 			                                                                 getTopKShardMetrics.getFuture(),
 			                                                                 getShardMetricsList.getFuture(),
-			                                                                 getAverageShardBytes.getFuture()),
+			                                                                 getAverageShardBytes.getFuture(),
+			                                                                 triggerStorageQueueRebalance.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -1150,7 +1152,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    getShardMetrics,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount,
-			    getAverageShardBytes });
+			    getAverageShardBytes,
+			    triggerStorageQueueRebalance });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
 			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
 			if (!isMocked) {
@@ -1175,7 +1178,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                getShardMetrics,
 				                                removeFailedServer,
 				                                getUnhealthyRelocationCount,
-				                                getAverageShardBytes });
+				                                getAverageShardBytes,
+				                                triggerStorageQueueRebalance });
 				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
 				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,

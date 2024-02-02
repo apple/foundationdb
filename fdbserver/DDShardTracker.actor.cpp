@@ -1524,6 +1524,44 @@ struct DataDistributionTrackerImpl {
 				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
 					self->actors.add(fetchShardMetricsList(self, req));
 				}
+				when(ServerTeamInfo req = waitNext(self->triggerStorageQueueRebalance)) {
+					TraceEvent e("TriggerDataMoveStorageQueueRebalance", self->distributorId);
+					e.detail("Server", req.serverId);
+					e.detail("Teams", req.teams.size());
+					int64_t maxShardWriteTraffic = 0;
+					KeyRange shardToMove;
+					ShardsAffectedByTeamFailure::Team selectedTeam;
+					for (const auto& team : req.teams) {
+						for (auto const& shard : self->shardsAffectedByTeamFailure->getShardsFor(team)) {
+							for (auto it : self->shards->intersectingRanges(shard)) {
+								if (it->value().stats->get().present()) {
+									int64_t shardWriteTraffic =
+									    it->value().stats->get().get().metrics.bytesWrittenPerKSecond;
+									if (shardWriteTraffic > maxShardWriteTraffic &&
+									    shardWriteTraffic > SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN) {
+										shardToMove = it->range();
+										maxShardWriteTraffic = shardWriteTraffic;
+									}
+								}
+							}
+						}
+					}
+					if (!shardToMove.empty()) {
+						e.detail("TeamSelected", selectedTeam.servers);
+						e.detail("ShardSelected", shardToMove);
+						e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
+						RelocateShard rs(shardToMove,
+						                 SERVER_KNOBS->PRIORITY_REBALANCE_STORAGE_QUEUE,
+						                 RelocateReason::REBALANCE_WRITE);
+						self->output.send(rs);
+						TraceEvent("SendRelocateToDDQueue", self->distributorId)
+						    .detail("ServerPrimary", req.primary)
+						    .detail("ServerTeam", selectedTeam.servers)
+						    .detail("KeyBegin", rs.keys.begin)
+						    .detail("KeyEnd", rs.keys.end)
+						    .detail("Priority", rs.priority);
+					}
+				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
 					self->actors.add(tenantCreationHandling(self, newTenant));
@@ -1544,11 +1582,13 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
                                           const FutureStream<GetMetricsRequest>& getShardMetrics,
                                           const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
                                           const FutureStream<GetMetricsListRequest>& getShardMetricsList,
-                                          const FutureStream<Promise<int64_t>>& getAverageShardBytes) {
+                                          const FutureStream<Promise<int64_t>>& getAverageShardBytes,
+                                          const FutureStream<ServerTeamInfo>& triggerStorageQueueRebalance) {
 	self->getShardMetrics = getShardMetrics;
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
+	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
 	self->userRangeConfig = initData->userRangeConfig;
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }

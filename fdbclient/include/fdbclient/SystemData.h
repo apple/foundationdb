@@ -65,9 +65,10 @@ enum class DataMovementReason : uint8_t {
 	TEAM_0_LEFT = 16,
 	SPLIT_SHARD = 17,
 	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 18,
-	ASSIGN_EMPTY_RANGE = 19, // dummy reason, no corresponding data move priority
-	SEED_SHARD_SERVER = 20, // dummy reason, no corresponding data move priority
-	NUMBER_OF_REASONS = 21, // dummy reason, no corresponding data move priority
+	REBALANCE_STORAGE_QUEUE = 19,
+	ASSIGN_EMPTY_RANGE = 20, // dummy reason, no corresponding data move priority
+	SEED_SHARD_SERVER = 21, // dummy reason, no corresponding data move priority
+	NUMBER_OF_REASONS = 22, // dummy reason, no corresponding data move priority
 };
 
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base

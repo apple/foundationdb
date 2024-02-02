@@ -92,6 +92,26 @@ public:
 				server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 			}
 		}
+
+		// Detect any storage with a too long storage queue and notify team tracker
+		// with a minimal interval
+		if (SERVER_KNOBS->ENABLE_REBALANCE_STORAGE_QUEUE) {
+			int64_t queueSize = server->getStorageQueueSize();
+			bool storageQueueKeepTooLong = server->updateAndGetStorageQueueTooLong(queueSize, server->getId());
+			double currentTime = now();
+			if (storageQueueKeepTooLong) {
+				if (!server->lastTimeNotifyLongStorageQueue.present() ||
+				    currentTime - server->lastTimeNotifyLongStorageQueue.get() >
+				        SERVER_KNOBS->DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL) {
+					server->longStorageQueue.trigger(); // will trigger data move for rebalancing storage queue
+					TraceEvent(SevInfo, "LongStorageQueueNotified", server->collection->getDistributorId())
+					    .detail("SSID", server->getId())
+					    .detail("CurrentQueueSize", queueSize);
+					server->lastTimeNotifyLongStorageQueue = currentTime;
+				}
+			}
+		}
+
 		return Void();
 	}
 
@@ -172,6 +192,45 @@ Future<Void> TCServerInfo::updateServerMetrics(Reference<TCServerInfo> server) {
 
 Future<Void> TCServerInfo::serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor) {
 	return TCServerInfoImpl::serverMetricsPolling(this, txnProcessor);
+}
+
+// Return true if the storage queue of the input storage server ssi keeps too long for a while
+bool TCServerInfo::updateAndGetStorageQueueTooLong(int64_t currentBytes, UID ssid) {
+	double currentTime = now();
+	if (currentBytes > SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_LONG_BYTES) {
+		if (!storageQueueTooLongStartTime.present()) {
+			storageQueueTooLongStartTime = currentTime;
+			TraceEvent(SevWarn, "TCDetectStorageQueueBecomeLong")
+			    .detail("SSID", ssid)
+			    .detail("StorageQueueBytes", currentBytes)
+			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+		} else {
+			TraceEvent(SevDebug, "TCDetectStorageQueueRemainLong")
+			    .detail("SSID", ssid)
+			    .detail("StorageQueueBytes", currentBytes)
+			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+		}
+	} else if (currentBytes < SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHORT_BYTES) {
+		if (storageQueueTooLongStartTime.present()) {
+			storageQueueTooLongStartTime = Optional<double>();
+			TraceEvent(SevInfo, "TCDetectStorageQueueBecomeShort")
+			    .detail("SSID", ssid)
+			    .detail("StorageQueueBytes", currentBytes);
+		}
+	} else {
+		if (storageQueueTooLongStartTime.present()) {
+			TraceEvent(SevDebug, "TCDetectStorageQueueRemainLong")
+			    .detail("SSID", ssid)
+			    .detail("StorageQueueBytes", currentBytes)
+			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+		}
+	}
+	if (storageQueueTooLongStartTime.present() &&
+	    currentTime - storageQueueTooLongStartTime.get() > SERVER_KNOBS->DD_LONG_STORAGE_QUEUE_TIMESPAN) {
+		return true;
+	} else {
+		return false;
+	}
 }
 
 void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {
