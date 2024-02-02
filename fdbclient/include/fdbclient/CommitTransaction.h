@@ -65,6 +65,7 @@ static const char* typeString[] = { "SetValue",
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; // 12 is the size of Header in MutationList entries
+	static const uint8_t CHECKSUM_FLAG_MASK = 128U;
 	enum Type : uint8_t {
 		SetValue = 0,
 		ClearRange,
@@ -116,22 +117,42 @@ struct MutationRef {
 	}
 
 	std::string toString() const {
-		return format("code: %s param1: %s param2: %s",
+		std::string checksumStr;
+		if (checksum.present()) {
+			checksumStr = format("checksum: %s ", std::to_string(checksum.get()).c_str());
+		}
+		return format("%scode: %s param1: %s param2: %s",
 		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset",
+		              checksumStr.c_str(),
 		              printable(param1).c_str(),
 		              printable(param2).c_str());
 	}
 
-	uint8_t typeWithChecksum() const { return this->type | (uint8_t)(128); }
+	uint8_t typeWithChecksum() const { return this->type | CHECKSUM_FLAG_MASK; }
 	void removeChecksum() {
 		ASSERT(param2.size() >= 4);
-		type &= ~(uint8_t)(128);
+		type &= ~CHECKSUM_FLAG_MASK;
 		param2 = param2.substr(0, param2.size() - 4);
 	}
-	bool withChecksum() const { return this->type & (uint8_t)(128); }
+	bool withChecksum() const { return this->type & CHECKSUM_FLAG_MASK; }
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 	bool isValid() const { return type < MAX_ATOMIC_OP; }
+
+	uint32_t populateChecksum() {
+		uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
+		crc32c_append(c, param2.begin(), param2.size());
+		if (this->checksum.present()) {
+			if (this->checksum.get() != c) {
+				TraceEvent(SevError, "MutationRefChecksumMismatch")
+				    .detail("CalculatedChecksum", std::to_string(c))
+				    .detail("Mutatino", toString());
+			}
+		} else {
+			this->checksum = c;
+		}
+		return c;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -139,15 +160,7 @@ struct MutationRef {
 			StringRef empty;
 			if (!isEncrypted() && ar.protocolVersion().hasMutationChecksum() &&
 			    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
-				// serializeWithChecksum(ar, param2, empty);
-				uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
-				crc32c_append(c, param2.begin(), param2.size());
-				if (this->checksum.present()) {
-					// ASSERT_EQ(this->checksum.get(), c);
-				} else {
-					this->checksum = c;
-				}
-				// StringRef cs = *(StringRef*)&c;
+				uint32_t c = populateChecksum();
 				StringRef cs = StringRef((uint8_t*)&c, 4);
 				uint8_t cType = this->typeWithChecksum();
 				serializer(ar, cType, param2, cs);
@@ -161,14 +174,7 @@ struct MutationRef {
 			}
 		} else if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		           CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
-			// serializeWithChecksum(ar, param1, param2);
-			uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
-			crc32c_append(c, param2.begin(), param2.size());
-			if (this->checksum.present()) {
-				// ASSERT_EQ(this->checksum.get(), c);
-			} else {
-				this->checksum = c;
-			}
+			uint32_t c = populateChecksum();
 			StringRef cs = StringRef((uint8_t*)&c, 4);
 			uint8_t cType = this->typeWithChecksum();
 			Standalone<StringRef> param2WithChecksum = param2.withSuffix(cs);
@@ -191,19 +197,6 @@ struct MutationRef {
 			param1 = param2.substr(0, param2.size() - 1);
 		}
 	}
-
-	// template <class Ar>
-	// void serializeWithChecksum(Ar& ar, StringRef cParam1, StringRef cParam2) {
-	// 	uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
-	// 	crc32c_append(c, param2.begin(), param2.size());
-	// 	if (this->checksum.present()) {
-	// 		ASSERT_EQ(this->checksum.get(), c);
-	// 	} else {
-	// 		this->checksum = c;
-	// 	}
-	// 	StringRef cs = *(StringRef*)&c;
-	// 	serializer(ar, this->typeWithChecksum(), cParam1, cParam2.withSuffix(cs));
-	// }
 
 	// An encrypted mutation has type Encrypted, encryption header (which contains encryption metadata) as param1,
 	// and the payload as param2. It can be serialize/deserialize as normal mutation, but can only be used after
