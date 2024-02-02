@@ -486,7 +486,7 @@ public:
 	bool ROCKSDB_ATOMIC_FLUSH;
 	bool ROCKSDB_IMPORT_MOVE_FILES;
 	bool ROCKSDB_CHECKPOINT_REPLAY_MARKER;
-	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
+	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE; // Conduct block-level checksum when rocksdb injecting data
 	bool ROCKSDB_ENABLE_CHECKPOINT_VALIDATION;
 	bool ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT;
 	int ROCKSDB_COMPACTION_PRI;
@@ -504,6 +504,11 @@ public:
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
 	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
+	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
+	                                // verify_file_checksum when ingesting (for physical shard move).
+	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
+	                                // checksum). The block-level checksum does not cover the corruption such as wrong
+	                                // sst file or file move/copy.
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
 	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
