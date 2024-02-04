@@ -48,7 +48,7 @@ Existing Benchmarks
 - `bench_iterate` measures iteration over a list of mutations
 - `bench_stream` measures the performance of writing to and reading from a `PromiseStream`
 - `bench_random` measures the performance of `DeterministicRandom`.
-- `bench_timer` measures the perforamnce of FoundationDB timers.
+- `bench_timer` measures the performance of FoundationDB timers.
 
 Future use cases
 ================

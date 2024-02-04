@@ -28,15 +28,15 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This test creates a scenario that large number of SS join the cluster, by excluding and including a random
-// SS consistenly for many times.
+// SS consistently for many times.
 // this test would quit early in two scenarios:
 // 		1. QuitEarlyNoEligibleSSToExclude: All storage servers are running alongside with a TLog, thus we cannot
-//			exclude a SS, otherwse DB would be unavailable. (this is due to simulation uses UNSET process class)
+//			exclude a SS, otherwise DB would be unavailable. (this is due to simulation uses UNSET process class)
 //		2. QuitEarlyNotCompleteServerExclude: Sometimes it takes too long for a SS exclusion to finish(disappear from
-//			serverListKeys), there is a timeout_error when that happens, and we quit if it never suceeded( i.e.)
+//			serverListKeys), there is a timeout_error when that happens, and we quit if it never succeeded( i.e.)
 // It makes sense because the purpose of this test is to :
 // 		1) create a scenario that large number of SS join/quit.
-// 		2) then verify RateKeeper is only bookkeeping required processes. (delete the SS that has quitted)
+// 		2) then verify RateKeeper is only bookkeeping required processes. (delete the SS that has quit)
 // it's okay to quit if we can't create such scenario in rare cases, as long as in most cases we can create the scenario
 // we have seen the case RK bookkeeping large number of unnecessary SS:
 // https://github.com/apple/foundationdb/issues/10260
@@ -58,7 +58,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 		// Failure injection workloads like Rollback, Attrition and so on are interfering with the test.
 		// In particular, this test expects the storage server can be excluded and included in time
 		// to test that ratekeeper's bookkeeping works fine.
-		// Consequently, we disable all failure injection workloads in backgroud for this test
+		// Consequently, we disable all failure injection workloads in background for this test
 		out.insert("all");
 	}
 

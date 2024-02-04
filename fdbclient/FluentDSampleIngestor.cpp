@@ -124,7 +124,7 @@ public:
 	}
 };
 
-// Sample function to make instanciation of SampleSender easier
+// Sample function to make instantiation of SampleSender easier
 template <class Protocol, class Callback>
 std::shared_ptr<SampleSender<Protocol, Callback>> makeSampleSender(typename Protocol::socket& socket,
                                                                    Callback const& callback,

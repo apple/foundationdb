@@ -110,11 +110,11 @@ void ExecCmdValueString::dbgPrint() const {
 	return;
 }
 
-ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
+ACTOR void destroyChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
 	// This code path should be bug free
 	wait(parentSSClosed);
 	TraceEvent(SevDebug, message.c_str()).log();
-	// This one is root cause for most failures, make sure it's okay to destory
+	// This one is root cause for most failures, make sure it's okay to destroy
 	g_simulator->destroyProcess(childInfo);
 	// Explicitly reset the connection with the child process in case re-spawn very quickly
 	FlowTransport::transport().resetConnection(childInfo->address);
@@ -209,7 +209,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					TraceEvent(SevDebug, "ChildProcessKilled").log();
 					wait(g_simulator->onProcess(self));
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
-					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
+					destroyChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}
 				when(wait(success(onShutdown))) {
 					ASSERT(false);

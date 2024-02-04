@@ -84,7 +84,7 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 	prev = ranges.begin();
 	it = ranges.begin();
 	++it;
-	// If possible create a new boundry which doesn't exist yet
+	// If possible create a new boundary which doesn't exist yet
 	for (; it != ranges.end(); ++it) {
 		if (it->value() == src && !borders.count(prev->value()) &&
 		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==

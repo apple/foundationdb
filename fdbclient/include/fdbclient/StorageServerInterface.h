@@ -873,7 +873,7 @@ struct ReadHotSubRangeRequest {
 struct SplitRangeReply {
 	constexpr static FileIdentifier file_identifier = 11813134;
 	// If the given range can be divided, contains the split points.
-	// If the given range cannot be divided(for exmaple its total size is smaller than the chunk size), this would be
+	// If the given range cannot be divided(for example its total size is smaller than the chunk size), this would be
 	// empty
 	Standalone<VectorRef<KeyRef>> splitPoints;
 

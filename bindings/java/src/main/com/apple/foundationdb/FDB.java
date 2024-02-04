@@ -572,7 +572,7 @@ public class FDB {
 
 	protected static boolean evalErrorPredicate(int predicate, int code) {
 		if(singleton == null)
-			throw new IllegalStateException("FDB API not yet initalized");
+			throw new IllegalStateException("FDB API not yet initialized");
 		return singleton.Error_predicate(predicate, code);
 	}
 

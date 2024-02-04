@@ -380,7 +380,7 @@ private:
 	// A physical shard is available if the current metric + moveInMetrics <= a threshold
 	PhysicalShardAvailable checkPhysicalShardAvailable(uint64_t physicalShardID, StorageMetrics const& moveInMetrics);
 
-	// Reduce the metics of input physical shard by the input metrics
+	// Reduce the metrics of input physical shard by the input metrics
 	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
 
 	// Add the input metrics to the metrics of input physical shard
@@ -404,7 +404,7 @@ private:
 	// Checks the consistency between the mapping of physical shards and key ranges.
 	void checkKeyRangePhysicalShardMapping();
 
-	// Return a string concating the input IDs interleaving with " "
+	// Return a string concatenating the input IDs interleaving with " "
 	std::string convertIDsToString(std::set<uint64_t> ids);
 
 	// Reset TransitionStartTime

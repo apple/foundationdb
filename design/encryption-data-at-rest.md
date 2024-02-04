@@ -81,7 +81,7 @@ Below diagram depicts the end-to-end encryption workflow detailing various modul
 
 ```
                                           _______________________________________________________
-                                         |                FDB CLUSER HOST                        |
+                                         |                FDB CLUSTER HOST                        |
                                          |                                                       |
        _____________________             |   ________________________      _________________     |
       |                     | (proprietary) |                        |    |                 |    |
@@ -126,7 +126,7 @@ Given encryption keys will be needed as part of cluster-recovery, this process/r
 
 Implements a native FDB KMS framework allowing multiple interfaces to co-existing and enabling FDB <-> KMS communication. Salient features:
 
-* Abstract `KmsConnector` class, the class enables a specilization implementation to implement `actor` supporting desired communication protocol.
+* Abstract `KmsConnector` class, the class enables a specialization implementation to implement `actor` supporting desired communication protocol.
 * `KmsConnectorInterface` defines the supported endpoints allowing EncryptKeyProxy to fetch/refresh encryption keys.
 * `--kms-connector-type` configuration parameter supplied via `foundationdb.conf` controls the runtime selection of KmsConnector selection.
 

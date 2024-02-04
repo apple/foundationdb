@@ -369,8 +369,8 @@ struct IndexBlockRef {
 	void finalize(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx, Arena& arena) {
 		if (cipherKeysCtx.present()) {
 			// IndexBlock childBlock pointers offsets are relative to IndexBlock endOffset instead of file start offset.
-			// Compressing indexBlock will need offset recalculation (circular depedency). IndexBlock size is bounded by
-			// number of chunks and sizeof(KeyPrefix), 'not' compressing IndexBlock shouldn't cause significant file
+			// Compressing indexBlock will need offset recalculation (circular dependency). IndexBlock size is bounded
+			// by number of chunks and sizeof(KeyPrefix), 'not' compressing IndexBlock shouldn't cause significant file
 			// size bloat.
 			CODE_PROBE(true, "encrypting index block");
 			ASSERT(cipherKeysCtx.present());

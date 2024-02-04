@@ -1782,9 +1782,9 @@ public:
 						}
 					}
 					if (!status->isUnhealthy()) {
-						// On server transistion from unhealthy -> healthy, trigger buildTeam check,
+						// On server transition from unhealthy -> healthy, trigger buildTeam check,
 						// handles scenario when team building failed due to insufficient healthy servers.
-						// Operaton cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+						// Operation cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
 						self->doBuildTeams = true;
 					}
 
@@ -2115,8 +2115,8 @@ public:
 				// wiggle will start the next wiggle.
 				// The wiggle waits until the numSSToBeLoadBytesBalanced to be less than
 				// PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO before starting the next wiggle. With this we can have
-				// mutiple SS that are in balancing state. Used to speed up wiggling rather than waiting for every SS to
-				// get balanced/filledup before starting the next wiggle.
+				// multiple SS that are in balancing state. Used to speed up wiggling rather than waiting for every
+				// SS to get balanced/filledup before starting the next wiggle.
 				numSSToBeLoadBytesBalanced =
 				    self->numSSToBeLoadBytesBalanced(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
 				imbalance = numSSToBeLoadBytesBalanced > SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO;
@@ -2371,7 +2371,7 @@ public:
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.first == ignoreSSFailuresZoneString) {
-						// healthyZone is now overloaded for DD diabling purpose, which does not timeout
+						// healthyZone is now overloaded for DD disabling purpose, which does not timeout
 						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
 						healthyZoneTimeout = Never();
 						self->healthyZone.set(p.first);
@@ -4293,7 +4293,7 @@ std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer
 		return teams[candidates[deterministicRandom()->randomInt(0, candidates.size())]]->getServerIDs();
 	} else if (backup.size() > 0) {
 		// The backup choice is a team with at least one server besides excludeServer, in this
-		// case, the team  will be possibily relocated to a healthy destination later by DD.
+		// case, the team will be possibly relocated to a healthy destination later by DD.
 		std::vector<UID> servers = teams[backup[deterministicRandom()->randomInt(0, backup.size())]]->getServerIDs();
 		std::vector<UID> res;
 		for (const UID& id : servers) {
@@ -6159,7 +6159,7 @@ public:
 
 		// NOTE: Due to the pure randomness in selecting a machine for a machine team,
 		// we cannot guarantee that all machine teams are created.
-		// When we chnage the selectReplicas function to achieve such guarantee, we can enable the following ASSERT
+		// When we change the selectReplicas function to achieve such guarantee, we can enable the following ASSERT
 		ASSERT(collection->machineTeams.size() == 10); // Should create all machine teams
 
 		// We need to guarantee a server always have at least a team so that the server can participate in data

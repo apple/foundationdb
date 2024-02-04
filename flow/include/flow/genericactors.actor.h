@@ -758,7 +758,7 @@ private:
 	__attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))                     \
 	__attribute__((swift_attr("release:immortal")))
 // // TODO(swift): https://github.com/apple/swift/issues/62456 can't support retain/release funcs that are templates
-// themselfes
+// themselves
 //    __attribute__((swift_attr("retain:addref_AsyncVar")))   \
 //    __attribute__((swift_attr("release:delref_AsyncVar")))
 
@@ -1383,7 +1383,7 @@ ACTOR template <class F>
 Future<Void> recurringAsync(
     F actorFunc, // Callback actor functor
     double interval, // Interval between two subsequent invocations of actor functor.
-    bool absoluteIntervalDelay, // Flag guarantees "interval" delay between two subequent actor functor invocations. If
+    bool absoluteIntervalDelay, // Flag guarantees "interval" delay between two subsequent actor functor invocations. If
                                 // not selected, guarantees provided are "at least 'interval' delay" between two
                                 // subsequent actor functor invocations, however, due to either 'poorly choose' interval
                                 // value AND/OR actor functor taking longer than expected to return, could cause actor
@@ -1548,7 +1548,7 @@ struct ActiveCounter {
 // The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
 // called Lock.
 //
-// The default behavior is that if a Lock is droppped without error or release, existing and future
+// The default behavior is that if a Lock is dropped without error or release, existing and future
 // waiters will see a broken_promise exception.
 //
 // If hangOnDroppedMutex is true, then if a Lock is dropped without error or release, existing and

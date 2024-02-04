@@ -82,7 +82,7 @@ struct NetworkMetrics {
 	NetworkMetrics()
 	  : lastRunLoopBusyness(0), networkBusyness(0),
 	    starvationTrackerNetworkBusyness(PriorityStats(static_cast<TaskPriority>(starvationBins.at(0)))) {
-		for (int priority : starvationBins) { // initalize starvation trackers with given priorities
+		for (int priority : starvationBins) { // initialize starvation trackers with given priorities
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
 		}
 	}

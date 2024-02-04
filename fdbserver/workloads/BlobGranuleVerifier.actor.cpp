@@ -852,7 +852,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		// ask all workers for all of their open granules and make sure none are in the force purge range
 
-		// Because there could be ranges assigned that havne't yet finished opening to check for purge, some BWs might
+		// Because there could be ranges assigned that haven't yet finished opening to check for purge, some BWs might
 		// still temporarily have ranges assigned. To address this, we just retry the check after a bit
 		loop {
 			state bool anyRangesLeft = false;

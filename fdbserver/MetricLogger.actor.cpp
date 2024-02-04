@@ -443,7 +443,7 @@ ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
 		int size = wait(serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE));
 		auto message = packetString.substr(0, size);
 
-		// Let's just focus on statsd for now. For statsd, the message is expected to be seperated by newlines. We need
+		// Let's just focus on statsd for now. For statsd, the message is expected to be separated by newlines. We need
 		// to break each statsd metric and verify them individually.
 		if (model == MetricsDataModel::STATSD) {
 			std::string statsd_message = message.toString();

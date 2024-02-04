@@ -38,7 +38,7 @@ struct WorkloadSpec {
 	std::unordered_map<std::string, std::string> options;
 };
 
-// Test speficification loaded from a *.toml file
+// Test specification loaded from a *.toml file
 struct TestSpec {
 	// Title of the test
 	std::string title;
@@ -97,7 +97,7 @@ struct TestSpec {
 	std::vector<WorkloadSpec> workloads;
 };
 
-// Read the test specfication from a *.toml file
+// Read the test specification from a *.toml file
 TestSpec readTomlTestSpec(std::string fileName);
 
 } // namespace FdbApiTester

@@ -512,7 +512,7 @@ struct BlobCipherEncryptHeaderRef {
 
 	// API supports following validation:
 	// 1. Ensure input BlobCipherDetails (textDetails and/or headerDetails) matches with the input
-	// 2. Ensure persited KCV matches with the input values
+	// 2. Ensure persisted KCV matches with the input values
 	// 3. Ensure input IV buffer matches with the persisted ones.
 	//
 	// Currently API is used by BlobGranule encryption where encryption key lookup based on persisted
@@ -702,7 +702,7 @@ private:
 };
 
 // This interface allows FDB processes participating in encryption to store and
-// index recently used encyption cipher keys. FDB encryption has two dimensions:
+// index recently used encryption cipher keys. FDB encryption has two dimensions:
 // 1. Mapping on cipher encryption keys per "encryption domains"
 // 2. Per encryption domain, the cipher keys are index using {baseCipherKeyId, salt} tuple.
 //
@@ -710,7 +710,7 @@ private:
 // key. For details refer to:
 // https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-3/archive/2012-07-10
 //
-// Below gives a pictoral representation of in-memory datastructure implemented
+// Below gives a pictorial representation of in-memory datastructure implemented
 // to index encryption keys:
 //                  { encryptionDomain -> { {baseCipherId, salt} -> cipherKey } }
 //
@@ -767,10 +767,10 @@ public:
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
 	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
-	// 'encrypt_update_cipher' exception. Returns the inserted cipher key if sucess.
+	// 'encrypt_update_cipher' exception. Returns the inserted cipher key if success.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
-	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
+	// decryption. The encryption header would contain relevant details including: 'encryptDomainId',
 	// 'baseCipherId' & 'salt'. The caller needs to fetch 'baseCipherKey' detail and re-populate KeyCache.
 	// Also, the invocation will NOT update the latest cipher-key details.
 
@@ -788,7 +788,7 @@ public:
 	// API returns list of all 'cached' cipherKeys
 	std::vector<Reference<BlobCipherKey>> getAllCipherKeys();
 
-	// Return number of cipher keys in the cahce.
+	// Return number of cipher keys in the cache.
 	size_t getSize() const { return keyIdCache.size(); }
 
 private:
@@ -803,7 +803,7 @@ using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Refer
 
 class BlobCipherKeyCache : NonCopyable, public ReferenceCounted<BlobCipherKeyCache> {
 public:
-	// Public visibility constructior ONLY to assist FlowSingleton instance creation.
+	// Public visibility constructor ONLY to assist FlowSingleton instance creation.
 	// API Note: Constructor is expected to be instantiated only in simulation mode.
 
 	explicit BlobCipherKeyCache(bool ignored) { ASSERT(g_network->isSimulated()); }
@@ -1010,7 +1010,7 @@ private:
 	Optional<Reference<BlobCipherKey>> headerCipherKeyOpt;
 	bool authTokensValidationDone;
 
-	// API is resposible to validate persisted EncryptionHeader sanity, it does following checks
+	// API is responsible to validate persisted EncryptionHeader sanity, it does following checks
 	// 1. Parse and validate EncryptionHeaderFlags (version compliant checks)
 	// 2. Parse and validate KCVs
 	// 3. Parse and validate auth-tokens if applicable.
@@ -1076,7 +1076,7 @@ public:
 
 	EncryptCipherKeyCheckValue computeKCV(const uint8_t* cipher, const int len);
 
-	static void checkEqual(const Reference<BlobCipherKey>& cipher, const EncryptCipherKeyCheckValue persited);
+	static void checkEqual(const Reference<BlobCipherKey>& cipher, const EncryptCipherKeyCheckValue persisted);
 
 private:
 	EVP_MD_CTX* ctx;

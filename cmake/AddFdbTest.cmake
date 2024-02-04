@@ -7,7 +7,7 @@
 #   an error if there are any .txt files in the test directory that do not
 #   correspond to a test or are not ignore by a pattern
 # - IGNORE_PATTERNS regular expressions. All files that match any of those
-#   experessions don't need to be associated with a test
+#   expressions don't need to be associated with a test
 function(configure_testing)
   set(options ERROR_ON_ADDITIONAL_FILES)
   set(oneValueArgs TEST_DIRECTORY)

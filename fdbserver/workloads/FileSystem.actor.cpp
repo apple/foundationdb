@@ -300,14 +300,14 @@ struct FileSystemWorkload : TestWorkload {
 		state Key keyEnd(base + "0");
 		state KeySelectorRef begin = firstGreaterThan(keyBegin);
 		state KeySelectorRef end = firstGreaterOrEqual(keyEnd);
-		state int transfered = 1000;
+		state int transferred = 1000;
 		state int transferSize = 1000;
 		state uint64_t deletedFiles = 0;
-		while (transfered == transferSize) {
+		while (transferred == transferSize) {
 			RangeResult val = wait(tr->getRange(begin, end, transferSize));
-			transfered = val.size();
-			deletedFiles += transfered;
-			begin = begin + transfered;
+			transferred = val.size();
+			deletedFiles += transferred;
+			begin = begin + transferred;
 		}
 		if (self->loggingQueries) {
 			TraceEvent("DeletionQueryResults")

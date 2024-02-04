@@ -95,7 +95,7 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 		StringRef mutationData = msg.getMessageWithoutTags();
 		uint8_t mutationType = *mutationData.begin();
 		if (logAdapterMessage) {
-			// Skip the message, as there will always be an idential non-logAdapterMessage mutation
+			// Skip the message, as there will always be an identical non-logAdapterMessage mutation
 			// that we can match against in the same commit.
 		} else if (LogProtocolMessage::startsLogProtocolMessage(mutationType)) {
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));

@@ -868,13 +868,13 @@ FORCE_INLINE __m128i _mm_shuffle_epi_2301(__m128i a) {
 	return vreinterpretq_m128i_s32(vcombine_s32(a01, a23));
 }
 
-// rotates the least significant 32 bits into the most signficant 32 bits, and
+// rotates the least significant 32 bits into the most significant 32 bits, and
 // shifts the rest down
 FORCE_INLINE __m128i _mm_shuffle_epi_0321(__m128i a) {
 	return vreinterpretq_m128i_s32(vextq_s32(vreinterpretq_s32_m128i(a), vreinterpretq_s32_m128i(a), 1));
 }
 
-// rotates the most significant 32 bits into the least signficant 32 bits, and
+// rotates the most significant 32 bits into the least significant 32 bits, and
 // shifts the rest up
 FORCE_INLINE __m128i _mm_shuffle_epi_2103(__m128i a) {
 	return vreinterpretq_m128i_s32(vextq_s32(vreinterpretq_s32_m128i(a), vreinterpretq_s32_m128i(a), 3));

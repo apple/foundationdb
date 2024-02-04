@@ -1303,7 +1303,7 @@ public:
 		FieldValueBlockEncoding<TimeAndValue<T>> enc;
 		BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
 		// Write a header so the client can treat this value like a normal data value block.
-		// TOOD: If it is useful, this could be the current header value of the most recently logged level.
+		// TODO: If it is useful, this could be the current header value of the most recently logged level.
 		wr << FieldHeader<TimeAndValue<T>>();
 		enc.write(wr, tv);
 		return wr.toValue();
@@ -1402,7 +1402,7 @@ struct MetricHandle {
 
 	// Initialize this handle to point to a new or existing metric with (name, id).  If a new metric is created then the
 	// handle's current metric's current value will be the new metric's initial value.  This allows Metric handle users
-	// to treate their Metric variables as normal variables and then bind them to actual logging metrics later while
+	// to treat their Metric variables as normal variables and then bind them to actual logging metrics later while
 	// continuing with the current value.
 	void init(StringRef const& name, StringRef const& id = StringRef()) {
 		ref = T::getOrCreateInstance(name, id, true, ref->getValue());

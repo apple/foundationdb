@@ -1341,7 +1341,7 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	BlobCipherEncryptHeaderRef headerRefCopy = BlobCipherEncryptHeaderRef(headerRef);
 
 	AesCtrWithAuth<Params> algoHeaderCopy = std::get<AesCtrWithAuth<Params>>(headerRefCopy.algoHeader);
-	// preserve the 'persisted' token for future validation before reseting the field
+	// preserve the 'persisted' token for future validation before resetting the field
 	memcpy(&persisted[0], &algoHeaderCopy.v1.authToken[0], Params::authTokenSize);
 	memset(&algoHeaderCopy.v1.authToken[0], 0, Params::authTokenSize);
 
@@ -1905,7 +1905,7 @@ void Sha256KCV::checkEqual(const Reference<BlobCipherKey>& cipher, const Encrypt
 		CODE_PROBE(true, "Sha256 Key Check Value mismatch");
 		TraceEvent(SevWarnAlways, "Sha256KCVMismatch")
 		    .detail("Computed", cipher->getBaseCipherKCV())
-		    .detail("Persited", persisted)
+		    .detail("Persisted", persisted)
 		    .detail("DomainId", cipher->getDomainId())
 		    .detail("BaseCipherId", cipher->getBaseCipherId());
 		throw encrypt_key_check_value_mismatch();
@@ -2061,7 +2061,7 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 	}
 	TraceEvent("TestLooksupDone").log();
 
-	// Ensure attemtping to insert existing cipherKey (identical) more than once is treated as a NOP
+	// Ensure attempting to insert existing cipherKey (identical) more than once is treated as a NOP
 	try {
 		Reference<BaseCipher> baseCipher = domainKeyMap[minDomainId][minBaseCipherKeyId];
 		cipherKeyCache->insertCipherKey(baseCipher->domainId,
@@ -2076,7 +2076,7 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 	}
 	TraceEvent("TestReinsertIdempotentKeyDone").log();
 
-	// Ensure attemtping to insert an existing cipherKey (modified) fails with appropriate error
+	// Ensure attempting to insert an existing cipherKey (modified) fails with appropriate error
 	try {
 		Reference<BaseCipher> baseCipher = domainKeyMap[minDomainId][minBaseCipherKeyId];
 		uint8_t rawCipher[baseCipher->len];

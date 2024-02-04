@@ -28,7 +28,7 @@ import com.apple.foundationdb.tuple.Tuple;
 import org.junit.jupiter.api.Assertions;
 
 /**
- * This test verify transcations have repeatable read.
+ * This test verify transactions have repeatable read.
  * 1 First set initialValue to key.
  * 2 Have transactions to read the key and verify the initialValue in a loop, if it does not 
  *   see the initialValue as the value, it set the flag to false.
@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Assertions;
  * 
  * 4 Verify that old transactions have not finished when new transactions have finished, 
  *   then verify old transactions does not have false flag -- it means that old transactions
- *   are still seeting the initialValue even after new transactions set them to a new value. 
+ *   are still seeing the initialValue even after new transactions set them to a new value. 
  */
 public class RepeatableReadMultiThreadClientTest {
     public static final MultiClientHelper clientHelper = new MultiClientHelper();

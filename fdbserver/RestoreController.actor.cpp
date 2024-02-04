@@ -1024,7 +1024,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<ControllerBatc
 		}
 		state std::vector<RestoreCommonReply> replies;
 		// The actor at each batchIndex should only occur once.
-		// Use batchData->applyToDB just incase the actor at a batchIndex is executed more than once.
+		// Use batchData->applyToDB just in case the actor at a batchIndex is executed more than once.
 		if (!batchData->applyToDB.present()) {
 			batchData->applyToDB = Never();
 			batchData->applyToDB = getBatchReplies(&RestoreApplierInterface::applyToDB,

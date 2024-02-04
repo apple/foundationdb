@@ -13,7 +13,7 @@ Remember to:
 
 - Add TEST() statements to any conditional/rare cases
 
-- Comment invarients, strategy, preconditions, tricky stuff when you
+- Comment invariants, strategy, preconditions, tricky stuff when you
 	figure it out, even if it's not "your" code.
 
 - Factor common asynchronous control flows to use composition

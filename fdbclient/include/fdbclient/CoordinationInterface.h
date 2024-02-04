@@ -134,10 +134,10 @@ public:
 	// the connection string stored in memory.
 	virtual Future<ClusterConnectionString> getStoredConnectionString() = 0;
 
-	// Checks whether the connection string in persisten storage matches the connection string stored in memory.
+	// Checks whether the connection string in persistent storage matches the connection string stored in memory.
 	Future<bool> upToDate();
 
-	// Checks whether the connection string in persisten storage matches the connection string stored in memory. The
+	// Checks whether the connection string in persistent storage matches the connection string stored in memory. The
 	// cluster string stored in persistent storage is returned via the reference parameter connectionString.
 	virtual Future<bool> upToDate(ClusterConnectionString& connectionString) = 0;
 
@@ -172,7 +172,7 @@ protected:
 	ClusterConnectionString cs;
 
 private:
-	// A flag that indicates whether this connection record needs to be persisted when it succesfully establishes a
+	// A flag that indicates whether this connection record needs to be persisted when it successfully establishes a
 	// connection.
 	bool connectionStringNeedsPersisted;
 };
@@ -189,7 +189,7 @@ struct LeaderInfo {
 	static const uint64_t changeIDMask = ~(uint64_t(0b1111111) << 57);
 	Value serializedInfo;
 	// If true, serializedInfo is a connection string instead!
-	// If true, it also means the receipient need to update their local cluster file
+	// If true, it also means the recipient need to update their local cluster file
 	// with the latest list of coordinators
 	bool forward;
 

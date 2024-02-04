@@ -96,7 +96,7 @@ In `status json` output, please look at field `.data.team_tracker.state` for tea
 
 A key range is a shard. A shard is the minimum unit of moving data. The storage server’s ownership of a shard -- which SS owns which shard -- is stored in the system keyspace *serverKeys* (`\xff/serverKeys/`) and *keyServers* (`\xff/keyServers/`). To simplify the explanation, we refer to the storage server’s ownership of a shard as a shard’s ownership.
 
-A shard’s ownership is used in transaction systems (commit proxy and tLogs) to route mutations to tLogs and storage servers. When a commit proxy receives a mutation, it uses the shard’s ownership to decide which *k* tLogs receive the mutation, assuming *k* is the replias factor. When a storage server pulls mutations from tLogs, it uses the shard’s ownership to decide which shards the SS is responsible for and which tLog the SS should pull the data from.
+A shard’s ownership is used in transaction systems (commit proxy and tLogs) to route mutations to tLogs and storage servers. When a commit proxy receives a mutation, it uses the shard’s ownership to decide which *k* tLogs receive the mutation, assuming *k* is the replicas factor. When a storage server pulls mutations from tLogs, it uses the shard’s ownership to decide which shards the SS is responsible for and which tLog the SS should pull the data from.
 
 A shard’s ownership must be consistent across transaction systems and SSes, so that mutations can be correctly routed to SSes. Moving keys from a SS to another requires changing the shard’s ownership under ACID property. The ACID property is achieved by using FDB transactions to change the *serverKeys *(`\xff/serverKeys/`) and *keyServers* (`\xff/keyServers/`). The mutation on the *serverKeys *and* keyServers *will be categorized as private mutations in transaction system. Compared to normal mutation, the private mutations will change the transaction state store (txnStateStore) that maintains the *serverKeys* and *keyServers* for transaction systems (commit proxy and tLog) when it arrives on each transaction component (e.g., tLog). Because mutations are processed in total order with the ACID guarantees, the change to the txnStateStore will be executed in total order on each node and the change on the shard’s ownership will also be consistent.
 
@@ -115,7 +115,7 @@ Before FDB 7.2, when the data distributor wants to rebalance shard, it only cons
 The data distributor will periodically check whether the read rebalance is needed. The conditions of rebalancing are 
 * the **worst CPU usage of source team >= 0.15** , which means the source team is somewhat busy;
 * the ongoing relocation is less than the parallelism budget. `queuedRelocation[ priority ] < countLimit (default 50)`;
-* the source team is not throttled to be a data movement source team. `( now() - The last time the source team was selected ) * time volumn (default 20) > read sample interval (2 min default)`;
+* the source team is not throttled to be a data movement source team. `( now() - The last time the source team was selected ) * time volume (default 20) > read sample interval (2 min default)`;
 * the read load difference between source team and destination team is larger than 30% of the source team load;
 
 ## Metrics definition

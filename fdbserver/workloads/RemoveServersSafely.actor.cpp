@@ -209,7 +209,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("ProcessAddrSize", processAddrs.size())
 		    .detail("NetAddrs", describe(netAddrs))
 		    .detail("ProcessAddrs", describe(processAddrs))
-		    .detail("Proceses", processes.size())
+		    .detail("Processes", processes.size())
 		    .detail("MachineProcesses", machineProcesses.size());
 
 		return processes;

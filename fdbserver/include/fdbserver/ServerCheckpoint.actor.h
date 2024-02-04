@@ -71,7 +71,7 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
 // Delete a checkpoint.
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 
-// Fetchs checkpoint to a local `dir`, `initialState` provides the checkpoint formats, location, restart point, etc.
+// Fetches checkpoint to a local `dir`, `initialState` provides the checkpoint formats, location, restart point, etc.
 // If cFun is provided, the progress can be checkpointed.
 // Returns a CheckpointMetaData, which could contain KVS-specific results, e.g., the list of fetched checkpoint files.
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,

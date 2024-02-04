@@ -246,7 +246,7 @@ description is not currently required but encouraged.
     <Option name="check_writes_enable" code="50"
             hidden="true" />
     <Option name="read_your_writes_disable" code="51"
-            description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction."/>
+            description="Reads performed by a transaction will not see any prior mutations that occurred in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction."/>
     <Option name="read_ahead_disable" code="52"
             description="Deprecated" />
     <Option name="read_server_side_cache_enable" code="507"

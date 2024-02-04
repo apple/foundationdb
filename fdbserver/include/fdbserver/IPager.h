@@ -206,7 +206,7 @@ private:
 //
 // preWrite() must be called before writing a page to disk to update checksums and encrypt as needed
 // After reading a page from disk,
-//   postReadHeader() must be called to verify the verison, main, and encoding headers
+//   postReadHeader() must be called to verify the version, main, and encoding headers
 //   postReadPayload() must be called, after potentially setting encryption secret, to verify and possibly
 //                     decrypt the payload
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
@@ -282,7 +282,7 @@ public:
 	// Redwood header version 1
 	// Protects all headers with a 64-bit XXHash checksum
 	// Most other fields are forensic in nature and are not required to be set for correct
-	// behavior but they can faciliate forensic investigation of data on disk.  Some of them
+	// behavior but they can facilitate forensic investigation of data on disk.  Some of them
 	// could be used for sanity checks at runtime.
 	struct RedwoodHeaderV1 {
 		PageType pageType;
@@ -870,7 +870,7 @@ public:
 	// invalidate them or keep their versions around until the snapshots are no longer in use.
 	virtual void setOldestReadableVersion(Version v) = 0;
 
-	// Advance the commit version and the oldest readble version and commit until the remap queue is empty.
+	// Advance the commit version and the oldest readable version and commit until the remap queue is empty.
 	virtual Future<Void> clearRemapQueue() = 0;
 
 	// Get a pointer to an integer representing a byte count penalty the pager should apply against usable page cache

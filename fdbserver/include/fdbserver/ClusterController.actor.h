@@ -402,7 +402,7 @@ public:
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 		for (auto& it : id_worker) {
 			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the approriate fitness
+			// not be one of the excluded addrs from req and have the appropiate fitness
 			if (workerAvailable(it.second, false) &&
 			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&

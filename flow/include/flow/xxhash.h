@@ -827,7 +827,7 @@ XXH_PUBLIC_API XXH128_hash_t XXH128(const void* data, size_t len, XXH64_hash_t s
  *
  * The check costs one initial branch per hash, which is generally negligible, but not zero.
  * Moreover, it's not useful to generate binary for an additional code path
- * if memory access uses same instruction for both aligned and unaligned adresses.
+ * if memory access uses same instruction for both aligned and unaligned addresses.
  *
  * In these cases, the alignment check can be removed by setting this macro to 0.
  * Then the code will always use unaligned memory access.

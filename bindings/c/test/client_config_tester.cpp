@@ -125,7 +125,7 @@ void printProgramUsage(const char* execName) {
 	       "  --transaction-timeout MILLISECONDS\n"
 	       "                 The timeout for the test transactions in milliseconds (default: 0 - no timeout)\n"
 	       "  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
+	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
 	       "  --tmp-dir DIR\n"

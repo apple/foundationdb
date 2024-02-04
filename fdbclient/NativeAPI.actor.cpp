@@ -2264,7 +2264,7 @@ void DatabaseContext::expireThrottles() {
 // file name, and also used to annotate all trace events.
 //
 // If trace_initialize_on_setup is not set, tracing is initialized when opening a database.
-// In that case we can immediatelly determine the IP. Thus, we can use the IP in the
+// In that case we can immediately determine the IP. Thus, we can use the IP in the
 // trace file name and annotate all events with it.
 //
 // If trace_initialize_on_setup network option is set, tracing is at first initialized without
@@ -5421,7 +5421,7 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 	state Key e = wait(fe);
 
 	if (!snapshot) {
-		// FIXME: this conflict range is too large, and should be updated continously as results are returned
+		// FIXME: this conflict range is too large, and should be updated continuously as results are returned
 		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(), begin.arena())),
 		                                  std::max(e, Key(end.getKey(), end.arena()))));
 	}
@@ -6057,7 +6057,7 @@ void Transaction::atomicOp(const KeyRef& key,
 
 void TransactionState::addClearCost() {
 	// NOTE: The throttling cost of each clear is assumed to be one page.
-	// This makes compuation fast, but can be inaccurate and may
+	// This makes computation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
 	totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 }
@@ -6487,7 +6487,7 @@ void Transaction::setupWatches() {
 
 		watches.clear();
 	} catch (Error&) {
-		ASSERT(false); // The above code must NOT throw because commit has already occured.
+		ASSERT(false); // The above code must NOT throw because commit has already occurred.
 		throw internal_error();
 	}
 }

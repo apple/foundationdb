@@ -1641,9 +1641,9 @@ private:
 
 				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
 				if (blobCredsFromENV != nullptr) {
-					fprintf(stderr, "[WARNING] Set blob credetial via env variable is not tested yet\n");
+					fprintf(stderr, "[WARNING] Set blob credential via env variable is not tested yet\n");
 					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
-					    .detail("Reason", "Set blob credetial via env variable is not tested yet");
+					    .detail("Reason", "Set blob credential via env variable is not tested yet");
 					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 					do {
 						StringRef file = t.eat(":");
@@ -1781,7 +1781,7 @@ private:
 		try {
 			ProfilerConfig::instance().reset(profilerConfig);
 		} catch (ConfigError& e) {
-			printf("Error seting up profiler: %s", e.description.c_str());
+			printf("Error setting up profiler: %s", e.description.c_str());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 

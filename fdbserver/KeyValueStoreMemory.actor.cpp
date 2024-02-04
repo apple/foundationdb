@@ -472,7 +472,7 @@ private:
 	}
 
 	// NOTE: The first bit of opType indicates whether the entry is encrypted or not. This is fine for backwards
-	// compatability since the first bit was never used previously
+	// compatibility since the first bit was never used previously
 	//
 	// Unencrypted data format:
 	// +-------------+-------------+-------------+--------+--------+-----------+

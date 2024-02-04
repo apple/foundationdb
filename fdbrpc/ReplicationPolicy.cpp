@@ -276,7 +276,7 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 			}
 		}
 	}
-	// Clear the return array, if not satified
+	// Clear the return array, if not satisfied
 	if (count < _count) {
 		results.resize(resultsInit);
 		count = 0;

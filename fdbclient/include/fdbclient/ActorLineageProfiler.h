@@ -148,7 +148,7 @@ class SampleCollection_t {
 
 public:
 	/**
-	 * Define how many samples the collection shoul keep. The window size is defined by time dimension.
+	 * Define how many samples the collection should keep. The window size is defined by time dimension.
 	 *
 	 * \param duration How long a sample should be kept in the collection.
 	 */

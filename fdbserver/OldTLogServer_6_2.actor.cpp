@@ -1217,7 +1217,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 			                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
 			           TaskPriority::UpdateStorage));
 		} else {
-			// recovery wants to commit to persistant data when updatePersistentData is not active, this delay ensures
+			// recovery wants to commit to persistent data when updatePersistentData is not active, this delay ensures
 			// that immediately after updatePersist returns another one has not been started yet.
 			wait(delay(0.0, TaskPriority::UpdateStorage));
 		}
@@ -1515,7 +1515,7 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, T
 		for (Tag t : tagsAndMessage.tags) {
 			if (t == tag || (tag.locality == tagLocalityLogRouter && t.locality == tagLocalityLogRouter &&
 			                 t.id % logRouters == tag.id)) {
-				// Mutations that are in the partially durable span between known comitted version and
+				// Mutations that are in the partially durable span between known committed version and
 				// recovery version get copied to the new log generation.  These commits might have had more
 				// log router tags than what now exist, so we mod them down to what we have.
 				relevantMessages.push_back(tagsAndMessage.getRawMessage());
@@ -1997,7 +1997,7 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 		    .detail("LogId", logData->logId)
 		    .detail("Version", logData->version.get())
 		    .detail("Committing", logData->queueCommittingVersion)
-		    .detail("Commmitted", logData->queueCommittedVersion.get());
+		    .detail("Committed", logData->queueCommittedVersion.get());
 		if (logData->committingQueue.canBeSet()) {
 			logData->committingQueue.send(Void());
 		}

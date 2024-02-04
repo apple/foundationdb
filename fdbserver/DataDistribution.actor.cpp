@@ -530,7 +530,7 @@ public:
 			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
 
 			// AuditStorage does not rely on DatabaseConfiguration
-			// AuditStorage read neccessary info purely from system key space
+			// AuditStorage read necessary info purely from system key space
 			if (!self->auditStorageInitStarted) {
 				// AuditStorage currently does not support DDMockTxnProcessor
 				if (!self->txnProcessor->isMocked()) {
@@ -543,7 +543,7 @@ public:
 			// No polling MoveKeyLock is running
 			// So, we need to check MoveKeyLock when waitUntilDataDistributorExitSecurityMode
 			if (!self->txnProcessor->isMocked()) {
-				// AuditStorage  currently does not suport DDMockTxnProcessor
+				// AuditStorage currently does not support DDMockTxnProcessor
 				wait(waitUntilDataDistributorExitSecurityMode(self)); // Trap DDMode == 2
 			}
 			// It is possible DDMode begins with 2 and passes
@@ -1231,7 +1231,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			self->context->primaryTeamCollection = Reference<DDTeamCollection>();
 			self->context->remoteTeamCollection = Reference<DDTeamCollection>();
 			if (err.code() == error_code_actor_cancelled) {
-				// When cancelled, we cannot clear asyncronously because
+				// When cancelled, we cannot clear asynchronously because
 				// this will result in invalid memory access. This should only
 				// be an issue in simulation.
 				if (!g_network->isSimulated()) {
@@ -1546,7 +1546,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 				coordSnapReqs.push_back(trySendSnapReq(
 				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
 		}
-		// At present, the fault injection workload doesn't repect the KNOB MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE
+		// At present, the fault injection workload doesn't respect the KNOB MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE
 		// Consequently, we ignore it in simulation tests
 		auto const coordFaultTolerance = std::min<int>(
 		    std::max<int>(0, (coordSnapReqs.size() - 1) / 2),
@@ -2054,7 +2054,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				// Note that a client may wait for the state on disk to proceed to "complete"
 				// However, this progress can never happen to a zombie audit
 				// For this case, the client should be able to be timed out
-				// A zombie aduit will be either: (1) resumed by the next DD; (2) removed by client
+				// A zombie audit will be either: (1) resumed by the next DD; (2) removed by client
 			}
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit

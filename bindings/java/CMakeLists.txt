@@ -164,7 +164,7 @@ if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
 endif()
 
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
-# libfdb_java.so is loaded by fdb-java.jar and doesn't need to depened on jvm shared libraries.
+# libfdb_java.so is loaded by fdb-java.jar and doesn't need to depend on jvm shared libraries.
 target_link_libraries(fdb_java PRIVATE fdb_c)
 target_link_libraries(fdb_java PRIVATE fdb_java_native)
 if(APPLE)

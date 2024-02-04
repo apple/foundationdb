@@ -986,7 +986,7 @@ static void printAgentUsage(bool devhelp) {
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
 	printf("  --loggroup LOG_GROUP\n"
@@ -1112,7 +1112,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
 	printf("  --loggroup LOG_GROUP\n"
@@ -1270,7 +1270,7 @@ static void printDBAgentUsage(bool devhelp) {
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
 	printf("  --loggroup LOG_GROUP\n"
@@ -1325,7 +1325,7 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 	printf(TLS_HELP);
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
+	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
 	printf("  --loggroup LOG_GROUP\n"
@@ -2768,7 +2768,7 @@ std::pair<Version, Version> getMaxMinRestorableVersions(const BackupDescription&
 }
 
 // If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
-// selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overriden to the version
+// selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overridden to the version
 // resolved to that timestamp.
 ACTOR Future<Void> queryBackup(const char* name,
                                std::string destinationContainer,

@@ -121,8 +121,8 @@ typedef FileBackupAgent::ERestoreState ERestoreState;
 
 StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	switch (id) {
-	case ERestoreState::UNITIALIZED:
-		return "unitialized"_sr;
+	case ERestoreState::UNINITIALIZED:
+		return "uninitialized"_sr;
 	case ERestoreState::QUEUED:
 		return "queued"_sr;
 	case ERestoreState::STARTING:
@@ -265,7 +265,7 @@ public:
 
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
-			return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNITIALIZED;
+			return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNINITIALIZED;
 		});
 	}
 
@@ -2165,7 +2165,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 					// so store a completion key for the dispatch finish() to set when dispatching the batch is
 					// done.
 					state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
-					// this is a bad hack - but flow doesn't work well with lambda functions and caputring
+					// this is a bad hack - but flow doesn't work well with lambda functions and capturing
 					// state variables...
 					auto cfg = &config;
 					auto tx = &tr;
@@ -4722,7 +4722,7 @@ ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr
 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 	state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 	if (!current.present())
-		return ERestoreState::UNITIALIZED;
+		return ERestoreState::UNINITIALIZED;
 
 	state RestoreConfig restore(current.get().first);
 
@@ -5634,8 +5634,8 @@ public:
 					if (verbose)
 						printf("waitRestore: Tag: %s  State: %s\n",
 						       tagName.toString().c_str(),
-						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
-					return ERestoreState::UNITIALIZED;
+						       FileBackupAgent::restoreStateText(ERestoreState::UNINITIALIZED).toString().c_str());
+					return ERestoreState::UNINITIALIZED;
 				}
 
 				state RestoreConfig restore(current.get().first);

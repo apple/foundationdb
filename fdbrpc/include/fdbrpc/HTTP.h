@@ -144,7 +144,7 @@ struct IRequestHandler {
 	// Actual callback implementation. Fills out the response object based on the request.
 	virtual Future<Void> handleRequest(Reference<IncomingRequest>, Reference<OutgoingResponse>) = 0;
 
-	// If each instance has a mix of global state provided in the type-specific construtor, but then also local state
+	// If each instance has a mix of global state provided in the type-specific constructor, but then also local state
 	// instantiated in init, the default instance passed to registerSimHTTPServer is cloned for each process to copy the
 	// global state, but before init is called. You may optionally clone after init, but the contract is that clone must
 	// not copy or share the non-global state between instances.

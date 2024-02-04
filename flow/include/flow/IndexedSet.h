@@ -608,7 +608,7 @@ int ISRebalance(Node*& root) {
 	// we know the value of balance(X), but not height(X).
 	//
 	// We will assume that balance(F) < 0 (so we will be rotating right).
-	// Trees that rotate to the left will perform analagous operations.
+	// Trees that rotate to the left will perform analogous operations.
 	//
 	//         F
 	//       /   \

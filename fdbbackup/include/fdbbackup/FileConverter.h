@@ -28,7 +28,7 @@
 
 namespace file_converter {
 
-// File format convertion constants
+// File format conversion constants
 enum {
 	OPT_CONTAINER,
 	OPT_FILE_TYPE,

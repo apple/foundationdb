@@ -103,7 +103,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Number of times this client has run its portion of the consistency check
 	int64_t repetitions;
 
-	// Whether to continuously perfom the consistency check
+	// Whether to continuously perform the consistency check
 	bool indefinite;
 
 	// Whether to suspendConsistencyCheck
@@ -558,7 +558,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state std::vector<StorageServerInterface> iter_ss;
 		state int effectiveClientCount = (self->distributed) ? self->clientCount : 1;
 		state int increment = self->distributed ? effectiveClientCount * self->shardSampleFactor : 1;
-		state int shard = 0; // index used for spliting work on different clients
+		state int shard = 0; // index used for splitting work on different clients
 		// move the index to the first responsible cached range
 		while (shard < self->clientId * self->shardSampleFactor && iter != iter_ranges.end()) {
 			if (iter->value().empty()) {
@@ -699,7 +699,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									// Last value mismatch
 									KeyRef valueMismatchKey;
 
-									// Loop indeces
+									// Loop indexes
 									int currentI = 0;
 									int referenceI = 0;
 									while (currentI < current.data.size() || referenceI < reference.data.size()) {

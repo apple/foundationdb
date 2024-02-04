@@ -233,7 +233,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 							manualClientRate = ClientTagThrottleLimits(priorityClientRate.get(),
 							                                           priorityItr->second.limits.expiration);
 						} else {
-							CODE_PROBE(true, "Manual throttle overriden by higher priority");
+							CODE_PROBE(true, "Manual throttle overridden by higher priority");
 						}
 
 						++priorityItr;
@@ -281,7 +281,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 					if (!result.second && result.first->second.tpsRate > adjustedRate) {
 						result.first->second = ClientTagThrottleLimits(adjustedRate, autoItr->second.limits.expiration);
 					} else {
-						CODE_PROBE(true, "Auto throttle overriden by manual throttle");
+						CODE_PROBE(true, "Auto throttle overridden by manual throttle");
 					}
 					clientRates[TransactionPriority::BATCH][tagItr->first] =
 					    ClientTagThrottleLimits(0, autoItr->second.limits.expiration);

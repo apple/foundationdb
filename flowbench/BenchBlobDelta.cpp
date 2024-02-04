@@ -47,7 +47,7 @@ public:
 		maxValueSize = randGen->randomExp(7, 9);
 		// Generate start version
 		version = randGen->randomUInt32();
-		// Generate probabilty of update existing keys
+		// Generate probability of update existing keys
 		updateExistingKeysProb = randGen->random01();
 		// Generate deltas
 		for (auto i : PRE_GEN_TARGET_BYTES) {

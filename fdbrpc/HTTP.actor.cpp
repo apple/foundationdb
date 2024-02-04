@@ -125,7 +125,7 @@ std::string IncomingResponse::toString() const {
 	std::string r = fmt::format("Response Code: {0}\n", code);
 	r += fmt::format("Response ContentLen: {0}\n", data.contentLen);
 	for (auto h : data.headers)
-		r += fmt::format("Reponse Header: {0}: {1}\n", h.first, h.second);
+		r += fmt::format("Response Header: {0}: {1}\n", h.first, h.second);
 	r.append("-- RESPONSE CONTENT--\n");
 	r.append(data.content);
 	r.append("\n--------\n");

@@ -51,7 +51,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 		wait(db->globalConfig->onInitialized());
 		if (tokencmp(tokens[2], "get")) {
 			if (tokens.size() != 3) {
-				fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
+				fprintf(stderr, "ERROR: Additional arguments to `get` are not supported.\n");
 				return false;
 			}
 			std::string sampleRateStr = "default";

@@ -582,14 +582,14 @@ if (WITH_SWIFT)
 
   set(SwiftOptions "${SwiftOptions} -Xcc -DWITH_SWIFT")
 
-  # Supress noisy C++ warnings from Swift.
+  # Suppress noisy C++ warnings from Swift.
   set(SwiftOptions "${SwiftOptions} -Xcc -Wno-deprecated -Xcc -Wno-undefined-var-template")
-  # Supress rapidjson noisy GCC pragma diagnostics.
+  # Suppress rapidjson noisy GCC pragma diagnostics.
   set(SwiftOptions "${SwiftOptions} -Xcc -Wno-unknown-warning-option")
 
   if (FOUNDATIONDB_CROSS_COMPILING)
     # Cross-compilation options.
-    # For some reason we need to specify -sdk explictly to pass config-time
+    # For some reason we need to specify -sdk explicitly to pass config-time
     # cmake checks, even though Swift does tend to pass it by itself for the
     # actual compilation.
     string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} TripleArch)

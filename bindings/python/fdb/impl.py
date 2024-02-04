@@ -223,7 +223,7 @@ make_enum("ConflictRangeType")
 
 
 def transactional(*tr_args, **tr_kwargs):
-    """Decorate a funcation as transactional.
+    """Decorate a function as transactional.
 
     The decorator looks for a named argument (default "tr") and takes
     one of two actions, depending on the type of the parameter passed

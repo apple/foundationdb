@@ -92,7 +92,7 @@ class RangeQueryIntegrationTest {
 				Assertions.assertTrue(kvs.hasNext(), "Did not return a record!");
 				KeyValue n = kvs.next();
 				Assertions.assertArrayEquals(key, n.getKey(), "Did not return a key correctly!");
-				Assertions.assertArrayEquals(value, n.getValue(), "Did not return the corect value!");
+				Assertions.assertArrayEquals(value, n.getValue(), "Did not return the correct value!");
 
 				return null;
 			});

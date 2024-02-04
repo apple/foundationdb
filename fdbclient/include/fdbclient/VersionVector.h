@@ -121,7 +121,7 @@ public:
 		delta.clear();
 
 		if (refVersion == maxVersion) {
-			return; // rerurn an invalid version vector
+			return; // return an invalid version vector
 		}
 
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {

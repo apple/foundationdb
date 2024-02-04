@@ -215,7 +215,7 @@ struct StagingKeyRange {
 	}
 };
 
-// Applier state in each verion batch
+// Applier state in each version batch
 class ApplierVersionBatchState : RoleVersionBatchState {
 public:
 	static const int NOT_INIT = 0;

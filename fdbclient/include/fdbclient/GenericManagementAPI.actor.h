@@ -27,7 +27,7 @@
 
 /* This file defines "management" interfaces that have been templated to support both IClientAPI
 and Native version of databases, transactions, etc., and includes functions for performing cluster
-managment tasks. It isn't exposed to C clients or anywhere outside our code base and doesn't need
+management tasks. It isn't exposed to C clients or anywhere outside our code base and doesn't need
 to be versioned. It doesn't do anything you can't do with the standard API and some knowledge of
 the contents of the system key space.
 */

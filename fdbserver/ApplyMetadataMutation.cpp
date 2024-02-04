@@ -174,7 +174,7 @@ private:
 
 	// Testing Storage Server removal (clearing serverTagKey) needs to read tss server list value to determine it is a
 	// tss + find partner's tag to send the private mutation. Since the removeStorageServer transaction clears both the
-	// storage list and server tag, we have to enforce ordering, proccessing the server tag first, and postpone the
+	// storage list and server tag, we have to enforce ordering, processing the server tag first, and postpone the
 	// server list clear until the end;
 	std::vector<KeyRangeRef> tssServerListToRemove;
 
@@ -1104,7 +1104,7 @@ private:
 				}
 			}
 
-			// Coallesce the entire range
+			// Coalesce the entire range
 			vecBackupKeys->coalesce(allKeys);
 		}
 

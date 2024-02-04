@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Assertions;
  * Consumer would consume the key by checking the existence of the key, if it does not find the key,
  * then the test would fail.
  *
- * This test is to verify the causal consistency of transactions for mutli-threaded client. 
+ * This test is to verify the causal consistency of transactions for multi-threaded client. 
  */
 public class SidebandMultiThreadClientTest {
     public static final MultiClientHelper clientHelper = new MultiClientHelper();

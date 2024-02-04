@@ -22,7 +22,7 @@
 
 int64_t dl_iterate_phdr_calls = 0;
 
-// Disabling the workaround in santizer builds, because dl_iterate_phdr used in the initialization of
+// Disabling the workaround in sanitizer builds, because dl_iterate_phdr used in the initialization of
 // the sanitizer state, so calling any sanitizer-instrumented code in the context of this function
 // causes uninitialized memory access
 #if defined(__linux__) && !defined(USE_SANITIZER)

@@ -97,13 +97,13 @@ force_inline int insertBegin(int rows, int p_idx, int t_idx, int total_p, int to
 	return (int)(round(interval * ((p_idx * total_t) + t_idx)));
 }
 
-/* similar to insertBegin, insertEnd returns the last row numer */
+/* similar to insertBegin, insertEnd returns the last row number */
 force_inline int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t) {
 	double interval = (double)rows / total_p / total_t;
 	return (int)(round(interval * ((p_idx * total_t) + t_idx + 1) - 1));
 }
 
-/* devide a value equally among threads */
+/* divide a value equally among threads */
 int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t);
 
 /* similar to insertBegin/end, computeThreadTps computes
@@ -112,7 +112,7 @@ int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t
 #define computeThreadTps(val, p_idx, t_idx, total_p, total_t) computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
 
 /* similar to computeThreadTps,
- * computeThreadIters computs the number of iterations.
+ * computeThreadIters computes the number of iterations.
  */
 #define computeThreadIters(val, p_idx, t_idx, total_p, total_t)                                                        \
 	computeThreadPortion(val, p_idx, t_idx, total_p, total_t)

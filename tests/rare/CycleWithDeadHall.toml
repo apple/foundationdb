@@ -14,7 +14,7 @@
 # We also need to disable 'generateFearless', since that option will
 # sometimes generate configs with a satellite data center, and we have
 # a policy of not placing tlogs there. It's impossible to place tlogs
-# in a way that satisfies the three_data_hall contstraints.
+# in a way that satisfies the three_data_hall constraints.
 [configuration]
 config = 'three_data_hall'
 datacenters = 3

@@ -161,7 +161,7 @@ public:
 	// A team healthy priority for wiggle a storage server
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	// A team healthy priority when all servers in a team are healthy. When a team changes from any unhealthy states to
-	// healthy, the unfinished relocations will be overriden to healthy priority
+	// healthy, the unfinished relocations will be overridden to healthy priority
 	int PRIORITY_TEAM_HEALTHY;
 	// A team healthy priority when there's undesired servers in the team. (ex. same ip
 	// address as other SS process, or SS is lagging too far ...)
@@ -190,7 +190,7 @@ public:
 	// it are default to be 'anonymous' for compatibility.
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
-	// Data fetching rate is throttled if its priority is STRICTLY LOWER than this value. The rate limite is set as
+	// Data fetching rate is throttled if its priority is STRICTLY LOWER than this value. The rate limit is set as
 	// STORAGE_FETCH_KEYS_RATE_LIMIT.
 	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
 
@@ -357,7 +357,7 @@ public:
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
 
-	// Run storage enginee on a child process on the same machine with storage process
+	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
 	// A delay to avoid race on file resources after seeing lock_file_failure
 	double REBOOT_KV_STORE_DELAY;
@@ -663,7 +663,7 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
-	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The intial delay in a new Cluster Controller just started to refresh
+	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The initial delay in a new Cluster Controller just started to refresh
 	                                           // the info of remote DC, such as remote DC health, and whether we need
 	                                           // to take remote DC health info when making failover decision.
 	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.

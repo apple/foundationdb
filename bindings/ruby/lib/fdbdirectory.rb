@@ -197,7 +197,7 @@ module FDB
 
         if old_path == new_path[0...old_path.length]
           raise ArgumentError, 
-            'The desination directory cannot be a subdirectory of the source directory.'
+            'The destination directory cannot be a subdirectory of the source directory.'
         end
 
         old_node = find(tr, old_path).prefetch_metadata(tr)

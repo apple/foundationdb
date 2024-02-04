@@ -35,7 +35,7 @@
 
 #include <boost/functional/hash.hpp>
 
-// unique key that indentifies interchangeable connections for the same settings and destination
+// unique key that identifies interchangeable connections for the same settings and destination
 // FIXME: can we define std::hash as a struct member of a S3BlobStoreEndpoint?
 struct BlobStoreConnectionPoolKey {
 	std::string host;
@@ -98,7 +98,7 @@ public:
 		LatencySample requestLatency;
 
 		// init not in static codepath, to avoid initialization race issues and so no blob connections means no
-		// unecessary blob stats traces
+		// unnecessary blob stats traces
 		BlobStats()
 		  : id(deterministicRandom()->randomUniqueID()), cc("BlobStoreStats", id.toString()),
 		    requestsSuccessful("RequestsSuccessful", cc), requestsFailed("RequestsFailed", cc),

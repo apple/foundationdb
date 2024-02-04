@@ -189,7 +189,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	                                   Key tag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   double stopDifferentialDelay,
-	                                   Promise<Void> submittted) {
+	                                   Promise<Void> submitted) {
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 
@@ -232,7 +232,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				throw;
 		}
 
-		submittted.send(Void());
+		submitted.send(Void());
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
@@ -769,7 +769,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));
 
-			// Decrement the backup agent requets
+			// Decrement the backup agent requests
 			if (self->agentRequest) {
 				BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests--;
 			}

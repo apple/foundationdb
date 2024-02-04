@@ -320,7 +320,7 @@ protected:
 	}
 
 	// Pointer to the transaction executor interface
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	ITransactionExecutor* const executor;
 
 	// FDB database
@@ -344,21 +344,21 @@ protected:
 	TOpStartFct startFct;
 
 	// Mutex protecting access to shared mutable state
-	// Only the state that is accessible unter IN_PROGRESS state
+	// Only the state that is accessible under IN_PROGRESS state
 	// must be protected by mutex
 	std::mutex mutex;
 
 	// Continuation to be called after completion of the transaction
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	const TOpContFct contAfterDone;
 
 	// Reference to the scheduler
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	// Cannot be accessed in DONE state, workloads can be completed and the scheduler deleted
 	IScheduler* const scheduler;
 
 	// Retry limit
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	const int retryLimit;
 
 	// Transaction execution state
@@ -386,7 +386,7 @@ protected:
 	std::vector<fdb::Error> retriedErrors;
 
 	// blob granule base path
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	const std::string bgBasePath;
 
 	// Indicates if the database error was injected

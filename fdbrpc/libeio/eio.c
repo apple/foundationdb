@@ -1800,7 +1800,7 @@ static void eio__scandir(eio_req* req, etp_worker* self) {
 					if (ent->type == EIO_DT_UNKNOWN) {
 						if (*name == '.') /* leading dots are likely directories, and, in any case, rare */
 							ent->score = 1;
-						else if (!strchr(name, '.')) /* absense of dots indicate likely dirs */
+						else if (!strchr(name, '.')) /* absence of dots indicate likely dirs */
 							ent->score = len <= 2   ? 4 - len
 							             : len <= 4 ? 4
 							             : len <= 7 ? 5

@@ -273,7 +273,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	// if sendFirstRequestIndefinitely is true, then this method would send the first request indefinitly
+	// if sendFirstRequestIndefinitely is true, then this method would send the first request indefinitely
 	// it is in order to test the metric
 	ACTOR Future<Void> submitSmallRequestIndefinitely(Database cx,
 	                                                  int beginId,

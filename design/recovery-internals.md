@@ -138,7 +138,7 @@ However, reading the txnStateStore can be slow because it needs to read from dis
 **Recruiting roles step.**
 There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the CC will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
 
-ServerKnob::CLUSTER_RECOVERY_EVENT_NAME_PREFIX defines the prefix for cluster recovery trace events. Hereafter, refered as 'RecoveryEventPrefix' in this document.
+ServerKnob::CLUSTER_RECOVERY_EVENT_NAME_PREFIX defines the prefix for cluster recovery trace events. Hereafter, referred as 'RecoveryEventPrefix' in this document.
 
 We can use the trace event `<RecoveryEventPrefix>RecoveredConfig`, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase.
 

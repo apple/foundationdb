@@ -528,7 +528,7 @@ public:
 
 	// Disallow any reads at a read version lower than minAcceptableReadVersion.  This way the client does not have to
 	// trust that the read version (possibly set manually by the application) is actually from the correct cluster.
-	// Updated everytime we get a GRV response
+	// Updated every time we get a GRV response
 	Version minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	void validateVersion(Version) const;
 

@@ -62,7 +62,7 @@ const KeyRangeRef keyServersKeyServersKeys("\xff/keyServers/\xff/keyServers/"_sr
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 // These constants are selected to be easily recognized during debugging.
-// Note that the last bit of the follwing constants is 0, indicating that physical shard move is disabled.
+// Note that the last bit of the following constants is 0, indicating that physical shard move is disabled.
 const UID anonymousShardId = UID(0x666666, 0x88888888);
 const uint64_t emptyShardId = 0x2222222;
 

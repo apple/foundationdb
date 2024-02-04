@@ -2224,7 +2224,7 @@ void* numaAllocate(size_t size) {
 		char* p = (char*)thePtr + i*nVAPages/nodes*vaPageSize;
 		char* e = (char*)thePtr + (i+1)*nVAPages/nodes*vaPageSize;
 		//printf("  %p + %lld\n", p, e-p);
-		// SOMEDAY: removed NUMA extensions for compatibity with Windows Server 2003 -- make execution dynamic
+		// SOMEDAY: removed NUMA extensions for compatibility with Windows Server 2003 -- make execution dynamic
 		if (!VirtualAlloc/*ExNuma*/(/*GetCurrentProcess(),*/ p, e-p, MEM_COMMIT|MEM_RESERVE|MEM_LARGE_PAGES, PAGE_READWRITE/*, i*/)) {
 			Error e = platform_error();
 			TraceEvent(e, "VirtualAlloc").GetLastError();
@@ -3372,9 +3372,9 @@ void TmpFile::write(const uint8_t* buff, size_t len) {
 bool TmpFile::destroyFile() {
 	bool deleted = deleteFile(filename);
 	if (deleted) {
-		TraceEvent("TmpFileDestory_Success").detail("Filename", filename);
+		TraceEvent("TmpFileDestroy_Success").detail("Filename", filename);
 	} else {
-		TraceEvent("TmpFileDestory_Failed").detail("Filename", filename);
+		TraceEvent("TmpFileDestroy_Failed").detail("Filename", filename);
 	}
 	return deleted;
 }

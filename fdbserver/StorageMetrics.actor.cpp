@@ -154,7 +154,7 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 }
 
 // Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
-// around branch misses and unnecessary stack allocation which eventually addes up under heavy load.
+// around branch misses and unnecessary stack allocation which eventually adds up under heavy load.
 void StorageServerMetrics::notifyBytesReadPerKSecond(const Key& key, int64_t in) {
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 	int64_t bytesReadPerKSecond =

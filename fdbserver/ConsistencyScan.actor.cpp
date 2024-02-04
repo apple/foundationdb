@@ -329,7 +329,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 					// Last value mismatch
 					KeyRef valueMismatchKey;
 
-					// Loop indeces
+					// Loop indexes
 					int currentI = 0;
 					int referenceI = 0;
 					while (currentI < current.data.size() || referenceI < reference.data.size()) {
@@ -547,7 +547,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 				systemDB->setOptions(tr);
 
 				// Get the config and store the cs trigger version so we can detect updates later.
-				// Get the ConsistencyScanState config andThe ConsistencyScanState trigger will update when any of its
+				// Get the ConsistencyScanState config and the ConsistencyScanState trigger will update when any of its
 				// configuration members change.
 				wait(store(config, cs.config().getD(tr)));
 				wait(store(configVersion, cs.trigger.get(tr)));
@@ -680,7 +680,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 			// reading using the actual amount that we read
 			state int totalReadBytesFromStorageServers = 0;
 
-			// We only want to update initialRoundState with *durable* progess, so if the loop below retries it must
+			// We only want to update initialRoundState with *durable* progress, so if the loop below retries it must
 			// start from the same initial state, so save it here and restore it at the start of the transaction.
 			state ConsistencyScanState::RoundStats savedCurrentRoundState = statsCurrentRound;
 
@@ -930,7 +930,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								// FIXME: increment failed request count if error present
 								ASSERT(failedRequest.get().code() != error_code_operation_cancelled);
 								// don't include replicated bytes this loop in metrics to avoid getting replication
-								// factor wrong, but make sure we stil throttle based on it
+								// factor wrong, but make sure we still throttle based on it
 								totalReadBytesFromStorageServers += 100000;
 								break;
 							}
@@ -1669,7 +1669,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			    .detail("DesiredReplicas", desiredReplicas)
 			    .detail("UsableRegions", configuration.usableRegions)
 			    .detail("SSCount", ssCount);
-			// Record the server reponsible for the problematic shards
+			// Record the server responsible for the problematic shards
 			int k = 0;
 			for (auto& id : sourceStorageServers) {
 				TraceEvent("IncorrectSizeTeamInfo").detail("ServerUID", id).detail("TeamIndex", k++);

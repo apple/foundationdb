@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-// This file delcares common struct and functions shared by restore roles, i.e.,
+// This file declares common struct and functions shared by restore roles, i.e.,
 // RestoreController, RestoreLoader, RestoreApplier
 
 #pragma once

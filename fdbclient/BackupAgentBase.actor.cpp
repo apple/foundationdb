@@ -734,7 +734,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
 
-	// mutations and encrypted mutations (and their relationship) is described in greater detail in the defenition of
+	// mutations and encrypted mutations (and their relationship) is described in greater detail in the definition of
 	// CommitTransactionRef in CommitTransaction.h
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
 	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());

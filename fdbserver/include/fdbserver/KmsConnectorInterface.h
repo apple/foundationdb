@@ -126,7 +126,7 @@ struct KmsConnLookupEKsByKeyIdsRep {
 
 struct KmsConnLookupKeyIdsReqInfo {
 	constexpr static FileIdentifier file_identifier = 3092256;
-	// Encryption at-rest relies on partioning database to define encryption domains, one such possible domain is
+	// Encryption at-rest relies on partitioning database to define encryption domains, one such possible domain is
 	// "Tenants". It is possible that KMS assigned 'baseCipherId' embedded 'encryption domain information', hence, make
 	// the field optional.
 	Optional<EncryptCipherDomainId> domainId;

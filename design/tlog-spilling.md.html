@@ -219,7 +219,7 @@ The rough outline of concrete changes proposed looks like:
 
 Modifying how transaction logs spill data is a change to the on-disk files of
 transaction logs.  The work for enabling safe upgrades and rollbacks of
-persistent state changes to transaction logs was split off into a seperate
+persistent state changes to transaction logs was split off into a separate
 design document: "Forward Compatibility for Transaction Logs".
 
 That document describes a `log_version` configuration setting that controls the
@@ -257,7 +257,7 @@ same process.
 
 Naively, this would create resource issues.  Each instance would think that it
 is allowed its own 1.5GB buffer of in-memory mutations.  Instead, internally to
-the TLog implmentation, the transaction log is split into two parts.  A
+the TLog implementation, the transaction log is split into two parts.  A
 `SharedTLog` is all the data that should be shared across multiple generations.
 A TLog is all the data that is private to one generation.  Most notably, the
 1.5GB mutation buffer and the on-disk files are owned by the `SharedTLog`.  The
@@ -367,7 +367,7 @@ same as `end-start`, intentionally.  For this reason, the API is `(start, end)`
 and not `(start, length)`.
 
 Spilled data, when using spill-by-value, was resistant to bitrot via data being
-checksummed interally within SQLite's B-tree.  Now that reads can be done
+checksummed internally within SQLite's B-tree.  Now that reads can be done
 directly, the responsibility for verifying data integrity falls upon the
 DiskQueue.  `CheckHashes::TRUE` will cause the DiskQueue to use the checksum in
 each DiskQueue page to verify data integrity.  If an externally maintained
@@ -433,11 +433,11 @@ the rest of the information about the database.
 
 The in-memory storage engine writes an equal amount of mutations and snapshot
 data to a queue, an when a full snapshot of the data has been written, deletes
-the preceeding snapshot and begins writing a new one.  When backing an
+the preceding snapshot and begins writing a new one.  When backing an
 in-memory storage engine with the transaction logs, the
 `LogSystemDiskQueueAdapter` implements writing to a queue as committing
 mutations to the transaction logs with a special tag of `txsTag`, and deleting
-the preceeding snapshot as popping the transaction logs for the tag of `txsTag`
+the preceding snapshot as popping the transaction logs for the tag of `txsTag`
 until the version where the last full snapshot began.
 
 This means that unlike every other commit that is tagged and stored on the
@@ -538,7 +538,7 @@ The expected implication of this are:
 2.  Generating a peek response of 150KB could require reading 100MB of data, and allocating buffers to hold that 100MB.
 
 		OOMs were observed in early testing.  Code has been added to specifically
-		limit how much memory can be allocated for serving a signle peek request
+		limit how much memory can be allocated for serving a single peek request
 		and all concurrent peek requests, with knobs to allow tuning this per
 		deployment configuration.
 
@@ -628,7 +628,7 @@ minor impacts on recovery times:
 
 ## Observability
 
-With the new changes, we must ensure that sufficent information has been exposed such that:
+With the new changes, we must ensure that sufficient information has been exposed such that:
 
 1. If something goes wrong in production, we can understand what and why from trace logs.
 2. We can understand if the TLog is performing suboptimally, and if so, which knob we should change and by how much.

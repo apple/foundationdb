@@ -482,7 +482,7 @@ class TestRunner(object):
             if timed_out.is_set():
                 reason = "timed out after %d seconds" % (self.args.timeout,)
             util.get_logger().error(
-                "\n'%s' did not complete succesfully (%s)" % (params[0], reason)
+                "\n'%s' did not complete successfully (%s)" % (params[0], reason)
             )
 
         util.get_logger().info("")

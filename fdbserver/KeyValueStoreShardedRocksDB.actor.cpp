@@ -1165,7 +1165,7 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
-			// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
+			// Calling `cursor->Prev()` is potentially expensive, so short-circuit here just in case.
 			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit) {
 				break;
 			}
@@ -1177,7 +1177,7 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 
 	if (!s.ok()) {
 		logRocksDBError(s, "ReadRange");
-		// The data writen to the arena is not erased, which will leave RangeResult in a dirty state. The RangeResult
+		// The data written to the arena is not erased, which will leave RangeResult in a dirty state. The RangeResult
 		// should never be returned to user.
 		return -1;
 	}
@@ -1380,7 +1380,7 @@ public:
 					break;
 				}
 
-				// Read from the current last key since the shard begining with it hasn't been processed.
+				// Read from the current last key since the shard beginning with it hasn't been processed.
 				if (metadata.size() == 1 && metadata.back().value.toString().empty()) {
 					// Should not happen, just being paranoid.
 					keyRange = KeyRangeRef(keyAfter(metadata.back().key), keyRange.end);
