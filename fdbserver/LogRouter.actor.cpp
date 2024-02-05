@@ -350,7 +350,7 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 				// The LR may become a bottleneck on the system and need to be excluded.
 				noPrimaryPeekLocation = self->primaryPeekLocation.present() ? 0 : ++noPrimaryPeekLocation;
 				if (!(noPrimaryPeekLocation % 4)) {
-					TraceEvent(SevError, "NoPrimaryPeekLocationForLR", self->dbgid);
+					TraceEvent(SevWarnAlways, "NoPrimaryPeekLocationForLR", self->dbgid);
 				}
 			}
 		}
