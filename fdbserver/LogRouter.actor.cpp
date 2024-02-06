@@ -302,6 +302,8 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
                                                                    Version startVersion) {
 	state Reference<ILogSystem::IPeekCursor> result = r;
 	state bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
+	state uint32_t noPrimaryPeekLocation = 0;
+
 	loop {
 		Future<Void> getMoreF = Never();
 		if (result) {
@@ -344,6 +346,12 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 				TraceEvent("LogRouterPeekLocation", self->dbgid)
 				    .detail("LogID", result->getPrimaryPeekLocation())
 				    .trackLatest(self->eventCacheHolder->trackingKey);
+				// If no primary peek location after many tries, flag an error for manual intervention.
+				// The LR may become a bottleneck on the system and need to be excluded.
+				noPrimaryPeekLocation = self->primaryPeekLocation.present() ? 0 : ++noPrimaryPeekLocation;
+				if (!(noPrimaryPeekLocation % 4)) {
+					TraceEvent(SevWarnAlways, "NoPrimaryPeekLocationForLR", self->dbgid);
+				}
 			}
 		}
 	}
