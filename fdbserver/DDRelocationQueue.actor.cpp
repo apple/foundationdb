@@ -2344,8 +2344,8 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 			rebalancePollingInterval =
 			    std::max(rebalancePollingInterval / 2, SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL);
 
-			state TraceEvent traceEvent(mcMove ? "MountainChopperSample" : "ValleyFillerSample", self->distributorId)
-			    .suppressFor(5.0);
+			state TraceEvent traceEvent(mcMove ? "MountainChopperSample" : "ValleyFillerSample", self->distributorId);
+			traceEvent.suppressFor(5.0);
 			GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 			                                       PreferLowerDiskUtil::False,
 			                                       TeamMustHaveShards::True,
