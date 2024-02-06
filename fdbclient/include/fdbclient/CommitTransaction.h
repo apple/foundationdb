@@ -130,6 +130,9 @@ struct MutationRef {
 
 	uint8_t typeWithChecksum() const { return this->type | CHECKSUM_FLAG_MASK; }
 	void removeChecksum() {
+		if (!withChecksum()) {
+			return;
+		}
 		ASSERT(param2.size() >= 4);
 		type &= ~CHECKSUM_FLAG_MASK;
 		param2 = param2.substr(0, param2.size() - 4);
