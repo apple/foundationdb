@@ -157,6 +157,16 @@ struct MutationRef {
 		return c;
 	}
 
+	bool validateChecksum() const {
+		if (!checksum.present()) {
+			return true;
+		}
+		uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
+		crc32c_append(c, param2.begin(), param2.size());
+
+		return c == checksum.get();
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
