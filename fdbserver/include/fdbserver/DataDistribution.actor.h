@@ -455,7 +455,7 @@ struct ServerTeamInfo {
 	bool primary;
 
 	ServerTeamInfo() {}
-	ServerTeamInfo(UID serverId, std::vector<ShardsAffectedByTeamFailure::Team> teams, bool primary)
+	ServerTeamInfo(UID serverId, const std::vector<ShardsAffectedByTeamFailure::Team>& teams, bool primary)
 	  : serverId(serverId), teams(teams), primary(primary) {}
 };
 

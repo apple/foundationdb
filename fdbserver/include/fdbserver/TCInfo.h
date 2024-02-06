@@ -57,9 +57,11 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	ErrorOr<GetStorageMetricsReply> metrics;
 	Optional<HealthMetrics::StorageStats> storageStats;
 	Optional<double> storageQueueTooLongStartTime; // When a storage queue becomes long
-	Optional<double> lastTimeNotifyLongStorageQueue; // Last time when we teamTracker DD that the queue is long
-	                                                 // We do not want repeatedly notify teamTracker in present of long
-	                                                 // queue lastTimeNotifyLongStorageQueue is used to support this
+
+	// Last time when server notified teamTracker that the queue is long
+	// We do not want repeatedly notify teamTracker in present of long
+	// queue lastTimeNotifyLongStorageQueue is used to support this
+	Optional<double> lastTimeNotifyLongStorageQueue;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
 	void setStorageStats(HealthMetrics::StorageStats stats) { storageStats = stats; }

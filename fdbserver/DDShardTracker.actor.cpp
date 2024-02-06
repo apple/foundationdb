@@ -1538,7 +1538,9 @@ struct DataDistributionTrackerImpl {
 									int64_t shardWriteTraffic =
 									    it->value().stats->get().get().metrics.bytesWrittenPerKSecond;
 									if (shardWriteTraffic > maxShardWriteTraffic &&
-									    shardWriteTraffic > SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN) {
+									    (SERVER_KNOBS->DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD ||
+									     shardWriteTraffic >
+									         SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN)) {
 										shardToMove = it->range();
 										maxShardWriteTraffic = shardWriteTraffic;
 									}

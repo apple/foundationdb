@@ -93,7 +93,7 @@ public:
 			}
 		}
 
-		// Detect any storage with a too long storage queue and notify team tracker
+		// Detect any storage server with a too long storage queue and notify team tracker
 		// with a minimal interval
 		if (SERVER_KNOBS->ENABLE_REBALANCE_STORAGE_QUEUE) {
 			int64_t queueSize = server->getStorageQueueSize();
