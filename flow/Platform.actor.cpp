@@ -3010,6 +3010,24 @@ int64_t fileSize(std::string const& filename) {
 #endif
 }
 
+time_t fileModifiedTime(const std::string& filename) {
+#ifdef _WIN32
+	struct _stati64 file_status;
+	if (_stati64(filename.c_str(), &file_status) != 0)
+		return 0;
+	else
+		return file_status.st_mtime;
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+	struct stat file_status;
+	if (stat(filename.c_str(), &file_status) != 0)
+		return 0;
+	else
+		return file_status.st_mtime;
+#else
+#error Port me!
+#endif
+}
+
 size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
 	std::fstream ifs(filename, std::fstream::in | std::fstream::binary);
 	if (!ifs.good()) {
@@ -3221,10 +3239,10 @@ void outOfMemory() {
 	    .detail("BackTraces", traceCounts.size());
 
 	for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
-		char buf[1024];
 		std::vector<void*>* frames = i->second.backTrace;
 		std::string backTraceStr;
 #if defined(_WIN32)
+		char buf[1024];
 		for (int j = 1; j < frames->size(); j++) {
 			_snprintf(buf, 1024, "%p ", frames->at(j));
 			backTraceStr += buf;

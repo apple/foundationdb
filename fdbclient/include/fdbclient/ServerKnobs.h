@@ -119,6 +119,7 @@ public:
 	double BEST_TEAM_STUCK_DELAY;
 	double DEST_OVERLOADED_DELAY;
 	double BG_REBALANCE_POLLING_INTERVAL;
+	double BG_REBALANCE_MAX_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
@@ -486,7 +487,7 @@ public:
 	bool ROCKSDB_ATOMIC_FLUSH;
 	bool ROCKSDB_IMPORT_MOVE_FILES;
 	bool ROCKSDB_CHECKPOINT_REPLAY_MARKER;
-	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
+	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE; // Conduct block-level checksum when rocksdb injecting data
 	bool ROCKSDB_ENABLE_CHECKPOINT_VALIDATION;
 	bool ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT;
 	int ROCKSDB_COMPACTION_PRI;
@@ -504,6 +505,11 @@ public:
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
 	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
+	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
+	                                // verify_file_checksum when ingesting (for physical shard move).
+	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
+	                                // checksum). The block-level checksum does not cover the corruption such as wrong
+	                                // sst file or file move/copy.
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
 	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
@@ -519,6 +525,8 @@ public:
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
+	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
+	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -766,6 +774,8 @@ public:
 	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 	double STORAGE_FETCH_KEYS_DELAY;
 	bool STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET;
+	double STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY;
+	double STORAGE_ROCKSDB_LOG_TTL;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;

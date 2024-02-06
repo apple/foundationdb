@@ -13533,6 +13533,14 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
+			when(GetHotShardsRequest req = waitNext(ssi.getHotShards.getFuture())) {
+				TraceEvent(SevError, "GetHotShardsHasNotImplemented", ssi.id());
+				req.reply.sendError(not_implemented());
+			}
+			when(GetStorageCheckSumRequest req = waitNext(ssi.getCheckSum.getFuture())) {
+				TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", ssi.id());
+				req.reply.sendError(not_implemented());
+			}
 			when(wait(self->actors.getResult())) {}
 		}
 	}
@@ -13803,6 +13811,35 @@ ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
 	return Void();
 }
 
+ACTOR Future<Void> rocksdbLogCleaner(std::string folder) {
+	std::replace(folder.begin(), folder.end(), '/', '_');
+	if (!folder.empty() && folder[0] == '_') {
+		folder.erase(0, 1);
+	}
+	try {
+		loop {
+			wait(delayJittered(SERVER_KNOBS->STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY));
+			TraceEvent("CleanUpRocksDBLogs").detail("LogPrefix", folder);
+			auto logFiles = platform::listFiles(SERVER_KNOBS->LOG_DIRECTORY);
+			for (const auto& f : logFiles) {
+				if (f.find(folder) != std::string::npos) {
+					auto filePath = joinPath(SERVER_KNOBS->LOG_DIRECTORY, f);
+					auto t = fileModifiedTime(filePath);
+					if (now() - t > SERVER_KNOBS->STORAGE_ROCKSDB_LOG_TTL) {
+						deleteFile(filePath);
+						TraceEvent("DeleteRocksDBLog").detail("FileName", f);
+					}
+				}
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "RocksDBLogCleanerError").errorUnsuppressed(e);
+		}
+	}
+	return Void();
+}
+
 // for creating a new storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -13829,6 +13866,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
+	self.actors.add(rocksdbLogCleaner(folder));
 
 	try {
 		wait(self.storage.init());
@@ -13953,6 +13991,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		platform::createDirectory(self.fetchedCheckpointFolder);
 	}
 
+	self.actors.add(rocksdbLogCleaner(folder));
 	try {
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();

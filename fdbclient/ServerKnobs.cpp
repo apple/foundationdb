@@ -132,7 +132,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( HEALTH_POLL_TIME,                                      1.0 );
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
 	init( DEST_OVERLOADED_DELAY,                                 0.2 );
-	init( BG_REBALANCE_POLLING_INTERVAL,                        10.0 );
+	init( BG_REBALANCE_POLLING_INTERVAL,                         1.0 );
+	init( BG_REBALANCE_MAX_POLLING_INTERVAL,                    10.0 );
 	init( BG_REBALANCE_SWITCH_CHECK_INTERVAL,                    5.0 ); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
 	init( DD_QUEUE_COUNTER_REFRESH_INTERVAL,                    60.0 );
@@ -544,20 +545,21 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); 
 	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                         0 );
 	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                  100 );
-	init (ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
-	init (ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
-	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
-	init (ROCKSDB_MAX_LOG_FILE_SIZE,                         10485760 ); // 10MB.
-	init (ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
-	init (ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                     true ); 
-	init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                  true );
-	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
-	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
-	init (ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
-	init (SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
-	init (SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
-	init (SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
-	init (SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                    -1 );
+	init( ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
+	init( ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
+	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
+	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
+	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
+	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                      true ); 
+	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                   true );
+	init( ROCKSDB_FULLFILE_CHECKSUM,                             false ); if ( randomize && BUGGIFY ) ROCKSDB_FULLFILE_CHECKSUM = true;
+	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
+	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
+	init( ROCKSDB_MAX_MANIFEST_FILE_SIZE,                    100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
+	init( SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                    8 << 20 ); // 8MB
+	init( SHARDED_ROCKSDB_COMPACTION_PERIOD,                   isSimulated? 3600 : 2592000 ); // 30d
+	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,                  3600 ); // 1h
+	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                    -1 );
 	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE,                   16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE,              1 << 30 ); // 1GB
 	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET,                      64 << 20); // 64MB
@@ -566,6 +568,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                1 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,             true );
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                        4 );
+	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,                   isSimulated? 16 * 1024 : 134217728 /* 128MB */);
+	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
+	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,     33554432 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -802,6 +807,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,                     0.0); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
 	init (STORAGE_FETCH_KEYS_DELAY,	                             0.0 ); if ( randomize && BUGGIFY ) { STORAGE_FETCH_KEYS_DELAY = deterministicRandom()->random01() * 5.0; }
 	init (STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET,                false ); if (isSimulated) STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET = deterministicRandom()->coinflip();
+	init (STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY,               3600 * 2 ); if (isSimulated) STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY = 20.0;
+	init (STORAGE_ROCKSDB_LOG_TTL,                    3600 * 24 * 15 ); if (isSimulated) STORAGE_ROCKSDB_LOG_TTL = 3600.0;
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
 	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
@@ -894,7 +901,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
 	init( READ_SAMPLING_ENABLED,                                false ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
-	init( DD_PREFER_LOW_READ_UTIL_TEAM,                         false );
+	init( DD_PREFER_LOW_READ_UTIL_TEAM,                          true );
 	init( DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,                   120);
 	init( MOVING_WINDOW_SAMPLE_SIZE,                         10000000); // 10MB
 

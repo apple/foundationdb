@@ -536,7 +536,7 @@ protected:
 
 	// Read storage metadata from database, get the server's storeType, and do necessary updates. Error is caught by the
 	// caller
-	Future<Void> updateStorageMetadata(TCServerInfo* server, bool isTss);
+	Future<Void> updateStorageMetadata(TCServerInfo* server);
 
 	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
 

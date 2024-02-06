@@ -513,6 +513,7 @@ struct RolesInfo {
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
+		obj["tss"] = iface.isTss();
 		if (iface.metadata.present()) {
 			obj["storage_metadata"] = iface.metadata.get().toJSON();
 			// printf("%s\n", metadataObj.getJson().c_str());
