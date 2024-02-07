@@ -244,7 +244,7 @@ public:
 	// When the sampled read operations changes more than this threshold, the
 	// shard metrics will update immediately
 	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
-	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // experimental
+	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // Experimental. Enable to enforce shard split when write traffic is high
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
@@ -327,9 +327,13 @@ public:
 	                                               // storage bytes used by a tenant group
 	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
 	                                                  // distributor to fetch the list of tenants over storage quota
-	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // experimental!
-	int64_t DD_TARGET_STORAGE_QUEUE_SIZE;
-	bool ENABLE_REBALANCE_STORAGE_QUEUE; // experimental!
+	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // Experimental! Enable to avoid moving data to a team which has a
+	                                                // long storage queue
+	double DD_LONG_STORAGE_QUEUE_MAJORITY_PERCENTILE; // p% amount SSes which have longer queues
+	double DD_MIN_TEAM_PERCENTAGE_TO_SELECT_LONG_QUEUE_THRESHOLD; // At least this portion of SSes should be involved
+	                                                              // when deciding the long queue threshold
+	bool ENABLE_REBALANCE_STORAGE_QUEUE; // Experimental! Enable to trigger data moves to rebalance storage queues when
+	                                     // a queue is significantly longer than others
 	int64_t REBALANCE_STORAGE_QUEUE_LONG_BYTES; // Lower bound of length indicating the storage queue is too long
 	int64_t REBALANCE_STORAGE_QUEUE_SHORT_BYTES; // Upper bound of length indicating the storage queue is back to short
 	double DD_LONG_STORAGE_QUEUE_TIMESPAN;
