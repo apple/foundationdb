@@ -5,7 +5,7 @@
     must be installed. If you upgrade a language binding to a new version, you may need to upgrade the FoundationDB client binaries as well. See :ref:`installing-client-binaries`.
 
 .. |project-dependency| replace::
-    If you have a project with automatic dependency installation and have expressed a dependency on foundationdb, it may automatically install the lastest version of the language binding when you deploy your project to a new machine. If you have not also upgraded the Foundation client binary, an unplanned upgrade of the language binding may encounter an incompatibility. You should therefore configure any project dependency on foundationdb in coordination with your overall upgrade strategy.
+    If you have a project with automatic dependency installation and have expressed a dependency on foundationdb, it may automatically install the latest version of the language binding when you deploy your project to a new machine. If you have not also upgraded the Foundation client binary, an unplanned upgrade of the language binding may encounter an incompatibility. You should therefore configure any project dependency on foundationdb in coordination with your overall upgrade strategy.
 
 .. |client-installed-bindings| replace::
     The language binding requires FoundationDB client binaries whose version is at least as recent. The binding installed with FoundationDB installation will automatically satisfy this requirement.
@@ -381,7 +381,7 @@
 
 .. |option-read-your-writes-disable-blurb| replace::
 
-    When this option is invoked, a read performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.
+    When this option is invoked, a read performed by a transaction will not see any prior mutations that occurred in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.
 
 .. |option-read-your-writes-disable-note| replace::
 
@@ -460,7 +460,7 @@
 
 .. |future-cancel-blurb| replace::
 
-    Cancels |future-type-string| and its associated asynchronous operation. If called before the future is ready, attempts to access its value will |error-raise-type| an :ref:`operation_cancelled <developer-guide-error-codes>` |error-type|. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have succesfully completed and be unable to be cancelled.
+    Cancels |future-type-string| and its associated asynchronous operation. If called before the future is ready, attempts to access its value will |error-raise-type| an :ref:`operation_cancelled <developer-guide-error-codes>` |error-type|. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have successfully completed and be unable to be cancelled.
 
 .. |fdb-open-blurb1| replace::
     Connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
@@ -509,7 +509,7 @@
     Returns the tuple encoded by the given key, with the subspace's prefix tuple and raw prefix removed.
 
 .. |subspace-range-blurb| replace::
-    Returns a range representing all keys in the subspace that encode tuples strictly starting with the specifed tuple.
+    Returns a range representing all keys in the subspace that encode tuples strictly starting with the specified tuple.
 
 .. |subspace-contains-blurb| replace::
     Returns true if ``key`` starts with |key-meth|, indicating that the subspace logically contains ``key``.

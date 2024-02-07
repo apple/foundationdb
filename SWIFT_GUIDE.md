@@ -176,7 +176,7 @@ knobs.MAX_VERSION_RATE_MODIFIER
 
 #### Bridging reference types
 
-Some C++ types have reference counting and referencial semantics, i.e. they're passed around using raw or smart pointers that point to an instance. That instance typically has its own reference count, that keeps track of when the instance should be released. Such types can be bridged over to Swift reference types, and Swift's automatic reference counting (ARC) will automatically retain and release them using their C++ reference counting implementation.
+Some C++ types have reference counting and referential semantics, i.e. they're passed around using raw or smart pointers that point to an instance. That instance typically has its own reference count, that keeps track of when the instance should be released. Such types can be bridged over to Swift reference types, and Swift's automatic reference counting (ARC) will automatically retain and release them using their C++ reference counting implementation.
 
 You can use the `SWIFT_CXX_REF` annotation for that. Right now `SWIFT_CXX_REF` does not work (due to https://github.com/apple/swift/issues/61620), so you have to make a custom annotation for each class you want to bridge with reference semantics to Swift. For example, the `MasterData` class receives the following annotation:
 

@@ -204,7 +204,7 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
-	// purge blob granules api. purgeBlobGranules is asynchronus, calling waitPurgeGranulesComplete after guarantees
+	// purge blob granules api. purgeBlobGranules is asynchronous, calling waitPurgeGranulesComplete after guarantees
 	// completion.
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;

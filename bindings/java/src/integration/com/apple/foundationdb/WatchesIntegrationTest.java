@@ -273,7 +273,7 @@ class WatchesIntegrationTest {
   }
 
   private void ensureConnected(Database db) throws Exception {
-    // Run one transaction succesfully to ensure we established connection
+    // Run one transaction successfully to ensure we established connection
     db.run(tr -> {
       tr.getReadVersion().join();
       return null;

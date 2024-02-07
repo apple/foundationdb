@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Assertions;
 
 /**
  * Setup: Generating a cycle 0 -> 1 -> 2 -> 3 -> 0, its length is 4
- * Process: randomly choose an element, reverse 2nd and 4rd element, considering the chosen one as the 1st element.
+ * Process: randomly choose an element, reverse 2nd and 4th element, considering the chosen one as the 1st element.
  * Check: verify no element is lost or added, and they are still a cycle.
  * 
  * This test is to verify the atomicity of transactions. 

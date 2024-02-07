@@ -142,7 +142,7 @@ public:
 	}
 
 	// Histogram buckets samples into one of the same sized buckets
-	// This is used when the distance b/t upperBound and lowerBound are relativly small
+	// This is used when the distance b/t upperBound and lowerBound are relatively small
 	inline void sampleRecordCounter(uint32_t sample) {
 		if (sample > upperBound) {
 			sample = upperBound;

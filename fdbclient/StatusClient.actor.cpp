@@ -166,7 +166,7 @@ void JSONDoc::cleanOps(json_spirit::mObject& obj) {
 					if (version == 0 || version > JSONDoc::expires_reference_version)
 						kv->second = o.at(op);
 					else {
-						// Thing is expired so competely remove its key from the enclosing Object
+						// Thing is expired so completely remove its key from the enclosing Object
 						auto tmp = kv;
 						++kv;
 						obj.erase(tmp);

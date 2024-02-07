@@ -1080,7 +1080,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		return brokenPromiseToReady(nextIter->value().stats->onChange());
 	}
 
-	// restarting shard tracker will derefenced values in the shard map, so make a copy
+	// restarting shard tracker will dereference values in the shard map, so make a copy
 	KeyRange mergeRange = merged;
 
 	// OldKeys: Shards in the key range are merged as one shard defined by NewKeys;
@@ -1119,7 +1119,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	Future<Void> onChange = shardSize->onChange() || yieldedFuture(self->maxShardSize->onChange());
 
 	// There are the bounds inside of which we are happy with the shard size.
-	// getShardSizeBounds() will allways have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
+	// getShardSizeBounds() will always have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
 	//  so will will never attempt to merge that shard with the one previous.
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
@@ -1231,7 +1231,7 @@ void restartShardTrackers(DataDistributionTracker* self,
 	auto ranges = self->shards->getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
-			// When starting, key space will be full of "dummy" default contructed entries.
+			// When starting, key space will be full of "dummy" default constructed entries.
 			// This should happen when called from trackInitialShards()
 			ASSERT(!self->readyToStart.isSet());
 			continue;
@@ -1718,7 +1718,7 @@ void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange
 	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
 	std::set<uint64_t> physicalShardIDSet;
 
-	// If there are any existing physical shards own `keyRange`, remove the overlaping ranges from existing physical
+	// If there are any existing physical shards own `keyRange`, remove the overlapping ranges from existing physical
 	// shards.
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		uint64_t shardID = it->value();

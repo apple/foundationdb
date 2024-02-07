@@ -74,7 +74,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// In particular, the test aims to test special keys' functions on monitoring and managing the cluster.
 		// It expects the FDB cluster is healthy and not doing unexpected configuration changes.
 		// All changes should come from special keys' operations' outcome.
-		// Consequently, we disable all failure injection workloads in backgroud for this test
+		// Consequently, we disable all failure injection workloads in background for this test
 		out.insert("all");
 	}
 
@@ -308,7 +308,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
 		auto limit = GetRangeLimits(rowLimits, byteLimits);
-		// minRows is always initilized to 1
+		// minRows is always initialized to 1
 		if (limit.rows == 0)
 			limit.minRows = 0;
 		return limit;
@@ -914,7 +914,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString csNew(res.get().toString());
-					// verify the cluster decription
+					// verify the cluster description
 					ASSERT(!changeCoordinatorsSucceeded ||
 					       new_cluster_description == csNew.clusterKeyName().toString());
 					ASSERT(!changeCoordinatorsSucceeded ||

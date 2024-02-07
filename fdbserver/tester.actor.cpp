@@ -2153,7 +2153,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
 
 		// Randomly inject custom shard configuration
-		// TOOO:  Move this to a workload representing non-failure behaviors which can be randomly added to any test
+		// TODO:  Move this to a workload representing non-failure behaviors which can be randomly added to any test
 		// run.
 		if (deterministicRandom()->random01() < 0.25) {
 			wait(customShardConfigWorkload(cx));

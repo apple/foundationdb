@@ -52,7 +52,7 @@ struct BlobWorkerStats {
 	int64_t numRangesAssigned;
 	int64_t mutationBytesBuffered;
 	int activeReadRequests;
-	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
+	// TODO: add gauge for granules blocking on old snapshots, once this gauge is fixed
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
 	Version cfVersionLag;

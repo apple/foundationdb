@@ -1024,7 +1024,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			wait(self->pulledVersion.whenAtLeast(currentVersion));
 			pullFinished = Future<Void>(); // cancels pullAsyncData()
 			self->pulling = false;
-			TraceEvent("BackupWorkerPaused", self->myId).detail("Reson", "NoBackup");
+			TraceEvent("BackupWorkerPaused", self->myId).detail("Reason", "NoBackup");
 		} else {
 			// Backup key is not present, enter this NOOP POP mode.
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();

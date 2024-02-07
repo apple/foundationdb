@@ -594,7 +594,7 @@ struct LineageProperties : LineagePropertiesBase {
 	// this has to be implemented by subclasses
 	// but can't be made virtual.
 	// A user should implement this for any type
-	// within the properies class.
+	// within the properties class.
 	template <class Value>
 	bool isSet(Value Derived::*member) const {
 		return true;

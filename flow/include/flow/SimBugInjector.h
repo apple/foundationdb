@@ -54,7 +54,7 @@ public:
 	virtual std::string name() const;
 	/**
 	 * Should be called every time this bug is hit. This method can't be overridden. However, it will call `onHit` which
-	 * can be overriden by a child.
+	 * can be overridden by a child.
 	 */
 	void hit();
 	/**

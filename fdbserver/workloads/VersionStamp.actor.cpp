@@ -159,7 +159,7 @@ struct VersionStampWorkload : TestWorkload {
 			cx = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		}
 		state ReadYourWritesTransaction tr(cx);
-		// We specifically wish to grab the smalles read version that we can get and maintain it, to
+		// We specifically wish to grab the smallest read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
 		state Version readVersion;
 		loop {

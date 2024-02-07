@@ -274,7 +274,7 @@ ACTOR Future<Void> waitForVersion(LogRouterData* self, Version ver) {
 		return Void();
 	}
 	if (!self->foundEpochEnd) {
-		// Similar to proxy that does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions oustanding;
+		// Similar to proxy that does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions outstanding;
 		// Log router does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions outstanding because
 		// remote SS cannot roll back to more than MAX_READ_TRANSACTION_LIFE_VERSIONS ago.
 		wait(self->minPopped.whenAtLeast(

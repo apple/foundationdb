@@ -328,7 +328,7 @@ static inline bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, KeyR
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
 		minVersion = std::min(minVersion, r->value());
 	}
-	ASSERT(minVersion != MAX_VERSION); // pRangeVersions is initialized as entired keyspace, ranges cannot be empty
+	ASSERT(minVersion != MAX_VERSION); // pRangeVersions is initialized as entire keyspace, ranges cannot be empty
 	return minVersion >= v;
 }
 
@@ -1314,7 +1314,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	int rangeStart = 1;
 	int rangeEnd = blockData.size() - 1; // The rangeStart and rangeEnd is [,)
 
-	// Slide start from begining, stop if something in range is found
+	// Slide start from beginning, stop if something in range is found
 	// Move rangeStart and rangeEnd until they is within restoreRange
 	while (rangeStart < rangeEnd && !asset.range.contains(blockData[rangeStart].key)) {
 		++rangeStart;

@@ -301,8 +301,8 @@ public:
 	// If initialVersion is not present it will be initialized internally to the first read version successfully
 	// obtained from the db.
 	//
-	// initialVersion can be thought of as a "last known version" but it could also be used to indiciate some future
-	// version after which you want to be notifified if the trigger's value changes.
+	// initialVersion can be thought of as a "last known version" but it could also be used to indicate some future
+	// version after which you want to be notified if the trigger's value changes.
 	//
 	// If watching can be set, the initialized value of initialVersion will be sent to it once known.
 	template <class DB>

@@ -25,7 +25,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 
 /**
  * A singleton that manages a pool of {@link DirectByteBuffer}, that will be
- * shared by the {@link DirectBufferIterator} instances. It is responsibilty of
+ * shared by the {@link DirectBufferIterator} instances. It is responsibility of
  * user to return the borrowed buffers.
  */
 class DirectBufferPool {

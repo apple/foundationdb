@@ -572,7 +572,7 @@ TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	ASSERT(TSS_doCompare(GetKeyReply(KeySelectorRef(StringRef(a, s_a), true, 0), false),
 	                     GetKeyReply(KeySelectorRef(StringRef(a, s_a), false, 1), false)));
 
-	// explictly test checksum function
+	// explicitly test checksum function
 	std::string s12 = "ABCDEFGHIJKL";
 	std::string s13 = "ABCDEFGHIJKLO";
 	std::string checksumStart13 = "(13)";

@@ -101,7 +101,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			ASSERT(self->getRangeResultInOrder(result));
 			tx->reset();
 		}
-		// "exclude" error message shema check
+		// "exclude" error message schema check
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);

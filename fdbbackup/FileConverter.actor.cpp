@@ -43,7 +43,7 @@ void printConvertUsage() {
 	          << "                  Begin version.\n"
 	          << "  -e, --end END   End version.\n"
 	          << "  --log           Enables trace file logging for the CLI session.\n"
-	          << "  --logdir PATH   Specifes the output directory for trace files. If\n"
+	          << "  --logdir PATH   Specifies the output directory for trace files. If\n"
 	          << "                  unspecified, defaults to the current directory. Has\n"
 	          << "                  no effect unless --log is specified.\n"
 	          << "  --loggroup LOG_GROUP\n"
@@ -430,7 +430,7 @@ struct LogFileWriter {
 
 	Future<Void> writeKV(Key k, Value v) { return writeKV_impl(this, k, v); }
 
-	// Adds a new mutation to an interal buffer and writes out when encountering
+	// Adds a new mutation to an internal buffer and writes out when encountering
 	// a new commitVersion or exceeding the block size.
 	ACTOR static Future<Void> addMutation(LogFileWriter* self, Version commitVersion, MutationListRef mutations) {
 		state Standalone<StringRef> value = BinaryWriter::toValue(mutations, IncludeVersion());

@@ -1207,7 +1207,7 @@ void usage() {
 	       "Duration in milliseconds after which a transaction times out in run mode. Set as transaction option");
 }
 
-/* parse benchmark paramters */
+/* parse benchmark parameters */
 int parseArguments(int argc, char* argv[], Arguments& args) {
 	int rc;
 	int c;
@@ -2519,7 +2519,7 @@ int main(int argc, char* argv[]) {
 
 	// set --seconds in case no ending condition has been set
 	if (args.seconds == 0 && args.iteration == 0) {
-		args.seconds = 30; // default value accodring to documentation
+		args.seconds = 30; // default value according to documentation
 	}
 
 	// if no cluster file is passed, fall back to default parameters

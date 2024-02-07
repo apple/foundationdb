@@ -405,7 +405,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			// Clear persistent progress data of the new audit if complete
 			if (auditPhase == AuditPhase::Complete) {
 				clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
-			} // We keep the progess metadata of Failed and Error audits for further investigations
+			} // We keep the progress metadata of Failed and Error audits for further investigations
 			// Check existing state
 			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!res_.present()) { // has been cancelled
@@ -494,7 +494,7 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			}
 			// It is possible ddAuditState is complete while some progress is about to persist
 			// Since doAuditOnStorageServer may repeatedly issue multiple requests (see getReplyUnlessFailedFor)
-			// For this case, no need to proceed. Sliently exit
+			// For this case, no need to proceed. Silently exit
 			if (ddAuditState.getPhase() == AuditPhase::Complete) {
 				break;
 			}
@@ -585,7 +585,7 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			}
 			// It is possible ddAuditState is complete while some progress is about to persist
 			// Since doAuditOnStorageServer may repeatedly issue multiple requests (see getReplyUnlessFailedFor)
-			// For this case, no need to proceed. Sliently exit
+			// For this case, no need to proceed. Silently exit
 			if (ddAuditState.getPhase() == AuditPhase::Complete) {
 				break;
 			}
@@ -1005,7 +1005,7 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 // from the perspective of ServerKeys system key space
 // Input: (1) SS id; (2) transaction tr; (3) within range
 // Return AuditGetServerKeysRes, including: (1) complete range by a single read range;
-// (2) verison of the read; (3) ranges of the input SS
+// (2) version of the read; (3) ranges of the input SS
 ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range) {
 	state RangeResult readResult;
 	state AuditGetServerKeysRes res;
@@ -1028,7 +1028,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 		    .detail("Range", range)
 		    .detail("Prefix", serverKeysPrefixFor(serverID))
 		    .detail("ResultSize", readResult.size())
-		    .detail("AduitServerID", serverID);
+		    .detail("AuditServerID", serverID);
 
 		std::vector<KeyRange> ownRanges;
 		for (int i = 0; i < readResult.size() - 1; ++i) {
@@ -1036,7 +1036,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 			    .detail("ValueIsServerKeysFalse", readResult[i].value == serverKeysFalse)
 			    .detail("ServerHasKey", serverHasKey(readResult[i].value))
 			    .detail("Range", KeyRangeRef(readResult[i].key, readResult[i + 1].key))
-			    .detail("AduitServerID", serverID);
+			    .detail("AuditServerID", serverID);
 			if (serverHasKey(readResult[i].value)) {
 				KeyRange shardRange;
 				ownRanges.push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
@@ -1044,7 +1044,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 		}
 		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		TraceEvent(SevVerbose, "AuditUtilGetThisServerKeysFromServerKeysEnd", serverID)
-		    .detail("AduitServerID", serverID)
+		    .detail("AuditServerID", serverID)
 		    .detail("Range", range)
 		    .detail("Prefix", serverKeysPrefixFor(serverID))
 		    .detail("ReadAtVersion", readAtVersion)
@@ -1055,7 +1055,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "AuditUtilGetThisServerKeysError", serverID)
 		    .errorUnsuppressed(e)
-		    .detail("AduitServerID", serverID);
+		    .detail("AuditServerID", serverID);
 		throw e;
 	}
 
@@ -1065,7 +1065,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 // Given an input server, get ranges within the input range via the input transaction
 // from the perspective of KeyServers system key space
 // Input: (1) Audit Server ID (for logging); (2) transaction tr; (3) within range
-// Return AuditGetKeyServersRes, including : (1) complete range by a single read range; (2) verison of the read;
+// Return AuditGetKeyServersRes, including : (1) complete range by a single read range; (2) version of the read;
 // (3) map between SSes and their ranges --- in KeyServers space, a range corresponds to multiple SSes
 ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range) {
 	state AuditGetKeyServersRes res;
@@ -1101,7 +1101,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 		TraceEvent(SevVerbose, "AuditUtilGetThisServerKeysFromKeyServersReadDone", auditServerId)
 		    .detail("Range", range)
 		    .detail("ResultSize", readResult.size())
-		    .detail("AduitServerID", auditServerId);
+		    .detail("AuditServerID", auditServerId);
 
 		// produce result
 		std::unordered_map<UID, std::vector<KeyRange>> serverOwnRanges;

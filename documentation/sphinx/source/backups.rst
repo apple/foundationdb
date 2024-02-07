@@ -106,7 +106,7 @@ Blob store Backup URLs can have optional parameters at the end which set various
 
 Here is a complete list of valid parameters:
 
- *secure_connection* (or *sc*) - Set 1 for secure connection and 0 for unsecure connection. Defaults to secure connection.
+ *secure_connection* (or *sc*) - Set 1 for secure connection and 0 for insecure connection. Defaults to secure connection.
 
  *connect_tries* (or *ct*) - Number of times to try to connect for each request.
 

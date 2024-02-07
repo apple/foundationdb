@@ -378,7 +378,7 @@ static int64_t safe_stoi64(std::string const& str) {
 }
 
 // Converts the given string into a bool. "true" and "false" are case
-// insenstively interpreted as true and false. Otherwise, any non-zero
+// insensitively interpreted as true and false. Otherwise, any non-zero
 // integer is true. If any errors are encountered, it throws an
 // invalid_option_value exception.
 static bool safe_stob(std::string const& str) {

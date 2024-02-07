@@ -186,7 +186,7 @@ class GlobalTagThrottlerImpl {
 	ServerThroughputTracker throughputTracker;
 
 	// For transactions with the provided tag, returns the average cost of all transactions
-	// accross the cluster. The minimum cost is one page. If the transaction rate is too low,
+	// across the cluster. The minimum cost is one page. If the transaction rate is too low,
 	// return an empty Optional, because no accurate estimation can be made.
 	Optional<double> getAverageTransactionCost(TransactionTag tag, TraceEvent& te) const {
 		auto const cost = throughputTracker.getThroughput(tag);

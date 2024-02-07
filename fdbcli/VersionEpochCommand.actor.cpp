@@ -162,7 +162,7 @@ CommandFactory versionEpochFactory(
                 "Read or write the version epoch",
                 "If no arguments are specified, reports the offset between the expected version "
                 "and the actual version. Otherwise, enables, disables, or commits the version epoch. "
-                "Setting the version epoch can be irreversible since it can cause a large verison jump. "
+                "Setting the version epoch can be irreversible since it can cause a large version jump. "
                 "Thus, the version epoch must first by enabled with the enable or set command. This "
                 "causes a recovery. Once the version epoch has been set, versions may be given out at "
                 "a faster or slower rate to attempt to match the actual version to the expected version, "

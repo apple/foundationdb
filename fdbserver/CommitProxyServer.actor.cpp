@@ -1512,7 +1512,7 @@ Error validateAndProcessTenantAccess(Arena& arena,
 	return success();
 }
 
-// If the validation success, return the list of tenant Ids refered by the transaction via tenantIds.
+// If the validation success, return the list of tenant Ids referred by the transaction via tenantIds.
 Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
                                      ProxyCommitData* const pProxyCommitData,
                                      std::unordered_set<int64_t>& rawAccessTenantIds) {
@@ -1749,7 +1749,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	}
 
 	// If there are raw access requests or cross-tenant boundary clear ranges in the batch, tenant ids for those
-	// requests are availalbe only after resolution. We need to fetch additional cipher keys for these requests.
+	// requests are available only after resolution. We need to fetch additional cipher keys for these requests.
 	if (pProxyCommitData->encryptMode == EncryptionAtRestMode::DOMAIN_AWARE && !rawAccessTenantIds.empty()) {
 		std::unordered_set<EncryptCipherDomainId> extraDomainIds;
 		for (auto tenantId : rawAccessTenantIds) {
@@ -2907,7 +2907,7 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		// tr.setVersion(minVersion);
 		// FIXME: could use streaming range read for large mappings?
 		state RangeResult blobGranuleMapping;
-		// add +1 to convert from range limit to boundary limit, 3 to allow for sequnce of:
+		// add +1 to convert from range limit to boundary limit, 3 to allow for sequence of:
 		// end of previous range - query begin key - start of granule - query end key - end of granule
 		// to pick up the intersecting granule
 		req.limit = std::max(3, req.limit + 1);
@@ -3213,7 +3213,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			logAntiQuorum = atoi(result.get().toString().c_str());
 		}
 		// FIXME: logAntiQuorum not supported, remove it later,
-		// In version2, we probably don't need this limtiation, but this needs to be tested.
+		// In version2, we probably don't need this limitation, but this needs to be tested.
 		if (logAntiQuorum > 0) {
 			TraceEvent("SnapCommitProxy_LogAntiQuorumNotSupported")
 			    .detail("SnapPayload", snapReq.snapPayload)
@@ -3860,7 +3860,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 				if (trs.size() || lastCommitComplete.isReady()) {
 					// When encryption is enabled, cipher key fetching issue (e.g KMS outage) is detected by the
 					// encryption monitor. In that case, commit timeout is expected and timeout error is suppressed. But
-					// we still want to trigger recovery occassionally (with the COMMIT_PROXY_MAX_LIVENESS_TIMEOUT), in
+					// we still want to trigger recovery occasionally (with the COMMIT_PROXY_MAX_LIVENESS_TIMEOUT), in
 					// the hope that the cipher key fetching issue could be resolve by recovery (e.g, if one CP have
 					// networking issue connecting to EKP, and recovery may exclude the CP).
 					lastCommitComplete = transformError(

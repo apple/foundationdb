@@ -299,9 +299,9 @@ void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, int64_t 
 
 } // namespace
 
-// Below actors asssit in fetching/lookup desired encryption keys. Following steps are done for an encryption key
+// Below actors assist in fetching/lookup desired encryption keys. Following steps are done for an encryption key
 // lookup:
-// 1. Lookup proccess local in-memory cache `BlobCipherKeyCache` to check if desired EK is 'present' and 'valid'. Given
+// 1. Lookup process local in-memory cache `BlobCipherKeyCache` to check if desired EK is 'present' and 'valid'. Given
 //    FDB supports 'revocable' & 'non-revocable' EKs; a cached EK can also be 'invalid'.
 // 2. Local cache miss will follow with a RPC call to EncryptKeyProxy process (EKP), EKP maintain an in-memory cache of
 //    KMS BaseCipher details with KMS defined TTL if applicable. The lookup call can either to serviced by EKP or would
@@ -517,7 +517,7 @@ ACTOR Future<GranuleFiles> loadPreviousFiles(Transaction* tr, UID granuleID) {
 
 // Once all sub-granules have reached step 2 (Assigned), the change feed can be safely "stopped" - it needs to
 // continue to serve the mutations it has seen so far, but will not need any new mutations after this version. The
-// last sub-granule to reach this step is responsible for commiting the change feed stop as part of its transaction.
+// last sub-granule to reach this step is responsible for committing the change feed stop as part of its transaction.
 // Because this change feed stops commits in the same transaction as the worker's new change feed start, it is
 // guaranteed that no versions are missed between the old and new change feed.
 //
@@ -3197,7 +3197,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						break;
 					} else {
 						if (BW_HISTORY_DEBUG) {
-							fmt::print("HL {0} {1}) [{2} - {3}) @ {4}:    Superceded by existing [{5} - "
+							fmt::print("HL {0} {1}) [{2} - {3}) @ {4}:    Superseded by existing [{5} - "
 							           "{6}) @ {7}\n",
 							           bwData->id.shortString().substr(0, 5),
 							           loadId,
@@ -3212,7 +3212,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				}
 				if (allLess) {
 					if (BW_HISTORY_DEBUG) {
-						fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: root b/c superceded\n",
+						fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: root b/c superseded\n",
 						           bwData->id.shortString().substr(0, 5),
 						           loadId,
 						           curHistory.range.begin.printable(),
@@ -3355,7 +3355,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						break;
 					} else if (r.cvalue().isValid() && r.cvalue()->endVersion > val->second.entry->endVersion) {
 						if (BW_HISTORY_DEBUG) {
-							fmt::print("HL {0} {1}) [{2} - {3}) @ {4}:    Superceded by existing [{5} - "
+							fmt::print("HL {0} {1}) [{2} - {3}) @ {4}:    Superseded by existing [{5} - "
 							           "{6}) @ {7}\n",
 							           bwData->id.shortString().substr(0, 5),
 							           loadId,
@@ -5629,8 +5629,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	TraceEvent("BlobWorkerInitStart", self->id).detail("Recovering", false).log();
 
 	try {
-		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
-		// state using the DB Config rather than passing it through the initalization request for the blob manager and
+		// Since the blob worker gets initialized through the blob manager it is more reliable to fetch the encryption
+		// state using the DB Config rather than passing it through the initialization request for the blob manager and
 		// blob worker
 		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx, true);
 
@@ -5732,8 +5732,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			recovered.send(Void());
 		}
 
-		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
-		// state using the DB Config rather than passing it through the initalization request for the blob manager and
+		// Since the blob worker gets initialized through the blob manager it is more reliable to fetch the encryption
+		// state using the DB Config rather than passing it through the initialization request for the blob manager and
 		// blob worker
 		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx, true);
 

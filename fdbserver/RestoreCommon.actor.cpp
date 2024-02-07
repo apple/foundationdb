@@ -113,7 +113,7 @@ KeyBackedSet<RestoreConfigFR::RestoreFile> RestoreConfigFR::fileSet() {
 
 Future<bool> RestoreConfigFR::isRunnable(Reference<ReadYourWritesTransaction> tr) {
 	return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
-		return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNITIALIZED;
+		return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNINITIALIZED;
 	});
 }
 

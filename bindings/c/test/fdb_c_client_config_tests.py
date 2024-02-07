@@ -598,7 +598,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
 class ClientConfigSeparateCluster(unittest.TestCase):
     def test_wait_cluster_to_upgrade(self):
         # Test starting a client incompatible to a cluster and connecting
-        # successfuly after cluster upgrade
+        # successfully after cluster upgrade
         self.cluster = TestCluster(PREV_RELEASE_VERSION)
         self.cluster.setup()
         try:
@@ -639,7 +639,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             self.cluster.tear_down()
 
     def test_plaintext_cluster_tls_client(self):
-        # Test connecting succesfully to a plaintext cluster with a TLS client
+        # Test connecting successfully to a plaintext cluster with a TLS client
         self.cluster = TestCluster(
             CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
         )
@@ -677,7 +677,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             self.cluster.tear_down()
 
     def test_plaintext_cluster_tls_client_plaintext_connection_disabled(self):
-        # Test connecting succesfully to a plaintext cluster with a TLS-configured client with plaintext connections disabled
+        # Test connecting successfully to a plaintext cluster with a TLS-configured client with plaintext connections disabled
         self.cluster = TestCluster(
             CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
         )
@@ -860,7 +860,7 @@ class ClientTracingTests(unittest.TestCase):
             pattern += "\.\d+\.\w+\.\d+\.\d+\.{}$".format(self.test.trace_format)
             if re.match(pattern, name):
                 return trace_file
-        self.fail("No maching trace file found")
+        self.fail("No matching trace file found")
 
     def find_and_check_event(
         self, trace_file, event_type, attr_present, attr_missing, seqno=0

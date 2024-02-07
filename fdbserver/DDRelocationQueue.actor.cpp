@@ -539,7 +539,7 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 	completeDest(relocation, destBusymap);
 }
 
-// Cancells in-flight data moves intersecting with range.
+// Cancels in-flight data moves intersecting with range.
 ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState);
 
 ACTOR Future<Void> dataDistributionRelocator(class DDQueue* self,
@@ -1750,7 +1750,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data movement
 					// across DC, we randomly choose a server in bestTeams[i] as the shard's destination, and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
-					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
+					// propagate its data to the servers in the same team. This saves data movement bandwidth across DC
 					int idx = deterministicRandom()->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);

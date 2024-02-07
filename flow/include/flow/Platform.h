@@ -818,7 +818,7 @@ int64_t getNumProfilesCaptured();
 EXTERNC void criticalError(int exitCode, const char* type, const char* message);
 EXTERNC void flushAndExit(int exitCode);
 
-// Initilization code that's run at the beginning of every entry point (except fdbmonitor)
+// Initialization code that's run at the beginning of every entry point (except fdbmonitor)
 void platformInit();
 
 // Register a callback which will run as part of the crash handler. Use in conjunction with registerCrashHandler.

@@ -226,7 +226,7 @@ void WorkloadManager::run() {
 	if (failed()) {
 		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
 	} else {
-		fprintf(stderr, "All workloads succesfully completed\n");
+		fprintf(stderr, "All workloads successfully completed\n");
 	}
 }
 

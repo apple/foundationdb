@@ -362,7 +362,7 @@ Future<TextAndHeaderCipherKeys> _getLatestEncryptCipherKeysForDomain(Reference<A
                                                                      EncryptCipherDomainId domainId,
                                                                      BlobCipherMetrics::UsageType usageType,
                                                                      Reference<GetEncryptCipherKeysMonitor> monitor) {
-	// TODO: Do not fetch header cipher key if authentication is diabled.
+	// TODO: Do not fetch header cipher key if authentication is disabled.
 	std::unordered_set<EncryptCipherDomainId> domainIds = { domainId, ENCRYPT_HEADER_DOMAIN_ID };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(_getLatestEncryptCipherKeys(db, domainIds, usageType, monitor));

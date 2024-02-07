@@ -31,7 +31,7 @@ FDB_BOOLEAN_PARAM(CheckHashes);
 class IDiskQueue : public IClosable {
 public:
 	struct location {
-		// location is same with seq., specifying the index of the virtualy infinite queue.
+		// location is same with seq., specifying the index of the virtually infinite queue.
 		int64_t hi, lo; // hi is always 0, lo is always equal to seq.
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}

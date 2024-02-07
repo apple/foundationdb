@@ -189,7 +189,7 @@ struct AddressExclusion {
 		return ip == addr.ip && port == addr.port;
 	}
 
-	// This is for debugging and IS NOT to be used for serialization to persistant state
+	// This is for debugging and IS NOT to be used for serialization to persistent state
 	std::string toString() const {
 		if (!isWholeMachine())
 			return formatIpPort(ip, port);

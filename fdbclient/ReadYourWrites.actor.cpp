@@ -86,10 +86,10 @@ public:
 	};
 
 	// read() Performs a read (get, getKey, getRange, etc), in the context of the given transaction.  Snapshot or RYW
-	// reads are distingushed by the type Iter being SnapshotCache::iterator or RYWIterator. Fills in the snapshot cache
-	// as a side effect but does not affect conflict ranges. Some (indicated) overloads of read are required to update
-	// the given *it to point to the key that was read, so that the corresponding overload of addConflictRange() can
-	// make use of it.
+	// reads are distinguished by the type Iter being SnapshotCache::iterator or RYWIterator. Fills in the snapshot
+	// cache as a side effect but does not affect conflict ranges. Some (indicated) overloads of read are required
+	// to update the given *it to point to the key that was read, so that the corresponding overload of
+	// addConflictRange() can make use of it.
 
 	ACTOR template <class Iter>
 	static Future<Optional<Value>> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {

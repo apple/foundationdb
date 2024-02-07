@@ -842,7 +842,7 @@ struct RawCursor {
 			int valuePerFragment = kv.value.size();
 
 			// Figure out if we would benefit from fragmenting this kv pair.  The key size must be less than
-			// primary page usable size, and the value and key size together must exceeed the primary page usable size.
+			// primary page usable size, and the value and key size together must exceed the primary page usable size.
 			if ((kv.key.size() + kv.value.size()) > primaryPageUsable && kv.key.size() < primaryPageUsable) {
 
 				// Just the part of the value that would be in a partially-filled overflow page
@@ -1623,7 +1623,7 @@ public:
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override;
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override;
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,

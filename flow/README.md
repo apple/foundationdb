@@ -452,7 +452,7 @@ will need to be declared state.
 When the reference to the returned `Future` of an actor is dropped, that actor will be cancelled.
 Cancellation of an actor means that any `wait()`s that were currently active (the callback was
 currently registered) will be delivered an exception (`actor_cancelled`). In almost every case
-this exception should not be caught, though there are cetainly exceptions!
+this exception should not be caught, though there are certainly exceptions!
 
 # Memory Management
 

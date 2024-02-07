@@ -866,7 +866,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	req->data.headers["Host"] = bstore->host;
 	req->data.headers["Accept"] = "application/xml";
 
-	// Avoid to send request with an empty resouce.
+	// Avoid to send request with an empty resource.
 	if (resource.empty()) {
 		resource = "/";
 	}

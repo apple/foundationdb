@@ -802,7 +802,7 @@ public:
 				debug_printf("FIFOQueue::Cursor(%s) loading\n", toString().c_str());
 
 				// If the next pageID loading or loaded is not the page we should be reading then restart the load
-				// nextPageID coud be different because it could be invalid or it could be no longer relevant
+				// nextPageID could be different because it could be invalid or it could be no longer relevant
 				// if the previous commit added new pages to the front of the queue.
 				if (pageID != nextPageID) {
 					debug_printf("FIFOQueue::Cursor(%s) reloading\n", toString().c_str());
@@ -1774,7 +1774,7 @@ public:
 			return s;
 		}
 
-		// Any external data strutures whose memory usage should be counted as part of the object cache
+		// Any external data structures whose memory usage should be counted as part of the object cache
 		// budget should add their usage to this total and keep it updated.
 		int64_t reservedSize = 0;
 		int64_t sizeLimit;
@@ -5640,7 +5640,7 @@ private:
 	 *      c\x00 = { rangeClearVersion = 2, startKeyMutations = { 2 => <not present> }
 	 *      z =     { rangeClearVersion = <not present>, startKeyMutations = {}
 	 *
-	 *   This is because the rangeClearVersion applies to a range begining with the first
+	 *   This is because the rangeClearVersion applies to a range beginning with the first
 	 *   key AFTER the start key, so that the logic for reading the start key is more simple
 	 *   as it only involves consulting startKeyMutations.  When adding a clear range, the
 	 *   boundary key insert/split described above is valid, and is what is currently done,
@@ -5649,7 +5649,7 @@ private:
 	 *   without adding an additional key to the buffer.
 
 	 * TODO: A possible optimization here could be to only use existing btree leaf page boundaries as keys,
-	 * with mutation point keys being stored in an unsorted strucutre under those boundary map keys,
+	 * with mutation point keys being stored in an unsorted structure under those boundary map keys,
 	 * to be sorted later just before being merged into the existing leaf page.
 	 */
 
@@ -6544,7 +6544,7 @@ private:
 
 			// The boundaries can't have changed, but the child page link may have.
 			if (maybeNewID != decodeLowerBound.getChildPage()) {
-				// Add page's decode lower bound to newLinks set without its child page, intially
+				// Add page's decode lower bound to newLinks set without its child page, initially
 				newLinks.push_back_deep(newLinks.arena(), decodeLowerBound.withoutValue());
 
 				// Set the child page ID, which has already been allocated in result.arena()
@@ -6756,7 +6756,7 @@ private:
 					insert({}, u.newLinks);
 				}
 
-				// cBegin has been erased so interating from the first entry forward will never see cBegin to use as an
+				// cBegin has been erased so interacting from the first entry forward will never see cBegin to use as an
 				// endpoint.
 				changesMade = true;
 			} else {
@@ -7687,7 +7687,7 @@ public:
 	public:
 		BTreeCursor() : reason(PagerEventReasons::MAXEVENTREASONS) {}
 
-		bool intialized() const { return pager.isValid(); }
+		bool initialized() const { return pager.isValid(); }
 		bool isValid() const { return valid; }
 
 		// path entries at dumpHeight or below will have their entire pages printed
@@ -8717,7 +8717,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
 
 	loop {
 		wait(yield());
-		if (!cur.intialized() || deterministicRandom()->random01() > .01) {
+		if (!cur.initialized() || deterministicRandom()->random01() > .01) {
 			wait(btree->initBTreeCursor(&cur, btree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
 		}
 

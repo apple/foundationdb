@@ -133,7 +133,7 @@ std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::st
 			}
 		} catch (std::exception&) {
 			// If an entry in the process map is badly formed then something will throw. Since we are
-			// looking for a positive match, just ignore any read execeptions and move on to the next proc
+			// looking for a positive match, just ignore any read exceptions and move on to the next proc
 		}
 	}
 	return "unknown";
@@ -1261,7 +1261,7 @@ void printStatus(StatusObjectReader statusObj,
 
 		// status minimal
 		else if (level == StatusClient::MINIMAL) {
-			// Checking for field exsistence is not necessary here because if a field is missing there is no additional
+			// Checking for field existence is not necessary here because if a field is missing there is no additional
 			// information that we would be able to display if we continued execution. Instead, any missing fields will
 			// throw and the catch will display the proper message.
 			try {

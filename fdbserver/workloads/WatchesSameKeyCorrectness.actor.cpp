@@ -196,7 +196,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				wait(setKeyRandomValue(
 				    cx,
 				    key,
-				    Optional<Value>())); // since ABA has occured we need to trigger the watches with a new value
+				    Optional<Value>())); // since ABA has occurred we need to trigger the watches with a new value
 				wait(watch1);
 				wait(watch2);
 				return Void();

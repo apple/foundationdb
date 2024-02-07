@@ -45,29 +45,29 @@ func (ks KeySelector) FDBKeySelector() KeySelector {
 	return ks
 }
 
-// LastLessThan returns the KeySelector specifying the lexigraphically greatest
-// key present in the database which is lexigraphically strictly less than the
+// LastLessThan returns the KeySelector specifying the lexicographically greatest
+// key present in the database which is lexicographically strictly less than the
 // given key.
 func LastLessThan(key KeyConvertible) KeySelector {
 	return KeySelector{key, false, 0}
 }
 
-// LastLessOrEqual returns the KeySelector specifying the lexigraphically
-// greatest key present in the database which is lexigraphically less than or
+// LastLessOrEqual returns the KeySelector specifying the lexicographically
+// greatest key present in the database which is lexicographically less than or
 // equal to the given key.
 func LastLessOrEqual(key KeyConvertible) KeySelector {
 	return KeySelector{key, true, 0}
 }
 
-// FirstGreaterThan returns the KeySelector specifying the lexigraphically least
-// key present in the database which is lexigraphically strictly greater than
+// FirstGreaterThan returns the KeySelector specifying the lexicographically least
+// key present in the database which is lexicographically strictly greater than
 // the given key.
 func FirstGreaterThan(key KeyConvertible) KeySelector {
 	return KeySelector{key, true, 1}
 }
 
-// FirstGreaterOrEqual returns the KeySelector specifying the lexigraphically
-// least key present in the database which is lexigraphically greater than or
+// FirstGreaterOrEqual returns the KeySelector specifying the lexicographically
+// least key present in the database which is lexicographically greater than or
 // equal to the given key.
 func FirstGreaterOrEqual(key KeyConvertible) KeySelector {
 	return KeySelector{key, false, 1}

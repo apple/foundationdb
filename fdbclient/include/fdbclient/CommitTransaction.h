@@ -354,7 +354,7 @@ struct CommitTransactionRef {
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
 	VectorRef<MutationRef> mutations; // metadata mutations
-	// encryptedMutations should be a 1-1 corespondence with mutations field above. That is either
+	// encryptedMutations should be a 1-1 correspondence with mutations field above. That is either
 	// encryptedMutations.size() == 0 or encryptedMutations.size() == mutations.size() and encryptedMutations[i] =
 	// mutations[i].encrypt(). Currently this field is not serialized so clients should NOT set this field during a
 	// usual commit path. It is currently only used during backup mutation log restores.

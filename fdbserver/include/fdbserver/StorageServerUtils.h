@@ -37,7 +37,7 @@ enum class MoveInPhase {
 	Error = 7,
 };
 
-// MoveInShardMetaData contains all the necessary infomation to start/resume fetching a physical
+// MoveInShardMetaData contains all the necessary information to start/resume fetching a physical
 // shard by a destination storage server.
 struct MoveInShardMetaData {
 	constexpr static FileIdentifier file_identifier = 3804366;

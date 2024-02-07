@@ -550,7 +550,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// The if condition should be consistent with the condition in serverTeamRemover() and
 			// machineTeamRemover() that decides if redundant teams exist.
 			// Team number is always valid when we disable teamRemover, which avoids false positive in simulation test.
-			// The minimun team number per server (and per machine) should be no less than 0 so that newly added machine
+			// The minimum team number per server (and per machine) should be no less than 0 so that newly added machine
 			// can host data on it.
 			//
 			// If the machineTeamRemover does not remove the machine team with the most machine teams,
@@ -575,7 +575,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				// When DESIRED_TEAMS_PER_SERVER == 1, we see minMachineTeamOnMachine can be 0 in one out of 30k test
 				// cases. Only check DESIRED_TEAMS_PER_SERVER == 3 for now since it is mostly used configuration.
 				// TODO: Remove the constraint SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER == 3 to ensure that
-				// the minimun team number per server (and per machine) is always > 0 for any number of replicas
+				// the minimum team number per server (and per machine) is always > 0 for any number of replicas
 				TraceEvent("GetTeamCollectionValid")
 				    .detail("CurrentServerTeams", currentTeams)
 				    .detail("DesiredTeams", desiredTeams)

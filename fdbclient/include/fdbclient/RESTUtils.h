@@ -59,7 +59,7 @@ public:
 	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 
 	// Routine is responsible to provide an usable TCP connection object; it reuses an active connection from
-	// connection-pool if availalbe, otherwise, establish a new TCP connection
+	// connection-pool if available, otherwise, establish a new TCP connection
 	Future<ReusableConnection> connect(RESTConnectionPoolKey connectKey, const bool isSecure, const int maxConnLife);
 	void returnConnection(RESTConnectionPoolKey connectKey, ReusableConnection& conn, const int maxConnections);
 

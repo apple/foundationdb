@@ -246,7 +246,7 @@ ACTOR template <class Transaction>
 Future<int64_t> getNextTenantId(Transaction tr) {
 	state Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId().get(tr));
 	if (!lastId.present()) {
-		// If the last tenant id is not present fetch the tenantIdPrefix (if any) and initalize the lastId
+		// If the last tenant id is not present fetch the tenantIdPrefix (if any) and initialize the lastId
 		int64_t tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().getD(tr, Snapshot::False, 0));
 		// Shift by 6 bytes to make the prefix the first two bytes of the tenant id
 		lastId = tenantIdPrefix << 48;

@@ -195,7 +195,7 @@ func tupleToString(t tuple.Tuple) string {
 		case tuple.Tuple:
 			buffer.WriteString(tupleToString(el))
 		default:
-			log.Fatalf("Don't know how to stringify tuple elemement %v %T\n", el, el)
+			log.Fatalf("Don't know how to stringify tuple element %v %T\n", el, el)
 		}
 	}
 	buffer.WriteByte(')')

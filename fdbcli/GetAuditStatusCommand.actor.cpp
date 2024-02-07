@@ -62,7 +62,7 @@ ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID
 					throw e;
 				}
 				if (retryCount > 30) {
-					printf("Imcomplete check\n");
+					printf("Incomplete check\n");
 					return Void();
 				}
 				wait(delay(0.5));

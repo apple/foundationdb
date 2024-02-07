@@ -22,7 +22,7 @@ inconsistently in the code base as "metadata mutations" in commit proxies and
 
 ## Why do we need transaction state store?
 
-When bootstraping an FDB cluster, the cluster controller (CC) role recruits a
+When bootstrapping an FDB cluster, the cluster controller (CC) role recruits a
 new transaction system and initializes them. In particular, the transaction state store
 is first read by the CC from previous generation's log system, and then broadcast to
 all commit proxies of the new transaction system. After initializing `txnStateStore`, these
@@ -45,7 +45,7 @@ conflict resolution request to all Resolvers and they process transactions in st
 of commit versions. Leveraging this mechanism, each commit proxy sends all metadata
 (i.e., system key) mutations to all Resolvers. Resolvers keep these mutations in memory
 and forward to other commit proxies in separate resolution response. Each commit proxy
-receive resolution response, along with metadata mutations happend at other proxies before
+receive resolution response, along with metadata mutations happened at other proxies before
 its commit version, and apply all these metadata mutations in the commit order.
 Finally, this proxy only writes metadata mutations in its own transaction batch to TLogs,
 i.e., do not write other proxies' metadata mutations to TLogs to avoid repeated writes.

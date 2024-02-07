@@ -111,10 +111,10 @@ limitingTps(tag) = min{limitingTps(tag, storage) : all storage servers}
 
 If the throttling ratio is empty for all storage servers affected by a tag, then the per-tag, per-storage limiting TPS rate is also empty. In this case the target rate for this tag is simply the desired rate.
 
-If an individual zone is unhealthy, it may cause the throttling ratio for storage servers in that zone to shoot up. This should not be misinterpretted as a workload issue that requires active throttling. Therefore, the zone with the worst throttling ratios is ignored when computing the limiting transaction rate for a tag (similar to the calculation of the global transaction limit in `Ratekeeper::updateRate`).
+If an individual zone is unhealthy, it may cause the throttling ratio for storage servers in that zone to shoot up. This should not be misinterpreted as a workload issue that requires active throttling. Therefore, the zone with the worst throttling ratios is ignored when computing the limiting transaction rate for a tag (similar to the calculation of the global transaction limit in `Ratekeeper::updateRate`).
 
 ### Client Rate Calculation
-The smoothed per-client rate for each tag is tracked within `GlobalTagThrottlerImpl::PerTagStatistics`. Once a target rate has been computed, this is passed to `GlobalTagThrotterImpl::PerTagStatistics::updateAndGetPerClientRate` which adjusts the per-client rate. The per-client rate is meant to limit the busiest clients, so that at equilibrium, the per-client rate will remain constant and the sum of throughput from all clients will match the target rate.
+The smoothed per-client rate for each tag is tracked within `GlobalTagThrottlerImpl::PerTagStatistics`. Once a target rate has been computed, this is passed to `GlobalTagThrottlerImpl::PerTagStatistics::updateAndGetPerClientRate` which adjusts the per-client rate. The per-client rate is meant to limit the busiest clients, so that at equilibrium, the per-client rate will remain constant and the sum of throughput from all clients will match the target rate.
 
 ## Simulation Testing
 The `ThroughputQuota.toml` test provides a simple end-to-end test using the global tag throttler. Quotas are set using the internal tag quota API in the `ThroughputQuota` workload. This is run with the `Cycle` workload, which randomly tags transactions. 

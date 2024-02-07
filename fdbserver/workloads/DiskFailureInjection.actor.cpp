@@ -181,7 +181,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	// Resend the chaos event to previosuly chosen workers, in case some workers got restarted and lost their chaos
+	// Resend the chaos event to previously chosen workers, in case some workers got restarted and lost their chaos
 	// config
 	ACTOR static Future<Void> reSendChaos(DiskFailureInjectionWorkload* self) {
 		state int throttledWorkers = 0;

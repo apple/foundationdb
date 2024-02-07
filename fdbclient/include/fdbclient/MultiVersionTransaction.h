@@ -1081,10 +1081,10 @@ public:
 		// Must be called from the main thread
 		void startLegacyVersionMonitors();
 
-		// Set a new database connnection
+		// Set a new database connection
 		void setDatabase(Reference<IDatabase> db);
 
-		// Get database intialization error if initialization failed
+		// Get database initialization error if initialization failed
 		ErrorOr<Void> getInitializationError();
 
 		// Return a JSON string containing database client-side status information

@@ -999,7 +999,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 			                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
 			           TaskPriority::UpdateStorage));
 		} else {
-			// recovery wants to commit to persistant data when updatePersistentData is not active, this delay ensures
+			// recovery wants to commit to persistent data when updatePersistentData is not active, this delay ensures
 			// that immediately after updatePersist returns another one has not been started yet.
 			wait(delay(0.0, TaskPriority::UpdateStorage));
 		}
@@ -1556,7 +1556,7 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 		    .detail("LogId", logData->logId)
 		    .detail("Version", logData->version.get())
 		    .detail("Committing", logData->queueCommittingVersion)
-		    .detail("Commmitted", logData->queueCommittedVersion.get());
+		    .detail("Committed", logData->queueCommittedVersion.get());
 		if (logData->committingQueue.canBeSet()) {
 			logData->committingQueue.send(Void());
 		}

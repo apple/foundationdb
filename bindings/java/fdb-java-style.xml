@@ -2,7 +2,7 @@
 <!--
 	The style for code written within the FDB Java bindings.
 	Note that this style guide grew up somewhat organically from
-	the idiosyncracies of the committers involved. It aims to
+	the idiosyncrasies of the committers involved. It aims to
 	be at least a little idiomatically Java while at the same time
 	trying not to look too incongruous when compared to the style
 	of our core products (e.g., fdbserver). It also isn't

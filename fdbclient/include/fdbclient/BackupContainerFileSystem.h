@@ -181,7 +181,7 @@ private:
 		Future<Void> clear();
 	};
 
-	// To avoid the need to scan the underyling filesystem in many cases, some important version boundaries are stored
+	// To avoid the need to scan the underlying filesystem in many cases, some important version boundaries are stored
 	// in named files. These versions also indicate what version ranges are known to be deleted or partially deleted.
 	//
 	// The values below describe version ranges as follows:

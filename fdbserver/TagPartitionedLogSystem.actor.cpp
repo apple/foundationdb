@@ -2997,7 +2997,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 	}
 
-	// Should be sorted by decending orders of versions.
+	// Should be sorted by descending orders of versions.
 	state std::vector<Version> oldGenerationRecoverAtVersions;
 	for (const auto& oldLogGen : logSystem->oldLogData) {
 		if (oldLogGen.recoverAt <= 0) {

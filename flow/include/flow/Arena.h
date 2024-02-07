@@ -64,7 +64,7 @@ struct TrackIt {
 #define TRACKIT_ASSIGN(o) *(TrackItType*)this = *(TrackItType*)&(o)
 
 	// The type name T is in the TrackIt output so that objects that inherit TrackIt multiple times
-	// can be tracked propertly, otherwise the create and delete addresses appear duplicative.
+	// can be tracked properly, otherwise the create and delete addresses appear duplicative.
 	// This function returns just the string "T]" parsed from the __PRETTY_FUNCTION__ macro.  There
 	// doesn't seem to be a better portable way to do this.
 	static const char* __trackit__type() {

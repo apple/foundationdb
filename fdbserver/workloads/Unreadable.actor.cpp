@@ -166,13 +166,13 @@ struct UnreadableWorkload : TestWorkload {
 		if ((resolvedBegin.offset >= resolvedEnd.offset && resolvedBegin.getKey() >= resolvedEnd.getKey()) ||
 		    (resolvedBegin.offset >= end.offset && resolvedBegin.getKey() >= end.getKey()) ||
 		    (begin.offset >= resolvedEnd.offset && begin.getKey() >= resolvedEnd.getKey())) {
-			// RYW does not perfectly optimize this scenario, it should be readable but might unnecesarily return as
+			// RYW does not perfectly optimize this scenario, it should be readable but might unnecessarily return as
 			// unreadable
 			return;
 		}
 
 		if (resolvedEnd.getKey() == normalKeys.begin || resolvedBegin.getKey() == normalKeys.end) {
-			// RYW does not perfectly optimize this scenario, it should be readable but might unnecesarily return as
+			// RYW does not perfectly optimize this scenario, it should be readable but might unnecessarily return as
 			// unreadable
 			return;
 		}

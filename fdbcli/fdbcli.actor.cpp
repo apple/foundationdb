@@ -479,7 +479,7 @@ static void printProgramUsage(const char* name) {
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
+	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
 	       "  --log-group LOG_GROUP\n"
@@ -583,7 +583,7 @@ void initHelp() {
 
 	helpMap["setknob"] = CommandHelp("setknob <KEY> <VALUE> [CONFIG_CLASS]",
 	                                 "updates a knob to specified value",
-	                                 "setknob will prompt for a descrption of the changes" ESCAPINGKV);
+	                                 "setknob will prompt for a description of the changes" ESCAPINGKV);
 
 	helpMap["getknob"] = CommandHelp(
 	    "getknob <KEY> [CONFIG_CLASS]", "gets the value of the specified knob", "CONFIG_CLASS is optional." ESCAPINGK);

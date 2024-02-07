@@ -1008,7 +1008,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNotExcluded = 0;
 	state int64_t totalKvStoreAvailableBytes = 0;
-	// Keep track if we exclude any storage process with the provided adddresses
+	// Keep track if we exclude any storage process with the provided addresses
 	state bool excludedAddressesContainsStorageRole = false;
 
 	try {
@@ -1130,7 +1130,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 	// CAUSAL_WRITE_RISKY
 	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-	// for exluded servers
+	// for excluded servers
 	auto ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManagementApiCommandRange("exclude"));
 	auto iter = ranges.begin();
@@ -1327,7 +1327,7 @@ ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, K
 	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
-		// exclude :tls in keys even the network addresss is TLS
+		// exclude :tls in keys even the network address is TLS
 		KeyRef k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port), result.arena()));
 		if (kr.contains(k)) {
 			ValueRef v(result.arena(), w.processClass.toString());
@@ -1450,7 +1450,7 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
-		// exclude :tls in keys even the network addresss is TLS
+		// exclude :tls in keys even the network address is TLS
 		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
 		if (kr.contains(k)) {
 			Value v(w.processClass.sourceString());
@@ -1771,12 +1771,12 @@ ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* r
 	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
 	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
 	RangeResult result;
-	Key cluster_decription_key = prefix.withSuffix("cluster_description"_sr);
-	if (kr.contains(cluster_decription_key)) {
-		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
+	Key cluster_description_key = prefix.withSuffix("cluster_description"_sr);
+	if (kr.contains(cluster_description_key)) {
+		result.push_back_deep(result.arena(), KeyValueRef(cluster_description_key, cs.clusterKeyName()));
 	}
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
-	// include :tls in keys if the network addresss is TLS
+	// include :tls in keys if the network address is TLS
 	std::sort(coordinator_processes.begin(),
 	          coordinator_processes.end(),
 	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) { return lhs.toString() < rhs.toString(); });
@@ -1848,8 +1848,8 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 
 	std::string newName;
 	// check update for cluster_description
-	Key cluster_decription_key = "cluster_description"_sr.withPrefix(kr.begin);
-	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
+	Key cluster_description_key = "cluster_description"_sr.withPrefix(kr.begin);
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_description_key];
 	if (entry.first) {
 		// check valid description [a-zA-Z0-9_]+
 		if (entry.second.present() && isAlphaNumeric(entry.second.get().toString())) {

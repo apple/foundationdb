@@ -98,7 +98,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 			}
 			// if auto change, read the special key to retrieve the recommended config
 			if (automatic) {
-				// if previous read failed, retry, otherwise, use the same recommened config
+				// if previous read failed, retry, otherwise, use the same recommended config
 				if (!auto_coordinators_str.size()) {
 					// Hold the reference to the standalone's memory
 					state ThreadFuture<Optional<Value>> auto_coordinatorsF =
@@ -206,7 +206,7 @@ CommandFactory coordinatorsFactory(
     CommandHelp(
         "coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
         "change cluster coordinators or description",
-        "If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured "
+        "If 'auto' is specified, coordinator addresses will be chosen automatically to support the configured "
         "redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, "
         "nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by "
         "<ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators "

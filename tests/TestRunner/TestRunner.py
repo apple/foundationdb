@@ -66,7 +66,7 @@ class LogParser:
         elif not self.result or self.aggregationPolicy == "ALL":
             self.out.write(txt)
         else:
-            self.outStream.wite(txt)
+            self.outStream.write(txt)
 
     def fail(self):
         self.result = False

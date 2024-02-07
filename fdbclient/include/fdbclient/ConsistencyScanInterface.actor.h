@@ -94,7 +94,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 		bool enabled = false;
 
-		// The values below are NOT being intialized from knobs because once the scan is enabled
+		// The values below are NOT being initialized from knobs because once the scan is enabled
 		// changing the knobs does nothing.  The consistency check knobs are for the consistency
 		// check workload, which is different from the Consistency Scan feature
 

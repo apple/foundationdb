@@ -413,7 +413,7 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			result += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
-			// Such properites are listed here:
+			// Such properties are listed here:
 			static std::set<std::string> directSet = {
 				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode",
 				"storage_engine",         "log_engine",  "perpetual_storage_wiggle_engine"

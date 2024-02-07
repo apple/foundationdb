@@ -34,7 +34,7 @@ test, do the following:
 
 ( see `BasicMultiClientIntegrationTest` for a good reference example)
 
-It is important to note that it requires significant time to start and stop 3 separate clusters; if the underying test takes a long time to run,
+It is important to note that it requires significant time to start and stop 3 separate clusters; if the underlying test takes a long time to run,
 ctest will time out and kill the test. When that happens, there is no guarantee that the FDB clusters will be properly stopped! It is thus
 in your best interest to ensure that all tests run in a relatively small amount of time, or have a longer timeout attached.
 

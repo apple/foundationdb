@@ -1057,7 +1057,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
 						//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
 						wait(operations[waitOp]);
-						wait(delay(0.000001)); // to ensure errors have propgated from reads to commits
+						wait(delay(0.000001)); // to ensure errors have propagated from reads to commits
 						waitLocation = operations.size();
 					}
 				}

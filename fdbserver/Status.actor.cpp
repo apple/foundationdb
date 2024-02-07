@@ -328,7 +328,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 
 		try {
 			std::string address = it->first.ip.toString();
-			// We will use the "physical" caluculated machine ID here to limit exposure to machineID repurposing
+			// We will use the "physical" calculated machine ID here to limit exposure to machineID repurposing
 			std::string machineId = event.getValue("MachineID");
 
 			// If this machine ID does not already exist in the machineMap, add it

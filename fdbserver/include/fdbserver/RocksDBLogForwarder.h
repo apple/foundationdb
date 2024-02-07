@@ -42,7 +42,7 @@ struct RocksDBLogRecord {
 	std::vector<std::pair<std::string, std::string>> kvPairs;
 };
 
-// Stores RocksDB log lines for furthur consumption.
+// Stores RocksDB log lines for further consumption.
 // *NOTE* This logger *MUST* run in a thread that is able to generate TraceEvents, e.g. in the event loop thread.
 class RocksDBLogger {
 	// The mutex that protects log records, as RocksDB is multi-threaded
@@ -91,7 +91,7 @@ public:
 	// Writes an entry to the log file
 	virtual void Logv(const char* format, va_list ap);
 
-	// Writes an entry to the log file, with a specificied log level
+	// Writes an entry to the log file, with a specified log level
 	virtual void Logv(const rocksdb::InfoLogLevel log_level, const char* format, va_list ap);
 };
 

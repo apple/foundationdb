@@ -966,7 +966,7 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 	}
 }
 
-// Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
+// Tries to send a reply to req with a worker (process) that a blob worker can be recruited on
 // Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
 void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequest req) {
 	try {
@@ -1467,7 +1467,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			// Earliest time at which we may begin a new request
 			double next_allowed_request_time = last_request_time + SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS;
 
-			// Wait if needed to satisfy min_time knob, also allows more requets to queue up.
+			// Wait if needed to satisfy min_time knob, also allows more requests to queue up.
 			double minwait = std::max(next_allowed_request_time - now(), 0.0);
 			wait(delay(minwait));
 

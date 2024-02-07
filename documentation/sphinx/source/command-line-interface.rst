@@ -423,7 +423,7 @@ flow
 
 ``profile flow run <DURATION> <FILENAME> <PROCESS...>``
 
-Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
+Enables flow profiling on the specified processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
 
 heap
 ^^^^

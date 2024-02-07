@@ -802,8 +802,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		// behavior is fine, but in simulation it can occasionally cause
 		// problems. Simulation does not take into account injected errors can
 		// cause permanent process death. In most cases this is true. But if
-		// this inconistent disk queue state occurs on a coordinator, the
-		// coordinator will enter a reboot loop, continously failing to open
+		// this inconsistent disk queue state occurs on a coordinator, the
+		// coordinator will enter a reboot loop, continuously failing to open
 		// its disk queue and crashing. If the simulation run has a small
 		// number of processes and another process is colocated with the
 		// coordinator, the run may get stuck because the coordinator crashing

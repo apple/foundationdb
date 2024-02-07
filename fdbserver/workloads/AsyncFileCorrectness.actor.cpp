@@ -68,7 +68,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	// Whether or not the correctness test succeeds
 	bool success;
 
-	// The targetted size of the file (the actual file can be anywhere in size from 1 byte to 2 * targetFileSize)
+	// The targeted size of the file (the actual file can be anywhere in size from 1 byte to 2 * targetFileSize)
 	int64_t targetFileSize;
 
 	double averageCpuUtilization;

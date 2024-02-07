@@ -26,7 +26,7 @@
 
     Conversions between UTF32, UTF-16, and UTF-8.  Header file.
 
-    Several funtions are included here, forming a complete set of
+    Several functions are included here, forming a complete set of
     conversions between the three formats.  UTF-7 is not included
     here, but is handled in a separate source file.
 
@@ -104,7 +104,7 @@ typedef unsigned char Boolean; /* 0 or 1 */
 typedef enum {
 	conversionOK, /* conversion successful */
 	sourceExhausted, /* partial character in source, but hit end */
-	targetExhausted, /* insuff. room in target for conversion */
+	targetExhausted, /* insufficient room in target for conversion */
 	sourceIllegal /* source sequence is illegal/malformed */
 } ConversionResult;
 

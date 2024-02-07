@@ -1388,7 +1388,7 @@ void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 	}
 
 	// When called from the constructor or from reset(), all persistent options are database options and therefore
-	// alredy set on newTr.transaction if it got created sucessfully. If newTr.transaction could not be created (i.e.,
+	// already set on newTr.transaction if it got created successfully. If newTr.transaction could not be created (i.e.,
 	// because no database with a matching version is present), the local timeout set in setTimeout() applies, so we
 	// need to set it.
 	if (setPersistentOptions || !newTr.transaction) {

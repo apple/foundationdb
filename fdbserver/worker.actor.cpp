@@ -2224,7 +2224,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			state DiskStore s = stores[index];
 			// FIXME: Error handling
 			if (s.storedComponent == DiskStore::Storage) {
-				// Opening multiple KVSs at the same time could make worker run out of mememory. Add delay to allow the
+				// Opening multiple KVSs at the same time could make worker run out of memory. Add delay to allow the
 				// extra storage process to be removed.
 				if (index >= 2 && SERVER_KNOBS->WORKER_START_STORAGE_DELAY > 0.0) {
 					wait(delay(SERVER_KNOBS->WORKER_START_STORAGE_DELAY));

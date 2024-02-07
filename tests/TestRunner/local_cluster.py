@@ -47,7 +47,7 @@ class PortProvider:
                 return port
             except OSError:
                 print(
-                    "Failed to lock file {}. Trying to aquire another port".format(
+                    "Failed to lock file {}. Trying to acquire another port".format(
                         lock_path
                     ),
                     file=sys.stderr,

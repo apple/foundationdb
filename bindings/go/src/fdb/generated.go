@@ -474,7 +474,7 @@ func (o TransactionOptions) SetNextWriteNoWriteConflictRange() error {
 	return o.setOpt(30, nil)
 }
 
-// Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction.
+// Reads performed by a transaction will not see any prior mutations that occurred in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction.
 func (o TransactionOptions) SetReadYourWritesDisable() error {
 	return o.setOpt(51, nil)
 }

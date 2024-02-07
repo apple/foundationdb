@@ -49,7 +49,7 @@ In `basicLoadBalance`, a *best* alternative is picked and used at the beginning.
 `loadBalance` provides a more sophisticated implementation of load balancing. In addition of the basic load balancing, it also provides a variety of features:
 
 * Support for Test Storage Server ([TSS](https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/tss.rst))
-* Datacenter awaring alternative election
+* Datacenter-aware alternative election
 * Recording the latency and penalty from interfaces, and [prioritize the interfaces based on previously stored data](#with-queuemodel).
 * Able to handle timeouts and SS exceptions with retries.
 
@@ -132,7 +132,7 @@ graph LR
    	H4 --Additional request failed--> H3
 ```
 
-The first request has a timeout option. If the LB is not able to retrieve the response within the timout, more requests will be sent to secondary and other available interfaces. If the first request failed, it is reset and the next request will be considered as the first request. Certain types of errors can also be returned as response, e.g. `request_may_be_delivered` or `process_behind`, which may not trigger a load-balancer retry.
+The first request has a timeout option. If the LB is not able to retrieve the response within the timeout, more requests will be sent to secondary and other available interfaces. If the first request failed, it is reset and the next request will be considered as the first request. Certain types of errors can also be returned as response, e.g. `request_may_be_delivered` or `process_behind`, which may not trigger a load-balancer retry.
 
 ### Wait for available alternative
 

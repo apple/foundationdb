@@ -98,18 +98,18 @@ struct WorkloadMetrics {
 // -----------------------
 // Correctness invariants are validated at various steps:
 // 1. Encryption key correctness: as part of performing decryption, BlobCipherKeyCache lookup is done to procure
-//    desired encrytion key based on: {encryptionDomainId, baseCipherId}; the obtained key is validated against
+//    desired encryption key based on: {encryptionDomainId, baseCipherId}; the obtained key is validated against
 //    the encryption key used for encrypting the data.
 // 2. After encryption, generated 'encryption header' fields are validated, encrypted buffer size and contents are
 //    validated.
-// 3. After decryption, the obtained deciphertext is validated against the orginal plaintext payload.
+// 3. After decryption, the obtained deciphertext is validated against the original plaintext payload.
 //
 // Performance metrics:
 // -------------------
 // The workload generator profiles below operations across the iterations and logs the details at the end, they are:
 // 1. Time spent in encryption key fetch (and derivation) operations.
-// 2. Time spent encrypting the buffer (doesn't incude key lookup time); also records the throughput in MB/sec.
-// 3. Time spent decrypting the buffer (doesn't incude key lookup time); also records the throughput in MB/sec.
+// 2. Time spent encrypting the buffer (doesn't include key lookup time); also records the throughput in MB/sec.
+// 3. Time spent decrypting the buffer (doesn't include key lookup time); also records the throughput in MB/sec.
 
 struct EncryptionOpsWorkload : TestWorkload {
 	static constexpr auto NAME = "EncryptionOps";

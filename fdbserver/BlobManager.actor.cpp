@@ -3496,10 +3496,10 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t, UID>>& m
 	}
 
 	if (!allExistingNewer) {
-		// if this range supercedes an old range insert it over that
+		// if this range supersedes an old range insert it over that
 		map.insert(newRange, std::tuple(anyConflicts ? UID() : newId, newEpoch, newSeqno, newId));
 
-		// then, if there were any ranges superceded by this one, insert them over this one
+		// then, if there were any ranges superseded by this one, insert them over this one
 		if (newer.size()) {
 			if (newId != UID()) {
 				outOfDate.push_back(std::pair(newId, newRange));
@@ -3813,8 +3813,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	//
 	// 1. We get the existing granule mappings. We do this by asking all active blob workers for their current granule
 	//    assignments. This guarantees a consistent snapshot of the state of that worker's assignments: Any request it
-	//    recieved and processed from the old manager before the granule assignment request will be included in the
-	//    assignments, and any request it recieves from the old manager afterwards will be rejected with
+	//    received and processed from the old manager before the granule assignment request will be included in the
+	//    assignments, and any request it receives from the old manager afterwards will be rejected with
 	//    blob_manager_replaced. We then read from the database as the source of truth for the assignment. We will
 	//    reconcile the set of ongoing splits to this mapping, and any ranges that are not already assigned to existing
 	//    blob workers will be reassigned.

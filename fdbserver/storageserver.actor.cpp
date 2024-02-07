@@ -753,7 +753,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Key id;
 	AsyncTrigger newMutations;
 	NotifiedVersion durableFetchVersion;
-	// A stopped change feed no longer adds new mutations, but is still queriable.
+	// A stopped change feed no longer adds new mutations, but is still queryable.
 	// stopVersion = MAX_VERSION means the feed has not been stopped
 	Version stopVersion = MAX_VERSION;
 
@@ -1411,7 +1411,7 @@ public:
 		Counter logicalBytesMoveInOverhead;
 		// Bytes committed to the underlying storage engine by SS, it counts the size of key value pairs.
 		Counter kvCommitLogicalBytes;
-		// Count of all clearRange operatons to the storage engine.
+		// Count of all clearRange operations to the storage engine.
 		Counter kvClearRanges;
 		// Count of all clearRange operations on a singlekeyRange(key delete) to the storage engine.
 		Counter kvClearSingleKey;
@@ -2021,7 +2021,7 @@ void StorageServer::byteSampleApplyMutation(MutationRef const& m, Version ver) {
 	else if (m.type == MutationRef::SetValue)
 		byteSampleApplySet(KeyValueRef(m.param1, m.param2), ver);
 	else
-		ASSERT(false); // Mutation of unknown type modfying byte sample
+		ASSERT(false); // Mutation of unknown type modifying byte sample
 }
 
 // watchMap Operations
@@ -2778,7 +2778,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	return Void();
 }
 
-// Delete the checkpoint from disk, as well as all related presisted meta data.
+// Delete the checkpoint from disk, as well as all related persisted meta data.
 ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::Low));
 
@@ -2977,7 +2977,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 				metadataWaitVersion = std::max(metadataWaitVersion, it->metadataCreateVersion);
 
 				// don't wait for all it->metadataVersion updates, if metadata was fetched from elsewhere it's already
-				// durable, and some updates are unecessary to wait for
+				// durable, and some updates are unnecessary to wait for
 				Version stopVersion;
 				if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
 					stopVersion = it->stopVersion;
@@ -3580,7 +3580,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	// FIXME: clean all of this up, and just rely on client-side check
 	// This check is done just before returning, after all waits in this function
-	// Check if pop happened concurently
+	// Check if pop happened concurrently
 	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
 		// This can happen under normal circumstances if this part of a change feed got no updates, but then the feed
 		// was popped. We can check by confirming that the client was sent empty versions as part of another feed's
@@ -4200,7 +4200,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			ASSERT(!vCurrent || vCurrent.key() >= readBegin);
 			ASSERT(data->storageVersion() <= version);
 
-			/* Traverse the PTree further, if thare are no unconsumed resultCache items */
+			/* Traverse the PTree further, if there are no unconsumed resultCache items */
 			if (pos == resultCache.size()) {
 				if (vCurrent) {
 					auto b = vCurrent;
@@ -4302,7 +4302,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			ASSERT(!vCurrent || vCurrent.key() < readEnd);
 			ASSERT(data->storageVersion() <= version);
 
-			/* Traverse the PTree further, if thare are no unconsumed resultCache items */
+			/* Traverse the PTree further, if there are no unconsumed resultCache items */
 			if (pos == resultCache.size()) {
 				if (vCurrent) {
 					auto b = vCurrent;
@@ -5454,7 +5454,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			return Void(); // sliently exit
+			return Void(); // silently exit
 		}
 		TraceEvent(SevInfo, "SSAuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -5870,7 +5870,7 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			return Void(); // sliently exit
+			return Void(); // silently exit
 		}
 		TraceEvent(SevInfo, "SSAuditStorageShardReplicaFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -9404,7 +9404,7 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 }
 
 // It works in the following sequences:
-// 1. Look up the corresponding checkponts, based on key ranges and version.
+// 1. Look up the corresponding checkpoints, based on key ranges and version.
 // 2. Fetch the checkpoints from the source storage servers
 // 3. Restore the checkpoints.
 // 4. Apply any new updates accumulated since the checkpoint version.
@@ -10278,7 +10278,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
 				setAvailableStatus(data, range, true);
 				// Note: The initial range is available, however, the shard won't be created in the storage engine
-				// untill version is committed.
+				// until version is committed.
 				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 				TraceEvent(sevDm, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
@@ -10719,7 +10719,7 @@ private:
 				// got the feed create mutation
 				// 2. The shard was moved away
 				// 3. The shard was moved back, and this SS fetched change feed metadata from a different SS that
-				// did not yet recieve the private mutation, so the feed was not refreshed
+				// did not yet receive the private mutation, so the feed was not refreshed
 				// 4. This SS gets the private mutation, the feed is still marked as removing
 				TraceEvent(SevDebug, "ResetChangeFeedInfoFromPrivateMutation", data->thisServerID)
 				    .detail("FeedID", changeFeedId)
@@ -10873,7 +10873,7 @@ private:
 				} else {
 					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID).log();
 					TraceEvent("StorageServerWorkerRemoved", data->thisServerID).detail("Reason", "TSSQuarantineStop");
-					// dipose of this TSS
+					// dispose of this TSS
 					throw worker_removed();
 				}
 			}
@@ -10944,7 +10944,7 @@ private:
 	}
 
 	// Handles checkpoint private mutations:
-	// 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
+	// 1. Registers a pending checkpoint request, it will be fulfilled when the desired version is durable.
 	// 2. Schedule deleting a checkpoint.
 	void handleCheckpointPrivateMutation(StorageServer* data, const MutationRef& m, Version ver) {
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
@@ -12137,8 +12137,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		if (requireCheckpoint) {
-			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versoins, and
-			// `newOldestVersion` is chosen such that it is no larger than the smallest pending checkpoing
+			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versions, and
+			// `newOldestVersion` is chosen such that it is no larger than the smallest pending checkpoint
 			// version. When the exact desired checkpoint version is committed, updateStorage() is blocked
 			// and a checkpoint will be created at that version from the underlying storage engine.
 			// Note a pending checkpoint is only dequeued after the corresponding checkpoint is created

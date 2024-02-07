@@ -315,7 +315,7 @@ bool isNumber(const std::string& num) {
 		}
 	}
 
-	// Iterate through the string and make sure every char is a digit and there is only one occurence of "."
+	// Iterate through the string and make sure every char is a digit and there is only one occurrence of "."
 	int dot_count = 0;
 	for (size_t i = start; i < num.size(); i++) {
 		if (!std::isdigit(num[i])) {
@@ -337,7 +337,7 @@ bool isNumber(const std::string& num) {
     <name>:<value>|<type>|#<tag1-key>:<tag1-value>,<tag2-k/v>
 
     Where name consists of only upper or lowercase letters (no symbols),
-    value is numeric (postive or negative, integer or decimal),
+    value is numeric (positive or negative, integer or decimal),
     type is one of "g", "c",
 
 */

@@ -149,7 +149,7 @@ struct KmsUrlStore {
 			// Sort the available URLs based on following rules:
 			// 1. URL with higher unresponsiveness-penalty are least preferred
 			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-respones are
-			// less preferrred
+			// less preferred
 			// 3. Lastly, URLs with more malformed response messages are less preferred
 
 			if (l.unresponsivenessPenalty != r.unresponsivenessPenalty) {
@@ -207,8 +207,8 @@ FDB_BOOLEAN_PARAM(RefreshPersistedUrls);
 FDB_BOOLEAN_PARAM(IsCipherType);
 
 // Routine to determine penalty for cached KMSUrl based on unresponsive KMS behavior observed in recent past. The
-// routine is desgined to assign a maximum penalty if KMS responses are unacceptable in very recent past, with time the
-// the penalty weight deteorates (matches real world outage OR server overload scenario)
+// routine is designed to assign a maximum penalty if KMS responses are unacceptable in very recent past, with time the
+// the penalty weight deteriorates (matches real world outage OR server overload scenario)
 
 struct KmsUrlPenaltyParams {
 	static double penalty(int64_t timeSinceLastPenalty) { return continuousTimeDecay(1.0, 0.1, timeSinceLastPenalty); }
@@ -374,15 +374,15 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPe
 	// 2) Requests to all cached KMS URLs is failing for some reason.
 	//
 	// Following steps are followed as part of KMS discovery:
-	// 1) Based on the configured KMS URL discovery mode, the KMS URLs are extracted and persited in a DynamicKnob
+	// 1) Based on the configured KMS URL discovery mode, the KMS URLs are extracted and persisted in a DynamicKnob
 	// enabled configuration knob. Approach allows relying on the parsing configuration supplied discovery URL mode
-	// only during afte the initial boot, from then on, the URLs can periodically refreshed along with encryption
+	// only during after the initial boot, from then on, the URLs can periodically refreshed along with encryption
 	// key fetch requests (SERVER_KNOBS->REST_KMS_CONNECTOR_REFRESH_KMS_URLS needs to be enabled). 2) Cluster will
 	// continue using cached KMS URLs (and refreshing them if needed); however, if for some reason, all cached URLs
 	// aren't working, then code re-discovers the URL following step#1 and refresh persisted state as well.
 
 	if (!refreshPersistedUrls) {
-		// TODO: request must be satisfied accessing KMS URLs persited using DynamicKnobs. Will be implemented once
+		// TODO: request must be satisfied accessing KMS URLs persisted using DynamicKnobs. Will be implemented once
 		// feature is available
 	}
 
@@ -810,7 +810,7 @@ Future<T> kmsRequestImpl(
 			// 1. URLs got reshuffled since the start of the enumeration.
 			// 2. All cached URLs aren't working, KMS URLs got re-discovered since start of enumeration.
 			// For #1, let the code continue enumerating cached URLs, an attempt to reset enumeration order could
-			// cause deadlock when: all cached URLs aren't working and multiple requests keep updating penalities
+			// cause deadlock when: all cached URLs aren't working and multiple requests keep updating penalties
 			// and reshuffling the order. For #2, reset the enumeration order to re-attempt operation after
 			// re-discovery for KMS URL is done (stale cached KMS URLs)
 

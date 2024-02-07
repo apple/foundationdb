@@ -16,7 +16,7 @@ enum Output_options {
 
 	pretty_print = 0x01, // Add whitespace to format the output nicely.
 
-	raw_utf8 = 0x02, // This prevents non-printable characters from being escapted using "\uNNNN" notation.
+	raw_utf8 = 0x02, // This prevents non-printable characters from being escaped using "\uNNNN" notation.
 	                 // Note, this is an extension to the JSON standard. It disables the escaping of
 	                 // non-printable characters allowing UTF-8 sequences held in 8 bit char strings
 	                 // to pass through unaltered.
@@ -27,7 +27,7 @@ enum Output_options {
 	// pretty printing except that arrays printed on single lines unless they contain
 	// composite elements, i.e. objects or arrays
 	always_escape_nonascii = 0x10,
-	// all unicode wide characters are escaped, i.e. outputed as "\uXXXX", even if they are
+	// all unicode wide characters are escaped, i.e. outputted as "\uXXXX", even if they are
 	// printable under the current locale, ascii printable chars are not escaped
 };
 }

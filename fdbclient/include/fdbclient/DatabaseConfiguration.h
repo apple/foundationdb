@@ -147,7 +147,7 @@ struct DatabaseConfiguration {
 		return result;
 	}
 
-	// Counts the number of DCs required including remote and satellites for current database configuraiton.
+	// Counts the number of DCs required including remote and satellites for current database configuration.
 	int32_t minDatacentersRequired() const {
 		int minRequired = 0;
 		for (auto& r : regions) {
@@ -165,9 +165,9 @@ struct DatabaseConfiguration {
 		return minRequired;
 	}
 
-	// Retuns the maximum number of discrete failures a cluster can tolerate.
+	// Returns the maximum number of discrete failures a cluster can tolerate.
 	// In HA mode, `fullyReplicatedRegions` is set to "1" initially when data is being
-	// replicated to remote, and will be incremented later. `forAvailablity` is set to true
+	// replicated to remote, and will be incremented later. `forAvailability` is set to true
 	// if we want to account the number for machines that can recruit new tLogs/SS after failures.
 	// Killing an entire datacenter counts as killing one zone in modes that support it.
 	int32_t maxZoneFailuresTolerated(int fullyReplicatedRegions, bool forAvailability) const {

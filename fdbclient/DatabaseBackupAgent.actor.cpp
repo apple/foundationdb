@@ -741,7 +741,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		                          .get(BackupAgentBase::keyConfig)
 		                          .get(task->params[BackupAgentBase::keyConfigLogUid]);
 		state std::vector<RangeResult> nextMutations;
-		state bool isTimeoutOccured = false;
+		state bool isTimeoutOccurred = false;
 		state Optional<KeyRef> lastKey;
 		state Version lastVersion;
 		state int64_t nextMutationSize = 0;
@@ -799,7 +799,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 						bool first = true;
 						for (auto m : mutations) {
 							for (auto kv : m) {
-								if (isTimeoutOccured) {
+								if (isTimeoutOccurred) {
 									Version newVersion = getLogKeyVersion(kv.key);
 
 									if (newVersion > lastVersion) {
@@ -832,13 +832,13 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				if (nextVersionAfterBreak.present()) {
 					return nextVersionAfterBreak;
 				}
-				if (!isTimeoutOccured && timer_monotonic() >= breakTime && lastKey.present()) {
-					// timeout occured
+				if (!isTimeoutOccurred && timer_monotonic() >= breakTime && lastKey.present()) {
+					// timeout occurred
 					// continue to copy mutations with the
 					// same version before break because
 					// the next run should start from the beginning of a version > lastVersion.
 					lastVersion = getLogKeyVersion(lastKey.get());
-					isTimeoutOccured = true;
+					isTimeoutOccurred = true;
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled || e.code() == error_code_backup_error)

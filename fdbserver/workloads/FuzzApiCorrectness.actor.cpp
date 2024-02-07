@@ -475,7 +475,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					if (waitLocation < operations.size()) {
 						int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
 						wait(operations[waitOp]);
-						wait(delay(0.000001)); // to ensure errors have propgated from reads to commits
+						wait(delay(0.000001)); // to ensure errors have propagated from reads to commits
 						waitLocation = operations.size();
 					}
 				}

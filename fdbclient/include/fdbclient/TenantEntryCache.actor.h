@@ -68,9 +68,9 @@ using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(con
 // 2. Lookup by 'TenantPrefix'
 // 3. Lookup by 'TenantName'
 // TODO: Currently this cache performs poorly if there are tenant access happening to unknown tenants which happens most
-// frequently in optional tenant mode but can also happen in required mode if there are alot of tenants created. Further
-// as a consequence of the design we cannot be sure that the state of a given tenant is accurate even if its present in
-// the cache.
+// frequently in optional tenant mode but can also happen in required mode if there are a lot of tenants created.
+// Further as a consequence of the design we cannot be sure that the state of a given tenant is accurate even if its
+// present in the cache.
 
 template <class T>
 class TenantEntryCache : public ReferenceCounted<TenantEntryCache<T>>, NonCopyable {
@@ -185,9 +185,9 @@ private:
 				state Future<Void> tenantModifiedWatch = TenantMetadata::lastTenantModification().watch(tr);
 				wait(tr->commit());
 				TraceEvent(SevDebug, "TenantEntryCacheRefreshWatchSet", cache->id());
-				// setInitialWatch is set to indicate that an inital watch has been set for the lastTenantModification
+				// setInitialWatch is set to indicate that an initial watch has been set for the lastTenantModification
 				// key. Currently this is only used in simulation to avoid a race condition where a tenant is created
-				// before the inital watch is set. However, it can be enabled by passing waitForInitalWatch = true to
+				// before the initial watch is set. However, it can be enabled by passing waitForInitalWatch = true to
 				// the init() method.
 				if (cache->setInitialWatch.canBeSet()) {
 					cache->setInitialWatch.send(Void());
@@ -504,7 +504,7 @@ public:
 			refresher = recurringAsync([&, reason]() { return refresh(reason); },
 			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* interval */
 			                           true, /* absoluteIntervalDelay */
-			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
+			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* initialDelay */
 			                           TaskPriority::Worker);
 		} else if (refreshMode == TenantEntryCacheRefreshMode::WATCH) {
 			if (waitForInitalWatch) {

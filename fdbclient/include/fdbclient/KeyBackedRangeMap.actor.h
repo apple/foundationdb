@@ -167,7 +167,7 @@ public:
 	                                     bool replace) {
 		kbt_debug("RANGEMAP updateRange start {} to {} value {}\n", begin, end, valueUpdate);
 
-		// In order to update and coalsce the range, we need all range boundaries from
+		// In order to update and coalesce the range, we need all range boundaries from
 		//   lastLessThan(begin) inclusive
 		// through
 		//   firstGreaterOrEqual(end) inclusive, which is firstGreaterThan(end) exclusive

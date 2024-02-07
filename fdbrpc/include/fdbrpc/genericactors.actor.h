@@ -32,7 +32,7 @@
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// To avoid diretly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
+// To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
 // the call to FlowTransport.actor.cpp as a external function.
 extern void removeCachedDNS(const std::string& host, const std::string& service);
 

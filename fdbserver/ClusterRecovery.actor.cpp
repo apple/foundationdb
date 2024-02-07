@@ -1090,7 +1090,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	// If it's the first recovery the encrypt mode is not yet avilable so create the txn state store with encryption
+	// If it's the first recovery the encrypt mode is not yet available so create the txn state store with encryption
 	// disabled. This is fine since we will not write any data to disk using this txn store.
 	state bool enableEncryptionForTxnStateStore = false;
 	if (self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
