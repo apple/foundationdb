@@ -97,15 +97,14 @@ public:
 		// with a minimal interval
 		if (SERVER_KNOBS->ENABLE_REBALANCE_STORAGE_QUEUE) {
 			int64_t queueSize = server->getStorageQueueSize();
-			bool storageQueueKeepTooLong = server->updateAndGetStorageQueueTooLong(queueSize, server->getId());
+			bool storageQueueKeepTooLong = server->updateAndGetStorageQueueTooLong(queueSize);
 			double currentTime = now();
 			if (storageQueueKeepTooLong) {
 				if (!server->lastTimeNotifyLongStorageQueue.present() ||
 				    currentTime - server->lastTimeNotifyLongStorageQueue.get() >
 				        SERVER_KNOBS->DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL) {
 					server->longStorageQueue.trigger(); // will trigger data move for rebalancing storage queue
-					TraceEvent(SevInfo, "LongStorageQueueNotified", server->collection->getDistributorId())
-					    .detail("SSID", server->getId())
+					TraceEvent(SevInfo, "SSTrackerTriggerLongStorageQueue", server->getId())
 					    .detail("CurrentQueueSize", queueSize);
 					server->lastTimeNotifyLongStorageQueue = currentTime;
 				}
@@ -195,32 +194,27 @@ Future<Void> TCServerInfo::serverMetricsPolling(Reference<IDDTxnProcessor> txnPr
 }
 
 // Return true if the storage queue of the input storage server ssi keeps too long for a while
-bool TCServerInfo::updateAndGetStorageQueueTooLong(int64_t currentBytes, UID ssid) {
+bool TCServerInfo::updateAndGetStorageQueueTooLong(int64_t currentBytes) {
 	double currentTime = now();
 	if (currentBytes > SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_LONG_BYTES) {
 		if (!storageQueueTooLongStartTime.present()) {
 			storageQueueTooLongStartTime = currentTime;
-			TraceEvent(SevWarn, "TCDetectStorageQueueBecomeLong")
-			    .detail("SSID", ssid)
+			TraceEvent(SevWarn, "SSTrackerDetectStorageQueueBecomeLong", id)
 			    .detail("StorageQueueBytes", currentBytes)
 			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
 		} else {
-			TraceEvent(SevDebug, "TCDetectStorageQueueRemainLong")
-			    .detail("SSID", ssid)
+			TraceEvent(SevDebug, "SSTrackerDetectStorageQueueRemainLong", id)
 			    .detail("StorageQueueBytes", currentBytes)
 			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
 		}
 	} else if (currentBytes < SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHORT_BYTES) {
 		if (storageQueueTooLongStartTime.present()) {
-			storageQueueTooLongStartTime = Optional<double>();
-			TraceEvent(SevInfo, "TCDetectStorageQueueBecomeShort")
-			    .detail("SSID", ssid)
-			    .detail("StorageQueueBytes", currentBytes);
+			storageQueueTooLongStartTime.reset();
+			TraceEvent(SevInfo, "SSTrackerDetectStorageQueueBecomeShort", id).detail("StorageQueueBytes", currentBytes);
 		}
 	} else {
 		if (storageQueueTooLongStartTime.present()) {
-			TraceEvent(SevDebug, "TCDetectStorageQueueRemainLong")
-			    .detail("SSID", ssid)
+			TraceEvent(SevDebug, "SSTrackerDetectStorageQueueRemainLong", id)
 			    .detail("StorageQueueBytes", currentBytes)
 			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
 		}

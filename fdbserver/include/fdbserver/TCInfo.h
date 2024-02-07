@@ -128,7 +128,7 @@ public:
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor);
-	bool updateAndGetStorageQueueTooLong(int64_t currentBytes, UID ssid);
+	bool updateAndGetStorageQueueTooLong(int64_t currentBytes);
 	~TCServerInfo();
 };
 
