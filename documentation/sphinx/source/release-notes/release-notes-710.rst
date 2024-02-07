@@ -2,6 +2,69 @@
 Release Notes
 #############
 
+7.1.55
+======
+* Same as 7.1.54 release with AVX enabled.
+
+7.1.54
+======
+* Released with AVX disabled.
+* Upgraded RocksDB to 8.6.7. `(PR #11160) <https://github.com/apple/foundationdb/pull/11160>`_
+* Enabled data distribution verbose logging by default. `(PR #11158) <https://github.com/apple/foundationdb/pull/11158>`_
+* Added logging for invalid mutations on storage servers. `(PR #11097) <https://github.com/apple/foundationdb/pull/11097>`_
+* Enhanced AsyncFileWriteChecker history.timestamp to have better millisecond precision. `(PR #11155) <https://github.com/apple/foundationdb/pull/11155>`_
+* Fixed checkall debug command to output all inconsistent keys. `(PR #11153) <https://github.com/apple/foundationdb/pull/11153>`_, `(PR #11146) <https://github.com/apple/foundationdb/pull/11146>`_, `(PR #11141) <https://github.com/apple/foundationdb/pull/11141>`_, and `(PR #11138) <https://github.com/apple/foundationdb/pull/11138>`_
+* Fixed unreachable processes in status json due to stale tester interfaces at cluster controller. `(PR #11149) <https://github.com/apple/foundationdb/pull/11149>`_
+
+7.1.53
+======
+* Same as 7.1.52 release with AVX enabled.
+
+7.1.52
+======
+* Released with AVX disabled.
+* Fixed testers from being overloaded by consistency checkers. `(PR #11127) <https://github.com/apple/foundationdb/pull/11127>`_
+
+7.1.51
+======
+* Same as 7.1.50 release with AVX enabled.
+
+7.1.50
+======
+* Released with AVX disabled.
+* Added urgent consistency checker mode that uses multiple tester processes. `(PR #11103) <https://github.com/apple/foundationdb/pull/11103>`_
+* Fixed checkall debug command when shard to check is large. `(PR #11105) <https://github.com/apple/foundationdb/pull/11105>`_
+
+7.1.49
+======
+* Same as 7.1.48 release with AVX enabled.
+
+7.1.48
+======
+* Released with AVX disabled.
+* Added consistency checker urgent mode. `(PR #11102) <https://github.com/apple/foundationdb/pull/11102>`_
+* Increased the number of keys that "fdbcli checkall" command can fetch per GetKeyValueRequest call. `(PR #11098) <https://github.com/apple/foundationdb/pull/11098>`_
+
+7.1.47
+======
+* Same as 7.1.46 release with AVX enabled.
+
+7.1.46
+======
+* Released with AVX disabled.
+* Added range-customizable consistency checker and fixed retriable errors during the check. `(PR #11100) <https://github.com/apple/foundationdb/pull/11100>`_ and `(PR #11096) <https://github.com/apple/foundationdb/pull/11096>`_
+* Added key ranges as filters for fdbdecode. `(PR #11099) <https://github.com/apple/foundationdb/pull/11099>`_
+
+7.1.45
+======
+* Same as 7.1.44 release with AVX enabled.
+
+7.1.44
+======
+* Released with AVX disabled.
+* Added distributed consistency checker. `(PR #11088) <https://github.com/apple/foundationdb/pull/11088>`_
+* Fixed the exclusions of localities that are not matching any process. `(PR #11034) <https://github.com/apple/foundationdb/pull/11034>`_
+
 7.1.43
 ======
 * Same as 7.1.42 release with AVX enabled.
