@@ -56,6 +56,12 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	std::vector<Reference<TCTeamInfo>> teams{};
 	ErrorOr<GetStorageMetricsReply> metrics;
 	Optional<HealthMetrics::StorageStats> storageStats;
+	Optional<double> storageQueueTooLongStartTime; // When a storage queue becomes long
+
+	// Last time when server notified teamTracker that the queue is long
+	// We do not want repeatedly notify teamTracker in present of long
+	// queue lastTimeNotifyLongStorageQueue is used to support this
+	Optional<double> lastTimeNotifyLongStorageQueue;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
 	void setStorageStats(HealthMetrics::StorageStats stats) { storageStats = stats; }
@@ -74,6 +80,7 @@ public:
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
+	AsyncVar<Void> longStorageQueue; // set when the storage queue remains too long for a while
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,
@@ -121,7 +128,7 @@ public:
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor);
-
+	bool updateAndGetStorageQueueTooLong(int64_t currentBytes);
 	~TCServerInfo();
 };
 

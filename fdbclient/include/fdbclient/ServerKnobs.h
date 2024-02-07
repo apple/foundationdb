@@ -158,6 +158,8 @@ public:
 	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
 	// A load-balance priority read mountain chopper
 	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
+	// A load-balance priority storage queue too long
+	int PRIORITY_REBALANCE_STORAGE_QUEUE;
 	// A team healthy priority for wiggle a storage server
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	// A team healthy priority when all servers in a team are healthy. When a team changes from any unhealthy states to
@@ -322,6 +324,14 @@ public:
 	                                                  // distributor to fetch the list of tenants over storage quota
 	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // experimental!
 	int64_t DD_TARGET_STORAGE_QUEUE_SIZE;
+	bool ENABLE_REBALANCE_STORAGE_QUEUE; // experimental!
+	int64_t REBALANCE_STORAGE_QUEUE_LONG_BYTES; // Lower bound of length indicating the storage queue is too long
+	int64_t REBALANCE_STORAGE_QUEUE_SHORT_BYTES; // Upper bound of length indicating the storage queue is back to short
+	double DD_LONG_STORAGE_QUEUE_TIMESPAN;
+	double DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL;
+	int64_t REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN;
+	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
+	                                                               // light-traffic shards out of the overloading server
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor

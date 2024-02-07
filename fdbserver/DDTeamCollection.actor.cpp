@@ -1548,6 +1548,19 @@ public:
 					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
+					when(wait(server->longStorageQueue.onChange())) {
+						TraceEvent(SevInfo, "TriggerStorageQueueRebalance", self->distributorId)
+						    .detail("SSID", server->getId());
+						std::vector<ShardsAffectedByTeamFailure::Team> teams;
+						for (const auto& team : server->getTeams()) {
+							std::vector<UID> servers;
+							for (const auto& server : team->getServers()) {
+								servers.push_back(server->getId());
+							}
+							teams.push_back(ShardsAffectedByTeamFailure::Team(servers, self->primary));
+						}
+						self->triggerStorageQueueRebalance.send(ServerTeamInfo(server->getId(), teams, self->primary));
+					}
 				}
 
 				if (recordTeamCollectionInfo) {
@@ -4181,7 +4194,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
     processingUnhealthy(params.processingUnhealthy), getAverageShardBytes(params.getAverageShardBytes),
-    readyToStart(params.readyToStart),
+    triggerStorageQueueRebalance(params.triggerStorageQueueRebalance), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(params.getShardMetrics),
@@ -5957,7 +5970,8 @@ public:
 		                                                     PromiseStream<GetMetricsRequest>(),
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
-		                                                     PromiseStream<Promise<int64_t>>() }));
+		                                                     PromiseStream<Promise<int64_t>>(),
+		                                                     PromiseStream<ServerTeamInfo>() }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -6010,7 +6024,8 @@ public:
 		                                                     PromiseStream<GetMetricsRequest>(),
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
-		                                                     PromiseStream<Promise<int64_t>>() }));
+		                                                     PromiseStream<Promise<int64_t>>(),
+		                                                     PromiseStream<ServerTeamInfo>() }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
