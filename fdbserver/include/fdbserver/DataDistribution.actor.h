@@ -54,6 +54,7 @@ public:
 		OTHER = 0,
 		REBALANCE_DISK,
 		REBALANCE_READ,
+		REBALANCE_WRITE,
 		MERGE_SHARD,
 		SIZE_SPLIT,
 		WRITE_SPLIT,
@@ -70,6 +71,8 @@ public:
 			return "RebalanceDisk";
 		case REBALANCE_READ:
 			return "RebalanceRead";
+		case REBALANCE_WRITE:
+			return "RebalanceWrite";
 		case MERGE_SHARD:
 			return "MergeShard";
 		case SIZE_SPLIT:
@@ -444,6 +447,16 @@ private:
 	std::map<ShardsAffectedByTeamFailure::Team, std::set<uint64_t>> teamPhysicalShardIDs;
 	bool requireTransition;
 	double lastTransitionStartTime;
+};
+
+struct ServerTeamInfo {
+	UID serverId;
+	std::vector<ShardsAffectedByTeamFailure::Team> teams;
+	bool primary;
+
+	ServerTeamInfo() {}
+	ServerTeamInfo(UID serverId, const std::vector<ShardsAffectedByTeamFailure::Team>& teams, bool primary)
+	  : serverId(serverId), teams(teams), primary(primary) {}
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer

@@ -213,7 +213,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		                                      PromiseStream<GetMetricsRequest>(),
 		                                      Promise<UID>(),
 		                                      PromiseStream<Promise<int>>(),
-		                                      PromiseStream<Promise<int64_t>>() });
+		                                      PromiseStream<Promise<int64_t>>(),
+		                                      PromiseStream<ServerTeamInfo>() });
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 
