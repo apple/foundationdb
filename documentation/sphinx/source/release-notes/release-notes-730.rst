@@ -11,7 +11,7 @@ Release Notes
 7.3.30
 ======
 * Fixed an issue in Ratekeeper that could cause StorageQueueInfo loss. `(PR #11124) <https://github.com/apple/foundationdb/pull/11124>`_
-* Fixed checkall command for large shards. `(PR #11121) <https://github.com/apple/foundationdb/pull/11121>`
+* Fixed checkall command for large shards. `(PR #11121) <https://github.com/apple/foundationdb/pull/11121>`_
 
 7.3.29
 ======
