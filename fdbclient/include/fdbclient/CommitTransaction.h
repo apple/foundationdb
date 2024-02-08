@@ -93,7 +93,10 @@ struct MutationRef {
 		Encrypted, /* Represents an encrypted mutation and cannot be used directly before decrypting */
 		MAX_ATOMIC_OP
 	};
-	// This is stored this way for serialization purposes.
+
+	// This is stored this way for serialization purposes. Note: the first bit of `type` is used to indicate whether a
+	// checksum is appended to `param2`, when checksum is enabled, the bit is set during serialization, and reset during
+	// deserialization.
 	uint8_t type;
 	StringRef param1, param2;
 	Optional<uint32_t> checksum;
@@ -103,7 +106,9 @@ struct MutationRef {
 	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b) {}
 	MutationRef(Arena& to, const MutationRef& from)
 	  : type(from.type), param1(to, from.param1), param2(to, from.param2) {}
-	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
+	int totalSize() const {
+		return OVERHEAD_BYTES + param1.size() + param2.size() + (checksum.present() ? sizeof(uint32_t) + 1 : 1);
+	}
 	int expectedSize() const { return param1.size() + param2.size(); }
 	int weightedTotalSize() const {
 		// AtomicOp can cause more workload to FDB cluster than the same-size set mutation;
@@ -121,21 +126,31 @@ struct MutationRef {
 		if (checksum.present()) {
 			checksumStr = format("checksum: %s ", std::to_string(checksum.get()).c_str());
 		}
+		uint8_t cType = type & ~CHECKSUM_FLAG_MASK;
 		return format("%scode: %s param1: %s param2: %s",
-		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset",
+		              cType < MutationRef::MAX_ATOMIC_OP ? typeString[(int)cType] : "Unset",
 		              checksumStr.c_str(),
 		              printable(param1).c_str(),
 		              printable(param2).c_str());
 	}
 
 	uint8_t typeWithChecksum() const { return this->type | CHECKSUM_FLAG_MASK; }
-	void removeChecksum() {
+	Optional<uint32_t> removeChecksum() {
+		this->checksum.reset();
 		if (!withChecksum()) {
-			return;
+			return Optional<uint32_t>();
 		}
-		ASSERT(param2.size() >= 4);
-		type &= ~CHECKSUM_FLAG_MASK;
-		param2 = param2.substr(0, param2.size() - 4);
+		ASSERT(this->param2.size() >= 4);
+		const int idx = this->param2.size() - 4;
+		const uint32_t pc = *(const uint32_t*)(this->param2.substr(idx).begin());
+		this->type &= ~CHECKSUM_FLAG_MASK;
+		this->param2 = this->param2.substr(0, idx);
+		if constexpr (false) {
+			DisabledTraceEvent(SevVerbose, "RemoveMutationRefChecksum")
+			    .detail("ExistingChecksum", std::to_string(pc))
+			    .detail("Mutation", this->toString());
+		}
+		return pc;
 	}
 	bool withChecksum() const { return this->type & CHECKSUM_FLAG_MASK; }
 
@@ -143,6 +158,7 @@ struct MutationRef {
 	bool isValid() const { return type < MAX_ATOMIC_OP; }
 
 	uint32_t populateChecksum() {
+		ASSERT(!this->withChecksum());
 		uint32_t c = crc32c_append(static_cast<uint32_t>(this->type), param1.begin(), param1.size());
 		crc32c_append(c, param2.begin(), param2.size());
 		if (this->checksum.present()) {
@@ -177,11 +193,13 @@ struct MutationRef {
 				StringRef cs = StringRef((uint8_t*)&c, 4);
 				uint8_t cType = this->typeWithChecksum();
 				serializer(ar, cType, param2, cs);
-				TraceEvent(SevVerbose, "MutationRefChecksum")
-				    .detail("CType", cType)
-				    .detail("Mutation", this->toString())
-				    .detail("Checksum", std::to_string(c))
-				    .detail("ChecksumString", cs);
+				if constexpr (false) {
+					TraceEvent(SevVerbose, "MutationRefChecksumS")
+					    .detail("CType", cType)
+					    .detail("Mutation", this->toString())
+					    .detail("Checksum", std::to_string(c))
+					    .detail("ChecksumString", cs);
+				}
 			} else {
 				serializer(ar, type, param2, empty);
 			}
@@ -193,21 +211,27 @@ struct MutationRef {
 			Standalone<StringRef> param2WithChecksum = param2.withSuffix(cs);
 			StringRef p2 = param2WithChecksum;
 			serializer(ar, cType, param1, p2);
-			TraceEvent(SevVerbose, "MutationRefChecksum")
-			    .detail("CType", cType)
-			    .detail("Mutation", this->toString())
-			    .detail("Checksum", std::to_string(c))
-			    .detail("ChecksumString", cs);
+			if constexpr (false) {
+				TraceEvent(SevVerbose, "MutationRefChecksumS")
+				    .detail("CType", cType)
+				    .detail("Mutation", this->toString())
+				    .detail("Checksum", std::to_string(c))
+				    .detail("ChecksumString", cs);
+			}
 		} else {
 			serializer(ar, type, param1, param2);
 		}
-		if (ar.isDeserializing && withChecksum()) {
-			removeChecksum();
-		}
-		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
-			ASSERT(param1[param1.size() - 1] == '\x00');
-			param2 = param1;
-			param1 = param2.substr(0, param2.size() - 1);
+
+		if (ar.isDeserializing) {
+			if (withChecksum()) {
+				checksum = removeChecksum();
+			}
+			if (type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
+				ASSERT(param1[param1.size() - 1] == '\x00');
+				param2 = param1;
+				param1 = param2.substr(0, param2.size() - 1);
+			}
+			validateChecksum();
 		}
 	}
 
