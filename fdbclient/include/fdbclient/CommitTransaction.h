@@ -128,8 +128,8 @@ struct MutationRef {
 		}
 		uint8_t cType = type & ~CHECKSUM_FLAG_MASK;
 		return format("%scode: %s param1: %s param2: %s",
-		              cType < MutationRef::MAX_ATOMIC_OP ? typeString[(int)cType] : "Unset",
 		              checksumStr.c_str(),
+		              cType < MutationRef::MAX_ATOMIC_OP ? typeString[(int)cType] : "Unset",
 		              printable(param1).c_str(),
 		              printable(param2).c_str());
 	}
@@ -601,7 +601,6 @@ struct EncryptedMutationsAndVersionRef {
 TEST_CASE("noSim/CommitTransaction/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
-	// BinaryWriter wr(IncludeVersion(ProtocolVersion::withGcTxnGenerations()));
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
 
 	wr << m;
@@ -610,13 +609,11 @@ TEST_CASE("noSim/CommitTransaction/MutationRef") {
 	TraceEvent("EncodedMutation").detail("RawBytes", value);
 
 	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withBlobGranule()));
-	// BinaryReader rd(value, IncludeVersion());
 	Standalone<MutationRef> de;
 
 	rd >> de;
 
 	printf("Deserialized mutation: %s\n", de.toString().c_str());
-	printf("testing data move ID encoding/decoding complete\n");
 
 	return Void();
 }
