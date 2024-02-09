@@ -540,12 +540,12 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 		wr << (uint8_t)hashlittle(&version, sizeof(version), 0);
 		wr << bigEndian64(commitVersion);
 
-		MutationRef backupMutation;
-		backupMutation.type = MutationRef::SetValue;
 		uint32_t* partBuffer = nullptr;
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 
+			MutationRef backupMutation;
+			backupMutation.type = MutationRef::SetValue;
 			// Assign the second parameter as the part
 			backupMutation.param2 = val.substr(
 			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
