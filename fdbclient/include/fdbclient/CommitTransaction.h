@@ -145,11 +145,6 @@ struct MutationRef {
 		const uint32_t pc = *(const uint32_t*)(this->param2.substr(idx).begin());
 		this->type &= ~CHECKSUM_FLAG_MASK;
 		this->param2 = this->param2.substr(0, idx);
-		if constexpr (false) {
-			DisabledTraceEvent(SevVerbose, "RemoveMutationRefChecksum")
-			    .detail("ExistingChecksum", std::to_string(pc))
-			    .detail("Mutation", this->toString());
-		}
 		return pc;
 	}
 	bool withChecksum() const { return this->type & CHECKSUM_FLAG_MASK; }
@@ -193,13 +188,6 @@ struct MutationRef {
 				StringRef cs = StringRef((uint8_t*)&c, 4);
 				uint8_t cType = this->typeWithChecksum();
 				serializer(ar, cType, param2, cs);
-				if constexpr (false) {
-					TraceEvent(SevVerbose, "MutationRefChecksumS")
-					    .detail("CType", cType)
-					    .detail("Mutation", this->toString())
-					    .detail("Checksum", std::to_string(c))
-					    .detail("ChecksumString", cs);
-				}
 			} else {
 				serializer(ar, type, param2, empty);
 			}
@@ -211,13 +199,6 @@ struct MutationRef {
 			Standalone<StringRef> param2WithChecksum = param2.withSuffix(cs);
 			StringRef p2 = param2WithChecksum;
 			serializer(ar, cType, param1, p2);
-			if constexpr (false) {
-				TraceEvent(SevVerbose, "MutationRefChecksumS")
-				    .detail("CType", cType)
-				    .detail("Mutation", this->toString())
-				    .detail("Checksum", std::to_string(c))
-				    .detail("ChecksumString", cs);
-			}
 		} else {
 			serializer(ar, type, param1, param2);
 		}
