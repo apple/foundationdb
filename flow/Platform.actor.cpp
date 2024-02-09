@@ -3420,7 +3420,7 @@ extern "C" void flushAndExit(int exitCode) {
 	// Send a signal to allow the Kernel to generate a coredump for this process.
 	// See: https://man7.org/linux/man-pages/man5/core.5.html
 	// The abort method will send a SIGABRT, which causes the kernel to collect a coredump.
-	// See: https://pubs.opengroup.org/onlinepubs/9699919799/functions/abort.html.
+	// See: https://man7.org/linux/man-pages/man3/abort.3.html.
 	if (exitCode != FDB_EXIT_SUCCESS)
 		abort();
 	// In the success case exit the process gracefully.
