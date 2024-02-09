@@ -330,8 +330,6 @@ public:
 	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // Experimental! Enable to avoid moving data to a team which has a
 	                                                // long storage queue
 	double DD_LONG_STORAGE_QUEUE_MAJORITY_PERCENTILE; // p% amount SSes which have longer queues
-	double DD_MIN_TEAM_PERCENTAGE_TO_SELECT_LONG_QUEUE_THRESHOLD; // At least this portion of SSes should be involved
-	                                                              // when deciding the long queue threshold
 	bool ENABLE_REBALANCE_STORAGE_QUEUE; // Experimental! Enable to trigger data moves to rebalance storage queues when
 	                                     // a queue is significantly longer than others
 	int64_t REBALANCE_STORAGE_QUEUE_LONG_BYTES; // Lower bound of length indicating the storage queue is too long

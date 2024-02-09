@@ -199,27 +199,21 @@ public:
 	// portion of storage servers that have longer storage queues
 	static Optional<int64_t> selectLongStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
 		std::vector<int64_t> queueLengthList;
-		for (int i = 0; i < teams.size(); i++) {
-			Optional<int64_t> storageQueueSize = teams[i]->getLongestStorageQueueSize();
+		for (const auto& team : teams) {
+			Optional<int64_t> storageQueueSize = team->getLongestStorageQueueSize();
 			if (!storageQueueSize.present()) {
-				// This SS may not healthy, so avoid selecting them by setting the queue length to a large number
+				// This team may have an unhealthy SS, so avoid selecting it by setting the queue length to a large
+				// number
 				queueLengthList.push_back(std::numeric_limits<int64_t>::max());
 			} else {
 				queueLengthList.push_back(storageQueueSize.get());
 			}
 		}
-		if (queueLengthList.size() <
-		    SERVER_KNOBS->DD_MIN_TEAM_PERCENTAGE_TO_SELECT_LONG_QUEUE_THRESHOLD * teams.size()) {
-			TraceEvent(SevWarn, "StorageQueueAwareGetThresholdQueueFailed")
-			    .suppressFor(5.0)
-			    .detail("AvailableTeamCount", queueLengthList.size());
-			return Optional<int64_t>();
-		}
-		std::sort(queueLengthList.begin(), queueLengthList.end());
 		unsigned long position = queueLengthList.size() * (1 - SERVER_KNOBS->DD_LONG_STORAGE_QUEUE_MAJORITY_PERCENTILE);
 		position = std::max(
 		    (unsigned long)0,
 		    std::min(position, queueLengthList.size() - 1)); // position should be in [0, queueLengthList.size()-1]
+		std::nth_element(queueLengthList.begin(), queueLengthList.begin() + position, queueLengthList.end());
 		int64_t threshold = queueLengthList[position];
 		TraceEvent(SevInfo, "StorageQueueAwareGotThreshold").suppressFor(5.0).detail("Threshold", threshold);
 		return threshold;
