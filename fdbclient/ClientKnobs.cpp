@@ -326,6 +326,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( REST_KMS_ALLOW_NOT_SECURE_CONNECTION,     false ); if ( randomize && BUGGIFY ) REST_KMS_ALLOW_NOT_SECURE_CONNECTION = !REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
 	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );
 
+	init( ENABLE_MUTATION_CHECKSUM,                 false ); // if ( randomize && BUGGIFY )  ENABLE_MUTATION_CHECKSUM = true; Enable this after deserialiser is ported to 7.3.
 	// clang-format on
 }
 
