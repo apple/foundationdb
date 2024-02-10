@@ -195,24 +195,22 @@ public:
 		req.reply.send(std::make_pair(res, false));
 	}
 
-	// Return a threshold of storage queue size which guarantees at least DD_LONG_STORAGE_QUEUE_MAJORITY_PERCENTILE
-	// portion of storage servers that have longer storage queues
-	static Optional<int64_t> selectLongStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
+	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
+	// portion of teams that have longer storage queues
+	// A team storage queue size is defined as the longest storage queue size among all SSes of the team
+	static int64_t calculateTeamStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
 		std::vector<int64_t> queueLengthList;
 		for (const auto& team : teams) {
 			Optional<int64_t> storageQueueSize = team->getLongestStorageQueueSize();
 			if (!storageQueueSize.present()) {
-				// This team may have an unhealthy SS, so avoid selecting it by setting the queue length to a large
-				// number
+				// This team may have an unhealthy SS, so avoid selecting it
 				queueLengthList.push_back(std::numeric_limits<int64_t>::max());
 			} else {
 				queueLengthList.push_back(storageQueueSize.get());
 			}
 		}
-		unsigned long position = queueLengthList.size() * (1 - SERVER_KNOBS->DD_LONG_STORAGE_QUEUE_MAJORITY_PERCENTILE);
-		position = std::max(
-		    (unsigned long)0,
-		    std::min(position, queueLengthList.size() - 1)); // position should be in [0, queueLengthList.size()-1]
+		double percentile = std::max(0.0, std::min(SERVER_KNOBS->DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE, 1.0));
+		int position = queueLengthList.size() * (1 - percentile);
 		std::nth_element(queueLengthList.begin(), queueLengthList.begin() + position, queueLengthList.end());
 		int64_t threshold = queueLengthList[position];
 		TraceEvent(SevInfo, "StorageQueueAwareGotThreshold").suppressFor(5.0).detail("Threshold", threshold);
@@ -250,10 +248,10 @@ public:
 					Optional<int64_t> storageQueueSize = self->teams[currentIndex]->getLongestStorageQueueSize();
 					if (!storageQueueSize.present()) {
 						numSkippedSSFailedGetQueueLength++;
-						continue; // this SS may not healthy, skip
+						continue; // this team may have an unhealthy SS, skip
 					} else if (storageQueueSize.get() > storageQueueThreshold.get()) {
 						numSkippedSSQueueTooLong++;
-						continue; // this SS storage queue is too long, skip
+						continue; // this team has a SS with a too long storage queue, skip
 					}
 				}
 
@@ -429,15 +427,9 @@ public:
 
 			Optional<int64_t> storageQueueThreshold;
 			if (req.storageQueueAware) {
-				storageQueueThreshold = selectLongStorageQueueThreshold(self->teams);
+				storageQueueThreshold = calculateTeamStorageQueueThreshold(self->teams);
 			}
-			if (req.storageQueueAware && !storageQueueThreshold.present()) {
-				// If we are not able to find a threshold to distinguish whether a queue is long
-				// we will re-run getTeam without storageQueueAware
-				TraceEvent(SevWarn, "StorageQueueAwareGetTeamFailed", self->distributorId)
-				    .detail("Reason", "storageQueueThreshold not present");
-				ASSERT(!bestOption.present());
-			} else if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
+			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
 				ASSERT(!bestOption.present());
 				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
 					bestOption = getBestTeam(self,
@@ -491,10 +483,10 @@ public:
 						Optional<int64_t> storageQueueSize = dest->getLongestStorageQueueSize();
 						if (!storageQueueSize.present()) {
 							numSkippedSSFailedGetQueueLength++;
-							ok = false; // this SS may not healthy, skip
+							ok = false; // this team may have an unhealthy SS, skip
 						} else if (storageQueueSize.get() > storageQueueThreshold.get()) {
 							numSkippedSSQueueTooLong++;
-							ok = false; // this SS storage queue is too long, skip
+							ok = false; // this team has a SS with a too long storage queue, skip
 						}
 					}
 
@@ -1584,11 +1576,11 @@ public:
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
 					when(wait(server->longStorageQueue.onChange())) {
-						Optional<int64_t> threshold = selectLongStorageQueueThreshold(self->teams);
-						// threshold represents the queue length of majority SSes
-						if (!threshold.present() || server->longStorageQueue.get() < threshold.get()) {
+						int64_t threshold = calculateTeamStorageQueueThreshold(self->teams);
+						// threshold represents the queue length of majority teams
+						// team queue length is defined as the max queue size among all SSes of the team
+						if (server->longStorageQueue.get() < threshold) {
 							TraceEvent(SevInfo, "TriggerStorageQueueRebalanceIgnored", self->distributorId)
-							    .detail("ThresholdPresent", threshold.present())
 							    .detail("SSID", server->getId());
 						} else {
 							TraceEvent(SevInfo, "TriggerStorageQueueRebalance", self->distributorId)
