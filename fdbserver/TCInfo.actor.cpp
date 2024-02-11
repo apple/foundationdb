@@ -103,7 +103,7 @@ public:
 				if (!server->lastTimeNotifyLongStorageQueue.present() ||
 				    currentTime - server->lastTimeNotifyLongStorageQueue.get() >
 				        SERVER_KNOBS->DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL) {
-					server->longStorageQueue.trigger(); // will trigger data move for rebalancing storage queue
+					server->longStorageQueue.set(queueSize); // will trigger data move for rebalancing storage queue
 					TraceEvent(SevInfo, "SSTrackerTriggerLongStorageQueue", server->getId())
 					    .detail("CurrentQueueSize", queueSize);
 					server->lastTimeNotifyLongStorageQueue = currentTime;

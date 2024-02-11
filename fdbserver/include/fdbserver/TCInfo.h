@@ -80,7 +80,7 @@ public:
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
-	AsyncVar<Void> longStorageQueue; // set when the storage queue remains too long for a while
+	AsyncVar<int64_t> longStorageQueue; // set when the storage queue remains too long for a while
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,

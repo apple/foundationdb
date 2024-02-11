@@ -286,8 +286,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			                  lastKey,
 			                  key,
 			                  hasUsed);
-			if (used.bytes < minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
-			                                   remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
+			if (used.bytes < minSplitBytes)
 				key = std::max(
 				    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
 			key = getSplitKey(remaining.iosPerKSecond,
