@@ -199,6 +199,9 @@ public:
 	// portion of teams that have longer storage queues
 	// A team storage queue size is defined as the longest storage queue size among all SSes of the team
 	static int64_t calculateTeamStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
+		if (teams.size() == 0) {
+			return std::numeric_limits<int64_t>::max(); // disable this funcationality
+		}
 		std::vector<int64_t> queueLengthList;
 		for (const auto& team : teams) {
 			Optional<int64_t> storageQueueSize = team->getLongestStorageQueueSize();
@@ -210,7 +213,7 @@ public:
 			}
 		}
 		double percentile = std::max(0.0, std::min(SERVER_KNOBS->DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE, 1.0));
-		int position = queueLengthList.size() * (1 - percentile);
+		int position = (queueLengthList.size() - 1) * (1 - percentile);
 		std::nth_element(queueLengthList.begin(), queueLengthList.begin() + position, queueLengthList.end());
 		int64_t threshold = queueLengthList[position];
 		TraceEvent(SevInfo, "StorageQueueAwareGotThreshold").suppressFor(5.0).detail("Threshold", threshold);
