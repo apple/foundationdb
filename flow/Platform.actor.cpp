@@ -3421,7 +3421,7 @@ extern "C" void flushAndExit(int exitCode) {
 	// See: https://man7.org/linux/man-pages/man5/core.5.html
 	// The abort method will send a SIGABRT, which causes the kernel to collect a coredump.
 	// See: https://man7.org/linux/man-pages/man3/abort.3.html.
-	if (exitCode != FDB_EXIT_SUCCESS)
+	if (exitCode != FDB_EXIT_SUCCESS && FLOW_KNOBS->ABORT_ON_FAILURE)
 		abort();
 	// In the success case exit the process gracefully.
 	_exit(exitCode);
