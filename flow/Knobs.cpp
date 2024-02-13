@@ -75,6 +75,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( FAST_ALLOC_ALLOW_GUARD_PAGES,                      false );
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
+	init( ABORT_ON_FAILURE,                                  false );
 
 	init( MEMORY_USAGE_CHECK_INTERVAL,                         1.0 );
 
