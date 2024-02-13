@@ -114,7 +114,8 @@ enum class DataMovementReason {
 	TEAM_FAILED,
 	TEAM_0_LEFT,
 	SPLIT_SHARD,
-	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD
+	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
+	REBALANCE_STORAGE_QUEUE
 };
 extern int dataMovementPriority(DataMovementReason moveReason);
 extern DataMovementReason priorityToDataMovementReason(int priority);
