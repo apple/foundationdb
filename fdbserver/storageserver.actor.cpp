@@ -1946,7 +1946,13 @@ public:
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
 		StorageBytes sb = storage.getStorageBytes();
-		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
+		metrics.getStorageMetrics(req,
+		                          sb,
+		                          counters.bytesInput.getRate(),
+		                          versionLag,
+		                          lastUpdate,
+		                          counters.bytesDurable.getValue(),
+		                          counters.bytesInput.getValue());
 	}
 
 	// Used for recording shard assignment history for auditStorage

@@ -30,6 +30,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+	PromiseStream<ServerTeamInfo> triggerStorageQueueRebalance;
 
 	KeyRangeMap<ShardTrackedData> shards;
 
@@ -171,7 +172,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		                                        getShardMetrics.getFuture(),
 		                                        getTopKMetrics.getFuture(),
 		                                        getShardMetricsList.getFuture(),
-		                                        getAverageShardBytes.getFuture()));
+		                                        getAverageShardBytes.getFuture(),
+		                                        triggerStorageQueueRebalance.getFuture()));
 
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
