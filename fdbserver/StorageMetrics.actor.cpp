@@ -286,8 +286,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			                  lastKey,
 			                  key,
 			                  hasUsed);
-			if (used.bytes < minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
-			                                   remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
+			if (used.bytes < minSplitBytes)
 				key = std::max(
 				    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
 			key = getSplitKey(remaining.iosPerKSecond,
@@ -340,7 +339,9 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
                                              StorageBytes sb,
                                              double bytesInputRate,
                                              int64_t versionLag,
-                                             double lastUpdate) const {
+                                             double lastUpdate,
+                                             int64_t bytesDurable,
+                                             int64_t bytesInput) const {
 	GetStorageMetricsReply rep;
 
 	// SOMEDAY: make bytes dynamic with hard disk space
@@ -369,6 +370,9 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	rep.versionLag = versionLag;
 	rep.lastUpdate = lastUpdate;
+
+	rep.bytesDurable = bytesDurable;
+	rep.bytesInput = bytesInput;
 
 	req.reply.send(rep);
 }

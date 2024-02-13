@@ -92,6 +92,25 @@ public:
 				server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 			}
 		}
+
+		// Detect any storage server with a too long storage queue and notify team tracker
+		// with a minimal interval
+		if (SERVER_KNOBS->ENABLE_REBALANCE_STORAGE_QUEUE) {
+			int64_t queueSize = server->getStorageQueueSize();
+			bool storageQueueKeepTooLong = server->updateAndGetStorageQueueTooLong(queueSize);
+			double currentTime = now();
+			if (storageQueueKeepTooLong) {
+				if (!server->lastTimeNotifyLongStorageQueue.present() ||
+				    currentTime - server->lastTimeNotifyLongStorageQueue.get() >
+				        SERVER_KNOBS->DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL) {
+					server->longStorageQueue.set(queueSize); // will trigger data move for rebalancing storage queue
+					TraceEvent(SevInfo, "SSTrackerTriggerLongStorageQueue", server->getId())
+					    .detail("CurrentQueueSize", queueSize);
+					server->lastTimeNotifyLongStorageQueue = currentTime;
+				}
+			}
+		}
+
 		return Void();
 	}
 
@@ -174,6 +193,40 @@ Future<Void> TCServerInfo::serverMetricsPolling(Reference<IDDTxnProcessor> txnPr
 	return TCServerInfoImpl::serverMetricsPolling(this, txnProcessor);
 }
 
+// Return true if the storage queue of the input storage server ssi keeps too long for a while
+bool TCServerInfo::updateAndGetStorageQueueTooLong(int64_t currentBytes) {
+	double currentTime = now();
+	if (currentBytes > SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_LONG_BYTES) {
+		if (!storageQueueTooLongStartTime.present()) {
+			storageQueueTooLongStartTime = currentTime;
+			TraceEvent(SevWarn, "SSTrackerDetectStorageQueueBecomeLong", id)
+			    .detail("StorageQueueBytes", currentBytes)
+			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+		} else {
+			TraceEvent(SevDebug, "SSTrackerDetectStorageQueueRemainLong", id)
+			    .detail("StorageQueueBytes", currentBytes)
+			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+		}
+	} else if (currentBytes < SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHORT_BYTES) {
+		if (storageQueueTooLongStartTime.present()) {
+			storageQueueTooLongStartTime.reset();
+			TraceEvent(SevInfo, "SSTrackerDetectStorageQueueBecomeShort", id).detail("StorageQueueBytes", currentBytes);
+		}
+	} else {
+		if (storageQueueTooLongStartTime.present()) {
+			TraceEvent(SevDebug, "SSTrackerDetectStorageQueueRemainLong", id)
+			    .detail("StorageQueueBytes", currentBytes)
+			    .detail("Duration", currentTime - storageQueueTooLongStartTime.get());
+		}
+	}
+	if (storageQueueTooLongStartTime.present() &&
+	    currentTime - storageQueueTooLongStartTime.get() > SERVER_KNOBS->DD_LONG_STORAGE_QUEUE_TIMESPAN) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
 void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {
 	inDesiredDC =
 	    (includedDCs.empty() ||
@@ -221,6 +274,10 @@ std::pair<int64_t, int64_t> TCServerInfo::spaceBytes(bool includeInFlight) const
 
 int64_t TCServerInfo::loadBytes() const {
 	return getMetrics().load.bytes;
+}
+
+int64_t TCServerInfo::getStorageQueueSize() const {
+	return getMetrics().bytesInput - getMetrics().bytesDurable;
 }
 
 void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
@@ -375,6 +432,18 @@ int64_t TCTeamInfo::getReadInFlightToTeam() const {
 		inFlight += server->getReadInFlightToServer();
 	}
 	return inFlight;
+}
+
+Optional<int64_t> TCTeamInfo::getLongestStorageQueueSize() const {
+	int64_t longestQueueSize = 0;
+	for (const auto& server : servers) {
+		if (server->metricsPresent()) {
+			longestQueueSize = std::max(longestQueueSize, server->getStorageQueueSize());
+		} else {
+			return Optional<int64_t>();
+		}
+	}
+	return longestQueueSize;
 }
 
 int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) const {

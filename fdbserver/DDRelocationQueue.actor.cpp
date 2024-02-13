@@ -94,7 +94,8 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
 		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
 		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
-		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD }
+		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD },
+		{ DataMovementReason::REBALANCE_STORAGE_QUEUE, SERVER_KNOBS->PRIORITY_REBALANCE_STORAGE_QUEUE },
 	};
 
 	static PriorityDmReasonMapping priorityReason;
@@ -141,7 +142,8 @@ RelocateData::RelocateData(RelocateShard const& rs)
     dataMoveId(rs.dataMoveId), workFactor(0),
     wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
                     rs.moveReason == DataMovementReason::SPLIT_SHARD ||
-                    rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
+                    rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
+                    rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE),
     cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
@@ -280,6 +282,18 @@ public:
 
 	double getAverageCPU() const override {
 		return sum<double>([](IDataDistributionTeam const& team) { return team.getAverageCPU(); }) / teams.size();
+	}
+
+	Optional<int64_t> getLongestStorageQueueSize() const override {
+		int64_t maxQueueSize = 0;
+		for (const auto& team : teams) {
+			Optional<int64_t> queueSize = team->getLongestStorageQueueSize();
+			if (!queueSize.present()) {
+				return Optional<int64_t>();
+			}
+			maxQueueSize = std::max(maxQueueSize, queueSize.get());
+		}
+		return maxQueueSize;
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -1423,6 +1437,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
+						req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
 
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
