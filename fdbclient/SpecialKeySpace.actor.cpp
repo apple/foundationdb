@@ -3025,7 +3025,7 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	// Test
 	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse));
 	if (testResult != expectedResult) {
-		fmt::print("Reverse: {}\n", reverse);
+		fmt::print("Reverse: {}\n", static_cast<bool>(reverse));
 		fmt::print("Original range: [{}, {})\n", begin.toString(), end.toString());
 		fmt::print("Original result:\n");
 		for (const auto& kr : result) {
