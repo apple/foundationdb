@@ -133,6 +133,9 @@ public:
 	bool FAST_ALLOC_ALLOW_GUARD_PAGES;
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
+	// This setting allows to let the fdbserver abort instead of exit to generate coredumps
+	// in case of a failure.
+	bool ABORT_ON_FAILURE;
 
 	double MEMORY_USAGE_CHECK_INTERVAL;
 
