@@ -3417,6 +3417,13 @@ extern "C" void flushAndExit(int exitCode) {
 	// to the crashAndDie call below.
 	TerminateProcess(GetCurrentProcess(), exitCode);
 #else
+	// Send a signal to allow the Kernel to generate a coredump for this process.
+	// See: https://man7.org/linux/man-pages/man5/core.5.html
+	// The abort method will send a SIGABRT, which causes the kernel to collect a coredump.
+	// See: https://man7.org/linux/man-pages/man3/abort.3.html.
+	if (exitCode != FDB_EXIT_SUCCESS && FLOW_KNOBS->ABORT_ON_FAILURE)
+		abort();
+	// In the success case exit the process gracefully.
 	_exit(exitCode);
 #endif
 	// should never reach here, but you never know
