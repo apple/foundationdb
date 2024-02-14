@@ -11015,6 +11015,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
 						}
+					} else {
+						ASSERT(msg.validateChecksum());
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
@@ -12249,6 +12251,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        const char* debugContext) {
 	for (const auto& m : mutations) {
 		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
+		ASSERT(m.validateChecksum());
 		if (m.type == MutationRef::SetValue) {
 			storage->set(KeyValueRef(m.param1, m.param2));
 			*kvCommitLogicalBytes += m.expectedSize();
