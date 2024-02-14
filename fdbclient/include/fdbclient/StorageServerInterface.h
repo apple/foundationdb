@@ -1163,12 +1163,12 @@ struct GetStorageMetricsReply {
 	StorageMetrics load; // sum of key-value metrics (logical bytes)
 	StorageMetrics available; // physical bytes
 	StorageMetrics capacity; // physical bytes
-	double bytesInputRate;
-	int64_t versionLag;
-	double lastUpdate;
-	int64_t bytesDurable, bytesInput;
+	double bytesInputRate = 0;
+	int64_t versionLag = 0;
+	double lastUpdate = 0;
+	int64_t bytesDurable = 0, bytesInput = 0;
 
-	GetStorageMetricsReply() : bytesInputRate(0) {}
+	GetStorageMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
