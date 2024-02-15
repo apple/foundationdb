@@ -472,7 +472,6 @@ public:
 	bool ROCKSDB_PARANOID_FILE_CHECKS;
 	double ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
-	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	int64_t ROCKSDB_WAL_TTL_SECONDS;
 	int64_t ROCKSDB_WAL_SIZE_LIMIT_MB;
 	bool ROCKSDB_LOG_LEVEL_DEBUG;
@@ -526,6 +525,9 @@ public:
 	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
 	                                // checksum). The block-level checksum does not cover the corruption such as wrong
 	                                // sst file or file move/copy.
+	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
+	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
 	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
