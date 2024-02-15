@@ -708,7 +708,7 @@ The ``usable_regions`` configuration option determines the number of regions whi
 
 .. warning:: In release 6.0, ``usable_regions`` can only be configured to the values of ``1`` or ``2``, and a maximum of 2 regions can be defined in the ``regions`` json object.
 
-Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will immediately drop the replicas in the remote region. During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
+Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will drop the replicas in the remote region (on data distributor noticing the configuration change and marking the remote region's replicas as "undesired"). During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
 
 Changing the log routers configuration
 --------------------------------------
