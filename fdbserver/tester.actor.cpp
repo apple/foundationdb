@@ -525,7 +525,8 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 ACTOR Future<Void> runWorkloadAsync(Database cx,
                                     WorkloadInterface workIface,
                                     Reference<TestWorkload> workload,
-                                    double databasePingDelay) {
+                                    double databasePingDelay,
+                                    bool isConsistencyCheckUrgent) {
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<CheckReply>> checkResult;
@@ -552,7 +553,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					setupResult = Void();
 				} catch (Error& e) {
 					setupResult = operation_failed();
-					TraceEvent(SevError, "TestSetupError", workIface.id())
+					TraceEvent(isConsistencyCheckUrgent ? SevWarn : SevError, "TestSetupError", workIface.id())
 					    .error(e)
 					    .detail("Workload", workload->description());
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
@@ -576,9 +577,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					startResult = operation_failed();
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
-					TraceEvent(e.code() == error_code_consistency_check_task_failed ? SevWarn : SevError,
-					           "TestFailure",
-					           workIface.id())
+					TraceEvent(isConsistencyCheckUrgent ? SevWarn : SevError, "TestFailure", workIface.id())
 					    .errorUnsuppressed(e)
 					    .detail("Reason", "Error starting workload")
 					    .detail("Workload", workload->description());
@@ -646,7 +645,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
                                         Reference<IClusterConnectionRecord> ccr,
                                         Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                        LocalityData locality) {
+                                        LocalityData locality,
+                                        bool isConsistencyCheckUrgent) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
 	state Database cx;
@@ -672,8 +672,9 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
 			throw test_specification_invalid();
 		}
-		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay) ||
-		                    traceRole(Role::TESTER, workIface.id());
+		Future<Void> test =
+		    runWorkloadAsync(cx, workIface, workload, work.databasePingDelay, isConsistencyCheckUrgent) ||
+		    traceRole(Role::TESTER, workIface.id());
 		work.reply.send(workIface);
 		replied = true;
 
@@ -740,14 +741,15 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
 				}
-				consistencyCheckerUrgentTester =
-				    std::make_pair(work.sharedRandomNumber, testerServerWorkload(work, ccr, dbInfo, locality));
+				consistencyCheckerUrgentTester = std::make_pair(
+				    work.sharedRandomNumber,
+				    testerServerWorkload(work, ccr, dbInfo, locality, /*isConsistencyCheckUrgent=*/true));
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerWorkloadStart", interf.id())
 				    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
 				    .detail("ClientId", work.clientId)
 				    .detail("ClientCount", work.clientCount);
 			} else {
-				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
+				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality, /*isConsistencyCheckUrgent=*/false));
 			}
 		}
 	}
