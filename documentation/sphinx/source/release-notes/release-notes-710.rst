@@ -4,6 +4,20 @@
 Release Notes
 #############
 
+7.1.57
+======
+* Same as 7.1.56 release with AVX enabled.
+
+7.1.56
+======
+* Released with AVX disabled.
+* Added a knob DD_REMOVE_MAINTENANCE_ON_FAILURE to remove the maintenance mode if a failure outside of the maintenance zone happens. `(PR #11207) <https://github.com/apple/foundationdb/pull/11207>`_
+* Fixed start failure of single-threaded consistency checker. `(PR #11205) <https://github.com/apple/foundationdb/pull/11205>`_
+* Fixed false alarms of Sev40 TestFailure in consistency checker urgent mode. `(PR #11203) <https://github.com/apple/foundationdb/pull/11203>`_
+* Added a knob ABORT_ON_FAILURE to generate core dumps for failures. `(PR #11191) <https://github.com/apple/foundationdb/pull/11191>`_
+* Upgraded to RocksDB 8.10.0. `(PR #11176) <https://github.com/apple/foundationdb/pull/11176>`_
+* Fixed find toml in release-7.1 to avoid macos pr failures. `(PR #11190) <https://github.com/apple/foundationdb/pull/11190>`_
+
 7.1.55
 ======
 * Same as 7.1.54 release with AVX enabled.
