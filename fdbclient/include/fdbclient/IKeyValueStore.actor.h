@@ -93,8 +93,7 @@ public:
 		return replaceRange_impl(this, range, data);
 	}
 
-	virtual void markRangeAsActive(KeyRangeRef range) {}
-
+	// Marks a key range as active and prepares it for future read.
 	virtual void markRangeAsActive(KeyRangeRef range) {}
 
 	// Persists key range and physical shard mapping.

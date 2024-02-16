@@ -1501,6 +1501,11 @@ public:
 			if (!it.value()) {
 				continue;
 			}
+
+			auto beginSlice = toSlice(range.begin);
+			auto endSlice = toSlice(range.end);
+			db->SuggestCompactRange(it.value()->physicalShard->cf, &beginSlice, &endSlice);
+
 			std::unordered_map<std::string, std::string> options = {
 				{ "level0_file_num_compaction_trigger",
 				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER) },
@@ -1516,9 +1521,6 @@ public:
 				{ "num_levels", "-1" }
 			};
 			db->SetOptions(it.value()->physicalShard->cf, options);
-			auto beginSlice = toSlice(range.begin);
-			auto endSlice = toSlice(range.end);
-			db->SuggestCompactRange(it.value()->physicalShard->cf, &beginSlice, &endSlice);
 			TraceEvent("ShardedRocksDBRangeActive", logId).detail("ShardId", it.value()->physicalShard->id);
 		}
 	}
@@ -3681,7 +3683,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	void markRangeAsActive(KeyRangeRef range) { shardManager.markRangeAsActive(range); }
+	void markRangeAsActive(KeyRangeRef range) override { shardManager.markRangeAsActive(range); }
 
 	void set(KeyValueRef kv, const Arena*) override {
 		shardManager.put(kv.key, kv.value);
