@@ -95,6 +95,8 @@ public:
 
 	virtual void markRangeAsActive(KeyRangeRef range) {}
 
+	virtual void markRangeAsActive(KeyRangeRef range) {}
+
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
 
