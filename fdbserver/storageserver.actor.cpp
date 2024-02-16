@@ -557,9 +557,13 @@ struct StorageServerDisk {
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
 
-	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
+	Future<Void> addRange(KeyRangeRef range, std::string id) {
+		return storage->addRange(range, id, !SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE);
+	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	void markRangeAsActive(KeyRangeRef range) { storage->markRangeAsActive(range); }
 
 	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
 		return storage->replaceRange(range, data);
@@ -8726,6 +8730,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
 		shard->fetchComplete.send(Void());
+		data->storage.markRangeAsActive(keys);
 		const double duration = now() - startTime;
 		TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
 		    .detail("TotalBytes", totalBytes)
