@@ -1004,6 +1004,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
 	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
 	spec.options.push_back_deep(spec.options.arena(), options);
 	state double start = now();
 	state bool lastRun = false;
