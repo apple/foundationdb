@@ -215,6 +215,7 @@ if(WITH_PYTHON AND WITH_C_BINDING)
 endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
+  add_dependencies(html CopyJavadoc)
 endif()
 
 if(WIN32)
