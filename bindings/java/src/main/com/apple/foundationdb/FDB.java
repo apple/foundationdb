@@ -37,7 +37,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
  *   with incorrect assumptions from the current version. The latest supported API version
- *   is defined as {@link ApiVersion.LATEST}.<br><br>
+ *   is defined as ApiVersion.LATEST.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
