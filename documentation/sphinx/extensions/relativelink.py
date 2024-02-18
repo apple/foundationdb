@@ -29,10 +29,10 @@
 
 
 def setup(app):
-    import sphinx.environment
+    import sphinx.environment.adapters.toctree
     from docutils import nodes
 
-    old_resolve = sphinx.environment.BuildEnvironment.resolve_toctree
+    old_resolve = sphinx.environment.adapters.toctree.TocTree.resolve
 
     def resolve_toctree(
         self,
@@ -64,4 +64,4 @@ def setup(app):
                 node["refuri"] = node["refuri"][len("relative://") :]
         return result
 
-    sphinx.environment.BuildEnvironment.resolve_toctree = resolve_toctree
+    sphinx.environment.adapters.toctree.TocTree.resolve = resolve_toctree
