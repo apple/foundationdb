@@ -189,8 +189,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//AsyncFileWriteChecker
 	init( ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL,          60.0 );
-	init( ASYNC_FILE_WRITE_CHEKCER_CHECKING_INTERVAL,         60.0 );
-	init( ASYNC_FILE_WRITE_CHEKCER_ENABLE_CHECKSUM,           true );
+	init( ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY,             5.0 );
 
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );

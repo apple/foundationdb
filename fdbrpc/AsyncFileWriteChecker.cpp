@@ -29,91 +29,189 @@ static void compareWriteInfo(AsyncFileWriteChecker::WriteInfo w1, AsyncFileWrite
 	ASSERT(w1.checksum == w2.checksum);
 }
 
+class LRU2 {
+private:
+	struct node {
+		uint32_t page;
+		AsyncFileWriteChecker::WriteInfo writeInfo;
+		node *next, *prev;
+		node(uint32_t _page, AsyncFileWriteChecker::WriteInfo _writeInfo) {
+			page = _page;
+			writeInfo = _writeInfo;
+			next = nullptr;
+			prev = NULL;
+		}
+	};
+
+	node* start;
+	node* end;
+	std::unordered_map<uint32_t, node*> m;
+	std::string fileName;
+	int maxFullPagePlusOne;
+
+	void insertHead(node* n) {
+		n->next = start->next;
+		start->next->prev = n;
+		n->prev = start;
+		start->next = n;
+	}
+
+	void removeFromList(node* n) {
+		n->prev->next = n->next;
+		n->next->prev = n->prev;
+	}
+
+public:
+	LRU2(std::string _fileName) {
+		fileName = _fileName;
+		maxFullPagePlusOne = 0;
+		start = new node(0, AsyncFileWriteChecker::WriteInfo());
+		end = new node(0, AsyncFileWriteChecker::WriteInfo());
+		start->next = end;
+		end->prev = start;
+	}
+
+	void update(uint32_t page, AsyncFileWriteChecker::WriteInfo writeInfo) {
+		if (m.find(page) != m.end()) {
+			node* n = m[page];
+			removeFromList(n);
+			insertHead(n);
+			n->writeInfo = writeInfo;
+			return;
+		}
+		node* n = new node(page, writeInfo);
+		insertHead(n);
+		m[page] = n;
+		if (page >= maxFullPagePlusOne) {
+			maxFullPagePlusOne = page + 1;
+		}
+	}
+
+	uint32_t randomPage() {
+		if (m.size() == 0) {
+			return -1;
+		}
+		auto it = m.begin();
+		std::advance(it, deterministicRandom()->randomInt(0, (int)m.size()));
+		return it->first;
+	}
+
+	void truncate(int newMaxFullPagePlusOne) {
+		// exclude newMaxFullPage
+		for (int i = newMaxFullPagePlusOne; i < maxFullPagePlusOne; i++) {
+			remove(i);
+		}
+		if (maxFullPagePlusOne > newMaxFullPagePlusOne) {
+			maxFullPagePlusOne = newMaxFullPagePlusOne;
+		}
+	}
+
+	void print() {
+		auto it = end->prev;
+		while (it != start) {
+			printf("%d\t", it->page);
+			it = it->prev;
+		}
+		printf("\n");
+	}
+
+	int size() { return m.size(); }
+
+	bool exist(uint32_t page) { return m.find(page) != m.end(); }
+
+	AsyncFileWriteChecker::WriteInfo find(uint32_t page) {
+		auto it = m.find(page);
+		if (it == m.end()) {
+			printf("Cannot find page %d\n", page);
+			TraceEvent(SevError, "LRU2CheckerTryFindingPageNotExist")
+			    .detail("FileName", fileName)
+			    .detail("Page", page)
+			    .log();
+			return AsyncFileWriteChecker::WriteInfo();
+		}
+		return it->second->writeInfo;
+	}
+
+	uint32_t leastRecentlyUsedPage() {
+		if (m.size() == 0) {
+			return -1;
+		}
+		return end->prev->page;
+	}
+
+	void remove(uint32_t page) {
+		if (m.find(page) == m.end()) {
+			return;
+		}
+		node* n = m[page];
+		removeFromList(n);
+		m.erase(page);
+		delete n;
+	}
+};
+
 TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 	// run 1000 runs, each run either add or remote an element
 	// record the latest add / remove operation for each key
 	// try to find the elements that exist/removed, they should be present/absent
 	int i = 0;
 	int run = 1000;
-	int limit = 1000; // limit is a small number so that page can have conflict
+	// limit is a small number so that page can have conflict
+	// also LRU2::truncate has a time complexity of O(size of file), so page cannot be too large
+	int limit = 1000;
 	AsyncFileWriteChecker::LRU lru("TestLRU");
-
-	std::map<int, uint32_t> stepToKey;
-	std::map<uint32_t, int> keyToStep; // std::map is to support ::truncate
-	std::unordered_map<uint32_t, AsyncFileWriteChecker::WriteInfo> pageContents;
+	LRU2 lru2("TestLRU");
 	while (i < run) {
 		double r = deterministicRandom()->random01();
-		if (keyToStep.empty() || r > 0.5) {
+		if (lru2.size() == 0 || r > 0.5) {
 			// to add/update
 			uint32_t page = deterministicRandom()->randomInt(0, limit);
-			bool alreadyExist = false;
-			if (keyToStep.find(page) != keyToStep.end()) {
+			if (lru2.exist(page)) {
 				// the page already exist
-				alreadyExist = true;
-				compareWriteInfo(lru.find(page), pageContents[page]);
+				compareWriteInfo(lru.find(page), lru2.find(page));
 			}
 			// change the content each time
-			pageContents[page].checksum = deterministicRandom()->randomInt(0, INT_MAX);
-			pageContents[page].timestamp = deterministicRandom()->randomInt(0, INT_MAX);
-			lru.update(page, pageContents[page]);
-			compareWriteInfo(lru.find(page), pageContents[page]);
-
-			if (alreadyExist) {
-				// remove its old entry in stepToKey
-				stepToKey.erase(keyToStep[page]);
-			}
-			keyToStep[page] = i;
-			stepToKey[i] = page;
-			// printf("ASYNC::Insert %d\n", page);
+			AsyncFileWriteChecker::WriteInfo wi;
+			wi.checksum = deterministicRandom()->randomInt(0, INT_MAX);
+			wi.timestamp = AsyncFileWriteChecker::transformTime(now());
+			lru.update(page, wi);
+			lru2.update(page, wi);
+			compareWriteInfo(lru.find(page), lru2.find(page));
+			printf("ASYNC::Insert %d\n", page);
 		} else if (r < 0.45) {
 			// to remove
-			auto it = keyToStep.begin();
-			std::advance(it, deterministicRandom()->randomInt(0, (int)keyToStep.size()));
-			uint32_t page = it->first;
-			int step = it->second;
+			uint32_t page = lru2.randomPage();
 
+			ASSERT(page != -1);
 			ASSERT(lru.exist(page));
+			ASSERT(lru2.exist(page));
+			compareWriteInfo(lru.find(page), lru2.find(page));
 			lru.remove(page);
+			lru2.remove(page);
 			ASSERT(!lru.exist(page));
-			pageContents.erase(page);
-			keyToStep.erase(it);
-			stepToKey.erase(step);
-			// printf("ASYNC::erase %d\n", page);
+			ASSERT(!lru2.exist(page));
+			printf("ASYNC::erase %d\n", page);
 		} else {
 			// to truncate
-			auto it = keyToStep.begin();
-			int step = deterministicRandom()->randomInt(0, (int)keyToStep.size());
-			std::advance(it, step);
-			uint32_t page = it->first;
-
-			auto it2 = keyToStep.begin();
-			int step2 = deterministicRandom()->randomInt(step, (int)keyToStep.size());
-			std::advance(it2, step2);
-
+			uint32_t page = lru2.randomPage();
+			uint32_t page2 = lru2.randomPage(); // to ensure
 			lru.truncate(page);
-			ASSERT(!lru.exist(it2->first)); // make sure nothing after(including) page still exist
-
-			while (it != keyToStep.end()) {
-				int step = it->second;
-				auto next = it;
-				next++;
-				keyToStep.erase(it);
-				stepToKey.erase(step);
-				it = next;
+			lru2.truncate(page);
+			if (page2 >= page) {
+				ASSERT(!lru.exist(page2));
+				ASSERT(!lru2.exist(page2));
 			}
-			// printf("ASYNC::truncate %d\n", page);
+			printf("ASYNC::truncate %d\n", page);
 		}
-		uint32_t leastRecentlyPage = lru.leastRecentlyUsedPage();
-		if (leastRecentlyPage == -1) {
-			i += 1;
-			continue;
+		lru2.print();
+		if (lru2.size() != 0) {
+			uint32_t leastRecentlyPage = lru.leastRecentlyUsedPage();
+			uint32_t leastRecentlyPage2 = lru2.leastRecentlyUsedPage();
+			ASSERT(leastRecentlyPage == leastRecentlyPage2);
+			compareWriteInfo(lru.find(leastRecentlyPage), lru2.find(leastRecentlyPage));
 		}
-		auto it = stepToKey.begin();
-		int page = it->second;
+
 		// printf("Found Page %d, leastRecentlyPage is %d, step is %d\n", page, leastRecentlyPage, it->first);
-		ASSERT(keyToStep.find(page) != keyToStep.end());
-		ASSERT(page == leastRecentlyPage);
-		compareWriteInfo(pageContents[page], lru.find(leastRecentlyPage));
 		i += 1;
 	}
 	return Void();

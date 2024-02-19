@@ -33,6 +33,10 @@
 #include "flow/actorcompiler.h"
 static double millisecondsPerSecond = 1000;
 
+// this class does checksum for the wrapped IAsyncFile in read and writes opertions.
+// it maintains a dynamic data structure to store the recently written page and its checksum.
+// it has an actor to continuously read and verify checksums for the recently written page,
+// and also deletes the corresponding entry upon a successful to avoid using too much memory.
 class AsyncFileWriteChecker : public IAsyncFile, public ReferenceCounted<AsyncFileWriteChecker> {
 public:
 	void addref() override { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
@@ -102,166 +106,134 @@ public:
 		uint32_t timestamp; // keep a precision of ms
 	};
 
-	struct node {
-		uint32_t page;
-		WriteInfo writeInfo;
-		node *next, *prev;
-		node(uint32_t _page, WriteInfo _writeInfo) {
-			page = _page;
-			writeInfo = _writeInfo;
-			page = _page;
-			next = NULL;
-			prev = NULL;
-		}
-	};
+	static uint32_t transformTime(double unixTime) { return (uint32_t)(unixTime * millisecondsPerSecond); }
 
 	class LRU {
 	private:
-		node* start;
-		node* end;
-		std::unordered_map<uint32_t, node*> m;
+		int64_t step;
 		std::string fileName;
-		int maxFullPage;
-
-		void insertHead(node* n) {
-			n->next = start->next;
-			start->next->prev = n;
-			n->prev = start;
-			start->next = n;
-		}
-
-		void removeFromList(node* n) {
-			n->prev->next = n->next;
-			n->next->prev = n->prev;
-		}
+		std::map<int, uint32_t> stepToKey;
+		std::map<uint32_t, int> keyToStep; // std::map is to support ::truncate
+		std::unordered_map<uint32_t, AsyncFileWriteChecker::WriteInfo> pageContents;
 
 	public:
 		LRU(std::string _fileName) {
+			step = 0;
 			fileName = _fileName;
-			maxFullPage = 0;
-			start = new node(0, WriteInfo());
-			end = new node(0, WriteInfo());
-			start->next = end;
-			end->prev = start;
 		}
 
-		void update(uint32_t page, WriteInfo writeInfo) {
-			if (m.find(page) != m.end()) {
-				node* n = m[page];
-				removeFromList(n);
-				insertHead(n);
-				n->writeInfo = writeInfo;
-				return;
+		void update(uint32_t page, AsyncFileWriteChecker::WriteInfo writeInfo) {
+			if (keyToStep.find(page) != keyToStep.end()) {
+				// remove its old entry in stepToKey
+				stepToKey.erase(keyToStep[page]);
 			}
-			node* n = new node(page, writeInfo);
-			insertHead(n);
-			m[page] = n;
-			if (page >= maxFullPage) {
-				maxFullPage = page + 1;
-			}
+			keyToStep[page] = step;
+			stepToKey[step] = page;
+			pageContents[page] = writeInfo;
+			step++;
 		}
 
-		int maxPage() { return maxFullPage; }
-
-		void truncate(int newMaxFullPage) {
-			for (int i = newMaxFullPage; i < maxFullPage; i++) {
-				remove(i);
-			}
-			if (maxFullPage > newMaxFullPage) {
-				maxFullPage = newMaxFullPage;
+		void truncate(uint32_t page) {
+			auto it = keyToStep.lower_bound(page);
+			while (it != keyToStep.end()) {
+				int step = it->second;
+				auto next = it;
+				next++;
+				keyToStep.erase(it);
+				stepToKey.erase(step);
+				it = next;
 			}
 		}
 
-		int size() { return m.size(); }
-
-		bool exist(uint32_t page) { return m.find(page) != m.end(); }
-
-		WriteInfo find(uint32_t page) {
-			if (!exist(page)) {
-				TraceEvent(SevError, "CheckerTryFindingPageNotExist").log();
-				return WriteInfo();
+		uint32_t randomPage() {
+			if (keyToStep.size() == 0) {
+				return -1;
 			}
-			return m[page]->writeInfo;
+			auto it = keyToStep.begin();
+			std::advance(it, deterministicRandom()->randomInt(0, (int)keyToStep.size()));
+			return it->first;
+		}
+
+		int size() { return keyToStep.size(); }
+
+		bool exist(uint32_t page) { return keyToStep.find(page) != keyToStep.end(); }
+
+		AsyncFileWriteChecker::WriteInfo find(uint32_t page) {
+			auto it = keyToStep.find(page);
+			if (it == keyToStep.end()) {
+				TraceEvent(SevError, "LRUCheckerTryFindingPageNotExist")
+				    .detail("FileName", fileName)
+				    .detail("Page", page)
+				    .log();
+				return AsyncFileWriteChecker::WriteInfo();
+			}
+			return pageContents[page];
 		}
 
 		uint32_t leastRecentlyUsedPage() {
-			if (m.size() == 0) {
+			if (stepToKey.size() == 0) {
 				return -1;
 			}
-			return end->prev->page;
+			return stepToKey.begin()->second;
 		}
 
 		void remove(uint32_t page) {
-			if (m.find(page) == m.end()) {
+			if (keyToStep.find(page) == keyToStep.end()) {
 				return;
 			}
-			node* n = m[page];
-			removeFromList(n);
-			m.erase(page);
-			delete n;
+			pageContents.erase(page);
+			stepToKey.erase(keyToStep[page]);
+			keyToStep.erase(page);
 		}
 	};
 
-	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f), lru("aa") {
+	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f), lru(f->getFilename()) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.
 		if (!checksumHistoryBudget.present()) {
 			checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
 		}
+		pageBuffer = (void*)new char[checksumHistoryPageSize];
 		totalCheckedSucceed = 0;
 		totalCheckedFail = 0;
 		lru = LRU(m_f->getFilename());
+		checksumWorker = AsyncFileWriteChecker::sweep(this);
+		checksumLogger = runChecksumLogger(this);
 	}
 
-	~AsyncFileWriteChecker() override { checksumHistoryBudget.get() += lru.size(); }
+	~AsyncFileWriteChecker() override {
+		checksumHistoryBudget.get() += lru.size();
+		delete[] reinterpret_cast<char*>(pageBuffer);
+	}
 
 private:
 	// transform from unixTime(double) to uint32_t, to retain ms precision.
-	static uint32_t transformTime(double unixTime) { return (uint32_t)(unixTime * millisecondsPerSecond); }
 	Reference<IAsyncFile> m_f;
 	Future<Void> checksumWorker;
 	Future<Void> checksumLogger;
 	LRU lru;
-
+	void* pageBuffer;
 	uint64_t totalCheckedFail, totalCheckedSucceed;
 	uint32_t syncedTime;
-	bool checksumWorkerStart = false;
+	// to avoid concurrent operation, so that the continuous reader will skip a page if it is being written
 	std::unordered_set<uint32_t> writing;
 	// This is the most page checksum history blocks we will use across all files.
 	static Optional<int> checksumHistoryBudget;
 	static int checksumHistoryPageSize;
 
-	ACTOR static Future<Void> sweep(AsyncFileWriteChecker* self) {
-		state void* data = (void*)new char[checksumHistoryPageSize];
+	ACTOR Future<Void> sweep(AsyncFileWriteChecker* self) {
 		loop {
 			// for each page, read and do checksum
 			// scan from the least recently used, thus it is safe to quit if data has not been synced
 			state uint32_t page = self->lru.leastRecentlyUsedPage();
-			while (self->writing.find(page) != self->writing.end()) {
+			while (self->writing.find(page) != self->writing.end() || page == -1) {
 				// avoid concurrent ops
-				wait(delay(3.0));
+				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
 				continue;
-			}
-			if (page == -1) {
-				// no more available pages
-				break;
 			}
 			int64_t offset = page * checksumHistoryPageSize;
 			// perform a read to verify checksum
-			wait(success(self->read(data, checksumHistoryPageSize, offset)));
+			wait(success(self->read(self->pageBuffer, checksumHistoryPageSize, offset)));
 			self->lru.remove(page);
-		}
-		delete[] reinterpret_cast<char*>(data);
-		return Void();
-	}
-
-	ACTOR Future<Void> runChecksumWorker(AsyncFileWriteChecker* self) {
-		// periodically scan the LRU of checksum history, remove them after check the items that have been synced
-		loop {
-			choose {
-				when(wait(AsyncFileWriteChecker::sweep(self))) {}
-				when(wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_INTERVAL))) {}
-			}
-			wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_INTERVAL));
 		}
 	}
 
@@ -280,13 +252,14 @@ private:
 	}
 
 	// return true if there are still remaining valid synced pages to check, otherwise false
+	// this method removes the page entry from checksum history upon a successful check
 	bool verifyChecksum(int page, uint32_t checksum, uint8_t* start, bool sweep) {
 		if (!lru.exist(page)) {
 			// it has already been verified succesfully and removed by checksumWorker
 			return true;
 		}
 		WriteInfo history = lru.find(page);
-		// only verify checksum for pages have been sycned
+		// only verify checksum for pages have been synced
 		if (history.timestamp < syncedTime) {
 			if (history.checksum != checksum) {
 				TraceEvent(SevError, "AsyncFileLostWriteDetected")
@@ -320,11 +293,6 @@ private:
 	                                            uint8_t* buf,
 	                                            bool sweep = false) {
 		std::vector<uint32_t> pages;
-		if (!checksumWorkerStart) {
-			checksumWorkerStart = true;
-			checksumWorker = runChecksumWorker(this);
-			checksumLogger = runChecksumLogger(this);
-		}
 		// Check or set each full block in the the range
 		int page = offset / checksumHistoryPageSize; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
@@ -364,10 +332,8 @@ private:
 				history.checksum = checksum;
 				lru.update(page, history);
 			} else {
-				if (FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_ENABLE_CHECKSUM) {
-					if (!verifyChecksum(page, checksum, start, sweep)) {
-						break;
-					}
+				if (!verifyChecksum(page, checksum, start, sweep)) {
+					break;
 				}
 			}
 			start += checksumHistoryPageSize;
