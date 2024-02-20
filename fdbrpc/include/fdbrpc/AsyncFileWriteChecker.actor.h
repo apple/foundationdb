@@ -135,14 +135,7 @@ public:
 
 		void truncate(uint32_t page) {
 			auto it = keyToStep.lower_bound(page);
-			while (it != keyToStep.end()) {
-				int step = it->second;
-				auto next = it;
-				next++;
-				keyToStep.erase(it);
-				stepToKey.erase(step);
-				it = next;
-			}
+			keyToStep.erase(it, keyToStep.end());
 		}
 
 		uint32_t randomPage() {
@@ -231,9 +224,8 @@ private:
 				continue;
 			}
 			int64_t offset = page * checksumHistoryPageSize;
-			// perform a read to verify checksum
+			// perform a read to verify checksum, it will remove the entry upon success
 			wait(success(self->read(self->pageBuffer, checksumHistoryPageSize, offset)));
-			self->lru.remove(page);
 		}
 	}
 
