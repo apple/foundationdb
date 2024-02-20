@@ -503,6 +503,8 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	}
 
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
 	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
@@ -1237,7 +1239,11 @@ public:
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
 
 			// Write special key range metadata.
-			writeBatch = std::make_unique<rocksdb::WriteBatch>();
+			writeBatch = std::make_unique<rocksdb::WriteBatch>(
+			    0, // reserved_bytes default:0
+			    0, // max_bytes default:0
+			    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+			    0 /* default_cf_ts_sz default:0 */);
 			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 			persistRangeMapping(specialKeys, true);
 			status = db->Write(options, writeBatch.get());
@@ -1249,7 +1255,11 @@ public:
 			    .detail("MetadataShardCF", metadataShard->cf->GetID());
 		}
 
-		writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		writeBatch = std::make_unique<rocksdb::WriteBatch>(
+		    0, // reserved_bytes default:0
+		    0, // max_bytes default:0
+		    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+		    0 /* default_cf_ts_sz default:0 */);
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
@@ -1625,7 +1635,11 @@ public:
 
 	std::unique_ptr<rocksdb::WriteBatch> getWriteBatch() {
 		std::unique_ptr<rocksdb::WriteBatch> existingWriteBatch = std::move(writeBatch);
-		writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		writeBatch = std::make_unique<rocksdb::WriteBatch>(
+		    0, // reserved_bytes default:0
+		    0, // max_bytes default:0
+		    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+		    0 /* default_cf_ts_sz default:0 */);
 		return existingWriteBatch;
 	}
 
@@ -2979,7 +2993,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			rocksdb::Status status;
-			rocksdb::WriteBatch writeBatch;
+			rocksdb::WriteBatch writeBatch(
+			    0, // reserved_bytes default:0
+			    0, // max_bytes default:0
+			    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+			    0 /* default_cf_ts_sz default:0 */);
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
