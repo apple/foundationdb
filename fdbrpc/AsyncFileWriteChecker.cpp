@@ -122,7 +122,6 @@ public:
 	AsyncFileWriteChecker::WriteInfo find(uint32_t page) {
 		auto it = m.find(page);
 		if (it == m.end()) {
-			printf("Cannot find page %d\n", page);
 			TraceEvent(SevError, "LRU2CheckerTryFindingPageNotExist")
 			    .detail("FileName", fileName)
 			    .detail("Page", page)
@@ -177,7 +176,7 @@ TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 			lru.update(page, wi);
 			lru2.update(page, wi);
 			compareWriteInfo(lru.find(page), lru2.find(page));
-			printf("ASYNC::Insert %d\n", page);
+			// printf("ASYNC::Insert %d\n", page);
 		} else if (r < 0.45) {
 			// to remove
 			uint32_t page = lru2.randomPage();
@@ -190,7 +189,7 @@ TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 			lru2.remove(page);
 			ASSERT(!lru.exist(page));
 			ASSERT(!lru2.exist(page));
-			printf("ASYNC::erase %d\n", page);
+			// printf("ASYNC::erase %d\n", page);
 		} else {
 			// to truncate
 			uint32_t page = lru2.randomPage();
@@ -201,9 +200,9 @@ TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 				ASSERT(!lru.exist(page2));
 				ASSERT(!lru2.exist(page2));
 			}
-			printf("ASYNC::truncate %d\n", page);
+			// printf("ASYNC::truncate %d\n", page);
 		}
-		lru2.print();
+		// lru2.print();
 		if (lru2.size() != 0) {
 			uint32_t leastRecentlyPage = lru.leastRecentlyUsedPage();
 			uint32_t leastRecentlyPage2 = lru2.leastRecentlyUsedPage();
