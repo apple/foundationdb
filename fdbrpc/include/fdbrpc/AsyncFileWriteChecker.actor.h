@@ -135,7 +135,15 @@ public:
 
 		void truncate(uint32_t page) {
 			auto it = keyToStep.lower_bound(page);
-			keyToStep.erase(it, keyToStep.end());
+			// iterate through keyToStep, to find corresponding entries in stepToKey
+			while (it != keyToStep.end()) {
+				int step = it->second;
+				auto next = it;
+				next++;
+				keyToStep.erase(it);
+				stepToKey.erase(step);
+				it = next;
+			}
 		}
 
 		uint32_t randomPage() {
