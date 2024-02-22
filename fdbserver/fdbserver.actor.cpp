@@ -1035,6 +1035,7 @@ namespace {
 enum class ServerRole {
 	ChangeClusterKey,
 	ConsistencyCheck,
+	ConsistencyCheckUrgent,
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
@@ -2420,6 +2421,18 @@ int main(int argc, char* argv[]) {
 			                       TEST_TYPE_CONSISTENCY_CHECK,
 			                       TEST_HERE,
 			                       1,
+			                       opts.testFile,
+			                       StringRef(),
+			                       opts.localities));
+			g_network->run();
+		} else if (role == ServerRole::ConsistencyCheckUrgent) {
+			setupRunLoopProfiler();
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
+			f = stopAfter(runTests(opts.connectionFile,
+			                       TEST_TYPE_CONSISTENCY_CHECK_URGENT,
+			                       TEST_ON_TESTERS,
+			                       opts.minTesterCount,
 			                       opts.testFile,
 			                       StringRef(),
 			                       opts.localities));

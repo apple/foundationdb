@@ -82,6 +82,8 @@ struct WorkloadRequest {
 
 	VectorRef<VectorRef<KeyValueRef>> options;
 
+	std::vector<KeyRange> rangesToCheck; // For consistency checker urgent
+
 	int clientId; // the "id" of the client receiving the request (0 indexed)
 	int clientCount; // the total number of test clients participating in the workload
 	ReplyPromise<struct WorkloadInterface> reply;
@@ -102,6 +104,7 @@ struct WorkloadRequest {
 		           defaultTenant,
 		           runFailureWorkloads,
 		           disabledFailureInjectionWorkloads,
+		           rangesToCheck,
 		           arena);
 	}
 };
@@ -124,7 +127,12 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     LocalityData locality);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
-enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK, TEST_TYPE_UNIT_TESTS };
+enum test_type_t {
+	TEST_TYPE_FROM_FILE,
+	TEST_TYPE_CONSISTENCY_CHECK,
+	TEST_TYPE_UNIT_TESTS,
+	TEST_TYPE_CONSISTENCY_CHECK_URGENT
+};
 
 ACTOR Future<Void> runTests(
     Reference<IClusterConnectionRecord> connRecord,
