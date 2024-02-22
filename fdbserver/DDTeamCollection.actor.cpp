@@ -891,12 +891,14 @@ public:
 				bool anyUndesired = false;
 				bool anyWrongConfiguration = false;
 				bool anyWigglingServer = false;
+				const bool ignoreSSFailures = !badTeam && self->healthyZone.get().present() &&
+				                              (self->healthyZone.get().get() == ignoreSSFailuresZoneString);
 				int serversLeft = 0, serverUndesired = 0, serverWrongConf = 0, serverWiggling = 0;
 
 				for (const UID& uid : team->getServerIDs()) {
 					change.push_back(self->server_status.onChange(uid));
 					auto& status = self->server_status.get(uid);
-					if (!status.isFailed) {
+					if (!status.isFailed || ignoreSSFailures) {
 						serversLeft++;
 					}
 					if (status.isUndesired) {
@@ -918,8 +920,7 @@ public:
 				}
 
 				// Failed server should not trigger DD if SS failures are set to be ignored
-				if (!badTeam && self->healthyZone.get().present() &&
-				    (self->healthyZone.get().get() == ignoreSSFailuresZoneString)) {
+				if (ignoreSSFailures) {
 					ASSERT_WE_THINK(serversLeft == team->size());
 				}
 
