@@ -66,7 +66,7 @@ public:
 		auto pages = updateChecksumHistory(true, offset, length, (uint8_t*)data);
 		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
 		return map(m_f->write(data, length, offset), [self, pages](Void r) {
-			for (uint32_t page : pages) {
+			for (int page : pages) {
 				self->writing.erase(page);
 			}
 			return r;
@@ -103,18 +103,20 @@ public:
 	struct WriteInfo {
 		WriteInfo() : checksum(0), timestamp(0) {}
 		uint32_t checksum;
-		uint32_t timestamp; // keep a precision of ms
+		uint64_t timestamp; // keep a precision of ms
 	};
 
-	static uint32_t transformTime(double unixTime) { return (uint32_t)(unixTime * millisecondsPerSecond); }
+	// transform from unixTime(double) to uint64_t, to retain ms precision.
+	static uint64_t transformTime(double unixTime) { return (uint64_t)(unixTime * millisecondsPerSecond); }
 
 	class LRU {
 	private:
 		int64_t step;
 		std::string fileName;
-		std::map<int, uint32_t> stepToKey;
-		std::map<uint32_t, int> keyToStep; // std::map is to support ::truncate
-		std::unordered_map<uint32_t, AsyncFileWriteChecker::WriteInfo> pageContents;
+		// with int as page number, we support up to 8TB files(2147483647 * 4KB)
+		std::map<int, int> stepToKey;
+		std::map<int, int> keyToStep; // std::map is to support ::truncate
+		std::unordered_map<int, AsyncFileWriteChecker::WriteInfo> pageContents;
 
 	public:
 		LRU(std::string _fileName) {
@@ -122,7 +124,7 @@ public:
 			fileName = _fileName;
 		}
 
-		void update(uint32_t page, AsyncFileWriteChecker::WriteInfo writeInfo) {
+		void update(int page, AsyncFileWriteChecker::WriteInfo writeInfo) {
 			if (keyToStep.find(page) != keyToStep.end()) {
 				// remove its old entry in stepToKey
 				stepToKey.erase(keyToStep[page]);
@@ -133,7 +135,7 @@ public:
 			step++;
 		}
 
-		void truncate(uint32_t page) {
+		void truncate(int page) {
 			auto it = keyToStep.lower_bound(page);
 			// iterate through keyToStep, to find corresponding entries in stepToKey
 			while (it != keyToStep.end()) {
@@ -146,7 +148,7 @@ public:
 			}
 		}
 
-		uint32_t randomPage() {
+		int randomPage() {
 			if (keyToStep.size() == 0) {
 				return -1;
 			}
@@ -157,9 +159,9 @@ public:
 
 		int size() { return keyToStep.size(); }
 
-		bool exist(uint32_t page) { return keyToStep.find(page) != keyToStep.end(); }
+		bool exist(int page) { return keyToStep.find(page) != keyToStep.end(); }
 
-		AsyncFileWriteChecker::WriteInfo find(uint32_t page) {
+		AsyncFileWriteChecker::WriteInfo find(int page) {
 			auto it = keyToStep.find(page);
 			if (it == keyToStep.end()) {
 				TraceEvent(SevError, "LRUCheckerTryFindingPageNotExist")
@@ -171,14 +173,14 @@ public:
 			return pageContents[page];
 		}
 
-		uint32_t leastRecentlyUsedPage() {
+		int leastRecentlyUsedPage() {
 			if (stepToKey.size() == 0) {
 				return -1;
 			}
 			return stepToKey.begin()->second;
 		}
 
-		void remove(uint32_t page) {
+		void remove(int page) {
 			if (keyToStep.find(page) == keyToStep.end()) {
 				return;
 			}
@@ -207,16 +209,15 @@ public:
 	}
 
 private:
-	// transform from unixTime(double) to uint32_t, to retain ms precision.
 	Reference<IAsyncFile> m_f;
 	Future<Void> checksumWorker;
 	Future<Void> checksumLogger;
 	LRU lru;
 	void* pageBuffer;
 	uint64_t totalCheckedFail, totalCheckedSucceed;
-	uint32_t syncedTime;
+	uint64_t syncedTime;
 	// to avoid concurrent operation, so that the continuous reader will skip a page if it is being written
-	std::unordered_set<uint32_t> writing;
+	std::unordered_set<int> writing;
 	// This is the most page checksum history blocks we will use across all files.
 	static Optional<int> checksumHistoryBudget;
 	static int checksumHistoryPageSize;
@@ -225,8 +226,8 @@ private:
 		loop {
 			// for each page, read and do checksum
 			// scan from the least recently used, thus it is safe to quit if data has not been synced
-			state uint32_t page = self->lru.leastRecentlyUsedPage();
-			while (self->writing.find(page) != self->writing.end() || page == -1) {
+			state int64_t page = self->lru.leastRecentlyUsedPage();
+			if (self->writing.find(page) != self->writing.end() || page == -1) {
 				// avoid concurrent ops
 				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
 				continue;
@@ -247,13 +248,14 @@ private:
 			    .detail("Filename", self->getFilename())
 			    .detail("TotalCheckedSucceed", self->totalCheckedSucceed)
 			    .detail("TotalCheckedFail", self->totalCheckedFail)
-			    .detail("CurrentSize", self->lru.size());
+			    .detail("CurrentSize", self->lru.size())
+			    .log();
 		}
 	}
 
 	// return true if there are still remaining valid synced pages to check, otherwise false
 	// this method removes the page entry from checksum history upon a successful check
-	bool verifyChecksum(int page, uint32_t checksum, uint8_t* start, bool sweep) {
+	bool verifyChecksum(int page, uint32_t checksum, uint8_t* start) {
 		if (!lru.exist(page)) {
 			// it has already been verified succesfully and removed by checksumWorker
 			return true;
@@ -265,7 +267,6 @@ private:
 				TraceEvent(SevError, "AsyncFileLostWriteDetected")
 				    .error(checksum_failed())
 				    .detail("Filename", getFilename())
-				    .detail("Sweep", sweep)
 				    .detail("PageNumber", page)
 				    .detail("Size", lru.size())
 				    .detail("Start", (long)start)
@@ -287,12 +288,8 @@ private:
 
 	// Update or check checksum(s) in history for any full pages covered by this operation
 	// return the updated pages when updateChecksum is true
-	std::vector<uint32_t> updateChecksumHistory(bool updateChecksum,
-	                                            int64_t offset,
-	                                            int len,
-	                                            uint8_t* buf,
-	                                            bool sweep = false) {
-		std::vector<uint32_t> pages;
+	std::vector<int> updateChecksumHistory(bool updateChecksum, int64_t offset, int len, uint8_t* buf) {
+		std::vector<int> pages;
 		// Check or set each full block in the the range
 		int page = offset / checksumHistoryPageSize; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
@@ -332,7 +329,7 @@ private:
 				history.checksum = checksum;
 				lru.update(page, history);
 			} else {
-				if (!verifyChecksum(page, checksum, start, sweep)) {
+				if (!verifyChecksum(page, checksum, start)) {
 					break;
 				}
 			}
