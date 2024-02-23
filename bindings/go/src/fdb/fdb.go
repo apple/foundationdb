@@ -290,7 +290,7 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	// This case shouldn't happen and is only a safeguard.
 	if db, ok = storedDB.(Database); !ok {
 		// As the current entry is not usable, we delete it.
-		storedDB.Delete(clusterFile)
+		openDatabases.Delete(clusterFile)
 		return Database{}, fmt.Errorf("cannot load database from cache")
 	}
 
