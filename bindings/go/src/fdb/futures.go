@@ -42,7 +42,6 @@ import (
 	"runtime"
 	"sync"
 	"unsafe"
-	"log"
 )
 
 // A Future represents a value (or error) to be available at some later
