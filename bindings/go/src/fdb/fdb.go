@@ -39,6 +39,7 @@ import (
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
+//
 //export unlockMutex
 func unlockMutex(p unsafe.Pointer) {
 	m := (*sync.Mutex)(p)
@@ -329,12 +330,10 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 }
 
 func createDatabase(clusterFile string) (Database, error) {
-	log.Println("DEBUG: OpenDatabase")
 	err := startNetwork()
 	if err != nil {
 		return Database{}, err
 	}
-	log.Println("DEBUG: OpenDatabase network started")
 
 	var cf *C.char
 	if len(clusterFile) != 0 {
@@ -343,11 +342,13 @@ func createDatabase(clusterFile string) (Database, error) {
 	}
 
 	var outdb *C.FDBDatabase
-	if err := C.fdb_create_database(cf, &outdb); err != 0 {
-		return Database{}, Error{int(err)}
+	log.Println("Before fdb_create_database outdb:", outdb)
+	errno := C.fdb_create_database(cf, &outdb)
+	if errno != 0 {
+		return Database{}, Error{int(errno)}
 	}
 
-	log.Println("outdb:", outdb)
+	log.Println("After fdb_create_database outdb:", outdb, "error", errno)
 	if outdb == nil {
 		return Database{}, fmt.Errorf("could not create database, fdb_create_database returned nil pointer")
 	}
