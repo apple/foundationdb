@@ -350,7 +350,10 @@ func createDatabase(clusterFile string) (Database, error) {
 		return Database{}, Error{int(err)}
 	}
 
-	// TODO: Could this cause the issue?
+	if outdb == nil {
+		return Database{}, fmt.Errorf("could not create database, fdb_create_database returned nil pointer")
+	}
+
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
