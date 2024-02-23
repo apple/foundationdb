@@ -191,36 +191,37 @@ func MustGetAPIVersion() int {
 }
 
 var apiVersion int
-var networkStarted bool
-var networkMutex sync.RWMutex
 var openDatabases sync.Map
+var networkMutex sync.RWMutex
+var setupNetworkOnce sync.Once
 
 func startNetwork() error {
-	networkMutex.RLock()
-	if networkStarted {
-		networkMutex.RUnlock()
-		return nil
-	}
-	// release read lock and acquire write lock
-	networkMutex.RUnlock()
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
-	if networkStarted {
-		return nil
-	}
 
-	if e := C.fdb_setup_network(); e != 0 {
-		return Error{int(e)}
-	}
-
-	go func() {
-		e := C.fdb_run_network()
-		if e != 0 {
-			log.Printf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e)
+	var errno C.int
+	// Only setup the network once. There is no need for an additional mutex as the execution for all
+	// callers will be blocked until the method has finished. The usage of networkMutex will help to
+	// make sure we call the whole startNetwork only once.
+	setupNetworkOnce.Do(func() {
+		errno = C.fdb_setup_network()
+		// Stop further execution
+		if errno != 0 {
+			return
 		}
-	}()
 
-	networkStarted = true
+		errno = C.fdb_run_network()
+	})
+
+	if errno != 0 {
+		err := fmt.Errorf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(errno)), errno)
+		log.Println(err)
+		return err
+	} else {
+		// We have to reset the once as the initialization was not successfull.
+		// Should we panic here?
+		setupNetworkOnce = sync.Once{}
+	}
 
 	return nil
 }
@@ -339,6 +340,7 @@ func createDatabase(clusterFile string) (Database, error) {
 		return Database{}, Error{int(err)}
 	}
 
+	// TODO: Could this cause the issue?
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
@@ -354,10 +356,6 @@ func CreateCluster(clusterFile string) (Cluster, error) {
 
 	if apiVersion == 0 {
 		return Cluster{}, errAPIVersionUnset
-	}
-
-	if !networkStarted {
-		return Cluster{}, errNetworkNotSetup
 	}
 
 	return Cluster{clusterFile}, nil

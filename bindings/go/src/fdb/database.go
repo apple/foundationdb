@@ -27,6 +27,7 @@ package fdb
 import "C"
 
 import (
+	"log"
 	"runtime"
 )
 
@@ -60,6 +61,7 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 }
 
 func (d *database) destroy() {
+	log.Println("Closing database!")
 	C.fdb_database_destroy(d.ptr)
 }
 
