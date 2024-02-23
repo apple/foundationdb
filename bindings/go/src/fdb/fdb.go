@@ -193,12 +193,7 @@ func MustGetAPIVersion() int {
 var apiVersion int
 var networkStarted bool
 var networkMutex sync.RWMutex
-
-var openDatabases map[string]Database
-
-func init() {
-	openDatabases = make(map[string]Database)
-}
+var openDatabases sync.Map
 
 func startNetwork() error {
 	networkMutex.RLock()
@@ -279,13 +274,24 @@ func OpenDatabase(clusterFile string) (Database, error) {
 		return Database{}, err
 	}
 
-	db, ok := openDatabases[clusterFile]
-	if !ok {
-		db, e = createDatabase(clusterFile)
-		if e != nil {
-			return Database{}, e
+	var db Database
+	var ok bool
+	storedDB, exist := openDatabases.Load(clusterFile)
+	if !exist {
+		db, err = createDatabase(clusterFile)
+		if err != nil {
+			return Database{}, err
 		}
-		openDatabases[clusterFile] = db
+
+		openDatabases.Store(clusterFile, db)
+		return db, nil
+	}
+
+	// This case shouldn't happen and is only a safeguard.
+	if db, ok = storedDB.(Database); !ok {
+		// As the current entry is not usable, we delete it.
+		storedDB.Delete(clusterFile)
+		return Database{}, fmt.Errorf("cannot load database from cache")
 	}
 
 	return db, nil
