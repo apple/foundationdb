@@ -66,7 +66,7 @@ public:
 		auto pages = updateChecksumHistory(true, offset, length, (uint8_t*)data);
 		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
 		return map(m_f->write(data, length, offset), [self, pages](Void r) {
-			for (int page : pages) {
+			for (int32_t page : pages) {
 				self->writing.erase(page);
 			}
 			return r;
@@ -111,12 +111,12 @@ public:
 
 	class LRU {
 	private:
-		int64_t step;
+		uint64_t step;
 		std::string fileName;
 		// with int as page number, we support up to 8TB files(2147483647 * 4KB)
-		std::map<int, int> stepToKey;
-		std::map<int, int> keyToStep; // std::map is to support ::truncate
-		std::unordered_map<int, AsyncFileWriteChecker::WriteInfo> pageContents;
+		std::map<uint64_t, int32_t> stepToKey;
+		std::map<int32_t, uint64_t> keyToStep; // std::map is to support ::truncate
+		std::unordered_map<int32_t, AsyncFileWriteChecker::WriteInfo> pageContents;
 
 	public:
 		LRU(std::string _fileName) {
@@ -124,7 +124,7 @@ public:
 			fileName = _fileName;
 		}
 
-		void update(int page, AsyncFileWriteChecker::WriteInfo writeInfo) {
+		void update(int32_t page, AsyncFileWriteChecker::WriteInfo writeInfo) {
 			if (keyToStep.find(page) != keyToStep.end()) {
 				// remove its old entry in stepToKey
 				stepToKey.erase(keyToStep[page]);
@@ -135,11 +135,11 @@ public:
 			step++;
 		}
 
-		void truncate(int page) {
+		void truncate(int32_t page) {
 			auto it = keyToStep.lower_bound(page);
 			// iterate through keyToStep, to find corresponding entries in stepToKey
 			while (it != keyToStep.end()) {
-				int step = it->second;
+				uint64_t step = it->second;
 				auto next = it;
 				next++;
 				keyToStep.erase(it);
@@ -148,7 +148,7 @@ public:
 			}
 		}
 
-		int randomPage() {
+		int32_t randomPage() {
 			if (keyToStep.size() == 0) {
 				return -1;
 			}
@@ -159,9 +159,9 @@ public:
 
 		int size() { return keyToStep.size(); }
 
-		bool exist(int page) { return keyToStep.find(page) != keyToStep.end(); }
+		bool exist(int32_t page) { return keyToStep.find(page) != keyToStep.end(); }
 
-		AsyncFileWriteChecker::WriteInfo find(int page) {
+		AsyncFileWriteChecker::WriteInfo find(int32_t page) {
 			auto it = keyToStep.find(page);
 			if (it == keyToStep.end()) {
 				TraceEvent(SevError, "LRUCheckerTryFindingPageNotExist")
@@ -173,14 +173,14 @@ public:
 			return pageContents[page];
 		}
 
-		int leastRecentlyUsedPage() {
+		int32_t leastRecentlyUsedPage() {
 			if (stepToKey.size() == 0) {
 				return -1;
 			}
 			return stepToKey.begin()->second;
 		}
 
-		void remove(int page) {
+		void remove(int32_t page) {
 			if (keyToStep.find(page) == keyToStep.end()) {
 				return;
 			}
@@ -217,7 +217,7 @@ private:
 	uint64_t totalCheckedFail, totalCheckedSucceed;
 	uint64_t syncedTime;
 	// to avoid concurrent operation, so that the continuous reader will skip a page if it is being written
-	std::unordered_set<int> writing;
+	std::unordered_set<int32_t> writing;
 	// This is the most page checksum history blocks we will use across all files.
 	static Optional<int> checksumHistoryBudget;
 	static int checksumHistoryPageSize;
@@ -226,6 +226,7 @@ private:
 		loop {
 			// for each page, read and do checksum
 			// scan from the least recently used, thus it is safe to quit if data has not been synced
+			// use int64_t as offset will be calculated based on page
 			state int64_t page = self->lru.leastRecentlyUsedPage();
 			if (self->writing.find(page) != self->writing.end() || page == -1) {
 				// avoid concurrent ops
@@ -255,7 +256,7 @@ private:
 
 	// return true if there are still remaining valid synced pages to check, otherwise false
 	// this method removes the page entry from checksum history upon a successful check
-	bool verifyChecksum(int page, uint32_t checksum, uint8_t* start) {
+	bool verifyChecksum(int32_t page, uint32_t checksum, uint8_t* start) {
 		if (!lru.exist(page)) {
 			// it has already been verified succesfully and removed by checksumWorker
 			return true;
@@ -291,7 +292,7 @@ private:
 	std::vector<int> updateChecksumHistory(bool updateChecksum, int64_t offset, int len, uint8_t* buf) {
 		std::vector<int> pages;
 		// Check or set each full block in the the range
-		int page = offset / checksumHistoryPageSize; // First page number
+		int32_t page = offset / checksumHistoryPageSize; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
 		uint8_t* start = buf; // Position in buffer to start checking from
 		// If offset is not page-aligned, move to next page and adjust start
@@ -299,8 +300,8 @@ private:
 			++page;
 			start += (checksumHistoryPageSize - slack);
 		}
-		int startPage = page;
-		int pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
+		int32_t startPage = page;
+		int32_t pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
 		while (page < pageEnd) {
 			uint32_t checksum = crc32c_append(0xab12fd93, start, checksumHistoryPageSize);
 #if VALGRIND
