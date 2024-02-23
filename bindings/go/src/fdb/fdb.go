@@ -199,27 +199,31 @@ func startNetwork() error {
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
 
-	var errno C.int
+	var err error
 	// Only setup the network once. There is no need for an additional mutex as the execution for all
 	// callers will be blocked until the method has finished. The usage of networkMutex will help to
 	// make sure we call the whole startNetwork only once.
 	setupNetworkOnce.Do(func() {
-		errno = C.fdb_setup_network()
+		log.Println("DEBUG: Setup network")
+		errno := C.fdb_setup_network()
 		// Stop further execution
 		if errno != 0 {
+			err = fmt.Errorf("Could not setup nework, got error; %d", errno)
 			return
 		}
 
 		go func() {
 			e := C.fdb_run_network()
 			if e != 0 {
-				log.Printf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e)
+				err = fmt.Errorf("Unhandled error in FoundationDB network thread: %d", errno)
+				log.Println(err)
 			}
 		}()
+
+		log.Println("DEBUG: Setup network Done")
 	})
 
-	if errno != 0 {
-		err := fmt.Errorf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(errno)), errno)
+	if err != nil {
 		log.Println(err)
 		// We have to reset the once as the initialization was not successfull.
 		// Should we panic here?
@@ -274,15 +278,10 @@ func MustOpenDefault() Database {
 // To connect to multiple clusters running at different, incompatible versions,
 // the multi-version client API must be used.
 func OpenDatabase(clusterFile string) (Database, error) {
-	err := startNetwork()
-	if err != nil {
-		return Database{}, err
-	}
-
 	var db Database
-	var ok bool
 	storedDB, exist := openDatabases.Load(clusterFile)
 	if !exist {
+		var err error
 		db, err = createDatabase(clusterFile)
 		if err != nil {
 			return Database{}, err
@@ -293,6 +292,7 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	}
 
 	// This case shouldn't happen and is only a safeguard.
+	var ok bool
 	if db, ok = storedDB.(Database); !ok {
 		// As the current entry is not usable, we delete it.
 		openDatabases.Delete(clusterFile)
@@ -332,8 +332,14 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 }
 
 func createDatabase(clusterFile string) (Database, error) {
-	var cf *C.char
+	log.Println("DEBUG: OpenDatabase")
+	err := startNetwork()
+	if err != nil {
+		return Database{}, err
+	}
+	log.Println("DEBUG: OpenDatabase network started")
 
+	var cf *C.char
 	if len(clusterFile) != 0 {
 		cf = C.CString(clusterFile)
 		defer C.free(unsafe.Pointer(cf))

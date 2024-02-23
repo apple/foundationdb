@@ -42,6 +42,7 @@ import (
 	"runtime"
 	"sync"
 	"unsafe"
+	"log"
 )
 
 // A Future represents a value (or error) to be available at some later
@@ -96,7 +97,11 @@ func fdb_future_block_until_ready(f *C.FDBFuture) {
 	m := &sync.Mutex{}
 	m.Lock()
 	C.go_set_callback(unsafe.Pointer(f), unsafe.Pointer(m))
-	m.Lock()
+	// Could there be a case where m is nil?
+	log.Println("mutex in fdb_future_block_until_ready: %v", m)
+	if m != nil {
+		m.Lock()
+	}
 }
 
 func (f *future) BlockUntilReady() {
