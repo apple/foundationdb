@@ -210,17 +210,21 @@ func startNetwork() error {
 			return
 		}
 
-		errno = C.fdb_run_network()
+		go func() {
+			e := C.fdb_run_network()
+			if e != 0 {
+				log.Printf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e)
+			}
+		}()
 	})
 
 	if errno != 0 {
 		err := fmt.Errorf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(errno)), errno)
 		log.Println(err)
-		return err
-	} else {
 		// We have to reset the once as the initialization was not successfull.
 		// Should we panic here?
 		setupNetworkOnce = sync.Once{}
+		return err
 	}
 
 	return nil
