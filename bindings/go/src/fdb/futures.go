@@ -97,11 +97,7 @@ func fdb_future_block_until_ready(f *C.FDBFuture) {
 	m := &sync.Mutex{}
 	m.Lock()
 	C.go_set_callback(unsafe.Pointer(f), unsafe.Pointer(m))
-	// Could there be a case where m is nil?
-	log.Println("mutex in fdb_future_block_until_ready: %v", m)
-	if m != nil {
-		m.Lock()
-	}
+	m.Lock()
 }
 
 func (f *future) BlockUntilReady() {

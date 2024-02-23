@@ -204,7 +204,6 @@ func startNetwork() error {
 	// callers will be blocked until the method has finished. The usage of networkMutex will help to
 	// make sure we call the whole startNetwork only once.
 	setupNetworkOnce.Do(func() {
-		log.Println("DEBUG: Setup network")
 		errno := C.fdb_setup_network()
 		// Stop further execution
 		if errno != 0 {
@@ -219,8 +218,6 @@ func startNetwork() error {
 				log.Println(err)
 			}
 		}()
-
-		log.Println("DEBUG: Setup network Done")
 	})
 
 	if err != nil {
@@ -350,6 +347,7 @@ func createDatabase(clusterFile string) (Database, error) {
 		return Database{}, Error{int(err)}
 	}
 
+	log.Println("outdb:", outdb)
 	if outdb == nil {
 		return Database{}, fmt.Errorf("could not create database, fdb_create_database returned nil pointer")
 	}
