@@ -1788,18 +1788,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _startUrgent(Database cx, ConsistencyCheckWorkload* self) {
-		TraceEvent("ConsistencyCheckUrgent_TesterStart")
-		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-		    .detail("ClientCount", self->clientCount)
-		    .detail("ClientId", self->clientId);
-		wait(self->runUrgentCheck(cx, self));
-		return Void();
-	}
-
-	ACTOR Future<Void> runUrgentCheck(Database cx, ConsistencyCheckWorkload* self) {
 		try {
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterStart")
+			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+			    .detail("ClientCount", self->clientCount)
+			    .detail("ClientId", self->clientId);
 			if (self->rangesToCheck.size() == 0) {
-				TraceEvent("ConsistencyCheckUrgent_TesterExit")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterExit")
 				    .detail("Reason", "AssignedEmptyRangeToCheck")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientCount", self->clientCount)
@@ -1807,7 +1802,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				return Void();
 			}
 			if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
-				TraceEvent("ConsistencyCheckUrgent_SimTesterFailure")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterMimicFailure")
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId);
 				throw operation_failed(); // mimic tester failure
@@ -1816,39 +1811,31 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			                                      self->rangesToCheck,
 			                                      self,
 			                                      /*consistencyCheckEpoch=*/0));
-			TraceEvent("ConsistencyCheckUrgent_TesterExit")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterExit")
 			    .detail("Reason", "CompleteCheck")
 			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("ClientCount", self->clientCount)
 			    .detail("ClientId", self->clientId);
 		} catch (Error& e) {
+			std::string reason;
+			Severity sev = SevInfo;
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			} else if (e.code() == error_code_timed_out) {
-				TraceEvent("ConsistencyCheckUrgent_TesterExit")
-				    .error(e)
-				    .detail("Reason", "Operation retried too many times")
-				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("ClientId", self->clientId);
-				throw consistency_check_task_failed();
-			} else if (e.code() == error_code_consistency_check_task_failed) {
-				TraceEvent("ConsistencyCheckUrgent_TesterExit")
-				    .error(e)
-				    .detail("Reason", "Retry failed ranges for too many times")
-				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("ClientId", self->clientId);
-				throw consistency_check_task_failed();
+				reason = "Operation retried too many times";
+			} else if (e.code() == error_code_consistency_check_urgent_task_failed) {
+				reason = "Retry failed ranges for too many times";
 			} else {
-				TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterExit")
-				    .error(e)
-				    .detail("Reason", "Unknown failure")
-				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("ClientId", self->clientId);
-				throw consistency_check_task_failed();
+				reason = "Unexpected failure";
+				sev = SevWarnAlways;
 			}
+			TraceEvent(sev, "ConsistencyCheckUrgent_TesterExit")
+				.error(e)
+				.detail("Reason", reason)
+				.detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				.detail("ClientCount", self->clientCount)
+				.detail("ClientId", self->clientId);
+			throw consistency_check_urgent_task_failed();
 		}
 		return Void();
 	}
@@ -1867,8 +1854,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				endKeyToReadKeyServer = ranges[i].end;
 			}
 		}
-		TraceEvent("ConsistencyCheckUrgent_GetKeyLocationsForRangeList")
-		    .detail("Ops", "Input")
+		TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterGetKeyLocationsForRangeList")
 		    .detail("RangeBegin", beginKeyToReadKeyServer)
 		    .detail("RangeEnd", endKeyToReadKeyServer)
 		    .detail("ClientCount", self->clientCount)
@@ -1903,7 +1889,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					break;
 				}
 			} catch (Error& e) {
-				TraceEvent("ConsistencyCheckUrgent_RetryGetKeyLocationsForRangeList")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryGetKeyLocationsForRangeList")
 				    .error(e)
 				    .detail("ClientCount", self->clientCount)
 				    .detail("ClientId", self->clientId);
@@ -1929,7 +1915,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				if (e.code() == error_code_actor_cancelled) {
 					throw e;
 				}
-				TraceEvent(SevWarn, "ConsistencyCheckUrgent_GetKeyLocationListFailed")
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetKeyLocationListFailed")
 				    .error(e)
 				    .detail("RetryCount", retryCount)
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -1946,7 +1932,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("ConsistencyCheckUrgent_StartTask")
+		TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterStartTask")
 		    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 		    .detail("RangeToCheck", rangesToCheck.size())
 		    .detail("ShardToCheck", shardLocationPairList.size())
@@ -1989,7 +1975,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (e.code() == error_code_actor_cancelled) {
 						throw e;
 					}
-					TraceEvent(SevWarn, "ConsistencyCheckUrgent_GetUIDtoTagMapFailed")
+					TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetUIDtoTagMapFailed")
 					    .error(e)
 					    .detail("RetryCount", retryCount)
 					    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -2007,7 +1993,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 
 			if (sourceStorageServers.size() == 0) {
-				TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_EmptySourceServers")
+				TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterEmptySourceServers")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientId", self->clientId)
 				    .detail("ClientCount", self->clientCount)
@@ -2018,7 +2004,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				numCompleteShards++;
 				continue; // Skip to the next shard
 			} else if (sourceStorageServers.size() == 1) {
-				TraceEvent(SevWarn, "ConsistencyCheckUrgent_SingleReplica")
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterSingleReplica")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientId", self->clientId)
 				    .detail("ClientCount", self->clientCount)
@@ -2037,6 +2023,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			loop {
 				try {
 					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					std::vector<Future<Optional<Value>>> serverListEntries;
 					for (int s = 0; s < storageServers.size(); s++)
@@ -2044,7 +2032,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 					for (int s = 0; s < serverListValues.size(); s++) {
 						if (!serverListValues[s].present()) {
-							TraceEvent(SevWarn, "ConsistencyCheckUrgent_GetServerInterfaceFailed")
+							TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetServerInterfaceFailed")
 							    .detail("SSID", storageServers[s])
 							    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 							    .detail("ClientId", self->clientId)
@@ -2089,6 +2077,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 					req.version = version;
 					req.tags = TagSet();
+					req.options = ReadOptions(debugRandom()->randomUniqueID());
 
 					// Try getting the entries in the specified range
 					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -2104,7 +2093,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 						if (!rangeResult.present() || rangeResult.get().error.present()) {
 							valueAvailableToCheck = false;
-							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_GetRangeError");
+							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
 							e.detail("ResultPresent", rangeResult.present());
 							if (rangeResult.present()) {
 								e.detail("ErrorPresent", rangeResult.get().error.present());
@@ -2119,7 +2108,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					}
 					if (!valueAvailableToCheck) {
 						failedRanges.insert(range, true);
-						TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardAddedToRetry")
+						TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardAddedToRetry")
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -2249,7 +2238,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (e.code() == error_code_actor_cancelled) {
 						throw e;
 					}
-					TraceEvent("ConsistencyCheckUrgent_RetryDataConsistency").error(e);
+					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryDataConsistency").error(e);
 					wait(delay(5.0));
 				}
 			}
@@ -2258,7 +2247,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			// Otherwise, persist the progress
 			if (!valueAvailableToCheck) {
 				numFailedShards++;
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardFailed")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -2276,7 +2265,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ShardKeysCompared", shardKeyCompared);
 			} else {
 				numCompleteShards++;
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ShardComplete")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardComplete")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
@@ -2308,7 +2297,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (failedRangesToCheck.size() > 0) { // Retry for any failed shard
 			if (consistencyCheckEpoch < CLIENT_KNOBS->CONSISTENCY_CHECK_RETRY_DEPTH_MAX) {
 				wait(delay(60.0)); // Backoff 1 min
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_RetryFailedRanges")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryFailedRanges")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
@@ -2316,19 +2305,19 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("ClientCount", self->clientCount);
 				wait(self->checkDataConsistencyUrgent(cx, failedRangesToCheck, self, consistencyCheckEpoch + 1));
 			} else {
-				TraceEvent(SevWarn, "ConsistencyCheckUrgent_RetryDepthMax")
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterRetryDepthMax")
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("FailedCollectedRangeCount", failedRangesToCheck.size())
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch)
 				    .detail("ClientId", self->clientId)
 				    .detail("ClientCount", self->clientCount);
-				throw consistency_check_task_failed(); // Notify the checker that this tester is failed
+				throw consistency_check_urgent_task_failed(); // Notify the checker that this tester is failed
 			}
 			// When we are able to persist progress, we simply give up retrying when retry too many times
 			// The failed ranges will be picked up by the next round of the consistency checker urgent
 		}
 		if (consistencyCheckEpoch == 0) {
-			TraceEvent("ConsistencyCheckUrgent_EndTask")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterEndTask")
 			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 			    .detail("ShardCount", shardLocationPairList.size())
 			    .detail("ClientId", self->clientId)

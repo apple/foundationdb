@@ -693,11 +693,66 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 		reply.send(res.get());
 }
 
+ACTOR Future<Void> runConsistencyCheckUrgentWorkloadAsync(Database cx,
+                                                          WorkloadInterface workIface,
+                                                          Reference<TestWorkload> workload) {
+	state ReplyPromise<Void> jobReq;
+	loop choose {
+		when(ReplyPromise<Void> req = waitNext(workIface.start.getFuture())) {
+			jobReq = req;
+			try {
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadReceived", workIface.id());
+				wait(workload->start(cx));
+				jobReq.send(Void());
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadError", workIface.id()).errorUnsuppressed(e);
+				jobReq.sendError(consistency_check_urgent_task_failed());
+			}
+			break;
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> testerServerConsistencyCheckerUrgentWorkload(WorkloadRequest work,
+                                                                Reference<IClusterConnectionRecord> ccr,
+                                                                Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
+                                                                LocalityData locality) {
+	state WorkloadInterface workIface;
+	state bool replied = false;
+	try {
+		state Database cx = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
+		cx->defaultTenant = work.defaultTenant.castTo<TenantName>();
+		wait(delay(1.0));
+		Reference<TestWorkload> workload = wait(getWorkloadIface(work, ccr, dbInfo));
+		if (!workload) {
+			TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterFailedGetWorkloadInterface");
+			throw consistency_check_urgent_task_failed();
+		}
+		Future<Void> test =
+		    runConsistencyCheckUrgentWorkloadAsync(cx, workIface, workload) || traceRole(Role::TESTER, workIface.id());
+		work.reply.send(workIface);
+		replied = true;
+		wait(test);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterRunWorkloadFailed").errorUnsuppressed(e);
+		if (!replied) {
+			work.reply.sendError(e);
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> runWorkloadAsync(Database cx,
                                     WorkloadInterface workIface,
                                     Reference<TestWorkload> workload,
-                                    double databasePingDelay,
-                                    bool isConsistencyCheckUrgent) {
+                                    double databasePingDelay) {
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<CheckReply>> checkResult;
@@ -744,7 +799,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					startResult = operation_failed();
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
-					TraceEvent(isConsistencyCheckUrgent ? SevWarn : SevError, "TestFailure", workIface.id())
+					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .errorUnsuppressed(e)
 					    .detail("Reason", "Error starting workload")
 					    .detail("Workload", workload->description());
@@ -803,8 +858,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
                                         Reference<IClusterConnectionRecord> ccr,
                                         Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                        LocalityData locality,
-                                        bool isConsistencyCheckUrgent) {
+                                        LocalityData locality) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
 	state Database cx;
@@ -830,9 +884,8 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
 			throw test_specification_invalid();
 		}
-		Future<Void> test =
-		    runWorkloadAsync(cx, workIface, workload, work.databasePingDelay, isConsistencyCheckUrgent) ||
-		    traceRole(Role::TESTER, workIface.id());
+		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay) ||
+		                    traceRole(Role::TESTER, workIface.id());
 		work.reply.send(workIface);
 		replied = true;
 
@@ -879,7 +932,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 		when(wait(workerFatalError)) {}
 		when(wait(consistencyCheckerUrgentTester.second.isValid() ? consistencyCheckerUrgentTester.second : Never())) {
 			ASSERT(consistencyCheckerUrgentTester.first != 0);
-			TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerWorkloadEnd", interf.id())
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadEnd", interf.id())
 			    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first);
 			consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>()); // reset
 		}
@@ -888,27 +941,26 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 			    work.sharedRandomNumber < SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE) {
 				// The workload is a consistency checker urgent workload
 				if (work.sharedRandomNumber == consistencyCheckerUrgentTester.first) {
-					TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerDuplicatedRequest", interf.id())
+					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterDuplicatedRequest", interf.id())
 					    .detail("ConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
 				} else if (consistencyCheckerUrgentTester.second.isValid() &&
 				           !consistencyCheckerUrgentTester.second.isReady()) {
-					TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_ServerConflict", interf.id())
+					TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterWorkloadConflict", interf.id())
 					    .detail("ExistingConsistencyCheckerId", consistencyCheckerUrgentTester.first)
 					    .detail("ArrivingConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
 				}
 				consistencyCheckerUrgentTester = std::make_pair(
-				    work.sharedRandomNumber,
-				    testerServerWorkload(work, ccr, dbInfo, locality, /*isConsistencyCheckUrgent=*/true));
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_ServerWorkloadStart", interf.id())
+				    work.sharedRandomNumber, testerServerConsistencyCheckerUrgentWorkload(work, ccr, dbInfo, locality));
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interf.id())
 				    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
 				    .detail("ClientId", work.clientId)
 				    .detail("ClientCount", work.clientCount);
 			} else {
-				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality, /*isConsistencyCheckUrgent=*/false));
+				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
 			}
 		}
 	}
@@ -1374,23 +1426,26 @@ ACTOR Future<Void> checkConsistency(Database cx,
 ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
     Database cx,
     std::vector<TesterInterface> testers,
-    TestSpec spec,
     Optional<TenantName> defaultTenant,
     int64_t consistencyCheckerId,
     std::unordered_map<int, std::vector<KeyRange>> assignment) {
-	TraceEvent("ConsistencyCheckUrgent_Dispatch")
+	TraceEvent(SevInfo, "ConsistencyCheckUrgent_DispatchWorkloads")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 
 	// Step 1: Get interfaces for running workloads
 	state std::vector<Future<ErrorOr<WorkloadInterface>>> workRequests;
+	Standalone<VectorRef<KeyValueRef>> option;
+	option.push_back_deep(option.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
+	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;
+	options.push_back_deep(options.arena(), option);
 	for (int i = 0; i < testers.size(); i++) {
 		WorkloadRequest req;
-		req.title = spec.title;
+		req.title = "ConsistencyCheck"_sr;
 		req.useDatabase = true;
 		req.timeout = 0.0; // disable timeout workload
 		req.databasePingDelay = 0.0; // disable databased ping check
-		req.options = spec.options;
+		req.options = options;
 		req.clientId = i;
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = consistencyCheckerId;
@@ -1402,7 +1457,7 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 	wait(waitForAll(workRequests));
 
 	// Step 2: Run workloads via the interfaces
-	TraceEvent("ConsistencyCheckUrgent_StartWorkloads")
+	TraceEvent(SevInfo, "ConsistencyCheckUrgent_TriggerWorkloads")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 	state std::unordered_set<int> completeClientIds;
@@ -1410,7 +1465,13 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 	state std::vector<Future<ErrorOr<Void>>> jobs;
 	for (int i = 0; i < workRequests.size(); i++) {
 		ASSERT(workRequests[i].isReady());
-		if (!workRequests[i].get().isError()) {
+		if (workRequests[i].get().isError()) {
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_FailedToContactTester")
+			    .error(workRequests[i].get().getError())
+			    .detail("TesterCount", testers.size())
+			    .detail("TesterId", i)
+			    .detail("ConsistencyCheckerId", consistencyCheckerId);
+		} else {
 			jobs.push_back(workRequests[i].get().get().start.template getReplyUnlessFailedFor<Void>(10, 0));
 			clientIds.push_back(i);
 		}
@@ -1418,19 +1479,19 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 	wait(waitForAll(jobs));
 	for (int i = 0; i < jobs.size(); i++) {
 		if (jobs[i].isError()) {
-			TraceEvent("ConsistencyCheckUrgent_RunWorkloadError1")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_RunWorkloadError1")
 			    .errorUnsuppressed(jobs[i].getError())
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		} else if (jobs[i].get().isError()) {
-			TraceEvent("ConsistencyCheckUrgent_RunWorkloadError2")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_RunWorkloadError2")
 			    .errorUnsuppressed(jobs[i].get().getError())
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
 		} else {
-			TraceEvent("ConsistencyCheckUrgent_RunWorkloadComplete")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_RunWorkloadComplete")
 			    .detail("ClientId", clientIds[i])
 			    .detail("ClientCount", testers.size())
 			    .detail("ConsistencyCheckerId", consistencyCheckerId);
@@ -1438,27 +1499,7 @@ ACTOR Future<std::unordered_set<int>> runUrgentConsistencyCheckWorkload(
 		}
 	}
 
-	// Step 3: Stop workloads via the interfaces
-	for (int i = 0; i < workRequests.size(); i++) {
-		ASSERT(workRequests[i].isReady());
-		if (!workRequests[i].get().isError()) {
-			TraceEvent("ConsistencyCheckUrgent_RunWorkloadStopSignal")
-			    .detail("State", "Succeed")
-			    .detail("ClientId", i)
-			    .detail("ClientCount", testers.size())
-			    .detail("ConsistencyCheckerId", consistencyCheckerId);
-			workRequests[i].get().get().stop.send(ReplyPromise<Void>());
-			// This signal is not reliable but acceptable
-		} else {
-			TraceEvent("ConsistencyCheckUrgent_RunWorkloadStopSignal")
-			    .detail("State", "Not issue since the interface is failed to fetch")
-			    .detail("ClientId", i)
-			    .detail("ClientCount", testers.size())
-			    .detail("ConsistencyCheckerId", consistencyCheckerId);
-		}
-	}
-
-	TraceEvent("ConsistencyCheckUrgent_DispatchEnd")
+	TraceEvent(SevInfo, "ConsistencyCheckUrgent_DispatchWorkloadEnd")
 	    .detail("TesterCount", testers.size())
 	    .detail("ConsistencyCheckerId", consistencyCheckerId);
 
@@ -1477,7 +1518,7 @@ ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::
 			endKeyToReadKeyServer = ranges[i].end;
 		}
 	}
-	TraceEvent("ConsistencyCheckUrgent_GetConsistencyCheckShards")
+	TraceEvent(SevInfo, "ConsistencyCheckUrgent_GetConsistencyCheckShards")
 	    .detail("RangeBegin", beginKeyToReadKeyServer)
 	    .detail("RangeEnd", endKeyToReadKeyServer);
 	// Read KeyServer space within the scope and add shards intersecting with the input ranges
@@ -1510,7 +1551,7 @@ ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::
 				break;
 			}
 		} catch (Error& e) {
-			TraceEvent("ConsistencyCheckUrgent_GetConsistencyCheckShardsRetry").error(e);
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GetConsistencyCheckShardsRetry").error(e);
 			wait(tr.onError(e));
 		}
 	}
@@ -1556,38 +1597,40 @@ const std::unordered_map<char, uint8_t> parseCharMap{
 	{ 'A', 10 }, { 'B', 11 }, { 'C', 12 }, { 'D', 13 }, { 'E', 14 }, { 'F', 15 },
 };
 
-Key getKeyFromString(const std::string& str) {
+Optional<Key> getKeyFromString(const std::string& str) {
 	Key emptyKey;
 	if (str.size() == 0) {
 		return emptyKey;
 	}
 	if (str.size() % 4 != 0) {
-		TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Reason", "WrongLength")
 		    .detail("InputStr", str);
-		throw internal_error();
+		return Optional<Key>();
 	}
 	std::vector<uint8_t> byteList;
 	for (int i = 0; i < str.size(); i += 4) {
 		if (str.at(i + 0) != '\\' || str.at(i + 1) != 'x') {
-			TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+			           "ConsistencyCheckUrgent_GetKeyFromStringError")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Reason", "WrongBytePrefix")
 			    .detail("InputStr", str);
-			throw internal_error();
+			return Optional<Key>();
 		}
 		const char first = str.at(i + 2);
 		const char second = str.at(i + 3);
 		if (parseCharMap.count(first) == 0 || parseCharMap.count(second) == 0) {
-			TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+			           "ConsistencyCheckUrgent_GetKeyFromStringError")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Reason", "WrongByteContent")
 			    .detail("InputStr", str);
-			throw internal_error();
+			return Optional<Key>();
 		}
 		uint8_t parsedValue = parseCharMap.at(first) * 16 + parseCharMap.at(second);
 		byteList.push_back(parsedValue);
@@ -1595,7 +1638,7 @@ Key getKeyFromString(const std::string& str) {
 	return Standalone(StringRef(byteList.data(), byteList.size()));
 }
 
-std::vector<KeyRange> loadRangesToCheckFromKnob() {
+Optional<std::vector<KeyRange>> loadRangesToCheckFromKnob() {
 	// Load string from knob
 	std::vector<std::string> beginKeyStrs = {
 		CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_0,
@@ -1613,15 +1656,27 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 	// Get keys from strings
 	std::vector<Key> beginKeys;
 	for (const auto& beginKeyStr : beginKeyStrs) {
-		Key key = getKeyFromString(beginKeyStr);
-		beginKeys.push_back(key);
+		Optional<Key> key = getKeyFromString(beginKeyStr);
+		if (key.present()) {
+			beginKeys.push_back(key.get());
+		} else {
+			return Optional<std::vector<KeyRange>>();
+		}
 	}
 	std::vector<Key> endKeys;
 	for (const auto& endKeyStr : endKeyStrs) {
-		Key key = getKeyFromString(endKeyStr);
-		endKeys.push_back(key);
+		Optional<Key> key = getKeyFromString(endKeyStr);
+		if (key.present()) {
+			endKeys.push_back(key.get());
+		} else {
+			return Optional<std::vector<KeyRange>>();
+		}
 	}
-	ASSERT(beginKeys.size() == endKeys.size());
+	if (beginKeys.size() != endKeys.size()) {
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ConsistencyCheckUrgent_GetKeyFromStringError")
+		    .detail("Reason", "MismatchBeginKeysAndEndKeys");
+		return Optional<std::vector<KeyRange>>();
+	}
 
 	// Get ranges
 	KeyRangeMap<bool> rangeToCheckMap;
@@ -1635,7 +1690,7 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 			rangeBegin = allKeys.end;
 		}
 		if (rangeEnd > allKeys.end) {
-			TraceEvent("ConsistencyCheckUrgent_ReverseInputRange")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_ReverseInputRange")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Index", i)
@@ -1650,7 +1705,7 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 		} else if (rangeBegin > rangeEnd) {
 			rangeToCheck = Standalone(KeyRangeRef(rangeEnd, rangeBegin));
 		} else {
-			TraceEvent("ConsistencyCheckUrgent_EmptyInputRange")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_EmptyInputRange")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Index", i)
@@ -1669,7 +1724,7 @@ std::vector<KeyRange> loadRangesToCheckFromKnob() {
 			res.push_back(rangeToCheck.range());
 		}
 	}
-	TraceEvent e("ConsistencyCheckUrgent_LoadedInputRange");
+	TraceEvent e(SevInfo, "ConsistencyCheckUrgent_LoadedInputRange");
 	e.setMaxEventLength(-1);
 	e.setMaxFieldLength(-1);
 	for (int i = 0; i < res.size(); i++) {
@@ -1703,7 +1758,7 @@ ACTOR Future<std::unordered_map<int, std::vector<KeyRange>>> makeTaskAssignment(
 	}
 	state std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
 	for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
-		TraceEvent("ConsistencyCheckUrgent_ClientAssignedTask")
+		TraceEvent(SevInfo, "ConsistencyCheckUrgent_AssignTaskToTesters")
 		    .detail("ConsistencyCheckerId", consistencyCheckerId)
 		    .detail("Round", round)
 		    .detail("ClientId", assignIt->first)
@@ -1716,41 +1771,44 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
                                                    Database cx,
                                                    Optional<std::vector<TesterInterface>> testers,
                                                    int minTestersExpected,
-                                                   TestSpec testSpec,
                                                    Optional<TenantName> defaultTenant,
                                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(
-	    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
-	state std::vector<KeyRange> rangesToCheck; // get from progress metadata
-	state std::vector<KeyRange> shardsToCheck; // get from keyServer metadata
-	state KeyRangeMap<bool> globalProgressMap; // used to keep track of progress when persisting metadata is not allowed
+	state KeyRangeMap<bool> globalProgressMap; // used to keep track of progress
 	state std::unordered_map<int, std::vector<KeyRange>> assignment; // used to keep track of assignment of tasks
 	state std::vector<TesterInterface> ts; // used to store testers interface
+	state std::vector<KeyRange> rangesToCheck; // get from globalProgressMap
+	state std::vector<KeyRange> shardsToCheck; // get from keyServer metadata
 
-	// Initialization
-	// In case when persisting metadata is not allowed, prepare for globalProgressMap
-	// globalProgressMap is used to keep track of the global progress of checking
-	globalProgressMap.insert(allKeys, true);
-	rangesToCheck = loadRangesToCheckFromKnob();
-	for (const auto& rangeToCheck : rangesToCheck) {
-		// Mark rangesToCheck as incomplete
-		// Those ranges will be checked
-		globalProgressMap.insert(rangeToCheck, false);
+	// Initialize globalProgressMap
+	Optional<std::vector<KeyRange>> rangesToCheck_ = loadRangesToCheckFromKnob();
+	if (rangesToCheck_.present()) {
+		globalProgressMap.insert(allKeys, true);
+		for (const auto& rangeToCheck : rangesToCheck_.get()) {
+			// Mark rangesToCheck as incomplete
+			// Those ranges will be checked
+			globalProgressMap.insert(rangeToCheck, false);
+		}
+		globalProgressMap.coalesce(allKeys);
+	} else {
+		TraceEvent(SevInfo, "ConsistencyCheckUrgent_FailedToLoadRangeFromKnob")
+		    .detail("ConsistencyCheckerId", consistencyCheckerId);
+		globalProgressMap.insert(allKeys, false);
 	}
-	globalProgressMap.coalesce(allKeys);
 
-	// Main loop
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(
+	    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
 	state int retryTimes = 0;
 	state int round = 0;
+
+	// Main loop
 	loop {
 		try {
 			// Step 1: Load ranges to check, if nothing to run, exit
-			TraceEvent("ConsistencyCheckUrgent_RoundBegin")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_RoundBegin")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("RetryTimes", retryTimes)
 			    .detail("TesterCount", ts.size())
 			    .detail("Round", round);
-
 			rangesToCheck.clear();
 			for (auto& range : globalProgressMap.ranges()) {
 				if (!range.value()) { // range that is not finished
@@ -1758,7 +1816,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 				}
 			}
 			if (rangesToCheck.size() == 0) {
-				TraceEvent("ConsistencyCheckUrgent_Complete")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_Complete")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
 				    .detail("Round", round);
@@ -1775,7 +1833,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			} else { // In simulation
 				ts = testers.get();
 			}
-			TraceEvent("ConsistencyCheckUrgent_GoTTesters")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GoTTesters")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RetryTimes", retryTimes)
@@ -1785,7 +1843,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			// Shard is the unit for the task assignment
 			shardsToCheck.clear();
 			wait(store(shardsToCheck, getConsistencyCheckShards(cx, rangesToCheck)));
-			TraceEvent("ConsistencyCheckUrgent_GotShardsToCheck")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GotShardsToCheck")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RetryTimes", retryTimes)
@@ -1797,8 +1855,8 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			wait(store(assignment, makeTaskAssignment(cx, consistencyCheckerId, shardsToCheck, ts.size(), round)));
 
 			// Step 5: Run checking on testers
-			std::unordered_set<int> completeClients = wait(
-			    runUrgentConsistencyCheckWorkload(cx, ts, testSpec, defaultTenant, consistencyCheckerId, assignment));
+			std::unordered_set<int> completeClients =
+			    wait(runUrgentConsistencyCheckWorkload(cx, ts, defaultTenant, consistencyCheckerId, assignment));
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 				throw operation_failed(); // Introduce random failure
 			}
@@ -1808,7 +1866,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 					globalProgressMap.insert(range, true); // Mark the ranges as complete
 				}
 			}
-			TraceEvent("ConsistencyCheckUrgent_RoundEnd")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_RoundEnd")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("RetryTimes", retryTimes)
 			    .detail("SucceedTesterCount", completeClients.size())
@@ -1821,7 +1879,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			} else {
-				TraceEvent("ConsistencyCheckUrgent_CoreWithRetriableFailure")
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_CoreWithRetriableFailure")
 				    .errorUnsuppressed(e)
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
@@ -1842,34 +1900,12 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 ACTOR Future<Void> checkConsistencyUrgentSim(Database cx,
                                              std::vector<TesterInterface> testers,
                                              Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state TestSpec spec;
-	Standalone<VectorRef<KeyValueRef>> options;
-	spec.title = "ConsistencyCheck"_sr;
-	spec.phases = TestWorkload::EXECUTION;
-	options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
-	spec.options.push_back_deep(spec.options.arena(), options);
-	loop {
-		TraceEvent("ConsistencyCheckUrgent_SimBegin");
-		try {
-			wait(runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(),
-			                                     cx,
-			                                     testers,
-			                                     1,
-			                                     spec,
-			                                     Optional<TenantName>(),
-			                                     dbInfo));
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			if (e.code() == error_code_operation_failed) {
-				continue;
-			}
-			TraceEvent("ConsistencyCheckUrgent_RepairDC");
-			wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheckUrgent"));
-		}
-	}
+	wait(runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(),
+	                                     cx,
+	                                     testers,
+	                                     1,
+	                                     Optional<TenantName>(),
+	                                     dbInfo));
 	return Void();
 }
 
@@ -2910,13 +2946,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK_URGENT) {
-		TestSpec spec;
-		Standalone<VectorRef<KeyValueRef>> options;
-		spec.title = "ConsistencyCheck"_sr;
-		spec.phases = TestWorkload::EXECUTION;
-		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
-		spec.options.push_back_deep(spec.options.arena(), options);
-		testSet.testSpecs.push_back(spec);
+		// Need not to set spec here. Will set spec when triggering workload
 	} else if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
@@ -2985,14 +3015,10 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
 		cx = openDBOnServer(dbInfo);
 		cx->defaultTenant = defaultTenant;
-		tests = reportErrors(runConsistencyCheckerUrgentCore(cc,
-		                                                     cx,
-		                                                     Optional<std::vector<TesterInterface>>(),
-		                                                     minTestersExpected,
-		                                                     testSet.testSpecs[0],
-		                                                     defaultTenant,
-		                                                     dbInfo),
-		                     "runConsistencyCheckerUrgentCore");
+		tests = reportErrors(
+		    runConsistencyCheckerUrgentCore(
+		        cc, cx, Optional<std::vector<TesterInterface>>(), minTestersExpected, defaultTenant, dbInfo),
+		    "runConsistencyCheckerUrgentCore");
 	} else if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);

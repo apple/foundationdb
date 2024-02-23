@@ -106,7 +106,7 @@ ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfu
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
 ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been sent, the old request is discarded.")
 ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
-ERROR( consistency_check_task_failed, 1085, "Consistency check task is failed")
+ERROR( consistency_check_urgent_task_failed, 1085, "Consistency check urgent task is failed")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
