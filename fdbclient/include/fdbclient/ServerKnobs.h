@@ -1087,9 +1087,6 @@ public:
 	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
 	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
 	double WORKER_START_STORAGE_DELAY;
-	int64_t TESTER_SHARED_RANDOM_MAX_PLUS_ONE;
-	int64_t CONSISTENCY_CHECK_ID_MIN;
-	int64_t CONSISTENCY_CHECK_ID_MAX_PLUS_ONE;
 
 	// Test harness
 	double WORKER_POLL_DELAY;

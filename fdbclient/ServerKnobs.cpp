@@ -1070,9 +1070,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DISK_CLEANUP_MAX_RETRIES,                       10 );
 	init( STORAGE_DISK_CLEANUP_RETRY_INTERVAL,  isSimulated ? 2 : 30 );
 	init( WORKER_START_STORAGE_DELAY,                            0.0 ); if ( randomize && BUGGIFY ) WORKER_START_STORAGE_DELAY = 1.0;
-	init( TESTER_SHARED_RANDOM_MAX_PLUS_ONE,                10000000 );
-	init( CONSISTENCY_CHECK_ID_MIN, TESTER_SHARED_RANDOM_MAX_PLUS_ONE );
-	init( CONSISTENCY_CHECK_ID_MAX_PLUS_ONE, 10 * TESTER_SHARED_RANDOM_MAX_PLUS_ONE);
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
