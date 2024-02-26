@@ -693,6 +693,22 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 		reply.send(res.get());
 }
 
+ACTOR Future<Reference<TestWorkload>> getConsistencyCheckUrgentWorkloadIface(
+    WorkloadRequest work,
+    Reference<IClusterConnectionRecord> ccr,
+    Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state WorkloadContext wcx;
+	wcx.clientId = work.clientId;
+	wcx.clientCount = work.clientCount;
+	wcx.sharedRandomNumber = work.sharedRandomNumber;
+	wcx.ccr = ccr;
+	wcx.dbInfo = dbInfo;
+	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
+	wcx.rangesToCheck = work.rangesToCheck;
+	Reference<TestWorkload> iface = wait(getWorkloadIface(work, ccr, work.options[0], dbInfo));
+	return iface;
+}
+
 ACTOR Future<Void> runConsistencyCheckUrgentWorkloadAsync(Database cx,
                                                           WorkloadInterface workIface,
                                                           Reference<TestWorkload> workload) {
@@ -732,13 +748,8 @@ ACTOR Future<Void> testerServerConsistencyCheckerUrgentWorkload(WorkloadRequest 
 	try {
 		state Database cx = openDBOnServer(dbInfo);
 		wait(delay(1.0));
-		Reference<TestWorkload> workload = wait(getWorkloadIface(work, ccr, dbInfo));
-		if (!workload) {
-			TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterFailedGetWorkloadInterface");
-			throw consistency_check_urgent_task_failed();
-		}
-		Future<Void> test =
-		    runConsistencyCheckUrgentWorkloadAsync(cx, workIface, workload) || traceRole(Role::TESTER, workIface.id());
+		Reference<TestWorkload> workload = wait(getConsistencyCheckUrgentWorkloadIface(work, ccr, dbInfo));
+		Future<Void> test = runConsistencyCheckUrgentWorkloadAsync(cx, workIface, workload);
 		work.reply.send(workIface);
 		replied = true;
 		wait(test);

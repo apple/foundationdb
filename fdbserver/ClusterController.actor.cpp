@@ -871,8 +871,7 @@ ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Stand
 ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
                                            ProcessClass startingClass,
                                            ClusterControllerData* cluster) {
-	state Future<Void> failed = (worker.address() == g_network->getLocalAddress() ||
-	                             (g_network->isSimulated() && startingClass.classType() == ProcessClass::TesterClass))
+	state Future<Void> failed = (worker.address() == g_network->getLocalAddress())
 	                                ? Never()
 	                                : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set(worker.locality.processId(),
