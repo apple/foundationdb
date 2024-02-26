@@ -138,8 +138,6 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
 				    .detail("ClientId", self->clientId)
 				    .detail("ClientCount", self->clientCount)
-				    .detail("ShardBegin", range.begin)
-				    .detail("ShardEnd", range.end)
 				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 				wait(delay(5.0));
 				retryCount++;

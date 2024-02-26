@@ -1801,8 +1801,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		}
 		globalProgressMap.coalesce(allKeys);
 	} else {
-		TraceEvent(SevInfo, "ConsistencyCheckUrgent_FailedToLoadRangeFromKnob")
-		    .detail("ConsistencyCheckerId", consistencyCheckerId);
+		TraceEvent(SevInfo, "ConsistencyCheckUrgent_FailedToLoadRangeFromKnob");
 		globalProgressMap.insert(allKeys, false);
 	}
 
