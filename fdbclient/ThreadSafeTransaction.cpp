@@ -56,6 +56,7 @@ Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
+	std::cout << "Test0226ThreadSafeTxn" << std::endl;
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>(), nullptr));
 }
@@ -868,6 +869,7 @@ void ThreadSafeApi::stopNetwork() {
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
+	std::cout << "Test0227ThreadSafeApiCreateDB" << std::endl;
 	return Reference<IDatabase>(
 	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version()));
 }

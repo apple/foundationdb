@@ -666,7 +666,7 @@ private:
 			return;
 		}
 
-		TraceEvent("ApplyMetaDataMutationCheckClientInfo").detail("Key", m.param1);
+		TraceEvent("Test0226ApplyMetaDataMutationCheckClientInfo").detail("Key", m.param1);
 	}
 
 	// Generates private mutations for the target storage server, instructing it to create a checkpoint.

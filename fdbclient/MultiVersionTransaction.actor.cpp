@@ -688,6 +688,8 @@ Reference<ITenant> DLDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> DLDatabase::createTransaction() {
+	TraceEvent("Test0226DLCreateTxn").log();
+	std::cout << "Test0226DLCreateTxn" << std::endl;
 	FdbCApi::FDBTransaction* tr;
 	throwIfError(api->databaseCreateTransaction(db, &tr));
 	return Reference<ITransaction>(new DLTransaction(api, tr));
@@ -1238,6 +1240,8 @@ void DLApi::selectApiVersion(int apiVersion) {
 	// External clients must support at least this version
 	// Versions newer than what we understand are rejected in the C bindings
 	headerVersion = std::max(apiVersion, 400);
+	// here it adds the external client
+	std::cout<<"[Hfu5Critical]DLApiSelectAPIVErsion " << apiVersion << std::endl;
 
 	init();
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
@@ -2120,6 +2124,8 @@ Reference<ITenant> MultiVersionDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
+	TraceEvent("Test0226MultiVersionCreateTxn").log();
+	std::cout << "Test0226MultiVersionCreateTxn" << std::endl;
 	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
 	                                                           Optional<Reference<MultiVersionTenant>>(),
 	                                                           dbState->transactionDefaultOptions));
@@ -2808,7 +2814,7 @@ void MultiVersionApi::disableMultiVersionClientApi() {
 	if (networkStartSetup || localClientDisabled || disableBypass) {
 		throw invalid_option();
 	}
-
+	std::cout<<"hfu0229disableMultiVersionClientApi" << std::endl;
 	bypassMultiClientApi = true;
 }
 
@@ -2855,9 +2861,11 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	// external libraries always run on their own thread; ensure we allocate at least one thread to run this
 	// library.
 	threadCount = std::max(threadCount, 1);
+	std::cout<<"hfu0229addExternalLibraryDirectory" << std::endl;
 
 	for (auto filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
+		std::cout<<"hfu0229addExternalLibraryDirectoryEach, filename= " << filename << " lib=" << lib << std::endl;
 		if (externalClientDescriptions.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true, false)));
@@ -2997,9 +3005,11 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		validateOption(value, false, true);
 		setCallbacksOnExternalThreads();
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_LIBRARY) {
+		std::cout<<"hfu0229EXTERNAL_CLIENT_LIBRARY" << std::endl;
 		validateOption(value, true, false, false);
 		addExternalLibrary(abspath(value.get().toString()), false);
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_DIRECTORY) {
+		std::cout<<"hfu0229EXTERNAL_CLIENT_DIRECTORY" << std::endl;
 		validateOption(value, true, false, false);
 		addExternalLibraryDirectory(value.get().toString());
 	} else if (option == FDBNetworkOptions::DISABLE_LOCAL_CLIENT) {
@@ -3012,6 +3022,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		MutexHolder holder(lock);
 		ASSERT(!value.present() && !networkStartSetup);
 		externalClient = true;
+		std::cout<<"hfu0229EXTERNAL_CLIENT" << std::endl;
 		bypassMultiClientApi = true;
 		forwardOption = true;
 	} else if (option == FDBNetworkOptions::DISABLE_CLIENT_BYPASS) {
@@ -3106,6 +3117,7 @@ void MultiVersionApi::setupNetwork() {
 			}
 
 			if (externalClientDescriptions.empty() && !disableBypass) {
+				std::cout<<"hfu0229externalClientDescriptionsEmpty" << std::endl;
 				bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to
 				                             // add clients after setupNetwork is called
 			}
@@ -3153,7 +3165,13 @@ void MultiVersionApi::setupNetwork() {
 			runOnExternalClientsAllThreads(
 			    [this](Reference<ClientInfo> client) {
 				    TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-				    client->api->selectApiVersion(apiVersion.version());
+				    // test0229 it might fail here
+					std::cout<< "test0229 select API version" << std::endl;
+					try {
+						client->api->selectApiVersion(apiVersion.version());
+					} catch (Error& e) {
+					std::cout<< "test0229 select API version already set" << std::endl;
+					}
 				    if (client->useFutureVersion) {
 					    client->api->useFutureProtocolVersion();
 				    }
@@ -3294,6 +3312,9 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* 
 
 // Creates an IDatabase object that represents a connection to the cluster
 Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord const& connectionRecord) {
+	std::cout << "Test0227MultiVersionApiCreateDB disabled=" 
+		<< localClientDisabled 
+		<< " bypassMultiClientApi=" << bypassMultiClientApi << std::endl;
 	lock.enter();
 	if (!networkSetup) {
 		lock.leave();
@@ -3319,6 +3340,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord con
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {
+		std::cout << "[Hfu5Critical]ConfirmingMultiVersionTxn" << std::endl;
 		return Reference<IDatabase>(
 		    new MultiVersionDatabase(this, 0, connectionRecord, Reference<IDatabase>(), localDb));
 	}

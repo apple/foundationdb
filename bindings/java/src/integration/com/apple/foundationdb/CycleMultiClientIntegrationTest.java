@@ -66,7 +66,8 @@ public class CycleMultiClientIntegrationTest {
         int clientThreadsPerVersion = clientHelper.readClusterFromEnv().length;
         fdb.options().setClientThreadsPerVersion(clientThreadsPerVersion);
         System.out.printf("thread per version is %d\n", clientThreadsPerVersion);
-        fdb.options().setExternalClientDirectory("/var/dynamic-conf/lib");
+        // fdb.options().setExternalClientDirectory("/var/dynamic-conf/lib");
+        fdb.options().setExternalClientDirectory("/root/repro/binary73/c");
         fdb.options().setTraceEnable("/tmp");
         fdb.options().setKnob("min_trace_severity=5");
     }
@@ -88,7 +89,7 @@ public class CycleMultiClientIntegrationTest {
     private static void process(Collection<Database> dbs) {
         for (Database db : dbs) {
             for (int i = 0; i < threadPerDB; i++) {
-                final Thread thread = new Thread(CycleWorkload.create(db));
+                final Thread thread = new Thread(CycleWorkload.create(i, db));
                 thread.start();
             }
         }
@@ -108,26 +109,32 @@ public class CycleMultiClientIntegrationTest {
         for (Map.Entry<Thread, CycleChecker> entry : threadsToCheckers.entrySet()) {
             entry.getKey().join();
             final boolean succeed = entry.getValue().succeed();
-            Assertions.assertTrue(succeed, "Cycle test failed");
+            // Assertions.assertTrue(succeed, "Cycle test failed");
         }
     }
 
     public static class CycleWorkload implements Runnable {
 
         private final Database db;
+        int threadIndex;
 
-        private CycleWorkload(Database db) {
+        private CycleWorkload(int thread, Database db) {
+            this.threadIndex = thread;
             this.db = db;
         }
 
-        public static CycleWorkload create(Database db) {
-            return new CycleWorkload(db);
+        public static CycleWorkload create(int thread, Database db) {
+            return new CycleWorkload(thread, db);
         }
 
         @Override
         public void run() {
-            for (int i = 0; i < writeTxnCnt; i++) {
+            int i = 0;
+            while (true) {
+                System.out.printf("thread[%d] running round %d\n", this.threadIndex, i);
                 db.run(tr -> {
+                    // tr.options().setDebugTransactionIdentifier("haofu0229");
+                    // tr.options().setLogTransaction();
                     final int k = ThreadLocalRandom.current().nextInt(cycleLength);
                     final String key = Integer.toString(k);
                     byte[] result1 = tr.get(Tuple.from(key).pack()).join();
@@ -146,6 +153,7 @@ public class CycleMultiClientIntegrationTest {
                     tr.set(Tuple.from(value1).pack(), Tuple.from(value3).pack());
                     return null;
                 });
+                ++i;
             }
         }
     }

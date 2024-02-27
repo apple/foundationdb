@@ -15,6 +15,7 @@ LOGS_TASKSET=""
 STATELESS_TASKSET=""
 STORAGE_TASKSET=""
 LOGROUTER_COUNT=0
+CLEANUP=0
 
 function usage {
 	echo "Usage"
@@ -110,6 +111,9 @@ while [[ $# -gt 0 ]]; do
 		--logrouter_count)
 			LOGROUTER_COUNT=$2
 			;;
+		--cleanup)
+			CLEANUP=$2
+			;;
 	esac
 	shift; shift
 done
@@ -119,6 +123,8 @@ if [ ! -f ${FDB} ]; then
 	echo "Error: ${FDB} not found!"
 	usage
 fi
+
+echo "FDB is $FDB"
 
 if [ $REPLICATION_COUNT -eq 1 ]; then
 	replication="single"
@@ -131,8 +137,12 @@ else
 fi
 
 DIR=./loopback-cluster
-rm -rf $DIR
-mkdir -p ${DIR}
+
+if [ "$CLEANUP" -eq 1 ]; then
+	echo "Cleanup"
+	rm -rf $DIR
+	mkdir -p ${DIR}
+fi
 
 CLUSTER_FILE="test1:testdb1@127.0.0.1:$(( $PORT_PREFIX + 1))"
 CLUSTER=${DIR}/fdb.cluster
