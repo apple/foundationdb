@@ -688,6 +688,8 @@ Reference<ITenant> DLDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> DLDatabase::createTransaction() {
+	TraceEvent("Test0226DLCreateTxn").log();
+	std::cout << "Test0226DLCreateTxn" << std::endl;
 	FdbCApi::FDBTransaction* tr;
 	throwIfError(api->databaseCreateTransaction(db, &tr));
 	return Reference<ITransaction>(new DLTransaction(api, tr));
@@ -2120,6 +2122,8 @@ Reference<ITenant> MultiVersionDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
+	TraceEvent("Test0226MultiVersionCreateTxn").log();
+	std::cout << "Test0226MultiVersionCreateTxn" << std::endl;
 	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
 	                                                           Optional<Reference<MultiVersionTenant>>(),
 	                                                           dbState->transactionDefaultOptions));

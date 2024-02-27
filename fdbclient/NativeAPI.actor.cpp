@@ -9008,6 +9008,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
 			std::cout << "Enabling TrLogInfo" << std::endl;
+			TraceEvent("Test0226EnableTrLogInfo").log();
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}

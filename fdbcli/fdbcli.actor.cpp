@@ -766,6 +766,8 @@ Reference<ITransaction> getTransaction(Reference<IDatabase> db,
 		if (tenant) {
 			tr = tenant->createTransaction();
 		} else {
+			TraceEvent("Test0226GetTxnInside").log();
+			std::cout << "Test0226GetTxnInside" << std::endl;
 			tr = db->createTransaction();
 		}
 		options->apply(tr);
@@ -1866,6 +1868,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
+						bool tr_b = false;
+						bool tenant_b = false;
+						if (tr) {
+							tr_b = true;
+						}
+						if (tenant) {
+							tenant_b = true;
+						}
+						TraceEvent("Test0226GetTxnBefore")
+							.detail("Tr", tr_b)
+							.detail("InTrans", intrans)
+							.detail("Tenant", tenant_b)
+							.log();
+						// to add std cout here
+						std::cout << "Test0226GetTxnBefore Tr=" << tr_b << " Tenant=" << tenant_b 
+							<< " intrans=" << intrans
+							<< std::endl; 
 						if (intrans) {
 							if (transtype == TransType::None) {
 								transtype = TransType::Db;
