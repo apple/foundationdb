@@ -2591,6 +2591,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
+		// to validate here
 		validateOptionValueNotPresent(value);
 		networkOptions.logClientInfo = false;
 		break;
@@ -8991,6 +8992,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		double clientSamplingProbability =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		std::cout << "Using clientSamplingProbability=" << clientSamplingProbability << std::endl;
+		std::cout << "networkOptions.logClientInfo.present()=" << networkOptions.logClientInfo.present() << std::endl;
 		std::cout << "((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY)="
 		          << ((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY)
 		          << std::endl;

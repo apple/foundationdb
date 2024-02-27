@@ -869,6 +869,7 @@ void ThreadSafeApi::stopNetwork() {
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
+	std::cout << "Test0227ThreadSafeApiCreateDB" << std::endl;
 	return Reference<IDatabase>(
 	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version()));
 }

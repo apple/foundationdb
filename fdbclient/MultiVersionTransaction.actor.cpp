@@ -3298,6 +3298,9 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* 
 
 // Creates an IDatabase object that represents a connection to the cluster
 Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord const& connectionRecord) {
+	std::cout << "Test0227MultiVersionApiCreateDB disabled=" 
+		<< localClientDisabled 
+		<< " bypassMultiClientApi=" << bypassMultiClientApi << std::endl;
 	lock.enter();
 	if (!networkSetup) {
 		lock.leave();

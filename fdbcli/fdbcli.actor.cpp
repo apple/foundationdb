@@ -1885,6 +1885,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						std::cout << "Test0226GetTxnBefore Tr=" << tr_b << " Tenant=" << tenant_b 
 							<< " intrans=" << intrans
 							<< std::endl; 
+						std::cout << "options: ";
+						options->print();
+						std::cout << std::endl;
 						if (intrans) {
 							if (transtype == TransType::None) {
 								transtype = TransType::Db;
@@ -2461,7 +2464,8 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+		// hfu5: why disable here
+		// setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: cannot disable logging client related information (%s)\n", e.what());
 		return 1;
