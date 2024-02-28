@@ -37,8 +37,22 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// The ConsistencyCheckUrgent workload is designed to support the consistency check
+// urgent feature, a distributed version of the consistency check which emphasizes
+// the completeness of checking and the distributed fashion.
+// The ConsistencyCheckUrgent workload emphasizes the completeness of data consistency check ---
+// if any shard is failed to check, this information will be propagated to the user.
+// To support to the distributed fashion, the ConsistencyCheckUrgent workload takes
+// rangesToCheck and consistencyCheckerId as the input and check the data consistency of
+// the input ranges.
+// On the other hand, the ConsistencyCheck workload is used for a single-threaded consistency
+// check feature and includes many checks other than the data consistency check, such as
+// shard size estimation evaluation. However, the ConsistencyCheck workload cannot guarantee
+// the complete check and users cannot specify input range to check. Therefore, the
+// ConsistencyCheck workload cannot meet the requirement of the consistency check urgent feature.
 struct ConsistencyCheckUrgentWorkload : TestWorkload {
 	static constexpr auto NAME = "ConsistencyCheckUrgent";
+
 	int64_t consistencyCheckerId;
 
 	ConsistencyCheckUrgentWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -159,6 +173,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		state Reference<IRateControl> rateLimiter =
 		    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
 		state KeyRangeMap<bool> failedRanges; // Used to collect failed ranges in the current checkDataConsistency
+		failedRanges.insert(allKeys, false); // Initialized with false and will set any failed range as true later
 		// Which will be used to start the next consistencyCheckEpoch of the checkDataConsistency
 		state int64_t numShardThisClient = shardLocationPairList.size();
 		state int64_t numShardToCheck = -1;
@@ -457,6 +472,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			// Step 4: if the shard failed to check, add it to retry queue
 			// Otherwise, persist the progress
 			if (!valueAvailableToCheck) {
+				// Any shard for this case has been added to failedRanges which will be retried
+				// by the next consistencyCheckEpoch
 				numFailedShards++;
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardFailed")
 				    .setMaxEventLength(-1)
