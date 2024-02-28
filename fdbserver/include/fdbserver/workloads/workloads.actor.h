@@ -59,6 +59,7 @@ struct WorkloadContext {
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Reference<IClusterConnectionRecord> ccr;
 	Optional<TenantName> defaultTenant;
+	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
