@@ -555,7 +555,9 @@ struct StorageServerDisk {
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
 
-	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id, false); }
+	Future<Void> addRange(KeyRangeRef range, std::string id) {
+		return storage->addRange(range, id, !SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE);
+	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
 

@@ -1385,8 +1385,8 @@ public:
 			}
 		}
 
-		auto [it, inserted] =
-		    physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, getCFOptionsForInactiveShard()));
+		auto cfOptions = active ? getCFOptions() : getCFOptionsForInactiveShard();
+		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
 		activePhysicalShardIds.emplace(id);
@@ -1397,7 +1397,10 @@ public:
 
 		validate();
 
-		TraceEvent(SevInfo, "ShardedRocksDBRangeAdded", this->logId).detail("Range", range).detail("ShardId", id);
+		TraceEvent(SevInfo, "ShardedRocksDBRangeAdded", this->logId)
+		    .detail("Range", range)
+		    .detail("ShardId", id)
+		    .detail("Active", active);
 
 		return shard.get();
 	}
@@ -1499,11 +1502,16 @@ public:
 				continue;
 			}
 			std::unordered_map<std::string, std::string> options = {
-				{ "level0_file_num_compaction_trigger", "4" },
-				{ "level0_slowdown_writes_trigger", "20" },
-				{ "level0_stop_writes_trigger", "36" },
-				{ "soft_pending_compaction_bytes_limit", "5000000" },
-				{ "hard_pending_compaction_bytes_limit", "10000000" },
+				{ "level0_file_num_compaction_trigger",
+				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER) },
+				{ "level0_slowdown_writes_trigger",
+				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER) },
+				{ "level0_stop_writes_trigger",
+				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER) },
+				{ "soft_pending_compaction_bytes_limit",
+				  std::to_string(SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT) },
+				{ "hard_pending_compaction_bytes_limit",
+				  std::to_string(SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT) },
 				{ "disable_auto_compactions", "false" },
 				{ "num_levels", "-1" }
 			};
@@ -1511,6 +1519,7 @@ public:
 			auto beginSlice = toSlice(range.begin);
 			auto endSlice = toSlice(range.end);
 			db->SuggestCompactRange(it.value()->physicalShard->cf, &beginSlice, &endSlice);
+			TraceEvent("ShardedRocksDBRangeActive", logId).detail("ShardId", it.value()->physicalShard->id);
 		}
 	}
 
