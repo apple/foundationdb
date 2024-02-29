@@ -2812,7 +2812,7 @@ void MultiVersionApi::disableMultiVersionClientApi() {
 	if (networkStartSetup || localClientDisabled || disableBypass) {
 		throw invalid_option();
 	}
-
+	std::cout<<"hfu0229disableMultiVersionClientApi" << std::endl;
 	bypassMultiClientApi = true;
 }
 
@@ -3016,6 +3016,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		MutexHolder holder(lock);
 		ASSERT(!value.present() && !networkStartSetup);
 		externalClient = true;
+		std::cout<<"hfu0229EXTERNAL_CLIENT" << std::endl;
 		bypassMultiClientApi = true;
 		forwardOption = true;
 	} else if (option == FDBNetworkOptions::DISABLE_CLIENT_BYPASS) {
@@ -3110,6 +3111,7 @@ void MultiVersionApi::setupNetwork() {
 			}
 
 			if (externalClientDescriptions.empty() && !disableBypass) {
+				std::cout<<"hfu0229externalClientDescriptionsEmpty" << std::endl;
 				bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to
 				                             // add clients after setupNetwork is called
 			}
@@ -3157,7 +3159,13 @@ void MultiVersionApi::setupNetwork() {
 			runOnExternalClientsAllThreads(
 			    [this](Reference<ClientInfo> client) {
 				    TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-				    client->api->selectApiVersion(apiVersion.version());
+				    // test0229 it might fail here
+					std::cout<< "test0229 select API version" << std::endl;
+					try {
+						client->api->selectApiVersion(apiVersion.version());
+					} catch (Error& e) {
+					std::cout<< "test0229 select API version already set" << std::endl;
+					}
 				    if (client->useFutureVersion) {
 					    client->api->useFutureProtocolVersion();
 				    }

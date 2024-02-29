@@ -66,7 +66,9 @@ public class CycleMultiClientIntegrationTest {
         int clientThreadsPerVersion = clientHelper.readClusterFromEnv().length;
         fdb.options().setClientThreadsPerVersion(clientThreadsPerVersion);
         System.out.printf("thread per version is %d\n", clientThreadsPerVersion);
-        fdb.options().setExternalClientDirectory("/var/dynamic-conf/lib");
+        // fdb.options().setExternalClientDirectory("/var/dynamic-conf/lib");
+        // for 0229 test, if 
+        fdb.options().setExternalClientDirectory("/root/build_output/packages/lib");
         fdb.options().setTraceEnable("/tmp");
         fdb.options().setKnob("min_trace_severity=5");
     }
@@ -127,7 +129,10 @@ public class CycleMultiClientIntegrationTest {
         @Override
         public void run() {
             for (int i = 0; i < writeTxnCnt; i++) {
+                System.out.printf("running round %d\n", i);
                 db.run(tr -> {
+                    tr.options().setDebugTransactionIdentifier("haofu0229");
+                    tr.options().setLogTransaction();
                     final int k = ThreadLocalRandom.current().nextInt(cycleLength);
                     final String key = Integer.toString(k);
                     byte[] result1 = tr.get(Tuple.from(key).pack()).join();
