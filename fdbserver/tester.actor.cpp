@@ -1543,8 +1543,11 @@ ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
-			RangeResult readResult = wait(krmGetRanges(
-			    &tr, keyServersPrefix, rangeToRead, CLIENT_KNOBS->TOO_MANY, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			RangeResult readResult = wait(krmGetRanges(&tr,
+			                                           keyServersPrefix,
+			                                           rangeToRead,
+			                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+			                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 			for (int i = 0; i < readResult.size() - 1; ++i) {
 				KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
 				Value valueToCheck = Standalone(readResult[i].value);
