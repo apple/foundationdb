@@ -446,7 +446,7 @@ class TransactionInfoLoader(object):
             self.num_transactions_discarded += 1
 
     def parse_key(self, k):
-        # the last 2 bytes are b"\x00\x00" thus need to exclude it
+        # the last 2 bytes are subsequence number within a version, e.g., "\x00\x00", thus need to exclude it
         version_stamp = struct.unpack(
             ">Q", k[self.version_stamp_start_idx:self.version_stamp_end_idx - 1])[0]
         tr_id = k[self.tr_id_start_idx : self.tr_id_end_idx + 1]
