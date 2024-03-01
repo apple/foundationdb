@@ -2859,9 +2859,11 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	// external libraries always run on their own thread; ensure we allocate at least one thread to run this
 	// library.
 	threadCount = std::max(threadCount, 1);
+	std::cout<<"hfu0229addExternalLibraryDirectory" << std::endl;
 
 	for (auto filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
+		std::cout<<"hfu0229addExternalLibraryDirectoryEach, filename= " << filename << " lib=" << lib << std::endl;
 		if (externalClientDescriptions.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true, false)));
@@ -3001,9 +3003,11 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		validateOption(value, false, true);
 		setCallbacksOnExternalThreads();
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_LIBRARY) {
+		std::cout<<"hfu0229EXTERNAL_CLIENT_LIBRARY" << std::endl;
 		validateOption(value, true, false, false);
 		addExternalLibrary(abspath(value.get().toString()), false);
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_DIRECTORY) {
+		std::cout<<"hfu0229EXTERNAL_CLIENT_DIRECTORY" << std::endl;
 		validateOption(value, true, false, false);
 		addExternalLibraryDirectory(value.get().toString());
 	} else if (option == FDBNetworkOptions::DISABLE_LOCAL_CLIENT) {
@@ -3334,6 +3338,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord con
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {
+		std::cout << "Test0229ConfirmingMultiVersionTxn" << std::endl;
 		return Reference<IDatabase>(
 		    new MultiVersionDatabase(this, 0, connectionRecord, Reference<IDatabase>(), localDb));
 	}
