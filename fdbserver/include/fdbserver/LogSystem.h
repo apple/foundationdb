@@ -774,12 +774,6 @@ struct LogPushData : NonCopyable {
 		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
 	}
 
-	void getLocations(const std::vector<Tag>& vtags, std::set<uint16_t>& writtenTLogs) {
-		std::vector<int> msg_locations;
-		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
-		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
-	}
-
 	// store tlogs as represented by index
 	void saveLocations(std::set<uint16_t>& writtenTLogs) {
 		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
