@@ -326,6 +326,7 @@ public:
 	int SIM_KMS_VAULT_MAX_KEYS;
 
 	bool ENABLE_MUTATION_CHECKSUM;
+	bool ENABLE_ACCUMULATIVE_CHECKSUM;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

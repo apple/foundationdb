@@ -258,7 +258,7 @@ private:
 			Tag tag = decodeServerTagValue(
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 			MutationRef privatized = m;
-			privatized.removeChecksumPayload();
+			privatized.removeChecksumAndAccumulativeIndex();
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)
 			    .detail("Original", m)
@@ -282,7 +282,7 @@ private:
 
 		if (toCommit) {
 			MutationRef privatized = m;
-			privatized.removeChecksumPayload();
+			privatized.removeChecksumAndAccumulativeIndex();
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
@@ -326,7 +326,7 @@ private:
 			// This is done to make the storage servers aware of the cached key-ranges
 			if (toCommit) {
 				MutationRef privatized = m;
-				privatized.removeChecksumPayload();
+				privatized.removeChecksumAndAccumulativeIndex();
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 				cachedRangeInfo[k] = privatized;
@@ -349,7 +349,7 @@ private:
 		// Create a private mutation for cache servers
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
-		privatized.removeChecksumPayload();
+		privatized.removeChecksumAndAccumulativeIndex();
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
 		toCommit->addTag(cacheTag);
@@ -390,7 +390,7 @@ private:
 		if (toCommit && keyInfo) {
 			KeyRange r = std::get<0>(decodeChangeFeedValue(m.param2));
 			MutationRef privatized = m;
-			privatized.removeChecksumPayload();
+			privatized.removeChecksumAndAccumulativeIndex();
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			auto ranges = keyInfo->intersectingRanges(r);
 			auto firstRange = ranges.begin();
@@ -455,7 +455,7 @@ private:
 		if (toCommit) {
 			// send private mutation to SS that it now has a TSS pair
 			MutationRef privatized = m;
-			privatized.removeChecksumPayload();
+			privatized.removeChecksumAndAccumulativeIndex();
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
@@ -488,7 +488,7 @@ private:
 		Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssi.tssPairID.get())).get();
 		if (tagV.present()) {
 			MutationRef privatized = m;
-			privatized.removeChecksumPayload();
+			privatized.removeChecksumAndAccumulativeIndex();
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
@@ -654,7 +654,7 @@ private:
 		}
 
 		MutationRef privatized = m;
-		privatized.removeChecksumPayload();
+		privatized.removeChecksumAndAccumulativeIndex();
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", privatized);
 		toCommit->addTags(allTags);
@@ -678,7 +678,7 @@ private:
 				}
 				const Tag tag = decodeServerTagValue(tagValue.get());
 				MutationRef privatized = m;
-				privatized.removeChecksumPayload();
+				privatized.removeChecksumAndAccumulativeIndex();
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
 				    .detail("Original", m)
@@ -795,7 +795,7 @@ private:
 				toCommit->addTags(allTags);
 
 				MutationRef privatized = m;
-				privatized.removeChecksumPayload();
+				privatized.removeChecksumAndAccumulativeIndex();
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				writeMutation(privatized);
 			}
@@ -925,7 +925,7 @@ private:
 
 				if (toCommit) {
 					MutationRef privatized = m;
-					privatized.removeChecksumPayload();
+					privatized.removeChecksumAndAccumulativeIndex();
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(privatized.param1, arena);
 
@@ -949,7 +949,7 @@ private:
 							Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssi.tssPairID.get())).get();
 							if (tagV.present()) {
 								MutationRef privatized = m;
-								privatized.removeChecksumPayload();
+								privatized.removeChecksumAndAccumulativeIndex();
 								privatized.param1 = maybeTssRange.begin.withPrefix(systemKeys.begin, arena);
 								privatized.param2 =
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
@@ -1147,7 +1147,7 @@ private:
 		// send private mutation to SS to notify that it no longer has a tss pair
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
-			privatized.removeChecksumPayload();
+			privatized.removeChecksumAndAccumulativeIndex();
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
@@ -1175,7 +1175,7 @@ private:
 				    tagV.present()) {
 
 					MutationRef privatized = m;
-					privatized.removeChecksumPayload();
+					privatized.removeChecksumAndAccumulativeIndex();
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
@@ -1256,7 +1256,7 @@ private:
 				toCommit->addTags(allTags);
 
 				MutationRef privatized;
-				privatized.removeChecksumPayload();
+				privatized.removeChecksumAndAccumulativeIndex();
 				privatized.type = MutationRef::ClearRange;
 				privatized.param1 = systemKeys.begin.withSuffix(std::max(range.begin, subspace.begin), arena);
 				if (range.end < subspace.end) {

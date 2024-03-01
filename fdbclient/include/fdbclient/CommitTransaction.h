@@ -61,13 +61,15 @@ static const char* typeString[] = { "SetValue",
 	                                "Reserved_For_SpanContextMessage",
 	                                "Reserved_For_OTELSpanContextMessage",
 	                                "Encrypted",
+	                                "AccumulativeChecksum",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; // 12 is the size of Header in MutationList entries
-	static const uint8_t CHECKSUM_PAYLOAD_FLAG_MASK =
-	    128U; // 10000000, the first bit indicates if checksum payload is set
-	enum Type : uint8_t {
+	static const uint8_t CHECKSUM_FLAG_MASK = 128U; // 10000000, the first bit indicates if checksum is set
+	static const uint8_t ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK =
+	    64U; // 01000000, the second bit indicates if the acs index is set
+	enum Type : uint8_t { // At most 64 types is available, since the first two bytes have been reserved
 		SetValue = 0,
 		ClearRange,
 		AddValue,
@@ -92,14 +94,15 @@ struct MutationRef {
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
 		Encrypted, /* Represents an encrypted mutation and cannot be used directly before decrypting */
+		AccumulativeChecksum, /* Used to propagate accumulative checksum from commit proxy to storage server */
 		MAX_ATOMIC_OP
 	};
 
 	// This is stored this way for serialization purposes. Note: the first bit of `type` is used to indicate whether a
 	// checksum is appended to `param2`, when checksum is enabled, the bit is set during serialization, and reset during
-	// deserialization.
+	// deserialization. The second bit of `type` indicates whether an accumulativeChecksumIndex is appended to `param2`.
 	uint8_t type;
-	StringRef param1, param2; // param2 carries checksum payload when transmitting the mutation
+	StringRef param1, param2;
 	Optional<uint32_t> checksum; // 4 bytes for checksum
 	Optional<uint16_t> accumulativeChecksumIndex; // 2 bytes for indexing accumulative checksum
 
@@ -126,31 +129,42 @@ struct MutationRef {
 
 	std::string toString() const {
 		std::string checksumStr;
+		std::string accumulativeChecksumIndexStr;
 		if (this->checksum.present()) {
 			checksumStr = format("checksum: %s ", std::to_string(this->checksum.get()).c_str());
+			if (this->accumulativeChecksumIndex.present()) {
+				accumulativeChecksumIndexStr = format("accumulativechecksumindex: %s ",
+				                                      std::to_string(this->accumulativeChecksumIndex.get()).c_str());
+			}
 		}
-		std::string accumulativeChecksumIndexStr;
-		if (this->accumulativeChecksumIndex.present()) {
-			ASSERT(this->checksum.present());
-			accumulativeChecksumIndexStr =
-			    format("accumulativechecksumindex: %s ", std::to_string(this->accumulativeChecksumIndex.get()).c_str());
-		}
-		uint8_t cType = this->type & ~CHECKSUM_PAYLOAD_FLAG_MASK;
-		return format("%scode: %s param1: %s param2: %s",
+		uint8_t mType = this->type & ~CHECKSUM_FLAG_MASK;
+		mType = mType & ~ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK;
+		return format("%s%scode: %s param1: %s param2: %s",
 		              checksumStr.c_str(),
-		              cType < MutationRef::MAX_ATOMIC_OP ? typeString[(int)cType] : "Unset",
+		              accumulativeChecksumIndexStr.c_str(),
+		              mType < MutationRef::MAX_ATOMIC_OP ? typeString[(int)mType] : "Unset",
 		              printable(param1).c_str(),
 		              printable(param2).c_str());
 	}
 
-	// Set checksum bit with mutation type
-	uint8_t typeOnChecksumPayload() const { return this->type | CHECKSUM_PAYLOAD_FLAG_MASK; }
+	// Return true if the mutation param2 carries checksum
+	bool withChecksum() const { return this->type & CHECKSUM_FLAG_MASK; }
 
-	// Return true if the mutation type indicating the mutation param carrying checksum
-	bool withChecksumPayload() const { return this->type & CHECKSUM_PAYLOAD_FLAG_MASK; }
+	// Return true if the mutation param2 carries acs index
+	bool withAccumulativeChecksumIndex() const { return this->type & ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK; }
+
+	// Set checksum bit to mutation type
+	uint8_t setTypeWithChecksum(uint8_t inType) const { return inType | CHECKSUM_FLAG_MASK; }
+
+	// Set acs bit to mutation type
+	uint8_t setTypeWithAccumulativeChecksumIndex(uint8_t inType) const {
+		return inType | ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK;
+	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
-	bool isValid() const { return type < MAX_ATOMIC_OP; }
+	bool isValid() const {
+		return type < MAX_ATOMIC_OP && type < 64U;
+	} // 2 bits have been reserved for checksum and acs
 
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
@@ -163,70 +177,77 @@ struct MutationRef {
 		return;
 	}
 
-	// Convert to normal mutation without payload and
-	// setup this->checksum and this->accumulativeChecksumIndex
-	void removeChecksumPayload() {
+	// If param2 includes checksum suffix, remove the suffix and set it to this->checksum
+	// Unflag the corresponding bit in type
+	// This operation must be after removing the acs index if exists
+	void removeChecksum() {
 		this->checksum.reset();
-		this->accumulativeChecksumIndex.reset();
-		if (!this->withChecksumPayload()) {
+		if (!this->withChecksum()) {
 			return;
 		}
-		this->type &= ~CHECKSUM_PAYLOAD_FLAG_MASK;
-		ASSERT(this->param2.size() >= 6); // 4 bytes for checksum, 2 bytes for accumulative index
-		int index = this->param2.size() - 6;
-		this->param2 = this->param2.substr(0, index);
+		ASSERT(!this->withAccumulativeChecksumIndex()); // Removing checksum must be after removing acs index
+		this->type &= ~CHECKSUM_FLAG_MASK;
+		int index = this->param2.size() - 4;
 		this->checksum = *(const uint32_t*)(this->param2.substr(index, 4).begin());
-		index += 4;
-		this->accumulativeChecksumIndex = *(const uint16_t*)(this->param2.substr(index, 2).begin());
+		this->param2 = this->param2.substr(0, index);
 	}
 
-	// Attach 32-bit crc and 16-bit accumulative index to param2
-	Standalone<StringRef> withPayloadSuffix(Standalone<StringRef> param) {
-		ASSERT(this->checksum.present() && this->accumulativeChecksumIndex.present());
-		uint32_t cs = this->checksum.get();
-		uint16_t acsIdx = this->accumulativeChecksumIndex.get();
-		return param.withSuffix(StringRef((uint8_t*)&cs, 4)).withSuffix(StringRef((uint8_t*)&acsIdx, 2));
+	// If param2 includes acs index suffix, remove the suffix and set it to this->accumulativeChecksumIndex
+	// Unflag the corresponding bit in type
+	void removeAccumulativeChecksumIndex() {
+		this->accumulativeChecksumIndex.reset();
+		if (!this->withAccumulativeChecksumIndex()) {
+			return;
+		}
+		this->type &= ~ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK;
+		int index = this->param2.size() - 2;
+		this->accumulativeChecksumIndex = *(const uint16_t*)(this->param2.substr(index, 2).begin());
+		this->param2 = this->param2.substr(0, index);
+	}
+
+	// Remove checksum and acs index if exist in param2
+	// Set this->checksum and this->accumulativeChecksumIndex
+	void removeChecksumAndAccumulativeIndex() {
+		// remove acs index at first if it exists
+		this->removeAccumulativeChecksumIndex();
+		this->removeChecksum();
+	}
+
+	// Validate param2 correctness
+	void validateParam2() {
+		if (this->withChecksum() && this->withAccumulativeChecksumIndex()) {
+			ASSERT(this->param2.size() >= 6); // 4 bytes for checksum, 2 bytes for accumulative index
+		} else if (this->withChecksum() && !this->withAccumulativeChecksumIndex()) {
+			ASSERT(this->param2.size() >= 4); // 4 bytes for checksum
+		} else {
+			ASSERT(this->param2.size() >= 0);
+		}
 	}
 
 	// Generate 32 bits checksum and set it to this->checksum
-	// If this->checksum exists, compare the new one with the existing one. Trace error if mismatch
 	void populateChecksum() {
-		ASSERT(!this->withChecksumPayload());
-		ASSERT(this->accumulativeChecksumIndex.present());
-		uint32_t crc0 = static_cast<uint32_t>(this->type);
-		uint32_t crc1 = crc32c_append(crc0, param1.begin(), param1.size());
-		uint32_t crc2 = crc32c_append(crc1, param2.begin(), param2.size());
-		uint16_t acsIdx = this->accumulativeChecksumIndex.get();
-		Standalone<StringRef> acsIndex = StringRef((uint8_t*)&acsIdx, 2);
-		uint32_t crc3 = crc32c_append(crc2, acsIndex.begin(), acsIndex.size());
-		uint32_t cs = crc3;
-		if (this->checksum.present()) {
-			if (this->checksum.get() != cs) {
-				TraceEvent(SevError, "MutationRefChecksumMismatch")
-				    .detail("CalculatedChecksum", std::to_string(cs))
-				    .detail("Mutation", toString());
-			}
-		} else {
-			this->checksum = cs;
+		ASSERT(!this->withChecksum());
+		uint32_t crc = static_cast<uint32_t>(this->type);
+		crc = crc32c_append(crc, this->param1.begin(), this->param1.size());
+		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
+		if (this->checksum.present() && this->checksum.get() != crc) {
+			TraceEvent(SevError, "MutationRefChecksumMismatch")
+			    .detail("CalculatedChecksum", std::to_string(crc))
+			    .detail("Mutation", toString());
+			ASSERT(false);
 		}
-		return;
+		this->checksum = crc;
 	}
 
-	// Calculate crc based on param1 and param2 and compare the crc with this->checksum
-	// Only compare checksum value for now. In the future, we will compare accumulative checksum
+	// Calculate crc based on type and param1 and param2 and compare the crc with this->checksum
 	bool validateChecksum() const {
 		if (!this->checksum.present()) {
-			ASSERT(!this->accumulativeChecksumIndex.present());
 			return true;
 		}
-		ASSERT(this->accumulativeChecksumIndex.present());
-		uint32_t crc0 = static_cast<uint32_t>(this->type);
-		uint32_t crc1 = crc32c_append(crc0, param1.begin(), param1.size());
-		uint32_t crc2 = crc32c_append(crc1, param2.begin(), param2.size());
-		uint16_t acsIdx = this->accumulativeChecksumIndex.get();
-		Standalone<StringRef> acsIndex = StringRef((uint8_t*)&acsIdx, 2);
-		uint32_t crc3 = crc32c_append(crc2, acsIndex.begin(), acsIndex.size());
-		return crc3 == static_cast<uint32_t>(this->checksum.get());
+		uint32_t crc = static_cast<uint32_t>(this->type);
+		crc = crc32c_append(crc, this->param1.begin(), this->param1.size());
+		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
+		return crc == static_cast<uint32_t>(this->checksum.get());
 	}
 
 	template <class Ar>
@@ -235,35 +256,57 @@ struct MutationRef {
 			StringRef empty;
 			if (!isEncrypted() && ar.protocolVersion().hasMutationChecksum() &&
 			    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
-				this->setAccumulativeChecksumIndex(0); // TODO: remove later
+				// Attach checksum at first, then attach acs index
 				this->populateChecksum();
-				uint8_t typeWithChecksum = this->typeOnChecksumPayload();
-				Standalone<StringRef> emptyWithChecksum = withPayloadSuffix(empty);
-				serializer(ar, typeWithChecksum, param2, emptyWithChecksum);
+				uint8_t cType = this->setTypeWithChecksum(this->type);
+				uint32_t cs = this->checksum.get();
+				Standalone<StringRef> cEmpty = empty.withSuffix(StringRef((uint8_t*)&cs, 4));
+				if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+					this->setAccumulativeChecksumIndex(0); // TODO: remove later
+					ASSERT(this->accumulativeChecksumIndex.present());
+					cType = this->setTypeWithAccumulativeChecksumIndex(cType);
+					uint16_t acsIdx = this->accumulativeChecksumIndex.get();
+					cEmpty = cEmpty.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
+				}
+				serializer(ar, cType, param2, cEmpty);
 			} else {
 				serializer(ar, type, param2, empty);
 			}
 		} else if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		           CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
-			this->setAccumulativeChecksumIndex(0); // TODO: remove later
+			// Attach checksum at first, then attach acs index
 			this->populateChecksum();
-			uint8_t typeWithChecksum = this->typeOnChecksumPayload();
-			Standalone<StringRef> param2WithChecksum = withPayloadSuffix(param2);
-			serializer(ar, typeWithChecksum, param1, param2WithChecksum);
+			uint8_t cType = this->setTypeWithChecksum(this->type);
+			uint32_t cs = this->checksum.get();
+			Standalone<StringRef> cParam2 = param2.withSuffix(StringRef((uint8_t*)&cs, 4));
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+				this->setAccumulativeChecksumIndex(0); // TODO: remove later
+				ASSERT(this->accumulativeChecksumIndex.present());
+				cType = this->setTypeWithAccumulativeChecksumIndex(cType);
+				uint16_t acsIdx = this->accumulativeChecksumIndex.get();
+				cParam2 = cParam2.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
+			}
+			serializer(ar, cType, param1, cParam2);
 		} else {
 			serializer(ar, type, param1, param2);
 		}
 
 		if (ar.isDeserializing) {
-			if (this->withChecksumPayload()) {
-				this->removeChecksumPayload();
+			this->validateParam2();
+			if (this->withChecksum()) {
+				// Remove acs index at first, then remove checksum
+				if (this->withAccumulativeChecksumIndex()) {
+					this->removeAccumulativeChecksumIndex();
+				}
+				this->removeChecksum();
 			}
+			this->validateParam2();
 			if (type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
 				ASSERT(param1[param1.size() - 1] == '\x00');
 				param2 = param1;
 				param1 = param2.substr(0, param2.size() - 1);
 			}
-			this->validateChecksum();
+			ASSERT(this->validateChecksum());
 		}
 	}
 
@@ -640,12 +683,25 @@ TEST_CASE("noSim/CommitTransaction/MutationRef") {
 	Standalone<StringRef> value = wr.toValue();
 	TraceEvent("EncodedMutation").detail("RawBytes", value);
 
-	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withBlobGranule()));
+	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withMutationChecksum()));
 	Standalone<MutationRef> de;
 
 	rd >> de;
 
 	printf("Deserialized mutation: %s\n", de.toString().c_str());
+
+	if (de.type != m.type || de.param1 != m.param1 || de.param2 != m.param2) {
+		TraceEvent(SevError, "MutationMismatch")
+		    .detail("OldType", m.type)
+		    .detail("NewType", de.type)
+		    .detail("OldParam1", m.param1)
+		    .detail("NewParam1", de.param1)
+		    .detail("OldParam2", m.param2)
+		    .detail("NewParam2", de.param2);
+		ASSERT(false);
+	}
+
+	ASSERT(de.validateChecksum());
 
 	return Void();
 }
