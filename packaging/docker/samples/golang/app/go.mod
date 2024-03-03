@@ -21,4 +21,4 @@ module foundationdb.org/docker/samples/golang/v0/fdb-demo-golang
 
 go 1.21
 
-require github.com/apple/foundationdb/bindings/go v0.0.0-20240218203134-05afc09840a7
+require github.com/apple/foundationdb/bindings/go v0.0.0-20231107151356-57ccdb8fee6d
