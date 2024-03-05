@@ -682,7 +682,8 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
-		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		                 " consistencycheck, consistencycheckurgent, kvfileintegritycheck, kvfilegeneratesums, "
+		                 "kvfiledump, unittests)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
@@ -1009,6 +1010,7 @@ namespace {
 enum class ServerRole {
 	ChangeClusterKey,
 	ConsistencyCheck,
+	ConsistencyCheckUrgent,
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
@@ -1106,7 +1108,7 @@ struct CLIOptions {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == ServerRole::ConsistencyCheck) {
+		if (role == ServerRole::ConsistencyCheck || role == ServerRole::ConsistencyCheckUrgent) {
 			if (!publicAddressStrs.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(name);
@@ -1294,6 +1296,8 @@ private:
 					role = ServerRole::KVFileDump;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
+				else if (!strcmp(sRole, "consistencycheckurgent"))
+					role = ServerRole::ConsistencyCheckUrgent;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
 				else if (!strcmp(sRole, "flowprocess"))
@@ -2367,6 +2371,18 @@ int main(int argc, char* argv[]) {
 			                       TEST_TYPE_CONSISTENCY_CHECK,
 			                       TEST_HERE,
 			                       1,
+			                       opts.testFile,
+			                       StringRef(),
+			                       opts.localities));
+			g_network->run();
+		} else if (role == ServerRole::ConsistencyCheckUrgent) {
+			setupRunLoopProfiler();
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
+			f = stopAfter(runTests(opts.connectionFile,
+			                       TEST_TYPE_CONSISTENCY_CHECK_URGENT,
+			                       TEST_ON_TESTERS,
+			                       opts.minTesterCount,
 			                       opts.testFile,
 			                       StringRef(),
 			                       opts.localities));
