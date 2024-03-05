@@ -180,8 +180,8 @@ struct MutationRef {
 	// If param2 includes checksum suffix, remove the suffix and set it to this->checksum
 	// Unflag the corresponding bit in type
 	// This operation must be after removing the acs index if exists
-	void removeChecksum() {
-		this->checksum.reset();
+	void offloadChecksum() {
+		ASSERT(!this->checksum.present());
 		if (!this->withChecksum()) {
 			return;
 		}
@@ -194,8 +194,8 @@ struct MutationRef {
 
 	// If param2 includes acs index suffix, remove the suffix and set it to this->accumulativeChecksumIndex
 	// Unflag the corresponding bit in type
-	void removeAccumulativeChecksumIndex() {
-		this->accumulativeChecksumIndex.reset();
+	void offloadAccumulativeChecksumIndex() {
+		ASSERT(!this->accumulativeChecksumIndex.present());
 		if (!this->withAccumulativeChecksumIndex()) {
 			return;
 		}
@@ -205,12 +205,10 @@ struct MutationRef {
 		this->param2 = this->param2.substr(0, index);
 	}
 
-	// Remove checksum and acs index if exist in param2
-	// Set this->checksum and this->accumulativeChecksumIndex
-	void removeChecksumAndAccumulativeIndex() {
-		// remove acs index at first if it exists
-		this->removeAccumulativeChecksumIndex();
-		this->removeChecksum();
+	// Clear checksum and acs index if exist
+	void clearChecksumAndAccumulativeIndex() {
+		this->checksum.reset();
+		this->accumulativeChecksumIndex.reset();
 	}
 
 	// Validate param2 correctness
@@ -261,9 +259,7 @@ struct MutationRef {
 				uint8_t cType = this->setTypeWithChecksum(this->type);
 				uint32_t cs = this->checksum.get();
 				Standalone<StringRef> cEmpty = empty.withSuffix(StringRef((uint8_t*)&cs, 4));
-				if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
-					this->setAccumulativeChecksumIndex(0); // TODO: remove later
-					ASSERT(this->accumulativeChecksumIndex.present());
+				if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM && this->accumulativeChecksumIndex.present()) {
 					cType = this->setTypeWithAccumulativeChecksumIndex(cType);
 					uint16_t acsIdx = this->accumulativeChecksumIndex.get();
 					cEmpty = cEmpty.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
@@ -279,9 +275,7 @@ struct MutationRef {
 			uint8_t cType = this->setTypeWithChecksum(this->type);
 			uint32_t cs = this->checksum.get();
 			Standalone<StringRef> cParam2 = param2.withSuffix(StringRef((uint8_t*)&cs, 4));
-			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
-				this->setAccumulativeChecksumIndex(0); // TODO: remove later
-				ASSERT(this->accumulativeChecksumIndex.present());
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM && this->accumulativeChecksumIndex.present()) {
 				cType = this->setTypeWithAccumulativeChecksumIndex(cType);
 				uint16_t acsIdx = this->accumulativeChecksumIndex.get();
 				cParam2 = cParam2.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
@@ -296,9 +290,9 @@ struct MutationRef {
 			if (this->withChecksum()) {
 				// Remove acs index at first, then remove checksum
 				if (this->withAccumulativeChecksumIndex()) {
-					this->removeAccumulativeChecksumIndex();
+					this->offloadAccumulativeChecksumIndex();
 				}
-				this->removeChecksum();
+				this->offloadChecksum();
 			}
 			this->validateParam2();
 			if (type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
@@ -673,9 +667,19 @@ struct EncryptedMutationsAndVersionRef {
 	};
 };
 
+class DefineAccumulativeChecksumIndex {
+public:
+	static uint16_t getIndexForCommitProxy(uint16_t commitProxyIndex) { return commitProxyIndex * 10 + 1; }
+	static uint16_t getInvalidIndex() { return 0; }
+	static uint16_t getIndexForResolver() { return 2; }
+};
+
 TEST_CASE("noSim/CommitTransaction/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
+	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+		m.setAccumulativeChecksumIndex(DefineAccumulativeChecksumIndex().getIndexForCommitProxy(0));
+	}
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
 
 	wr << m;

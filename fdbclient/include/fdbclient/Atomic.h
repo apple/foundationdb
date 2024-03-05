@@ -301,7 +301,7 @@ inline void transformVersionstampMutation(MutationRef& mutation,
                                           StringRef MutationRef::*param,
                                           Version version,
                                           uint16_t transactionNumber) {
-	mutation.removeChecksumAndAccumulativeIndex();
+	mutation.clearChecksumAndAccumulativeIndex();
 	if ((mutation.*param).size() >= 4) {
 		int32_t pos = parseVersionstampOffset(mutation.*param);
 		mutation.*param = (mutation.*param).substr(0, (mutation.*param).size() - 4);

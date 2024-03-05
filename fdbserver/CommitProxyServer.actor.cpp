@@ -561,6 +561,10 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			backupMutation.param2 = val.substr(
 			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
 			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+				backupMutation.setAccumulativeChecksumIndex(
+				    DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->commitProxyIndex));
+			}
 
 			// Write the last part of the mutation to the serialization, if the buffer is not defined
 			if (!partBuffer) {
@@ -1981,6 +1985,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			}
 
 			state MutationRef m = (*pMutations)[mutationNum];
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+				m.setAccumulativeChecksumIndex(
+				    DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->pProxyCommitData->commitProxyIndex));
+			}
 			state Optional<MutationRef> encryptedMutation =
 			    encryptedMutations->size() > 0 ? (*encryptedMutations)[mutationNum] : Optional<MutationRef>();
 			state Arena arena;
@@ -2213,37 +2221,46 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeStart));
 	}
 
-	buildIdempotencyIdMutations(self->trs,
-	                            self->idempotencyKVBuilder,
-	                            self->commitVersion,
-	                            self->committed,
-	                            ConflictBatch::TransactionCommitted,
-	                            self->locked,
-	                            [&](const KeyValue& kv) {
-		                            MutationRef idempotencyIdSet;
-		                            idempotencyIdSet.type = MutationRef::Type::SetValue;
-		                            idempotencyIdSet.param1 = kv.key;
-		                            idempotencyIdSet.param2 = kv.value;
-		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
-		                            self->toCommit.addTags(tags);
-		                            if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-			                            CODE_PROBE(true, "encrypting idempotency mutation");
-			                            EncryptCipherDomainId domainId =
-			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
-			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
-			                            ASSERT(encryptedMutation.isEncrypted());
-			                            self->toCommit.writeTypedMessage(encryptedMutation);
-		                            } else {
-			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
-		                            }
-	                            });
+	buildIdempotencyIdMutations(
+	    self->trs,
+	    self->idempotencyKVBuilder,
+	    self->commitVersion,
+	    self->committed,
+	    ConflictBatch::TransactionCommitted,
+	    self->locked,
+	    [&](const KeyValue& kv) {
+		    MutationRef idempotencyIdSet;
+		    idempotencyIdSet.type = MutationRef::Type::SetValue;
+		    idempotencyIdSet.param1 = kv.key;
+		    idempotencyIdSet.param2 = kv.value;
+		    if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			    idempotencyIdSet.setAccumulativeChecksumIndex(
+			        DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->pProxyCommitData->commitProxyIndex));
+		    }
+		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		    self->toCommit.addTags(tags);
+		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+			    CODE_PROBE(true, "encrypting idempotency mutation");
+			    EncryptCipherDomainId domainId =
+			        getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
+			    MutationRef encryptedMutation =
+			        idempotencyIdSet.encrypt(self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
+			    ASSERT(encryptedMutation.isEncrypted());
+			    self->toCommit.writeTypedMessage(encryptedMutation);
+		    } else {
+			    self->toCommit.writeTypedMessage(idempotencyIdSet);
+		    }
+	    });
 	state int i = 0;
 	for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
 		auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
 		self->toCommit.addTags(tags);
 		// We already have an arena with an appropriate lifetime handy
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			pProxyCommitData->idempotencyClears[i].setAccumulativeChecksumIndex(
+			    DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->pProxyCommitData->commitProxyIndex));
+		}
 		WriteMutationRefVar var = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
 		ASSERT(std::holds_alternative<MutationRef>(var));
@@ -3718,7 +3735,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          bool firstProxy,
                                          std::string whitelistBinPaths,
                                          EncryptionAtRestMode encryptMode,
-                                         bool provisional) {
+                                         bool provisional,
+                                         uint16_t commitProxyIndex) {
 	state ProxyCommitData commitData(proxy.id(),
 	                                 master,
 	                                 proxy.getConsistentReadVersion,
@@ -3727,7 +3745,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                 db,
 	                                 firstProxy,
 	                                 encryptMode,
-	                                 provisional);
+	                                 provisional,
+	                                 commitProxyIndex);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
 	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
@@ -3959,7 +3978,8 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                req.firstProxy,
 		                                                whitelistBinPaths,
 		                                                req.encryptMode,
-		                                                proxy.provisional);
+		                                                proxy.provisional,
+		                                                req.commitProxyIndex);
 		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);

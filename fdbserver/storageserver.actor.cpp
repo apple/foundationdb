@@ -11206,7 +11206,23 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							decryptionTime += decryptionTimeV;
 						}
 					} else {
-						ASSERT(msg.validateChecksum());
+						if (!msg.validateChecksum()) {
+							TraceEvent(SevError, "ValidateChecksumError", data->thisServerID).detail("Mutation", msg);
+							ASSERT(false);
+						} else if (msg.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+						           (!msg.accumulativeChecksumIndex.present())) {
+							TraceEvent(SevError, "ACSIndexNotPresent", data->thisServerID).detail("Mutation", msg);
+							ASSERT(false);
+						} else if (msg.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+						           msg.accumulativeChecksumIndex.present() &&
+						           msg.accumulativeChecksumIndex.get() ==
+						               DefineAccumulativeChecksumIndex().getInvalidIndex()) {
+							TraceEvent(SevError, "ACSIndexNotSet", data->thisServerID)
+							    .detail("Mutation", msg)
+							    .detail("ResolverGeneratePrivateMutation",
+							            SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+							ASSERT(false);
+						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
