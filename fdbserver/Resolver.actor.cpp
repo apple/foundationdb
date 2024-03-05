@@ -482,7 +482,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChanged || toCommit->getEmptyMessageRatio() < 1.0) {
+				if (shardChanged || reply.privateMutationCount) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}
