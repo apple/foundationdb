@@ -195,6 +195,8 @@ var apiVersion int
 var openDatabases sync.Map
 var networkMutex sync.RWMutex
 var setupNetworkOnce sync.Once
+var runningNetwork sync.WaitGroup
+var networkStarted bool
 
 func startNetwork() error {
 	networkMutex.Lock()
@@ -213,11 +215,13 @@ func startNetwork() error {
 		}
 
 		go func() {
+			runningNetwork.Add(1)
 			e := C.fdb_run_network()
 			if e != 0 {
 				err = fmt.Errorf("Unhandled error in FoundationDB network thread: %d", errno)
 				log.Println(err)
 			}
+			runningNetwork.Done()
 		}()
 	})
 
@@ -229,7 +233,31 @@ func startNetwork() error {
 		return err
 	}
 
+	networkStarted = true
+
 	return nil
+}
+
+// StopNetwork stops the FoundationDB client global network thread and waits for the related goroutine to exit.
+// After stopping the network the networkStarted flag is left as true, so that network cannot be started again.
+// StopNetwork my be called more then once.
+// See also: https://github.com/apple/foundationdb/issues/3015
+func StopNetwork() {
+	log.Println("StopNetwork was called")
+	waitForNetwork := false
+	{
+		networkMutex.Lock()
+		defer networkMutex.Unlock()
+		if networkStarted {
+			e := C.fdb_stop_network()
+			log.Printf("fdb_stop_network %v", e)
+			waitForNetwork = true
+		}
+	}
+
+	if waitForNetwork {
+		runningNetwork.Wait()
+	}
 }
 
 // Deprecated: the network is started automatically when a database is opened.
