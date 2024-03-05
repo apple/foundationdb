@@ -240,6 +240,65 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
+ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
+Future<Void> replicaComparison(Req req,
+                               Future<ErrorOr<Resp>> fSource,
+                               uint64_t srcEndpointId,
+                               Reference<MultiInterface<Multi>> ssTeam,
+                               RequestStream<Req, P> Interface::*channel) {
+	state int srcErrorCode = error_code_success;
+	state ErrorOr<Resp> src;
+
+	wait(store(src, fSource));
+
+	if (!src.isError()) {
+		Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
+
+		if (!srcLB.present() || !srcLB.get().error.present()) {
+			// if there is more than 1 SS in the team, attempt to verify that the other SS servers have the same
+			// data
+			state std::vector<Future<ErrorOr<Resp>>> restOfTeamFutures;
+			restOfTeamFutures.reserve(ssTeam->size() - 1);
+			for (int i = 0; i < ssTeam->size(); i++) {
+				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
+				if (si->getEndpoint().token.first() !=
+				    srcEndpointId) { // don't re-request to SS we already have a response from
+					resetReply(req);
+					restOfTeamFutures.push_back(si->tryGetReply(req));
+				}
+			}
+
+			wait(waitForAllReady(restOfTeamFutures));
+
+			int numError = 0;
+			int numMatchSS = 0;
+			int numMatchNeither = 0;
+			for (Future<ErrorOr<Resp>> f : restOfTeamFutures) {
+				if (!f.canGet() || f.get().isError()) {
+					numError++;
+				} else {
+					Optional<LoadBalancedReply> fLB = getLoadBalancedReply(&f.get().get());
+					if (fLB.present() && fLB.get().error.present()) {
+						numError++;
+					} else if (TSS_doCompare(src.get(), f.get().get())) {
+						numMatchSS++;
+					} else {
+						numMatchNeither++;
+					}
+				}
+			}
+
+			TraceEvent("ReplicaComparison").detail("TeamCheckErrors", numError).detail("TeamCheckMatchSS", numMatchSS);
+
+			if (numError || numMatchNeither) {
+				throw storage_replica_comparison_error();
+			}
+		}
+	}
+
+	return Void();
+}
+
 FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
@@ -254,6 +313,11 @@ struct RequestData : NonCopyable {
 
 	bool requestStarted = false; // true once the request has been sent to an alternative
 	bool requestProcessed = false; // true once a response has been received and handled by checkAndProcessResult
+
+	bool compareReplicas = false;
+	Future<Void> comparisonResult;
+
+	RequestData(bool compareReplicas = false) : compareReplicas(compareReplicas) {}
 
 	// Whether or not the response future is valid
 	// This is true once setupRequest is called, even though at that point the response is Never().
@@ -286,6 +350,20 @@ struct RequestData : NonCopyable {
 		}
 	}
 
+	void maybeDoReplicaComparison(RequestStream<Request, P> const* stream,
+	                              Request& request,
+	                              QueueModel* model,
+	                              Future<Reply> ssResponse,
+	                              Reference<MultiInterface<Multi>> alternatives,
+	                              RequestStream<Request, P> Interface::*channel) {
+		if (model && compareReplicas) {
+			resetReply(request);
+
+			comparisonResult =
+			    replicaComparison(request, ssResponse, stream->getEndpoint().token.first(), alternatives, channel);
+		}
+	}
+
 	// Initializes the request state and starts it, possibly after a backoff delay
 	void startRequest(
 	    double backoff,
@@ -311,6 +389,7 @@ struct RequestData : NonCopyable {
 			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
 			response = stream->tryGetReply(request);
 			maybeDuplicateTSSRequest(stream, request, model, response, alternatives, channel);
+			maybeDoReplicaComparison(stream, request, model, response, alternatives, channel);
 		}
 
 		requestProcessed = false;
@@ -447,10 +526,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr) {
+    QueueModel* model = nullptr,
+    bool compareReplicas = false) {
 
-	state RequestData<Request, Interface, Multi, P> firstRequestData;
-	state RequestData<Request, Interface, Multi, P> secondRequestData;
+	state RequestData<Request, Interface, Multi, P> firstRequestData(compareReplicas);
+	state RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
 
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Void> secondDelay = Never();
@@ -703,7 +783,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 			loop {
 				choose {
-					when(ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response)) {
+					when(state ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response)) {
 						if (model) {
 							model->secondMultiplier =
 							    std::max(model->secondMultiplier - FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_DECAY, 1.0);
@@ -713,6 +793,14 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						}
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+							wait(firstRequestData.comparisonResult);
+							/*
+							wait(replicaComparison(request,
+							                      firstRequestData.response,
+							                       stream->getEndpoint().token.first(),
+							                       alternatives,
+							                       channel));
+							                       */
 							return result.get();
 						}
 
