@@ -40,6 +40,7 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
@@ -563,7 +564,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
 				backupMutation.setAccumulativeChecksumIndex(
-				    DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->commitProxyIndex));
+				    getCommitProxyAccumulativeChecksumIndex(self->commitProxyIndex));
 			}
 
 			// Write the last part of the mutation to the serialization, if the buffer is not defined
@@ -1987,7 +1988,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			state MutationRef m = (*pMutations)[mutationNum];
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
 				m.setAccumulativeChecksumIndex(
-				    DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->pProxyCommitData->commitProxyIndex));
+				    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
 			}
 			state Optional<MutationRef> encryptedMutation =
 			    encryptedMutations->size() > 0 ? (*encryptedMutations)[mutationNum] : Optional<MutationRef>();
@@ -2235,7 +2236,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    idempotencyIdSet.param2 = kv.value;
 		    if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
 			    idempotencyIdSet.setAccumulativeChecksumIndex(
-			        DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->pProxyCommitData->commitProxyIndex));
+			        getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
 		    }
 		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
 		    self->toCommit.addTags(tags);
@@ -2259,7 +2260,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
 			pProxyCommitData->idempotencyClears[i].setAccumulativeChecksumIndex(
-			    DefineAccumulativeChecksumIndex().getIndexForCommitProxy(self->pProxyCommitData->commitProxyIndex));
+			    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
 		}
 		WriteMutationRefVar var = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));

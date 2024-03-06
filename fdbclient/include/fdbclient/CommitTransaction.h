@@ -163,8 +163,9 @@ struct MutationRef {
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 	bool isValid() const {
-		return type < MAX_ATOMIC_OP && type < 64U;
-	} // 2 bits have been reserved for checksum and acs
+		static_assert(MAX_ATOMIC_OP < 64U); // 2 bits have been reserved for checksum and accumulative checksum index
+		return type < MAX_ATOMIC_OP;
+	}
 
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
@@ -667,18 +668,11 @@ struct EncryptedMutationsAndVersionRef {
 	};
 };
 
-class DefineAccumulativeChecksumIndex {
-public:
-	static uint16_t getIndexForCommitProxy(uint16_t commitProxyIndex) { return commitProxyIndex * 10 + 1; }
-	static uint16_t getInvalidIndex() { return 0; }
-	static uint16_t getIndexForResolver() { return 2; }
-};
-
 TEST_CASE("noSim/CommitTransaction/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
-		m.setAccumulativeChecksumIndex(DefineAccumulativeChecksumIndex().getIndexForCommitProxy(0));
+		m.setAccumulativeChecksumIndex(512);
 	}
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
 

@@ -25,6 +25,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -88,8 +89,7 @@ public:
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
-	    accumulativeChecksumIndex(
-	        DefineAccumulativeChecksumIndex().getIndexForCommitProxy(proxyCommitData_.commitProxyIndex)) {
+	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -109,7 +109,7 @@ public:
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
-	    accumulativeChecksumIndex(DefineAccumulativeChecksumIndex().getIndexForResolver()) {
+	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -171,7 +171,7 @@ private:
 	bool provisionalCommitProxy = false;
 
 	// indicate which commit proxy / resolver applies mutations
-	uint16_t accumulativeChecksumIndex = DefineAccumulativeChecksumIndex().getInvalidIndex();
+	uint16_t accumulativeChecksumIndex = invalidAccumulativeChecksumIndex;
 
 private:
 	// The following variables are used internally

@@ -70,6 +70,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -11206,18 +11207,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							decryptionTime += decryptionTimeV;
 						}
 					} else {
-						if (!msg.validateChecksum()) {
-							TraceEvent(SevError, "ValidateChecksumError", data->thisServerID).detail("Mutation", msg);
-							ASSERT(false);
-						} else if (msg.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-						           (!msg.accumulativeChecksumIndex.present())) {
-							TraceEvent(SevError, "ACSIndexNotPresent", data->thisServerID).detail("Mutation", msg);
-							ASSERT(false);
-						} else if (msg.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-						           msg.accumulativeChecksumIndex.present() &&
-						           msg.accumulativeChecksumIndex.get() ==
-						               DefineAccumulativeChecksumIndex().getInvalidIndex()) {
-							TraceEvent(SevError, "ACSIndexNotSet", data->thisServerID)
+						if (!msg.validateChecksum() || !validateAccumulativeChecksumIndexAtStorageServer(msg)) {
+							TraceEvent(SevError, "ValidateChecksumOrAcsIndexError", data->thisServerID)
 							    .detail("Mutation", msg)
 							    .detail("ResolverGeneratePrivateMutation",
 							            SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
