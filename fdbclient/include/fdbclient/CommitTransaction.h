@@ -105,12 +105,14 @@ struct MutationRef {
 	StringRef param1, param2;
 	Optional<uint32_t> checksum; // 4 bytes for checksum
 	Optional<uint16_t> accumulativeChecksumIndex; // 2 bytes for indexing accumulative checksum
+	bool corrupted;
 
-	MutationRef() : type(MAX_ATOMIC_OP) {}
-	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b) {}
-	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b) {}
+	MutationRef() : type(MAX_ATOMIC_OP), corrupted(false) {}
+	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), corrupted(false) {}
+	MutationRef(Arena& to, Type t, StringRef a, StringRef b)
+	  : type(t), param1(to, a), param2(to, b), corrupted(false) {}
 	MutationRef(Arena& to, const MutationRef& from)
-	  : type(from.type), param1(to, from.param1), param2(to, from.param2) {}
+	  : type(from.type), param1(to, from.param1), param2(to, from.param2), corrupted(false) {}
 	int totalSize() const {
 		return OVERHEAD_BYTES + param1.size() + param2.size() + (checksum.present() ? sizeof(uint32_t) + 1 : 1) +
 		       (accumulativeChecksumIndex.present() ? sizeof(uint16_t) + 1 : 1);
@@ -182,11 +184,21 @@ struct MutationRef {
 	// Unflag the corresponding bit in type
 	// This operation must be after removing the acs index if exists
 	void offloadChecksum() {
-		ASSERT(!this->checksum.present());
+		if (this->checksum.present()) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Internal checksum has been set when offloading checksum")
+			    .detail("Mutation", this->toString());
+			this->corrupted = true;
+		}
 		if (!this->withChecksum()) {
 			return;
 		}
-		ASSERT(!this->withAccumulativeChecksumIndex()); // Removing checksum must be after removing acs index
+		if (this->withAccumulativeChecksumIndex()) { // Removing checksum must be after removing acs index
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Type contains acs index flag when offloading checksum")
+			    .detail("Mutation", this->toString());
+			this->corrupted = true;
+		}
 		this->type &= ~CHECKSUM_FLAG_MASK;
 		int index = this->param2.size() - 4;
 		this->checksum = *(const uint32_t*)(this->param2.substr(index, 4).begin());
@@ -196,7 +208,12 @@ struct MutationRef {
 	// If param2 includes acs index suffix, remove the suffix and set it to this->accumulativeChecksumIndex
 	// Unflag the corresponding bit in type
 	void offloadAccumulativeChecksumIndex() {
-		ASSERT(!this->accumulativeChecksumIndex.present());
+		if (this->accumulativeChecksumIndex.present()) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Internal acs index has been set when offloading acs index")
+			    .detail("Mutation", this->toString());
+			this->corrupted = true;
+		}
 		if (!this->withAccumulativeChecksumIndex()) {
 			return;
 		}
@@ -215,38 +232,69 @@ struct MutationRef {
 	// Validate param2 correctness
 	void validateParam2() {
 		if (this->withChecksum() && this->withAccumulativeChecksumIndex()) {
-			ASSERT(this->param2.size() >= 6); // 4 bytes for checksum, 2 bytes for accumulative index
+			if (this->param2.size() < 6) { // 4 bytes for checksum, 2 bytes for accumulative index
+				TraceEvent(SevError, "MutationRefUnexpectedError")
+				    .detail("Reason", "Param2 size is wrong with both checksum and acs index")
+				    .detail("Param2Size", this->param2.size())
+				    .detail("Mutation", this->toString());
+				this->corrupted = true;
+			}
 		} else if (this->withChecksum() && !this->withAccumulativeChecksumIndex()) {
-			ASSERT(this->param2.size() >= 4); // 4 bytes for checksum
-		} else {
-			ASSERT(this->param2.size() >= 0);
+			if (this->param2.size() < 4) { // 4 bytes for checksum
+				TraceEvent(SevError, "MutationRefUnexpectedError")
+				    .detail("Reason", "Param2 size is wrong with checksum and without acs index")
+				    .detail("Param2Size", this->param2.size())
+				    .detail("Mutation", this->toString());
+				this->corrupted = true;
+			}
 		}
 	}
 
 	// Generate 32 bits checksum and set it to this->checksum
 	void populateChecksum() {
-		ASSERT(!this->withChecksum());
+		if (this->withChecksum()) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Type already has checksum flag when populating checksum")
+			    .detail("Mutation", this->toString());
+			this->corrupted = true;
+		}
 		uint32_t crc = static_cast<uint32_t>(this->type);
 		crc = crc32c_append(crc, this->param1.begin(), this->param1.size());
 		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
 		if (this->checksum.present() && this->checksum.get() != crc) {
-			TraceEvent(SevError, "MutationRefChecksumMismatch")
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Checksum mismatch when populating a new checksum")
 			    .detail("CalculatedChecksum", std::to_string(crc))
-			    .detail("Mutation", toString());
-			ASSERT(false);
+			    .detail("Mutation", this->toString());
+			this->corrupted = true;
 		}
 		this->checksum = crc;
 	}
 
 	// Calculate crc based on type and param1 and param2 and compare the crc with this->checksum
 	bool validateChecksum() const {
+		if (this->corrupted) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Mutation has been marked as corrupted")
+			    .detail("Mutation", this->toString());
+			return false;
+		}
 		if (!this->checksum.present()) {
 			return true;
 		}
 		uint32_t crc = static_cast<uint32_t>(this->type);
 		crc = crc32c_append(crc, this->param1.begin(), this->param1.size());
 		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
-		return crc == static_cast<uint32_t>(this->checksum.get());
+		if (crc != static_cast<uint32_t>(this->checksum.get())) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .detail("Reason", "Mutation checksum mismatch")
+			    .detail("Mutation", this->toString())
+			    .detail("ExistingChecksum", this->checksum.get())
+			    .detail("NewChecksum", crc);
+			return false;
+		} else {
+			return true;
+		}
 	}
 
 	template <class Ar>
@@ -297,11 +345,20 @@ struct MutationRef {
 			}
 			this->validateParam2();
 			if (type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
-				ASSERT(param1[param1.size() - 1] == '\x00');
+				if (param1[param1.size() - 1] != '\x00') {
+					TraceEvent(SevError, "MutationRefUnexpectedError")
+					    .detail("Reason", "Param1 is not end with \\x00 for single key clear range")
+					    .detail("Param1", this->param1)
+					    .detail("Mutation", this->toString());
+					this->corrupted = true;
+				}
 				param2 = param1;
 				param1 = param2.substr(0, param2.size() - 1);
 			}
-			ASSERT(this->validateChecksum());
+			if (!this->validateChecksum()) {
+				TraceEvent(SevError, "MutationRefCorruptionDetected").detail("Mutation", this->toString());
+				this->corrupted = true;
+			}
 		}
 	}
 
