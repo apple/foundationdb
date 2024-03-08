@@ -40,3 +40,39 @@ bool validateAccumulativeChecksumIndexAtStorageServer(MutationRef m) {
 	}
 	return true;
 }
+
+TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
+	printf("testing MutationRef encoding/decoding\n");
+	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
+	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+		m.setAccumulativeChecksumIndex(512);
+	}
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
+
+	wr << m;
+
+	Standalone<StringRef> value = wr.toValue();
+	TraceEvent("EncodedMutation").detail("RawBytes", value);
+
+	BinaryReader rd(value, AssumeVersion(ProtocolVersion::withMutationChecksum()));
+	Standalone<MutationRef> de;
+
+	rd >> de;
+
+	printf("Deserialized mutation: %s\n", de.toString().c_str());
+
+	if (de.type != m.type || de.param1 != m.param1 || de.param2 != m.param2) {
+		TraceEvent(SevError, "MutationMismatch")
+		    .detail("OldType", m.type)
+		    .detail("NewType", de.type)
+		    .detail("OldParam1", m.param1)
+		    .detail("NewParam1", de.param1)
+		    .detail("OldParam2", m.param2)
+		    .detail("NewParam2", de.param2);
+		ASSERT(false);
+	}
+
+	ASSERT(de.validateChecksum());
+
+	return Void();
+}
