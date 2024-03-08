@@ -22,6 +22,8 @@
 #include "fdbserver/Knobs.h"
 
 uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex) {
+	// We leave flexibility in acs index generated from different components
+	// Acs index ends with 1 indicates the mutation is from a commit proxy
 	return commitProxyIndex * 10 + 1;
 }
 
