@@ -200,11 +200,13 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
 		req.encryptMode = getEncryptionAtRest(self->configuration);
+		req.commitProxyIndex = i;
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("EncryptMode", req.encryptMode.toString())
-		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
+		    .detail("FirstProxy", req.firstProxy ? "True" : "False")
+		    .detail("CommitProxyIndex", req.commitProxyIndex);
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
 		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
