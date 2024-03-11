@@ -224,6 +224,7 @@ struct ProxyCommitData {
 	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
 	bool firstProxy;
+	uint16_t commitProxyIndex; // decided when the cluster controller recruits commit proxies
 	double lastCoalesceTime;
 	bool locked;
 	Optional<Value> metadataVersion;
@@ -335,7 +336,8 @@ struct ProxyCommitData {
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy,
 	                EncryptionAtRestMode encryptMode,
-	                bool provisional)
+	                bool provisional,
+	                uint16_t commitProxyIndex)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
@@ -347,7 +349,7 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()) {
+	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

@@ -739,11 +739,19 @@ struct InitializeCommitProxyRequest {
 	bool firstProxy;
 	ReplyPromise<CommitProxyInterface> reply;
 	EncryptionAtRestMode encryptMode;
+	uint16_t commitProxyIndex;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply, encryptMode);
+		serializer(ar,
+		           master,
+		           masterLifetime,
+		           recoveryCount,
+		           recoveryTransactionVersion,
+		           firstProxy,
+		           reply,
+		           encryptMode,
+		           commitProxyIndex);
 	}
 };
 

@@ -70,6 +70,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -11211,7 +11212,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							decryptionTime += decryptionTimeV;
 						}
 					} else {
-						ASSERT(msg.validateChecksum());
+						if (!msg.validateChecksum() || !validateAccumulativeChecksumIndexAtStorageServer(msg)) {
+							TraceEvent(SevError, "ValidateChecksumOrAcsIndexError", data->thisServerID)
+							    .detail("Mutation", msg)
+							    .detail("ResolverGeneratePrivateMutation",
+							            SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
+							ASSERT(false);
+						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
