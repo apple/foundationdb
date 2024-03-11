@@ -439,12 +439,15 @@ class TransactionInfoLoader(object):
             start_key = fdb.KeySelector.first_greater_or_equal(timekeeper_prefix + timestamp_packed)
             end_key = fdb.KeySelector.first_greater_or_equal(strinc(timekeeper_prefix))
             reverse = False
+        logger.debug("Startkey=%s, endkey=%s" % (start_key, end_key))
         for k, v in tr.snapshot.get_range(start_key, end_key, limit=1, reverse=reverse):
+            logger.debug("Found result: Startkey=%s, endkey=%s" % (start_key, end_key))
             return fdb.tuple.unpack(v)[0]
         return 0 if start else 0x8000000000000000  # we didn't find any timekeeper data so find the max range
 
     def fetch_transaction_info(self):
         if self.min_timestamp:
+            logger.debug("get version for timestamp %s" % self.min_timestamp)
             start_version = self.find_version_for_timestamp(self.db, self.min_timestamp, True)
             logger.debug("Using start version %s" % start_version)
             start_key = self.get_key_prefix_for_version_stamp(start_version)
@@ -482,7 +485,7 @@ class TransactionInfoLoader(object):
 
                     version_stamp, tr_id, num_chunks, chunk_num = self.parse_key(k)
                     assert(version_stamp != 0)
-                    # logger.debug("num_chunks=%d, chunk_num=%d, version_stamp=%d" % (num_chunks,chunk_num,version_stamp))
+                    logger.debug("num_chunks=%d, chunk_num=%d, version_stamp=%d" % (num_chunks,chunk_num,version_stamp))
 
                     if num_chunks == 1:
                         assert chunk_num == 1
@@ -917,7 +920,6 @@ def main():
     db = connect(cluster_file=args.cluster_file)
     loader = TransactionInfoLoader(db, full_output=full_output, type_filter=type_filter,
                                    min_timestamp=min_timestamp, max_timestamp=max_timestamp)
-
     for info in loader.fetch_transaction_info():
         if info.has_types():
             if not write_counter and not read_counter:
