@@ -41,3 +41,7 @@ simBackupAgents = 'BackupToDB'
     machinesToLeave = 3
     reboot = true
     testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 60.0
