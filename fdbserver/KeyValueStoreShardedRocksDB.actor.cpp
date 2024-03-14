@@ -7,6 +7,7 @@
 #include "flow/serialize.h"
 #include <rocksdb/c.h>
 #include <rocksdb/cache.h>
+#include <rocksdb/advanced_cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/listener.h>
@@ -2196,6 +2197,10 @@ void RocksDBMetrics::logStats(rocksdb::DB* db, std::string manifestDirectory) {
 	std::string propValue = "";
 	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
 	TraceEvent(SevInfo, "DBWriteStallStats", debugID).detail("Stats", propValue);
+
+	if (rocksdb_block_cache) {
+		e.detail("CacheUsage", rocksdb_block_cache->GetUsage());
+	}
 }
 
 void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
