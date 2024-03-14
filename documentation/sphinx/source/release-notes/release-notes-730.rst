@@ -4,6 +4,26 @@
 Release Notes
 #############
 
+7.3.31
+======
+* Same as 7.3.30 release with AVX disabled.
+
+7.3.30
+======
+* Fixed an issue in Ratekeeper that could cause StorageQueueInfo loss. `(PR #11124) <https://github.com/apple/foundationdb/pull/11124>`_
+* Fixed checkall command for large shards. `(PR #11121) <https://github.com/apple/foundationdb/pull/11121>`_
+
+7.3.29
+======
+* Same as 7.3.28 release with AVX disabled.
+
+7.3.28
+======
+* Fixed a race condition in kvstorerockddb when accessing latencySample. `(PR #11043) <https://github.com/apple/foundationdb/pull/11114>`_
+* Added support for physical shard move. `(PR #11086) <https://github.com/apple/foundationdb/pull/11086>`_
+* Disabled CPU based team selection in rebalance data move. `(PR #11110) <https://github.com/apple/foundationdb/pull/11110>`_
+
+
 7.3.27
 ======
 * Same as 7.3.26 release with AVX disabled.
