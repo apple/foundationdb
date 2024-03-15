@@ -493,12 +493,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE,                    0.0001 );
 	init( ROCKSDB_METRICS_SAMPLE_INTERVAL,						 0.0 );
 	init( ROCKSDB_MAX_SUBCOMPACTIONS,                              3 );
-	init( ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT,      64000000000 ); // 64GB, Rocksdb option, Writes will slow down.
-	init( ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT,     100000000000 ); // 100GB, Rocksdb option, Writes will stall.
+	init( ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT,     128000000000 ); // 128GB, Rocksdb option, Writes will slow down.
+	init( ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT,     256000000000 ); // 256GB, Rocksdb option, Writes will stall.
 	init( SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT,                  0 );
 	init( SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT,                  0 );
-	init( ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT,        50000000000 ); // 50GB, Commit waits.
-	init( ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT,      INT_MAX ); // INT_MAX disables this feature. This value <= ROCKSDB_MAX_WRITE_BUFFER_NUMBER will enable the feature.
+	init( ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT,       100000000000 ); // 100GB, Commit waits.
+	init( ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT,            8 ); // INT_MAX disables this feature. This value <= ROCKSDB_MAX_WRITE_BUFFER_NUMBER will enable the feature.
 	// Enabling ROCKSDB_PARANOID_FILE_CHECKS knob will have overhead. Be cautious to enable in prod.
 	init( ROCKSDB_PARANOID_FILE_CHECKS,                        false ); if( randomize && BUGGIFY ) ROCKSDB_PARANOID_FILE_CHECKS = deterministicRandom()->coinflip();
 	init( ROCKSDB_WAL_TTL_SECONDS,                                 0 );
