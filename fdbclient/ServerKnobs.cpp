@@ -591,6 +591,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,       4 );
 	init( SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,         20 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,             36 ); // RocksDB default.
+	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,        true);
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
