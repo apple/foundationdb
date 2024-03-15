@@ -806,8 +806,8 @@ struct LogPushData : NonCopyable {
 	// MUST be called after getMessages() and recordEmptyMessage().
 	float getEmptyMessageRatio() const;
 
-	// Returns the total number of mutations.
-	uint32_t getMutationCount() const { return subsequence; }
+	// Returns the total number of mutations. Subsequence is initialized to 1, so subtract 1 to get count.
+	uint32_t getMutationCount() const { return subsequence - 1; }
 
 	// Sets mutations for all internal writers. "mutations" is the output from
 	// getAllMessages() and is used before writing any other mutations.
