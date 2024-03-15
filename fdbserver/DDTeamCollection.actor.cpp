@@ -1634,7 +1634,8 @@ public:
 			for (auto& server : self->server_info) {
 				// If this server isn't the right storage type and its wrong-type trigger has not yet been set
 				// then set it if we're in aggressive mode and log its presence either way.
-				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+				if (!(server.second->isCorrectStoreType(self->configuration.storageServerStoreType) ||
+				      server.second->isCorrectStoreType(self->configuration.perpetualStoreType)) &&
 				    !server.second->wrongStoreTypeToRemove.get()) {
 					// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 					// storageServerTracker. This race may cause the server to be removed before react to
@@ -3206,8 +3207,10 @@ public:
 		state StorageMetadataType data(
 		    StorageMetadataType::currentTime(),
 		    server->getStoreType(),
-		    !server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
-		                                      : self->configuration.storageServerStoreType));
+		    !(server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                       : self->configuration.storageServerStoreType) ||
+		      server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                       : self->configuration.perpetualStoreType)));
 
 		// read storage metadata
 		loop {
@@ -3242,7 +3245,8 @@ public:
 
 		// wrong store type handler
 		if (!isTss) {
-			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+			if (!(server->isCorrectStoreType(self->configuration.storageServerStoreType) ||
+			      server->isCorrectStoreType(self->configuration.perpetualStoreType)) &&
 			    self->wrongStoreTypeRemover.isReady()) {
 				self->wrongStoreTypeRemover = removeWrongStoreType(self);
 				self->addActor.send(self->wrongStoreTypeRemover);
