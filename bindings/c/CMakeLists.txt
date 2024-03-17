@@ -227,9 +227,20 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c fdbclient Threads::Threads fmt::fmt)
   target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
+  strip_debug_symbols(mako)
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c tokensign fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
+
+  # install mako
+  if(NOT OPEN_FOR_IDE)
+    if(GENERATE_DEBUG_PACKAGES)
+      fdb_install(TARGETS mako DESTINATION bin COMPONENT clients)
+    else()
+      add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
+      fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/mako DESTINATION bin COMPONENT clients)
+    endif()
+  endif()
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
