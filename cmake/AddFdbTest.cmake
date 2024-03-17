@@ -232,6 +232,7 @@ function(stage_correctness_package)
                             ${STAGE_OUT_DIR}/bin/coverage.flow.xml
                             ${STAGE_OUT_DIR}/bin/TestHarness.exe
                             ${STAGE_OUT_DIR}/bin/TraceLogHelper.dll
+                            ${STAGE_OUT_DIR}/bin/JoshuaDone.py
                             ${STAGE_OUT_DIR}/CMakeCache.txt
     )
 
@@ -245,6 +246,7 @@ function(stage_correctness_package)
             ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
             ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
             ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/JoshuaDone.py
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
                                      ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
@@ -253,6 +255,7 @@ function(stage_correctness_package)
                                      ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
                                      ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
                                      ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+                                     ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/JoshuaDone.py
                                      ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"
     )
@@ -294,13 +297,17 @@ function(create_correctness_package)
     DEPENDS ${package_files}
             ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
             ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/joshuaDone.sh
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
                                      ${out_dir}/joshua_test
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
                                      ${out_dir}/joshua_timeout
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/joshuaDone.sh
+                                     ${out_dir}/joshua_done
     COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
                                                     ${out_dir}/joshua_test
                                                     ${out_dir}/joshua_timeout
+                                                    ${out_dir}/joshua_done
     WORKING_DIRECTORY ${out_dir}
     COMMENT "Package correctness archive"
     )
