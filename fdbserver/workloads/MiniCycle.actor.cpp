@@ -52,6 +52,7 @@ struct MiniCycleWorkload : TestWorkload {
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		ASSERT(cycleSize(clientId) >= 3); // The workload assumes that each cycle has at least 3 distinct keys
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -74,6 +75,9 @@ struct MiniCycleWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return _check(cx->clone(), this); }
 
 	ACTOR Future<bool> _check(Database cx, MiniCycleWorkload* self) {
+		state bool ok = true;
+		bool ret1 = wait(self->_checkCycle(cx->clone(), self, ok));
+		ASSERT(ret1);
 		state std::vector<Future<Void>> cycleClients;
 		for (int c = 0; c < self->clientCount; c++)
 			cycleClients.push_back(
@@ -82,7 +86,6 @@ struct MiniCycleWorkload : TestWorkload {
 			            Void()));
 
 		state Future<Void> end = delay(self->testDuration);
-		state bool ok = true;
 		loop {
 			choose {
 				when(bool ret = wait(self->_checkCycle(cx->clone(), self, ok))) {
@@ -105,8 +108,8 @@ struct MiniCycleWorkload : TestWorkload {
 		cycleClients.clear();
 
 		printf("Beginning full cycle check...");
-		bool ret = wait(self->_checkCycle(cx->clone(), self, ok));
-		return ret;
+		bool ret2 = wait(self->_checkCycle(cx->clone(), self, ok));
+		return ret2;
 	}
 
 	ACTOR Future<bool> _checkCycle(Database cx, MiniCycleWorkload* self, bool ok) {
@@ -172,7 +175,7 @@ struct MiniCycleWorkload : TestWorkload {
 
 				state double tstart = now();
 				state int r =
-				    deterministicRandom()->randomInt(self->beginKey(self->clientId), self->endKey(self->clientId) - 1);
+				    deterministicRandom()->randomInt(self->beginKey(self->clientId), self->endKey(self->clientId));
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
 					state Span span("MiniCycleClient"_loc);
@@ -226,11 +229,17 @@ struct MiniCycleWorkload : TestWorkload {
 	}
 
 	void logTestData(const VectorRef<KeyValueRef>& data) {
-		TraceEvent("TestFailureDetail").log();
+		TraceEvent("TestFailureDetail")
+		    .detail("NodeCount", nodeCount)
+		    .detail("ClientCount", clientCount)
+		    .detail("ClientId", beginKey(clientId))
+		    .detail("CycleBegin", beginKey(clientId))
+		    .detail("CycleSize", cycleSize(clientId));
 		int index = 0;
 		for (auto& entry : data) {
 			TraceEvent("CurrentDataEntry")
 			    .detail("Index", index)
+			    .detail("ValueDecoded", fromValue(entry.value))
 			    .detail("Key", entry.key.toString())
 			    .detail("Value", entry.value.toString());
 			index++;
