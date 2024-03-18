@@ -171,7 +171,10 @@ struct MutationRef {
 
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
-	void setAccumulativeChecksumIndex(uint16_t index) {
+	void setAccumulativeChecksumIndex(uint16_t index, bool doSet = false) {
+		if (!doSet) {
+			return;
+		}
 		if (this->accumulativeChecksumIndex.present()) {
 			ASSERT(this->accumulativeChecksumIndex.get() == index);
 		} else {
@@ -186,6 +189,8 @@ struct MutationRef {
 	void offloadChecksum() {
 		if (this->checksum.present()) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Internal checksum has been set when offloading checksum")
 			    .detail("Mutation", toString());
 			this->corrupted = true;
@@ -195,6 +200,8 @@ struct MutationRef {
 		}
 		if (withAccumulativeChecksumIndex()) { // Removing checksum must be after removing acs index
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Type contains acs index flag when offloading checksum")
 			    .detail("Mutation", toString());
 			this->corrupted = true;
@@ -210,6 +217,8 @@ struct MutationRef {
 	void offloadAccumulativeChecksumIndex() {
 		if (this->accumulativeChecksumIndex.present()) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Internal acs index has been set when offloading acs index")
 			    .detail("Mutation", this->toString());
 			this->corrupted = true;
@@ -234,16 +243,20 @@ struct MutationRef {
 		if (withChecksum() && withAccumulativeChecksumIndex()) {
 			if (this->param2.size() < 6) { // 4 bytes for checksum, 2 bytes for accumulative index
 				TraceEvent(SevError, "MutationRefUnexpectedError")
+				    .setMaxFieldLength(-1)
+				    .setMaxEventLength(-1)
 				    .detail("Reason", "Param2 size is wrong with both checksum and acs index")
-				    .detail("Param2Size", this->param2.size())
+				    .detail("Param2", this->param2.toString().c_str())
 				    .detail("Mutation", toString());
 				this->corrupted = true;
 			}
 		} else if (withChecksum() && !withAccumulativeChecksumIndex()) {
 			if (this->param2.size() < 4) { // 4 bytes for checksum
 				TraceEvent(SevError, "MutationRefUnexpectedError")
+				    .setMaxFieldLength(-1)
+				    .setMaxEventLength(-1)
 				    .detail("Reason", "Param2 size is wrong with checksum and without acs index")
-				    .detail("Param2Size", this->param2.size())
+				    .detail("Param2Size", this->param2.toString().c_str())
 				    .detail("Mutation", toString());
 				this->corrupted = true;
 			}
@@ -254,6 +267,8 @@ struct MutationRef {
 	void populateChecksum() {
 		if (withChecksum()) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Type already has checksum flag when populating checksum")
 			    .detail("Mutation", toString());
 			this->corrupted = true;
@@ -263,6 +278,8 @@ struct MutationRef {
 		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
 		if (this->checksum.present() && this->checksum.get() != crc) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Checksum mismatch when populating a new checksum")
 			    .detail("CalculatedChecksum", std::to_string(crc))
 			    .detail("Mutation", this->toString());
@@ -275,6 +292,8 @@ struct MutationRef {
 	bool validateChecksum() const {
 		if (this->corrupted) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Mutation has been marked as corrupted")
 			    .detail("Mutation", this->toString());
 			return false;
@@ -287,6 +306,8 @@ struct MutationRef {
 		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
 		if (crc != static_cast<uint32_t>(this->checksum.get())) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("Reason", "Mutation checksum mismatch")
 			    .detail("Mutation", this->toString())
 			    .detail("ExistingChecksum", this->checksum.get())
@@ -313,6 +334,12 @@ struct MutationRef {
 					uint16_t acsIdx = this->accumulativeChecksumIndex.get();
 					cEmpty = cEmpty.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
 				}
+				if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+					TraceEvent(SevInfo, "SerializeMutationWithChecksum")
+					    .detail("Checksum", cs)
+					    .detail("AcsIndex",
+					            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
+				}
 				serializer(ar, cType, param2, cEmpty);
 			} else {
 				serializer(ar, type, param2, empty);
@@ -323,11 +350,29 @@ struct MutationRef {
 			populateChecksum();
 			uint8_t cType = createTypeWithChecksum(this->type);
 			uint32_t cs = this->checksum.get();
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+				TraceEvent(SevInfo, "SerializeMutationWithChecksumBeforeAddingCsToParam2")
+				    .detail("MType", this->type)
+				    .detail("Param1", this->param1.toString())
+				    .detail("Param2", this->param2.toString())
+				    .detail("Checksum", cs)
+				    .detail("AcsIndex",
+				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
+			}
 			Standalone<StringRef> cParam2 = param2.withSuffix(StringRef((uint8_t*)&cs, 4));
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM && this->accumulativeChecksumIndex.present()) {
 				cType = createTypeWithAccumulativeChecksumIndex(cType);
 				uint16_t acsIdx = this->accumulativeChecksumIndex.get();
 				cParam2 = cParam2.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
+			}
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+				TraceEvent(SevInfo, "SerializeMutationWithChecksum")
+				    .detail("MType", cType)
+				    .detail("Param1", this->param1.toString())
+				    .detail("Param2", cParam2.toString())
+				    .detail("Checksum", cs)
+				    .detail("AcsIndex",
+				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
 			}
 			serializer(ar, cType, param1, cParam2);
 		} else {
@@ -347,16 +392,30 @@ struct MutationRef {
 			if (type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
 				if (param1[param1.size() - 1] != '\x00') {
 					TraceEvent(SevError, "MutationRefUnexpectedError")
+					    .setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
 					    .detail("Reason", "Param1 is not end with \\x00 for single key clear range")
-					    .detail("Param1", param1)
+					    .detail("Param1", param1.toString())
 					    .detail("Mutation", toString());
 					this->corrupted = true;
 				}
 				param2 = param1;
 				param1 = param2.substr(0, param2.size() - 1);
 			}
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+				TraceEvent(SevInfo, "DeserializeMutationWithChecksum")
+				    .detail("MType", this->type)
+				    .detail("Param1", this->param1.toString())
+				    .detail("Param2", this->param2.toString())
+				    .detail("Checksum", this->checksum.present() ? this->checksum.get() : 0)
+				    .detail("AcsIndex",
+				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
+			}
 			if (!validateChecksum()) {
-				TraceEvent(SevError, "MutationRefCorruptionDetected").detail("Mutation", this->toString());
+				TraceEvent(SevError, "MutationRefCorruptionDetected")
+				    .setMaxFieldLength(-1)
+				    .setMaxEventLength(-1)
+				    .detail("Mutation", this->toString());
 				this->corrupted = true;
 			}
 		}

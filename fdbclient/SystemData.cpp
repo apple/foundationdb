@@ -303,6 +303,19 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
+const KeyRef accumulativeChecksumKey = "\xff/accumulativeChecksum"_sr;
+
+const Value accumulativeChecksumValue(const AccumulativeChecksumState& acsState) {
+	return ObjectWriter::toValue(acsState, IncludeVersion());
+}
+
+AccumulativeChecksumState decodeAccumulativeChecksum(const ValueRef& value) {
+	AccumulativeChecksumState acsState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(acsState);
+	return acsState;
+}
+
 const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
 const KeyRef auditPrefix = auditKeys.begin;
 const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
@@ -1238,6 +1251,9 @@ const KeyRangeRef applyLogKeys("\xff\x02/alog/"_sr, "\xff\x02/alog0"_sr);
 bool isBackupLogMutation(const MutationRef& m) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) &&
 	       (backupLogKeys.contains(m.param1) || applyLogKeys.contains(m.param1));
+}
+bool isAccumulativeChecksumMutation(const MutationRef& m) {
+	return m.type == MutationRef::AccumulativeChecksum;
 }
 // static_assert( backupLogKeys.begin.size() == backupLogPrefixBytes, "backupLogPrefixBytes incorrect" );
 const KeyRef backupVersionKey = "\xff/backupDataFormat"_sr;

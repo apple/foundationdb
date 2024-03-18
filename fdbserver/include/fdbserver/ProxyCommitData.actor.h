@@ -29,6 +29,7 @@
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -271,6 +272,8 @@ struct ProxyCommitData {
 
 	AsyncVar<bool> triggerCommit;
 
+	AccumulativeChecksumBuilder acsBuilder;
+
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
@@ -349,7 +352,8 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex) {
+	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
+	    acsBuilder(AccumulativeChecksumBuilder(getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

@@ -337,6 +337,7 @@ public:
 
 	bool ENABLE_MUTATION_CHECKSUM;
 	bool ENABLE_ACCUMULATIVE_CHECKSUM;
+	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

@@ -77,7 +77,8 @@ public:
 	                           Version version,
 	                           Version popVersion_,
 	                           bool initialCommit_,
-	                           bool provisionalCommitProxy_)
+	                           bool provisionalCommitProxy_,
+	                           bool updateAcsBuilderEntry_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
@@ -89,7 +90,8 @@ public:
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
-	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)) {
+	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
+	    acsBuilder(&proxyCommitData_.acsBuilder), updateAcsBuilderEntry(updateAcsBuilderEntry_) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -172,6 +174,11 @@ private:
 
 	// indicate which commit proxy / resolver applies mutations
 	uint16_t accumulativeChecksumIndex = invalidAccumulativeChecksumIndex;
+
+	AccumulativeChecksumBuilder* acsBuilder = nullptr;
+
+	bool updateAcsBuilderEntry =
+	    false; // when updateAcsBuilderEntry, acsBuild entry of a tag is reset if the tag is removed
 
 private:
 	// The following variables are used internally
@@ -662,6 +669,7 @@ private:
 
 		if (m.param1 == lastEpochEndKey) {
 			toCommit->addTags(allTags);
+			TraceEvent("ZheRecovery").detail("AllTags", allTags);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
 			TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", "LogProtocolMessage");
 		}
@@ -985,6 +993,21 @@ private:
 
 		if (!initialCommit) {
 			KeyRangeRef clearRange = range & serverTagKeys;
+			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+				// For a removed tag, reset its corresponding entry in acsBuilder
+				if (acsBuilder) {
+					for (auto& kv :
+					     txnStateStore->readRange(clearRange).get()) { // read is expected to be immediately available
+						Tag tag = decodeServerTagValue(kv.value);
+						acsBuilder->resetTag(tag);
+						if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+							TraceEvent(SevInfo, "AcsBuilderResetTag", dbgid)
+							    .detail("AcsTag", tag)
+							    .detail("AcsIndex", accumulativeChecksumIndex);
+						}
+					}
+				}
+			}
 			txnStateStore->clear(clearRange);
 			if (storageCache && clearRange.singleKeyRange()) {
 				storageCache->erase(decodeServerTagKey(clearRange.begin));
@@ -1488,7 +1511,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit,
-                            bool provisionalCommitProxy) {
+                            bool provisionalCommitProxy,
+                            bool updateAcsBuilderEntry) {
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1501,7 +1525,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           version,
 	                           popVersion,
 	                           initialCommit,
-	                           provisionalCommitProxy)
+	                           provisionalCommitProxy,
+	                           updateAcsBuilderEntry)
 	    .apply();
 }
 

@@ -24,6 +24,7 @@
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
+#include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
 #include "fdbclient/StorageServerInterface.h"
@@ -132,6 +133,10 @@ void decodeKeyServersValue(RangeResult result,
                            UID& destID,
                            bool missingIsError = true);
 bool isSystemKey(KeyRef key);
+
+extern const KeyRef accumulativeChecksumKey;
+const Value accumulativeChecksumValue(const AccumulativeChecksumState& acsState);
+AccumulativeChecksumState decodeAccumulativeChecksum(const ValueRef& value);
 
 extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
@@ -612,6 +617,9 @@ extern const KeyRangeRef backupLogKeys;
 extern const KeyRangeRef applyLogKeys;
 // Returns true if m is a blog (backup log) or alog (apply log) mutation
 bool isBackupLogMutation(const MutationRef& m);
+
+// Returns true if m is an acs mutation: a mutation carrying accumulative checksum value
+bool isAccumulativeChecksumMutation(const MutationRef& m);
 
 extern const KeyRef backupVersionKey;
 extern const ValueRef backupVersionValue;
