@@ -4578,7 +4578,7 @@ XXH_PUBLIC_API XXH128_hash_t XXH128(const void* input, size_t len, XXH64_hash_t 
 
 /*
  * All the functions are actually the same as for 64-bit streaming variant.
- * The only difference is the finalizatiom routine.
+ * The only difference is the finalization routine.
  */
 
 static void XXH3_128bits_reset_internal(XXH3_state_t* statePtr,
