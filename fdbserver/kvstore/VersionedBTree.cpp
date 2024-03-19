@@ -5771,7 +5771,7 @@ private:
 			PageToBuild& a = pages[pages.size() - 2];
 			PageToBuild& b = pages.back();
 
-			// While the last page page has too much slack and the second to last page
+			// While the last page has too much slack and the second to last page
 			// has more than the minimum record count, shift a record from the second
 			// to last page to the last page.
 			while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
