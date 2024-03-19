@@ -11054,6 +11054,7 @@ ACTOR Future<Void> tssDelayForever() {
 
 // Update ACS validator and validate ACS
 void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
+	ASSERT(!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM);
 	if (!msg.checksum.present() || !msg.accumulativeChecksumIndex.present()) {
 		// Ignore if msg.checksum and msg.accumulativeChecksumIndex are not set
 		return;
@@ -11269,7 +11270,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							    .detail("Mutation", msg);
 							ASSERT(false);
 						}
-						doAccumulativeChecksum(data, msg);
+						if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
+							doAccumulativeChecksum(data, msg);
+						}
 					}
 					if (msg.type == MutationRef::AccumulativeChecksum) {
 						continue; // Bypass ACS mutation
@@ -12704,6 +12707,7 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 }
 
 void restoreAccumulativeChecksumValidator(StorageServer* data, RangeResult accumulativeChecksums) {
+	ASSERT(!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM);
 	data->bytesRestored += accumulativeChecksums.logicalSize();
 	for (int acsLoc = 0; acsLoc < accumulativeChecksums.size(); acsLoc++) {
 		StringRef acsIndexStr = accumulativeChecksums[acsLoc].key.removePrefix(persistAccumulativeChecksumKeys.begin);
@@ -12848,7 +12852,9 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	}
 
 	// Restore acs validator from persisted disk
-	restoreAccumulativeChecksumValidator(data, fAccumulativeChecksum.get());
+	if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
+		restoreAccumulativeChecksumValidator(data, fAccumulativeChecksum.get());
+	}
 
 	state RangeResult assigned = fShardAssigned.get();
 	data->bytesRestored += assigned.logicalSize();

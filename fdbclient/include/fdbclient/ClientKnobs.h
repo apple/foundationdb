@@ -338,6 +338,7 @@ public:
 	bool ENABLE_MUTATION_CHECKSUM;
 	bool ENABLE_ACCUMULATIVE_CHECKSUM;
 	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
+	bool SS_BYPASS_ACCUMULATIVE_CHECKSUM;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
