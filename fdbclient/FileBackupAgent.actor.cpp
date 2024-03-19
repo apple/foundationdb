@@ -5251,7 +5251,7 @@ public:
 				for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
 					auto range = backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
-					// Register the request request in DB, which will be picked up by restore worker leader
+					// Register the request in DB, which will be picked up by restore worker leader
 					struct RestoreRequest restoreRequest(restoreIndex,
 					                                     restoreTag,
 					                                     bcUrl,
