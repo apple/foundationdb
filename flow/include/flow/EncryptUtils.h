@@ -102,7 +102,7 @@ typedef enum {
 } EncryptAuthTokenAlgo;
 
 static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::numeric_limits<uint8_t>::max(),
-              "EncryptHeaerAuthTokenAlgo value overflow");
+              "EncryptHeaderAuthTokenAlgo value overflow");
 
 bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode);
 bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo);

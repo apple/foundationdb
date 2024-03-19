@@ -310,18 +310,18 @@ void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCiphe
 
 	// Validate baseCipher KCVs
 	if (persistedTextKCV != kcvs.textKCV) {
-		TraceEvent(SevError, "EncryptionHeadeTextKCVMismatch")
+		TraceEvent(SevError, "EncryptionHeaderTextKCVMismatch")
 		    .detail("Persisted", persistedTextKCV)
 		    .detail("Expected", kcvs.textKCV);
 		throw encrypt_key_check_value_mismatch();
 	}
 	if (persistedHeaderKCV.present()) {
 		if (!kcvs.headerKCV.present()) {
-			TraceEvent(SevError, "EncryptionHeadeMissingHeaderKCV");
+			TraceEvent(SevError, "EncryptionHeaderMissingHeaderKCV");
 			throw encrypt_key_check_value_mismatch();
 		}
 		if (persistedHeaderKCV.get() != kcvs.headerKCV.get()) {
-			TraceEvent(SevError, "EncryptionHeadeTextKCVMismatch")
+			TraceEvent(SevError, "EncryptionHeaderTextKCVMismatch")
 			    .detail("Persisted", persistedTextKCV)
 			    .detail("Expected", kcvs.textKCV);
 			throw encrypt_key_check_value_mismatch();
