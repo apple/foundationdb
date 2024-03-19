@@ -168,7 +168,7 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-external-client-directory|
 
-    .. note:: |tls-options-burb|
+    .. note:: |tls-options-blurb|
 
     .. method :: fdb.options.set_tls_plugin(plugin_path_or_name)
 

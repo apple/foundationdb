@@ -253,7 +253,7 @@
 
     It is an error to set these options after the first call to |open-func| anywhere in your application.
 
-.. |tls-options-burb| replace::
+.. |tls-options-blurb| replace::
 
     The following options are only used when connecting to a :doc:`TLS-enabled cluster <tls>`.
 

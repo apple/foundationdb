@@ -147,7 +147,7 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
        |option-external-client-directory|
 
-    .. note:: |tls-options-burb|
+    .. note:: |tls-options-blurb|
 
     .. method :: FDB.options.set_tls_plugin(plugin_path_or_name) -> nil
 
