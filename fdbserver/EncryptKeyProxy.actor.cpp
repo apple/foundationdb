@@ -1059,7 +1059,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 	// Approach avoids external RPCs due to EncryptionKey refreshes for the inline write encryption codepath such as:
 	// CPs, Redwood Storage Server node flush etc. The process doing the encryption refresh the cached cipher keys based
 	// on FLOW_KNOB->ENCRYPTION_CIPHER_KEY_CACHE_TTL_SEC interval which is intentionally kept longer than
-	// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
+	// FLOW_KNOB->ENCRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
 	// mostly not coinciding with FDB process encryption key refresh attempts.
 
 	self->encryptionKeyRefresher = recurringAsync([&]() { return refreshEncryptionKeys(self, kmsConnectorInf); },
