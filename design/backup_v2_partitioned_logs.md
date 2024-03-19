@@ -1,6 +1,6 @@
 # The New FDB Backup System: Requirements & Design
 
-Github tracking issue: https://github.com/apple/foundationdb/issues/1003
+GitHub tracking issue: https://github.com/apple/foundationdb/issues/1003
 
 ## Purpose and Audience
 
