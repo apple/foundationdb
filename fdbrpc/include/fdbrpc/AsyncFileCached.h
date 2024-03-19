@@ -173,7 +173,7 @@ public:
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		// If there is a truncate in progress before the the write position then we must
+		// If there is a truncate in progress before the write position then we must
 		// wait for it to complete.
 		if (length + offset > currentTruncateSize) {
 			Future<Void> currentTruncate = this->currentTruncate;

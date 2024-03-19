@@ -282,7 +282,7 @@ private:
 	// return the updated pages when updateChecksum is true
 	std::vector<uint32_t> updateChecksumHistory(bool updateChecksum, int64_t offset, int len, uint8_t* buf) {
 		std::vector<uint32_t> pages;
-		// Check or set each full block in the the range
+		// Check or set each full block in the range
 		// page number starts at 1, as we use 0 to indicate invalid page
 		uint32_t page = offset / checksumHistoryPageSize + 1; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
