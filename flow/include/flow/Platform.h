@@ -381,8 +381,8 @@ std::string popPath(const std::string& path);
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
 // If resolveLinks is true then symbolic links will be expanded BEFORE resolving '..' references.
-// An empty path or a non-existent path when mustExist is true will result in a platform_error() exception.
-// Upon success, all '..' references will be resolved with the assumption that non-existent components
+// An empty path or a nonexistent path when mustExist is true will result in a platform_error() exception.
+// Upon success, all '..' references will be resolved with the assumption that nonexistent components
 // are NOT symbolic links.
 // User directory references such as '~' or '~user' are effectively treated as symbolic links which
 // are impossible to resolve, so resolveLinks=true results in failure and resolveLinks=false results

@@ -1222,7 +1222,7 @@ ERROR: assigned_cluster is only valid in metacluster configuration.
 ERROR: Tenant configuration is invalid (2140)
     """.strip()
     output = run_fdbcli_command_and_get_error(
-        "tenant configure tenant assigned_cluster=nonexist"
+        "tenant configure tenant assigned_cluster=nonexistent"
     )
     assert output == expected_output
 

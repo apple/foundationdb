@@ -1946,7 +1946,7 @@ struct TenantManagementWorkload : TestWorkload {
 				state Error err = e;
 				if (err.code() == error_code_tenant_not_found) {
 					ASSERT(!tenantPresent);
-					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
+					CODE_PROBE(true, "Attempted to read key from nonexistent tenant");
 					return Void();
 				} else if (err.code() == error_code_tenant_locked) {
 					ASSERT(!lockAware);

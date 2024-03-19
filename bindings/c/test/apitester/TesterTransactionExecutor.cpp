@@ -701,7 +701,7 @@ public:
 			originalClusterFile = clusterFile;
 			this->clusterFile = tamperedClusterFile.getFileName();
 
-			// begin with a valid cluster file, but with non existing address
+			// begin with a valid cluster file, but with nonexistent address
 			tamperedClusterFile.write(fmt::format("{}:{}@192.168.{}.{}:{}",
 			                                      Random().get().randomStringLowerCase<std::string>(3, 8),
 			                                      Random().get().randomStringLowerCase<std::string>(1, 100),

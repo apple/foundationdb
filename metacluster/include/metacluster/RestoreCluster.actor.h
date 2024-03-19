@@ -118,7 +118,7 @@ struct RestoreClusterImpl {
 	static Future<bool> eraseRestoreId(RestoreClusterImpl* self, Transaction tr) {
 		Optional<metadata::RestoreId> transactionId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 		if (!transactionId.present()) {
-			CODE_PROBE(true, "Erasing non-existent restore ID");
+			CODE_PROBE(true, "Erasing nonexistent restore ID");
 			return false;
 		} else if (transactionId.get() != self->restoreId) {
 			CODE_PROBE(true, "Conflicting restore detected while erasing restore ID");
