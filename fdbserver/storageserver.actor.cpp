@@ -11961,7 +11961,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->fetchKeysBytesBudget += bytesLeft;
 			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 
-			// Dependng on how negative the fetchKeys budget was it could still be used up
+			// Depending on how negative the fetchKeys budget was it could still be used up
 			if (!data->fetchKeysBudgetUsed.get()) {
 				wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
 			}
