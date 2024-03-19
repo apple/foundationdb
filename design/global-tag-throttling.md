@@ -75,7 +75,7 @@ For write operations that are sampled (with probability `COMMIT_SAMPLE_COST`), w
 
 The ratekeeper tracks per-storage, per-tag cost statistics in the `GlobalTagThrottlerImpl::throughput` object.
 
-The ratekeeper must also track the rate of transactions performed with each tag. Each GRV proxy agreggates a per-tag counter of transactions started (without sampling). These are sent to the ratekeeper through `GetRateInfoRequest` messages. The global tag throttler then tracks per tag transaction rates in the `GlobalTagThrottlerImpl::tagStatistics` object.
+The ratekeeper must also track the rate of transactions performed with each tag. Each GRV proxy aggregates a per-tag counter of transactions started (without sampling). These are sent to the ratekeeper through `GetRateInfoRequest` messages. The global tag throttler then tracks per tag transaction rates in the `GlobalTagThrottlerImpl::tagStatistics` object.
 
 ### Average Cost Calculation
 Quotas are expressed in terms of cost, but because throttling is enforced at the beginning of transactions, budgets need to be calculated in terms of transactions per second. To make this conversion, it is necessary to track the average cost of transactions (per-tag, and per-tag on a particular storage server).
