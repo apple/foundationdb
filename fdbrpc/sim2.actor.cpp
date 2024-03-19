@@ -576,7 +576,7 @@ private:
 	}
 
 	void rollRandomClose() {
-		// make sure connections between parenta and their childs are not closed
+		// make sure connections between parenta and their children are not closed
 		if (!stableConnection &&
 		    now() - g_simulator->lastConnectionFailure > g_simulator->connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {

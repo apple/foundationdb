@@ -7401,7 +7401,7 @@ private:
 			debug_print(addPrefix(context, update->toString()));
 
 			// TODO(yiwu): check whether we can pass decodeUpperBound as nextBoundary when the last slice
-			// have childenChanged=true.
+			// have childrenChanged=true.
 			modifier.applyUpdate(*slices.back(),
 			                     modifier.changesMade || slices.back()->childrenChanged ? &update->subtreeUpperBound
 			                                                                            : &update->decodeUpperBound);
