@@ -139,7 +139,7 @@ private:
 };
 
 class Mutex {
-	// A re-entrant process-local blocking lock (e.g. CRITICAL_SECTION on Windows)
+	// A reentrant process-local blocking lock (e.g. CRITICAL_SECTION on Windows)
 	// Thread safe even if !FLOW_THREAD_SAFE
 public:
 	Mutex();
