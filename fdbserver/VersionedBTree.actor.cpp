@@ -5126,7 +5126,7 @@ public:
 				ASSERT(entry.height > 1);
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
-				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
+				// RedwoodRecordRef::DeltaValueOnly as the delta type to skip key decoding
 				BTreePage::ValueTree::Cursor c(makeReference<BTreePage::ValueTree::DecodeCache>(dbBegin, dbEnd),
 				                               btPage.valueTree());
 				ASSERT(c.moveFirst());
