@@ -680,7 +680,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_CONFIG_REFRESH_TIMEOUT,                         10.0 ); if ( randomize && BUGGIFY ) GLOBAL_CONFIG_REFRESH_TIMEOUT = 1.0;
 
 	// Master Server
-	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
+	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistribution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.
 	bool fastBalancing = randomize && BUGGIFY;
 	init( COMMIT_SLEEP_TIME,								  0.0001 ); if( randomize && BUGGIFY ) COMMIT_SLEEP_TIME = 0;
