@@ -204,7 +204,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		path := sm.maybePath()
 		// This ***HAS*** to call Transact to ensure that any directory version
 		// key set in the process of trying to remove this potentially
-		// non-existent directory, in the REMOVE but not REMOVE_IF_EXISTS case,
+		// nonexistent directory, in the REMOVE but not REMOVE_IF_EXISTS case,
 		// doesn't end up committing the version key. (Other languages have
 		// separate remove() and remove_if_exists() so don't have this tricky
 		// issue).
