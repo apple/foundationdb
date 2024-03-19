@@ -2596,7 +2596,7 @@ public:
 			wait(waitForAll(backupIntoResults));
 			for (auto result : backupIntoResults) {
 				if (result.get().size() > 0) {
-					// One of the ranges we will be backing up into has pre-existing data.
+					// One of the ranges we will be backing up into has preexisting data.
 					throw restore_destination_not_empty();
 				}
 			}
