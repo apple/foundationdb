@@ -383,7 +383,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 								// Last value mismatch
 								KeyRef valueMismatchKey;
 
-								// Loop indeces
+								// Loop indices
 								int currentI = 0;
 								int referenceI = 0;
 								while (currentI < current.data.size() || referenceI < reference.data.size()) {
