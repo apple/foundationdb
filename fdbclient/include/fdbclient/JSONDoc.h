@@ -26,7 +26,7 @@
 
 // JSONDoc is a convenient reader/writer class for manipulating JSON documents using "paths".
 // Access is done using a "path", which is a string of dot-separated
-// substrings representing representing successively deeper keys found in nested
+// substrings representing successively deeper keys found in nested
 // JSON objects within the top level object
 //
 // Most methods are read-only with respect to the source JSON object.
