@@ -2562,7 +2562,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					// ASSERT(!deltas.mutations.empty());
 					if (!deltas.mutations.empty()) {
 						if (deltas.mutations.size() == 1 && deltas.mutations.back().param1 == lastEpochEndPrivateKey) {
-							// Note rollbackVerision is durable, [rollbackVersion+1 - deltas.version] needs to
+							// Note rollbackVersion is durable, [rollbackVersion+1 - deltas.version] needs to
 							// be tossed For correctness right now, there can be no waits and yields either in
 							// rollback handling or in handleBlobGranuleFileRequest once waitForVersion has
 							// succeeded, otherwise this will race and clobber results

@@ -9256,8 +9256,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			if (!updates.empty()) {
 				TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdates", data->thisServerID)
 				    .detail("MoveInShard", moveInShard->toString())
-				    .detail("MinVerion", updates.front().version)
-				    .detail("MaxVerion", updates.back().version)
+				    .detail("MinVersion", updates.front().version)
+				    .detail("MaxVersion", updates.back().version)
 				    .detail("TargetVersion", version)
 				    .detail("HighWatermark", highWatermark)
 				    .detail("Size", updates.size());

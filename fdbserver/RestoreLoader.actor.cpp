@@ -449,7 +449,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				mutation = decryptedMutation;
 			}
 
-			// Skip mutation whose commitVesion < range kv's version
+			// Skip mutation whose commitVersion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
 				cc->oldLogMutations += 1;
 				wait(yield()); // avoid potential stack overflows
@@ -1181,7 +1181,7 @@ ACTOR Future<Void> _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions
 				mutation = decryptedMutation;
 			}
 			// Should this mutation be skipped?
-			// Skip mutation whose commitVesion < range kv's version
+			// Skip mutation whose commitVersion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {
 				cc->oldLogMutations += 1;
 			} else {

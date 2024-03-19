@@ -623,9 +623,9 @@ def transaction(logger):
     assert lines[2] == "`key' is `value'"
     assert lines[3].startswith("Committed (") and lines[3].endswith(")")
     # validate commit version is larger than the read version
-    commit_verion = int(lines[3][len("Committed (") : -1])
-    logger.debug("Commit version: {}".format(commit_verion))
-    assert commit_verion >= read_version
+    commit_version = int(lines[3][len("Committed (") : -1])
+    logger.debug("Commit version: {}".format(commit_version))
+    assert commit_version >= read_version
     # check the transaction is committed
     output2 = run_fdbcli_command("get", "key")
     assert output2 == "`key' is `value'"

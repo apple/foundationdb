@@ -2099,7 +2099,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 				if (data->otherError.getFuture().isReady())
 					data->otherError.getFuture().get();
 
-				// we can get rid of versions beyond maxVerionsInMemory at any point. Update the
+				// we can get rid of versions beyond maxVersionsInMemory at any point. Update the
 				// desiredOldestVersion and that may invoke the compaction actor
 				Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 				Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;

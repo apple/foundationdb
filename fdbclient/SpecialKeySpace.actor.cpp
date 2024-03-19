@@ -2008,13 +2008,13 @@ ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWri
 
 	// Max version we can set for minRequiredCommitVersionKey,
 	// making sure the cluster can still be alive for 1000 years after the recovery
-	static const Version maxAllowedVerion =
+	static const Version maxAllowedVersion =
 	    std::numeric_limits<int64_t>::max() - 1 - CLIENT_KNOBS->VERSIONS_PER_SECOND * 3600 * 24 * 365 * 1000;
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	TraceEvent(SevDebug, "AdvanceVersion").detail("MaxAllowedVersion", maxAllowedVerion);
-	if (v > maxAllowedVerion) {
+	TraceEvent(SevDebug, "AdvanceVersion").detail("MaxAllowedVersion", maxAllowedVersion);
+	if (v > maxAllowedVersion) {
 		return ManagementAPIError::toJsonString(
 		    false,
 		    "advanceversion",

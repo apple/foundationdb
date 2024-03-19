@@ -3097,7 +3097,7 @@ public:
 				state Future<Optional<Value>> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(DatabaseBackupAgent::keyFolderId));
-				state Future<Optional<Value>> fBackupVerison =
+				state Future<Optional<Value>> fBackupVersion =
 				    tr->get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
 				state Future<Optional<Key>> fTagName =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
@@ -3195,7 +3195,7 @@ public:
 				// calculate time differential
 				Optional<Value> backupUid = wait(fBackupUid);
 				if (backupUid.present()) {
-					Optional<Value> v = wait(fBackupVerison);
+					Optional<Value> v = wait(fBackupVersion);
 					if (v.present()) {
 						state Version destApplyBegin = BinaryReader::fromStringRef<Version>(v.get(), Unversioned());
 						Version sourceVersion = wait(srcReadVersion);

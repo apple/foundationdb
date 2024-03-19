@@ -3248,7 +3248,7 @@ public:
 		snapshots.push_back({ version, makeReference<DWALPagerSnapshot>(this, meta, version) });
 	}
 
-	// Set the pending oldest versiont to keep as of the next commit
+	// Set the pending oldest version to keep as of the next commit
 	void setOldestReadableVersion(Version v) override {
 		ASSERT(v >= header.oldestVersion);
 		ASSERT(v <= header.committedVersion);
