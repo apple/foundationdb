@@ -636,7 +636,7 @@ protected:
 	// Assume team is sorted by std::sort
 	// Note: We must allow creating empty teams because empty team is created when a remote DB is initialized.
 	// The empty team is used as the starting point to move data to the remote DB
-	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
+	// isInitialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
 	// when the team added at init() when we recreate teams by looking up DB
 	void addTeam(std::vector<UID> const& team, IsInitialTeam isInitialTeam);
 
