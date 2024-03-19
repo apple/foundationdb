@@ -347,7 +347,7 @@ Future<Reference<HTTP::IncomingResponse>> RESTClient::doDelete(const std::string
 	    url,
 	    // 200 - action has been enacted.
 	    // 202 - action will likely succeed, but, has not yet been enacted.
-	    // 204 - action has been enated, no further information is to supplied.
+	    // 204 - action has been enacted, no further information is to supplied.
 	    { HTTP::HTTP_STATUS_CODE_OK, HTTP::HTTP_STATUS_CODE_NO_CONTENT, HTTP::HTTP_STATUS_CODE_ACCEPTED });
 }
 
