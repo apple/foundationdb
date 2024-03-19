@@ -624,7 +624,7 @@ The ``[[test]]`` section can contain the following options:
 - ``databasePerTransaction``: Create a separate database instance for each transaction (default: false).
   It is a special mode useful for testing bugs related to creation and destruction of database instances. 
 - ``fdbCallbacksOnExternalThreads``: Enables the option ``FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS``
-  causting the callbacks of futures to be executed directly on the threads of the external FDB clients 
+  causing the callbacks of futures to be executed directly on the threads of the external FDB clients 
   rather than on the thread of the local FDB client. 
 
 The workload section ``[[test.workload]]`` must contain the attribute name matching the registered name
