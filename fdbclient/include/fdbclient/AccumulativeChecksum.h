@@ -28,9 +28,9 @@
 struct AccumulativeChecksumState {
 	constexpr static FileIdentifier file_identifier = 13804380;
 
-	AccumulativeChecksumState() : acs(0), version(-1), restoring(false), outdated(false) {}
+	AccumulativeChecksumState() : acs(0), cachedAcs(Optional<uint32_t>()), version(-1), outdated(false) {}
 	AccumulativeChecksumState(uint32_t acs, Version version)
-	  : acs(acs), version(version), restoring(false), outdated(false) {}
+	  : acs(acs), cachedAcs(Optional<uint32_t>()), version(version), outdated(false) {}
 
 	bool isValid() { return version != -1; }
 
@@ -44,8 +44,8 @@ struct AccumulativeChecksumState {
 	}
 
 	uint32_t acs;
+	Optional<uint32_t> cachedAcs;
 	Version version;
-	bool restoring; // only used for acs validator restore, need not to transmit over network
 	bool outdated;
 };
 

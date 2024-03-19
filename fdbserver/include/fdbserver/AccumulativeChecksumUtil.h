@@ -67,35 +67,19 @@ class AccumulativeChecksumValidator {
 public:
 	AccumulativeChecksumValidator() : outdated(false) {}
 
-	Optional<std::pair<uint32_t, uint32_t>> updateAcs(uint16_t acsIndex, uint32_t checksum);
+	void updateAcs(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
 
-	bool validate(uint16_t acsIndex, uint32_t acsValueToCheck, Tag tag);
+	bool validateAcs(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsMutationState);
 
-	void updateVersion(uint16_t acsIndex, Version version);
+	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState);
 
-	Version getCurrentVersion(uint16_t acsIndex);
+	void markAllAcsIndexOutdated(UID ssid, Tag tag);
 
-	bool exist(uint16_t acsIndex);
+	bool isOutdated(UID ssid, Tag tag, uint16_t acsIndex, MutationRef mutation);
 
-	void restore(uint16_t acsIndex, AccumulativeChecksumState acsState);
-
-	void completeRestore(uint16_t acsIndex);
-
-	bool isRestoring(uint16_t acsIndex);
-
-	void loadCacheForRestore(uint16_t acsIndex);
-
-	void clearCacheForRestore(uint16_t acsIndex);
-
-	void markAllAcsIndexOutdated(std::string context, Tag tag, UID ssid);
-
-	bool isOutdated(uint16_t acsIndex);
-
-	std::unordered_map<uint16_t, AccumulativeChecksumState> getAcsTable() const { return acsTable; }
+	std::unordered_map<uint16_t, AccumulativeChecksumState> acsTable;
 
 private:
-	std::unordered_map<uint16_t, AccumulativeChecksumState> acsTable;
-	std::unordered_map<uint16_t, AccumulativeChecksumState> acsCacheTableForRestore;
 	bool outdated;
 };
 

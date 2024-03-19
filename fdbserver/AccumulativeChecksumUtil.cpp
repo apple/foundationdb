@@ -74,132 +74,128 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumBuilder::get(Tag tag) {
 	return acsTable[tag];
 }
 
-Optional<std::pair<uint32_t, uint32_t>> AccumulativeChecksumValidator::updateAcs(uint16_t acsIndex, uint32_t checksum) {
+// Update acs to cache
+void AccumulativeChecksumValidator::updateAcs(UID ssid, Tag tag, MutationRef mutation, Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
+	ASSERT(mutation.checksum.present());
+	ASSERT(mutation.accumulativeChecksumIndex.present());
+	uint32_t checksum = mutation.checksum.get();
+	uint16_t acsIndex = mutation.accumulativeChecksumIndex.get();
 	uint32_t newAcs = 0;
 	uint32_t oldAcs = 0;
-	Version newVersion = 0;
+	Version atAcsVersion = 0;
 	if (acsTable.find(acsIndex) == acsTable.end()) {
-		newAcs = checksum;
+		oldAcs = 0;
+		newAcs = 0;
+		atAcsVersion = 0;
+		acsTable[acsIndex] = AccumulativeChecksumState(); // init
 	} else {
-		ASSERT(acsTable[acsIndex].isValid());
-		if (acsTable[acsIndex].restoring) {
-			if (acsCacheTableForRestore.find(acsIndex) == acsCacheTableForRestore.end()) {
-				acsCacheTableForRestore[acsIndex] = acsTable[acsIndex];
-			}
-			uint32_t newVersionCache = acsCacheTableForRestore[acsIndex].version;
-			Version newAcsCache = calculateAccumulativeChecksum(acsCacheTableForRestore[acsIndex].acs, checksum);
-			acsCacheTableForRestore[acsIndex] = AccumulativeChecksumState(newAcsCache, newVersionCache);
-			return Optional<std::pair<uint32_t, uint32_t>>();
-		}
-		newVersion = acsTable[acsIndex].version;
-		oldAcs = acsTable[acsIndex].acs;
-		newAcs = calculateAccumulativeChecksum(acsTable[acsIndex].acs, checksum);
-	}
-	acsTable[acsIndex] = AccumulativeChecksumState(newAcs, newVersion);
-	return std::make_pair(newAcs, oldAcs);
-}
-
-void AccumulativeChecksumValidator::updateVersion(uint16_t acsIndex, Version version) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(acsTable.find(acsIndex) != acsTable.end());
-	acsTable[acsIndex] = AccumulativeChecksumState(acsTable[acsIndex].acs, version);
-}
-
-void AccumulativeChecksumValidator::completeRestore(uint16_t acsIndex) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(acsTable.find(acsIndex) != acsTable.end());
-	acsTable[acsIndex].restoring = false;
-}
-
-bool AccumulativeChecksumValidator::isRestoring(uint16_t acsIndex) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(acsTable.find(acsIndex) != acsTable.end());
-	return acsTable[acsIndex].restoring;
-}
-
-bool AccumulativeChecksumValidator::validate(uint16_t acsIndex, uint32_t acsValueToCheck, Tag tag) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	if (acsTable.find(acsIndex) == acsTable.end() || acsTable[acsIndex].acs != acsValueToCheck) {
-		TraceEvent e(SevError, "SSAccumulativeChecksumValidateError0");
-		e.detail("AcsTag", tag);
-		e.detail("AcsIndex", acsIndex);
-		e.detail("AcsValueToCheck", acsValueToCheck);
-		if (acsTable.find(acsIndex) == acsTable.end()) {
-			e.detail("Reason", "AcsIndexNotPresented");
+		atAcsVersion = acsTable[acsIndex].version;
+		if (!acsTable[acsIndex].cachedAcs.present()) {
+			oldAcs = acsTable[acsIndex].acs;
 		} else {
-			e.detail("Reason", "AcsValueMismatch");
-			e.detail("AcsInTable", acsTable[acsIndex].acs);
+			oldAcs = acsTable[acsIndex].cachedAcs.get();
 		}
-		return false;
+		newAcs = calculateAccumulativeChecksum(oldAcs, checksum);
+	}
+	acsTable[acsIndex].cachedAcs = newAcs;
+	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+		TraceEvent(SevInfo, "AcsValidatorUpdateAcsCache", ssid)
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("Checksum", checksum)
+		    .detail("Mutation", mutation.toString())
+		    .detail("NewAcs", newAcs)
+		    .detail("OldAcs", oldAcs)
+		    .detail("AtAcsVersion", atAcsVersion)
+		    .detail("SSVersion", ssVersion);
+	}
+}
+
+// Validate and update acs table
+bool AccumulativeChecksumValidator::validateAcs(UID ssid,
+                                                Tag tag,
+                                                uint16_t acsIndex,
+                                                AccumulativeChecksumState acsMutationState) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
+	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
+	if (acsTable.find(acsIndex) == acsTable.end()) {
+		return true;
+	}
+	ASSERT(acsTable[acsIndex].cachedAcs.present());
+	uint32_t cachedAcs = acsTable[acsIndex].cachedAcs.get();
+
+	if (acsMutationState.version > acsTable[acsIndex].version) {
+		if (cachedAcs != acsMutationState.acs) {
+			TraceEvent e(SevError, "AccumulativeChecksumValidateError", ssid);
+			e.detail("AcsTag", tag);
+			e.detail("AcsIndex", acsIndex);
+			e.detail("AcsValueToCheck", acsMutationState.acs);
+			if (acsTable.find(acsIndex) == acsTable.end()) {
+				e.detail("Reason", "AcsIndexNotPresented");
+			} else {
+				e.detail("Reason", "AcsValueMismatch");
+				e.detail("CachedAcs", cachedAcs);
+			}
+			return false; // Zhe: need to do something?
+		} else {
+			acsTable[acsIndex] = AccumulativeChecksumState(cachedAcs, acsMutationState.version); // with cleared cache
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+				TraceEvent(SevInfo, "AccumulativeChecksumValidated", ssid)
+				    .detail("AcsTag", tag)
+				    .detail("AcsIndex", acsIndex)
+				    .detail("AcsInTable", acsTable[acsIndex].toString());
+			}
+		}
 	}
 	return true;
 }
 
-Version AccumulativeChecksumValidator::getCurrentVersion(uint16_t acsIndex) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	if (acsTable.find(acsIndex) != acsTable.end()) {
-		return acsTable[acsIndex].version;
-	} else {
-		return -1;
-	}
-}
-
-bool AccumulativeChecksumValidator::exist(uint16_t acsIndex) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	return acsTable.find(acsIndex) != acsTable.end();
-}
-
-void AccumulativeChecksumValidator::restore(uint16_t acsIndex, AccumulativeChecksumState acsState) {
+void AccumulativeChecksumValidator::restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(acsTable.find(acsIndex) == acsTable.end());
-	acsState.restoring = true;
-	acsTable[acsIndex] = acsState;
+	acsTable[acsIndex] = acsState; // with cleared cache
+	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+		TraceEvent(SevInfo, "AccumulativeChecksumValidatorRestore", ssid)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("AcsTag", tag)
+		    .detail("AcsState", acsState.toString());
+	}
 }
 
-void AccumulativeChecksumValidator::loadCacheForRestore(uint16_t acsIndex) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(acsCacheTableForRestore.find(acsIndex) != acsCacheTableForRestore.end());
-	ASSERT(acsTable.find(acsIndex) != acsTable.end());
-	acsTable[acsIndex] = acsCacheTableForRestore[acsIndex];
-	return;
-}
-
-void AccumulativeChecksumValidator::clearCacheForRestore(uint16_t acsIndex) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(acsCacheTableForRestore.find(acsIndex) != acsCacheTableForRestore.end());
-	acsCacheTableForRestore.erase(acsIndex);
-}
-
-void AccumulativeChecksumValidator::markAllAcsIndexOutdated(std::string context, Tag tag, UID ssid) {
+void AccumulativeChecksumValidator::markAllAcsIndexOutdated(UID ssid, Tag tag) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	outdated = true;
 	for (const auto& [acsIndex, acsState] : acsTable) {
 		acsTable[acsIndex].outdated = true;
-	}
-	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-		TraceEvent(SevInfo, "AcsValidatorMarkAllIndexOutdated", ssid).detail("Context", context).detail("AcsTag", tag);
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+			TraceEvent(SevInfo, "MarkAcsValidatorAsOutdated", ssid)
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("AcsState", acsState.toString());
+		}
 	}
 }
 
-bool AccumulativeChecksumValidator::isOutdated(uint16_t acsIndex) {
+bool AccumulativeChecksumValidator::isOutdated(UID ssid, Tag tag, uint16_t acsIndex, MutationRef mutation) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(acsIndex) == acsTable.end()) {
 		return false;
+	} else if (acsTable[acsIndex].outdated) {
+		return false;
 	} else {
-		return acsTable[acsIndex].outdated;
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+			TraceEvent(SevInfo, "AcsValidatorIsOutdated", ssid)
+			    .detail("Context", "Check with Acs mutation")
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("Mutation", mutation);
+		}
+		return true;
 	}
 }
 
