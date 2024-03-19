@@ -3113,7 +3113,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
 					TraceEvent(SevInfo, "RocksDBRestoreCFSuccess", logId)
 					    .detail("Path", a.path)
-					    .detail("ColumnFaminly", ps->cf->GetName())
+					    .detail("ColumnFamily", ps->cf->GetName())
 					    .detail("Checkpoints", describe(a.checkpoints));
 
 					// Remove the extra data.
