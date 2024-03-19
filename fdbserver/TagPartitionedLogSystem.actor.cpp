@@ -1509,7 +1509,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::popFromLog(TagPartitionedLogSystem* 
 	loop {
 		wait(delay(delayBeforePop, TaskPriority::TLogPop));
 
-		// to: first is upto version, second is durableKnownComittedVersion
+		// to: first is upto version, second is durableKnownCommittedVersion
 		state std::pair<Version, Version> to = self->outstandingPops[std::make_pair(log->get().id(), tag)];
 
 		if (to.first <= last) {

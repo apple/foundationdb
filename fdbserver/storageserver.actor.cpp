@@ -12137,7 +12137,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
 
 		if (removeKVSRanges) {
-			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
+			TraceEvent(SevDebug, "RemoveKVSRangesCommitted", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
 			    .detail("DesiredVersion", desiredVersion)
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);

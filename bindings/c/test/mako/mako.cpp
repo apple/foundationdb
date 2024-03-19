@@ -294,7 +294,7 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, Workflo
 
 void updateErrorStatsRunMode(WorkflowStatistics& stats, fdb::Error err, int op) {
 	if (err) {
-		if (err.is(1020 /*not_commited*/)) {
+		if (err.is(1020 /*not_committed*/)) {
 			stats.incrConflictCount();
 		} else if (err.is(1031 /*timeout*/)) {
 			stats.incrTimeoutCount(op);

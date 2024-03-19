@@ -33,11 +33,11 @@ _tenant_map_prefix = b"\xff\xff/management/tenant/map/"
 # calls to this function will not perform the existence check.
 #
 # If the existence_check_marker is a non-empty list, return None.
-def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_commited):
+def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_committed):
     if not existence_check_marker:
         existing_tenant = tr[key].wait()
         existence_check_marker.append(None)
-        if force_maybe_commited:
+        if force_maybe_committed:
             raise _impl.FDBError(1021)  # maybe_committed
         return existing_tenant != None
 
