@@ -393,7 +393,7 @@ public:
 
 	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
-	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
+	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthiness again to
 	                                          // ensure it runs after machineTeamRemover
 	double TR_REDUNDANT_TEAM_PERCENTAGE_THRESHOLD; // serverTeamRemover will only remove teams if existing team number
 	                                               // is p% more than the desired team number.
