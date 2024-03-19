@@ -584,7 +584,7 @@ struct StorageServerDisk {
 	}
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
-	// Read the key that is equal or greater then 'key' from the storage engine.
+	// Read the key that is equal or greater than 'key' from the storage engine.
 	// For example, readNextKeyInclusive("a") should return:
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
