@@ -70,10 +70,10 @@ RESTClient::Stats RESTClient::Stats::operator-(const Stats& rhs) {
 	return r;
 }
 
-RESTClient::RESTClient() : conectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {}
+RESTClient::RESTClient() : connectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {}
 
 RESTClient::RESTClient(std::unordered_map<std::string, int>& knobSettings)
-  : conectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {
+  : connectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {
 	knobs.set(knobSettings);
 }
 
@@ -141,7 +141,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 		try {
 			// Start connecting
 			Future<RESTConnectionPool::ReusableConnection> frconn =
-			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
+			    client->connectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
 			rconn = co_await timeoutError(frconn, client->knobs.connect_timeout);
@@ -154,7 +154,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {
-				client->conectionPool->returnConnection(connectPoolKey, rconn, client->knobs.connection_pool_size);
+				client->connectionPool->returnConnection(connectPoolKey, rconn, client->knobs.connection_pool_size);
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
