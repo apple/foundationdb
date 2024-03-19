@@ -291,7 +291,7 @@ private:
 	using WaitingPrioritiesList = boost::intrusive::list<Priority, boost::intrusive::constant_time_size<false>>;
 
 	// List of all priorities with 1 or more waiters.  This list exists so that the scheduling loop
-	// does not have to iterage over the priorities vector checking priorities without waiters.
+	// does not have to iterate over the priorities vector checking priorities without waiters.
 	WaitingPrioritiesList waitingPriorities;
 
 	Future<Void> fRunner;
