@@ -367,7 +367,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
                                                     int64_t batchIndex,
                                                     Database cx) {
 	// Apply range mutations (i.e., clearRange) to database cx
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResultStart", applierID)
+	TraceEvent("FastRestoreApplierPhasePrecomputeMutationsResultStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Applying clear range mutations to DB")
 	    .detail("ClearRanges", batchData->stagingKeyRanges.size());
@@ -398,7 +398,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	}
 
 	// Apply range mutations (i.e., clearRange) to stagingKeyRanges
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
+	TraceEvent("FastRestoreApplierPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Applying clear range mutations to staging keys")
 	    .detail("ClearRanges", batchData->stagingKeyRanges.size())
@@ -409,7 +409,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
 		while (lb != ub) {
 			if (lb->first >= rangeMutation.mutation.param2) {
-				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResultIncorrectUpperBound")
+				TraceEvent(SevError, "FastRestoreApplierPhasePrecomputeMutationsResultIncorrectUpperBound")
 				    .detail("Key", lb->first)
 				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
 				    .detail("UsedUpperBound", ub->first);
@@ -421,13 +421,13 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 			lb++;
 		}
 	}
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
+	TraceEvent("FastRestoreApplierPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Wait on applying clear range mutations to DB")
 	    .detail("FutureClearRanges", fClearRanges.size());
 
 	wait(waitForAll(fClearRanges));
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
+	TraceEvent("FastRestoreApplierPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Getting and computing staging keys")
 	    .detail("StagingKeys", batchData->stagingKeys.size());
@@ -461,7 +461,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		}
 	}
 
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
+	TraceEvent("FastRestoreApplierPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Compute the other staging keys")
 	    .detail("StagingKeys", batchData->stagingKeys.size())
@@ -480,7 +480,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	// Sanity check all stagingKeys have been precomputed
 	ASSERT_WE_THINK(batchData->allKeysPrecomputed());
 
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResultDone", applierID).detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreApplierPhasePrecomputeMutationsResultDone", applierID).detail("BatchIndex", batchIndex);
 
 	return Void();
 }
@@ -605,7 +605,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 	state int txnBatches = 0;
 	double txnSize = 0;
 	std::vector<Future<Void>> fBatches;
-	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysStart", applierID)
+	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("StagingKeys", batchData->stagingKeys.size());
 	batchData->totalBytesToWrite = 0;
@@ -644,7 +644,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 
 	wait(waitForAll(fBatches));
 
-	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysDone", applierID)
+	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysDone", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("StagingKeys", batchData->stagingKeys.size())
 	    .detail("TransactionBatches", txnBatches)
