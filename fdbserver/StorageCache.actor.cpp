@@ -249,7 +249,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), debug_inApplyUpdate(false),
 	    debug_lastValidateTime(0), versionLag(0), behind(false), counters(this) {
 		version.initMetric("StorageCacheData.Version"_sr, counters.cc.getId());
-		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageCacheData.DesiredOldestVersion"_sr, counters.cc.getId());
 		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
