@@ -2558,7 +2558,7 @@ public:
 			co_await waitForAll(backupIntoResults);
 			for (const auto& result : backupIntoResults) {
 				if (!result.get().empty()) {
-					// One of the ranges we will be backing up into has pre-existing data.
+					// One of the ranges we will be backing up into has preexisting data.
 					throw restore_destination_not_empty();
 				}
 			}
