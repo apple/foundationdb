@@ -32,7 +32,7 @@ Future<int> AsyncFileBlobStoreRead::read(void* data, int length, int64_t offset)
 }
 
 Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
-	printf("Starting fake sender %d which will send send %d bytes.\n", id, bytes);
+	printf("Starting fake sender %d which will send %d bytes.\n", id, bytes);
 	double ts = timer();
 	int total = 0;
 	while (total < bytes) {
