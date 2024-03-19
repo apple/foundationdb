@@ -740,7 +740,7 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " A multitester will wait for NUM testers before starting"
 		                 " (defaults to 1).");
 		printOptionUsage("--test-PARAMNAME PARAMVALUE",
-		                 " Set a UnitTest named parameter to the given value.  Names are case sensitive.");
+		                 " Set a UnitTest named parameter to the given value.  Names are case-sensitive.");
 #ifdef __linux__
 		printOptionUsage("--rsssize SIZE",
 		                 " Turns on automatic heap profiling when RSS memory size exceeds"
