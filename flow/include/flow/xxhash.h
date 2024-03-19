@@ -1038,8 +1038,8 @@ static xxh_u32 XXH_read32(const void* memPtr) {
 
 #endif /* XXH_FORCE_DIRECT_MEMORY_ACCESS */
 
-/* ***   Endianess   *** */
-typedef enum { XXH_bigEndian = 0, XXH_littleEndian = 1 } XXH_endianess;
+/* ***   Endianness   *** */
+typedef enum { XXH_bigEndian = 0, XXH_littleEndian = 1 } XXH_endianness;
 
 /*!
  * XXH_CPU_LITTLE_ENDIAN:
