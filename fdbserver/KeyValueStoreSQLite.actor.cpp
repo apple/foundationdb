@@ -1810,7 +1810,7 @@ private:
 
 			// If a wal file fails during the commit process before finishing a checkpoint, then it is possible that our
 			// wal file will be non-empty when we reload it.  We execute a checkpoint here to remedy that situation.
-			// This call must come before before creating a cursor because it will fail if there are any outstanding
+			// This call must come before creating a cursor because it will fail if there are any outstanding
 			// transactions.
 			fullCheckpoint();
 
