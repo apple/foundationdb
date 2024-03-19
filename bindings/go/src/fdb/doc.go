@@ -112,7 +112,7 @@ implemented using only error values:
 
 If either read encounters an error, it will be returned to Transact, which will
 determine if the error is retryable or not (using (Transaction).OnError). If the
-error is an FDB Error and retryable (such as a conflict with with another
+error is an FDB Error and retryable (such as a conflict with another
 transaction), then the programmer-provided function will be run again. If the
 error is fatal (or not an FDB Error), then the error will be returned to the
 caller of Transact.
