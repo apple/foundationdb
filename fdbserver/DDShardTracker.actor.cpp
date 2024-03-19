@@ -2019,7 +2019,7 @@ void PhysicalShardCollection::initPhysicalShardCollection(KeyRange keys,
 		}
 	} else {
 		// If any physicalShard restored when DD init is the anonymousShard,
-		// Then DD enters Transition state where DD graduatelly moves Shard (or KeyRange)
+		// Then DD enters Transition state where DD gradually moves Shard (or KeyRange)
 		// out of the anonymousShard
 		setTransitionCheck();
 	}
