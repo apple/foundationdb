@@ -2331,7 +2331,7 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	state IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type, !integrity, integrity);
 	ASSERT(store != nullptr);
 
-	// Wait for integry check to finish
+	// Wait for integrity check to finish
 	wait(success(store->readValue(StringRef())));
 
 	if (store->getError().isError())
