@@ -2908,13 +2908,13 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 			state RangeResult res =
 			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			if (!res.empty()) {
-				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
+				TraceEvent(SevDebug, "FetchCheckpointKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
 				    .detail("FirstReturnedKey", res.front().key)
 				    .detail("LastReturnedKey", res.back().key)
 				    .detail("Size", res.size());
 			} else {
-				TraceEvent(SevInfo, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
+				TraceEvent(SevInfo, "FetchCheckpointKeyValuesEmptyRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID);
 			}
 
