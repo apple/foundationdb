@@ -3740,7 +3740,7 @@ public:
 
 		int64_t reusable = reusablePageSpace + reusableQueueSpace + reusablePagerSlackSpace;
 
-		// Space currently in used by old page versions have not yet been freed due to the remap cleanup window.
+		// Space currently in use by old page versions have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
 		return StorageBytes(free, total, pagerPhysicalSize, free + reusable, temp);
