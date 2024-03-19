@@ -63,7 +63,7 @@ struct MonitorLeaderInfo {
 
 Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees);
 
-// This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
+// This is one place where the leader election algorithm is run. The coordinator contacts all coordinators to collect
 // nominees, the nominee with the most nomination is the leader. This function also monitors the change of the leader.
 // If a leader is elected for long enough and communication with a quorum of coordinators is possible, eventually
 // outKnownLeader will be that leader's interface.
@@ -71,7 +71,7 @@ template <class LeaderInterface>
 Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connFile,
                            Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader);
 
-// This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
+// This is one place where the leader election algorithm is run. The coordinator contacts all coordinators to collect
 // nominees, the nominee with the most nomination is the leader, and collects client data from the leader. This function
 // also monitors the change of the leader.
 Future<Void> monitorLeaderAndGetClientInfo(Key const& clusterKey,
