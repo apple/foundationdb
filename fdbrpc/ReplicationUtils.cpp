@@ -101,7 +101,7 @@ bool findBestPolicySetSimple(int targetUniqueValueCount,
                              std::vector<LocalityEntry>& bestSet,
                              int desired) {
 	auto& mutableEntries = logServerSet->getMutableEntries();
-	// First make sure the current localitySet is able to fulfuill the policy
+	// First make sure the current localitySet is able to fulfill the policy
 	AttribKey indexKey = logServerSet->keyIndex("zoneid");
 	int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
 
