@@ -317,10 +317,10 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 			if (trackRequestLatency && SERVER_KNOBS->FASTRESTORE_TRACK_REQUEST_LATENCY) {
 				// Calculate the latest end time for each interface
 				std::map<UID, double> maxEndTime;
-				UID bathcID = deterministicRandom()->randomUniqueID();
+				UID batchID = deterministicRandom()->randomUniqueID();
 				for (int i = 0; i < replyDurations.size(); ++i) {
 					double endTime = std::get<2>(replyDurations[i]);
-					TraceEvent(SevInfo, "ProfileSendRequestBatchLatency", bathcID)
+					TraceEvent(SevInfo, "ProfileSendRequestBatchLatency", batchID)
 					    .detail("Node", std::get<0>(replyDurations[i]))
 					    .detail("Request", std::get<1>(replyDurations[i]).toString())
 					    .detail("Duration", endTime - start);
@@ -343,7 +343,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 					}
 				}
 				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS) {
-					TraceEvent(SevWarn, "ProfileSendRequestBatchLatencyFoundStraggler", bathcID)
+					TraceEvent(SevWarn, "ProfileSendRequestBatchLatencyFoundStraggler", batchID)
 					    .detail("SlowestNode", latestNode)
 					    .detail("FatestNode", earliestNode)
 					    .detail("EarliestEndtime", earliest)
