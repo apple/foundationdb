@@ -272,7 +272,7 @@ enum SI_Error {
 /** Simple INI file reader.
 
     This can be instantiated with the choice of unicode or native characterset,
-    and case sensitive or insensitive comparisons of section and key names.
+    and case-sensitive or insensitive comparisons of section and key names.
     The supported combinations are pre-defined with the following typedefs:
 
     <table>
