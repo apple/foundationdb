@@ -758,7 +758,7 @@ ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
 			state Error err(e);
 			if (e.code() == error_code_dd_not_found) {
 				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
-				    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
+				    .detail("Operation", "DDMetricsRequestThroughSpecialKeys");
 				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				continue;
 			}
