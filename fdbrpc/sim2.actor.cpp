@@ -965,7 +965,7 @@ private:
 			        opId.shortString().c_str());
 
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
-		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
+		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_error
 
 		return Void();
 	}
