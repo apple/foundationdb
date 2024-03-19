@@ -1506,7 +1506,7 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	}
 
 	// ************* TASK 1: CREATE A CANONICAL REQUEST *************
-	// Create Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
+	// Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
 	std::vector<std::string> queryParameters;
 	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, true);
 
