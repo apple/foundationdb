@@ -296,7 +296,7 @@ public:
 	bool RESOLVE_PREFER_IPV4_ADDR;
 
 	// Sim2
-	// FIMXE: more parameters could be factored out
+	// FIXME: more parameters could be factored out
 	double MIN_OPEN_TIME;
 	double MAX_OPEN_TIME;
 	int64_t SIM_DISK_IOPS;
