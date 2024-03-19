@@ -111,7 +111,7 @@ public:
 		// If this priority currently has no waiters
 		if (q.empty()) {
 			// Add this priority's weight to the total for priorities with pending work.  This must be done
-			// so that currenctCapacity() below will assign capacaity to this priority.
+			// so that currenctCapacity() below will assign capacity to this priority.
 			totalPendingWeights += p.weight;
 
 			// If there are slots available and the priority has capacity then don't make the caller wait
