@@ -1547,7 +1547,7 @@ public:
 				return false;
 			}
 
-			// Find the base base to borrow from, see if the resulting delta fits into the tree
+			// Find the base to borrow from, see if the resulting delta fits into the tree
 			int leftBaseIndex, rightBaseIndex;
 			bool addingRight = cmp > 0;
 			if (addingRight) {
