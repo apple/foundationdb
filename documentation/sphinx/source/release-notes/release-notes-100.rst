@@ -41,7 +41,7 @@ All
 * Improvements to installation packages, including package paths and directory modes.
 * Eliminated cases of excessive resource usage in the locality API.
 * Watches are disabled when read-your-writes functionality is disabled.
-* Fatal error paths now call ``_exit()`` instead instead of ``exit()``.
+* Fatal error paths now call ``_exit()`` instead of ``exit()``.
 
 Fixes
 -----
