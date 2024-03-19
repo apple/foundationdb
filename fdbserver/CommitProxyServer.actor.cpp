@@ -578,7 +578,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 				*partBuffer = bigEndian32(part);
 			}
 
-			// Define the mutation type and and location
+			// Define the mutation type and location
 			backupMutation.param1 = wr.toValue();
 			ASSERT(backupMutation.param1.startsWith(
 			    logRangeMutation->first)); // We are writing into the configured destination
