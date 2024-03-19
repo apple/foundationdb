@@ -345,7 +345,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS) {
 					TraceEvent(SevWarn, "ProfileSendRequestBatchLatencyFoundStraggler", batchID)
 					    .detail("SlowestNode", latestNode)
-					    .detail("FatestNode", earliestNode)
+					    .detail("FastestNode", earliestNode)
 					    .detail("EarliestEndtime", earliest)
 					    .detail("LagTime", latest - earliest);
 				}
