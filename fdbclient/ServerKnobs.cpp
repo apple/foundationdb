@@ -1190,7 +1190,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// KMS connector type
 	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );
 
-	// Blob granlues
+	// Blob granules
 	init( BG_URL,        isSimulated ? "file://simfdb/fdbblob/" : "" ); // TODO: store in system key space or something, eventually
 	bool buggifyMediumGranules = simulationMediumShards || (randomize && BUGGIFY);
 	// BlobGranuleVerify* simulation tests use "knobs", BlobGranuleCorrectness* use "tenant", default in real clusters is "knobs"
