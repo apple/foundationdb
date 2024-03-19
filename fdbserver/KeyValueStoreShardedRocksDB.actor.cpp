@@ -1153,7 +1153,7 @@ public:
 			return status;
 		}
 
-		TraceEvent("ShardedRocksDBOpen").detail("Duraton", now() - start).detail("NumCFs", descriptors.size());
+		TraceEvent("ShardedRocksDBOpen").detail("Duration", now() - start).detail("NumCFs", descriptors.size());
 
 		if (foundMetadata) {
 			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
