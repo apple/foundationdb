@@ -1063,7 +1063,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		} else if (retryable) {
 			// We will wait delay seconds before the next retry, start with nextRetryDelay.
 			double delay = nextRetryDelay;
-			// conenctionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
+			// connectionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
 			// so there is no point of waiting too long, instead retry more aggressively
 			double limit =
 			    connectionFailed ? bstore->knobs.max_delay_connection_failed : bstore->knobs.max_delay_retryable_error;
