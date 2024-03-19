@@ -549,13 +549,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state Key mapper = getMapper(self, false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
-		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
+		state bool originalStrictlyEnforceByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
 		wait(testMetric(cx, self, 10, 490, mapper, self->checkStorageQueueSeconds));
 
 		// reset it to default
-		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforceByteLimit;
 		return Void();
 	}
 
