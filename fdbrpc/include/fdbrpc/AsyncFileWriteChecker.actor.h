@@ -293,7 +293,7 @@ private:
 	                                            uint8_t* buf,
 	                                            bool sweep = false) {
 		std::vector<uint32_t> pages;
-		// Check or set each full block in the the range
+		// Check or set each full block in the range
 		int page = offset / checksumHistoryPageSize; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
 		uint8_t* start = buf; // Position in buffer to start checking from

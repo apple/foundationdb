@@ -1019,7 +1019,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			// In this case, the condition of `hasCapacity` will be further tightened since we will exclude those
 			// data clusters with autoTenantAssignment being false.
 			// It's possible that all the data clusters are excluded from the auto-assignment pool.
-			// Consequently, even if the the metacluster has capacity, the capacity index has no available data
+			// Consequently, even if the metacluster has capacity, the capacity index has no available data
 			// clusters. In this case, trying to assign a cluster to the tenant automatically will fail.
 			bool emptyCapacityIndex = true;
 			for (auto dataDb : self->dataDbs) {

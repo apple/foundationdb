@@ -5404,7 +5404,7 @@ public:
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
 		wait(self->commit(self->getLastCommittedVersion() + 1));
 
-		// Loop commits until the the lazy delete queue is completely processed.
+		// Loop commits until the lazy delete queue is completely processed.
 		loop {
 			wait(self->commit(self->getLastCommittedVersion() + 1));
 

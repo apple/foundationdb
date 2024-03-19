@@ -77,7 +77,7 @@ bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMap
 	return false;
 }
 
-// validates whether the the ID created by adding delta to baseID is a valid ID in the same tenant prefix
+// validates whether the ID created by adding delta to baseID is a valid ID in the same tenant prefix
 int64_t computeNextTenantId(int64_t baseId, int64_t delta) {
 	if ((baseId & 0xFFFFFFFFFFFF) + delta > 0xFFFFFFFFFFFF) {
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "NoMoreTenantIds")

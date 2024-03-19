@@ -1020,7 +1020,7 @@ void StorageCacheData::applyMutation(MutationRef const& m, Arena& arena, Storage
 			KeyRef nextKey = keyAfter(m.param1, arena);
 			if (end != nextKey) {
 				ASSERT(end > nextKey);
-				// TODO double check if it's okay to let go of the the insert version of the "right half"
+				// TODO double check if it's okay to let go of the insert version of the "right half"
 				// FIXME: This copy is technically an asymptotic problem, definitely a waste of memory (copy of keyAfter
 				// is a waste, but not asymptotic)
 				data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));

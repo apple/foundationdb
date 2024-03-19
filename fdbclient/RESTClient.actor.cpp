@@ -257,7 +257,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			if (err.present()) {
 				int code = err.get().code();
 
-				// If we get a timed_out error during the the connect() phase, we'll call that connection_failed
+				// If we get a timed_out error during the connect() phase, we'll call that connection_failed
 				// despite the fact that there was technically never a 'connection' to begin with.  It
 				// differentiates between an active connection timing out vs a connection timing out, though not
 				// between an active connection failing vs connection attempt failing.

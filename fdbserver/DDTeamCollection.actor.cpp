@@ -5833,7 +5833,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 		removeMachine(removedMachineInfo);
 	}
 
-	// If the machine uses removedServer's locality and the machine still has servers, the the machine's
+	// If the machine uses removedServer's locality and the machine still has servers, the machine's
 	// representative server will be updated when it is used in addBestMachineTeams()
 	// Note that since we do not rebuildMachineLocalityMap() here, the machineLocalityMap can be stale.
 	// This is ok as long as we do not arbitrarily validate if machine team satisfies replication policy.

@@ -851,7 +851,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				newBeginVersion = group.groupKey + 1;
 
 				// At this point if the tenant map changed we would have already sent any normalKey mutations
-				// accumulated thus far, so all thats left to do is to send all the mutations in the the offending
+				// accumulated thus far, so all thats left to do is to send all the mutations in the offending
 				// transaction that changed the tenant map. This is necessary so that we don't batch these tenant map
 				// mutations with future normalKey mutations (which will result in the same problem discussed above).
 				if (tenantMapChanging || mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {

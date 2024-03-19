@@ -2353,7 +2353,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	// keysSet will store the written keys in the current transaction.
 	// previousCommitKeysSet will store the written keys that are currently in the rocksdb commit path.
 	// When one commit is in the rocksdb commit path, the other processing commit in the kvsstorerocksdb
-	// read iterators will not see the the writes set in previousCommitKeysSet. To avoid that, we will
+	// read iterators will not see the writes set in previousCommitKeysSet. To avoid that, we will
 	// maintain the previousCommitKeysSet until the rocksdb commit is processed and returned.
 	std::set<Key> keysSet;
 	std::set<Key> previousCommitKeysSet;
