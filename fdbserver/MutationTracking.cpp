@@ -67,7 +67,7 @@ TraceEvent debugMutationEnabled(const char* context, Version version, MutationRe
 	return TraceEvent();
 }
 
-TraceEvent debugEncrptedMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
+TraceEvent debugEncryptedMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
 	ASSERT(mutation.type == mutation.Encrypted);
 	MutationRef fmutation = Standalone(mutation);
 	Arena tempArena;
@@ -127,7 +127,7 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 #if MUTATION_TRACKING_ENABLED
 TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id) {
 	if (mutation.type == mutation.Encrypted) {
-		return debugEncrptedMutationEnabled(context, version, mutation, id);
+		return debugEncryptedMutationEnabled(context, version, mutation, id);
 	} else {
 		return debugMutationEnabled(context, version, mutation, id);
 	}
