@@ -53,7 +53,7 @@ Fixes
 * Status showed the wrong explanation when performance was limited by system write-to-read latency limit.
 * Fixed a rare issue where a "stuck" process trying to participate in the database could run out of RAM.
 * Increased robustness of FoundationDB server when loaded with large data sets.
-* Eliminated certain cases where the data distribution algorithim could do unnecessary splitting and merging work.
+* Eliminated certain cases where the data distribution algorithm could do unnecessary splitting and merging work.
 * Several fixes for rare issues encountered by our fault simulation framework.
 * Certain uncommon usage of on_ready() in Python could cause segmentation faults.
 
