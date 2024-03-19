@@ -614,7 +614,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		ASSERT(r == size);
 		content = buf.toString();
 
-		// Any exceptions from hehre forward are parse failures
+		// Any exceptions from here forward are parse failures
 		errorEventType = "BlobCredentialFileParseFailed";
 		json_spirit::mValue json;
 		json_spirit::read_string(content, json);
