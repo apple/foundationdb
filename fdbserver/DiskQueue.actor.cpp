@@ -996,7 +996,7 @@ public:
 	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
 
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
-	// to be changed to understand the new intiailizeRecovery protocol.
+	// to be changed to understand the new initializeRecovery protocol.
 	location getNextReadLocation() const override { return nextReadLocation; }
 	location getNextPushLocation() const override {
 		ASSERT(initialized);
