@@ -3686,7 +3686,7 @@ void DDTeamCollection::updateTeamEligibility() {
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
 
-			DisabledTraceEvent(SevDebug, "EligiblityTeamDebug")
+			DisabledTraceEvent(SevDebug, "EligibilityTeamDebug")
 			    .detail("TeamId", team->getTeamID())
 			    .detail("CPU", team->getAverageCPU())
 			    .detail("AvailableSpace", team->getMinAvailableSpace())
