@@ -292,7 +292,7 @@ XXH_PUBLIC_API XXH32_hash_t XXH32(const void* input, size_t length, XXH32_hash_t
 /*******   Streaming   *******/
 
 /*
- * Streaming functions generate the xxHash value from an incrememtal input.
+ * Streaming functions generate the xxHash value from an incremental input.
  * This method is slower than single-call functions, due to state management.
  * For small inputs, prefer `XXH32()` and `XXH64()`, which are better optimized.
  *
