@@ -374,7 +374,7 @@ public:
 	// A team storage queue size is defined as the longest storage queue size among all SSes of the team
 	static int64_t calculateTeamStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
 		if (teams.empty()) {
-			return std::numeric_limits<int64_t>::max(); // disable this funcationality
+			return std::numeric_limits<int64_t>::max(); // disable this functionality
 		}
 		std::vector<int64_t> queueLengthList;
 		for (const auto& team : teams) {

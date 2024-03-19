@@ -293,7 +293,7 @@ struct ValidateStorage : TestWorkload {
 		}
 
 		testStringToAuditPhaseFunctionality();
-		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone");
+		TraceEvent("TestAuditStorageStringToAuditPhaseFunctionalityDone");
 
 		co_await testSSUserDataValidation(this, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr));
 		TraceEvent("TestAuditStorageValidateValueDone");
