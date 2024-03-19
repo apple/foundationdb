@@ -5677,14 +5677,14 @@ Reference<TCMachineTeamInfo> DDTeamCollection::checkAndCreateMachineTeam(Referen
 
 void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo) {
 	// Find machines that share teams with the removed machine
-	std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
+	std::set<Standalone<StringRef>> machinesWithAdjoiningTeams;
 	for (auto& machineTeam : removedMachineInfo->machineTeams) {
-		machinesWithAjoiningTeams.insert(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end());
+		machinesWithAdjoiningTeams.insert(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end());
 	}
-	machinesWithAjoiningTeams.erase(removedMachineInfo->machineID);
+	machinesWithAdjoiningTeams.erase(removedMachineInfo->machineID);
 	// For each machine in a machine team with the removed machine,
 	// erase shared machine teams from the list of teams.
-	for (auto it = machinesWithAjoiningTeams.begin(); it != machinesWithAjoiningTeams.end(); ++it) {
+	for (auto it = machinesWithAdjoiningTeams.begin(); it != machinesWithAdjoiningTeams.end(); ++it) {
 		auto& machineTeams = machine_info[*it]->machineTeams;
 		for (int t = 0; t < machineTeams.size(); t++) {
 			auto& machineTeam = machineTeams[t];
@@ -5762,17 +5762,17 @@ void DDTeamCollection::removeServer(UID removedServer) {
 
 	// Step: Remove server team that relate to removedServer
 	// Find all servers with which the removedServer shares teams
-	std::set<UID> serversWithAjoiningTeams;
+	std::set<UID> serversWithAdjoiningTeams;
 	auto const& sharedTeams = removedServerInfo->getTeams();
 	for (int i = 0; i < sharedTeams.size(); ++i) {
 		auto& teamIds = sharedTeams[i]->getServerIDs();
-		serversWithAjoiningTeams.insert(teamIds.begin(), teamIds.end());
+		serversWithAdjoiningTeams.insert(teamIds.begin(), teamIds.end());
 	}
-	serversWithAjoiningTeams.erase(removedServer);
+	serversWithAdjoiningTeams.erase(removedServer);
 
 	// For each server in a team with the removedServer, erase shared teams from the list of teams in that other
 	// server
-	for (auto it = serversWithAjoiningTeams.begin(); it != serversWithAjoiningTeams.end(); ++it) {
+	for (auto it = serversWithAdjoiningTeams.begin(); it != serversWithAdjoiningTeams.end(); ++it) {
 		server_info[*it]->removeTeamsContainingServer(removedServer);
 	}
 
