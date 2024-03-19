@@ -357,7 +357,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	self->dumpVersionBatches(self->versionBatches);
 
 	state std::vector<Future<Void>> fBatches;
-	state std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batchs
+	state std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batches
 	for (auto& vb : self->versionBatches) {
 		versionBatches.push_back(vb.second);
 	}
