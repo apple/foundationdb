@@ -55,7 +55,7 @@ void RandomByteGenerator::writeRandomBytesToBuffer(void* buf, int bytes) {
 	//}
 }
 
-//// Asynch File Workload
+//// Async File Workload
 
 const int AsyncFileWorkload::_PAGE_SIZE = 4096;
 

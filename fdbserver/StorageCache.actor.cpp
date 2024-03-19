@@ -1822,7 +1822,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		// Call the compaction routine that does the actual work,
 		//TraceEvent(SevDebug, "SCCompactCache", data->thisServerID).detail("DesiredVersion", desiredVersion);
-		// TODO It's a synchronous function call as of now. Should it asynch?
+		// TODO It's a synchronous function call as of now. Should it async?
 		data->mutableData().compact(desiredVersion);
 		Future<Void> finishedForgetting =
 		    data->mutableData().forgetVersionsBeforeAsync(desiredVersion, TaskPriority::CompactCache);
