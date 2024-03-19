@@ -2456,7 +2456,7 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 		state int i = 0;
 		for (; i < interfs.size(); ++i) {
 			state StorageServerInterface targetServer = interfs[i];
-			// Currently, Tss server may not follow the auit consistency rule
+			// Currently, Tss server may not follow the audit consistency rule
 			// Thus, skip if the server is tss
 			if (targetServer.isTss()) {
 				continue;
