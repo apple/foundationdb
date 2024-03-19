@@ -599,7 +599,7 @@ longer be valid.
 
 #### Use of Standalone Objects in ACTOR Functions
 
-Special care needs to be taken when using using `Standalone` values in actor functions.
+Special care needs to be taken when using `Standalone` values in actor functions.
 Consider the following example:
 
 ```
