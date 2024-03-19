@@ -222,7 +222,7 @@ private:
 			uint32_t page = self->lru.leastRecentlyUsedPage();
 			while (self->writing.find(page) != self->writing.end() || page == 0) {
 				// avoid concurrent ops
-				co_await delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY);
+				co_await delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHECKER_CHECKING_DELAY);
 				continue;
 			}
 			int64_t offset = page * checksumHistoryPageSize;
@@ -232,7 +232,7 @@ private:
 	}
 
 	Future<Void> runChecksumLogger(AsyncFileWriteChecker* self) {
-		double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
+		double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHECKER_LOGGING_INTERVAL;
 		while (true) {
 			co_await delay(delayDuration);
 			// TODO: add more stats, such as total checked, current entries, budget
