@@ -1120,7 +1120,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 
 	// There are the bounds inside of which we are happy with the shard size.
 	// getShardSizeBounds() will always have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
-	//  so will will never attempt to merge that shard with the one previous.
+	//  so will never attempt to merge that shard with the one previous.
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
