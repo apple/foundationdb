@@ -2486,7 +2486,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 
 			// Recruit EncryptKeyProxy in the same datacenter as the ClusterController.
 			// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
-			// on the same process as the CluserController.
+			// on the same process as the ClusterController.
 			state std::map<Optional<Standalone<StringRef>>, int> id_used;
 			self->updateKnownIds(&id_used);
 			state WorkerFitnessInfo ekpWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
