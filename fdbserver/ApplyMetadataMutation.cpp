@@ -91,7 +91,7 @@ public:
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
-	    acsBuilder(&proxyCommitData_.acsBuilder), updateAcsBuilderEntry(updateAcsBuilderEntry_) {
+	    acsBuilder(proxyCommitData_.acsBuilder), updateAcsBuilderEntry(updateAcsBuilderEntry_) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -175,10 +175,10 @@ private:
 	// indicate which commit proxy / resolver applies mutations
 	uint16_t accumulativeChecksumIndex = invalidAccumulativeChecksumIndex;
 
-	AccumulativeChecksumBuilder* acsBuilder = nullptr;
+	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 
-	bool updateAcsBuilderEntry =
-	    false; // when updateAcsBuilderEntry, acsBuild entry of a tag is reset if the tag is removed
+	// when updateAcsBuilderEntry, acsBuild entry of a tag is reset if the tag is removed
+	bool updateAcsBuilderEntry = false;
 
 private:
 	// The following variables are used internally
@@ -993,7 +993,8 @@ private:
 
 		if (!initialCommit) {
 			KeyRangeRef clearRange = range & serverTagKeys;
-			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+			    encryptMode.isEncryptionEnabled()) {
 				// For a removed tag, reset its corresponding entry in acsBuilder
 				if (acsBuilder) {
 					for (auto& kv :

@@ -1945,33 +1945,43 @@ double pushToBackupMutations(CommitBatchContext* self,
 	return encryptionTime;
 }
 
-void updateAccumulativeChecksum(CommitBatchContext* self, MutationRef mutation, std::vector<Tag> tags) {
+extern void updateAccumulativeChecksum(UID commitProxyId,
+                                       uint16_t commitProxyIndex,
+                                       std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                       MutationRef mutation,
+                                       std::vector<Tag> tags,
+                                       Version commitVersion);
+void updateAccumulativeChecksum(UID commitProxyId,
+                                uint16_t commitProxyIndex,
+                                std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                MutationRef mutation,
+                                std::vector<Tag> tags,
+                                Version commitVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled()); // ACS does not support encryption
-	ASSERT(self->pProxyCommitData->acsBuilder.isValid());
+	ASSERT(acsBuilder->isValid());
 	ASSERT(mutation.checksum.present());
 	ASSERT(mutation.accumulativeChecksumIndex.present());
 	for (const auto& tag : tags) {
 		if (!tagSupportAccumulativeChecksum(tag)) {
 			continue;
 		}
-		self->pProxyCommitData->acsBuilder.addAliveTag(tag);
-		Optional<AccumulativeChecksumState> oldAcsState = self->pProxyCommitData->acsBuilder.get(tag);
+		acsBuilder->addAliveTag(tag);
+		Optional<AccumulativeChecksumState> oldAcsState = acsBuilder->get(tag);
 		std::string oldAcs = "";
 		if (oldAcsState.present()) {
-			oldAcs = self->pProxyCommitData->acsBuilder.get(tag).get().toString();
+			oldAcs = acsBuilder->get(tag).get().toString();
 		}
-		self->pProxyCommitData->acsBuilder.update(tag, mutation.checksum.get(), self->commitVersion);
+		acsBuilder->update(tag, mutation.checksum.get(), commitVersion);
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevInfo, "AcsBuilderUpdateAccumulativeChecksum", self->pProxyCommitData->dbgid)
+			TraceEvent(SevInfo, "AcsBuilderUpdateAccumulativeChecksum", commitProxyId)
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", mutation.accumulativeChecksumIndex.get())
-			    .detail("CommitVersion", self->commitVersion)
+			    .detail("CommitVersion", commitVersion)
 			    .detail("OldAcs", oldAcs)
-			    .detail("NewAcs", self->pProxyCommitData->acsBuilder.get(tag).get().toString())
+			    .detail("NewAcs", acsBuilder->get(tag).get().toString())
 			    .detail("Mutation", mutation)
-			    .detail("CommitProxyIndex", self->pProxyCommitData->commitProxyIndex);
+			    .detail("CommitProxyIndex", commitProxyIndex);
 		}
 	}
 }
@@ -1980,9 +1990,9 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled()); // ACS does not support encryption
-	ASSERT(self->pProxyCommitData->acsBuilder.isValid());
-	std::unordered_map<Tag, AccumulativeChecksumState> acsTable = self->pProxyCommitData->acsBuilder.getAcsTable();
-	std::unordered_set<Tag> acsAliveTags = self->pProxyCommitData->acsBuilder.getAliveTags();
+	ASSERT(self->pProxyCommitData->acsBuilder->isValid());
+	std::unordered_map<Tag, AccumulativeChecksumState> acsTable = self->pProxyCommitData->acsBuilder->getAcsTable();
+	std::unordered_set<Tag> acsAliveTags = self->pProxyCommitData->acsBuilder->getAliveTags();
 	const uint16_t acsIndex = getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex);
 	for (const auto& tag : acsAliveTags) {
 		ASSERT(tagSupportAccumulativeChecksum(tag));
@@ -2005,7 +2015,7 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		self->toCommit.addTag(tag);
 		self->toCommit.writeTypedMessage(acsMutation);
 	}
-	self->pProxyCommitData->acsBuilder.clearAliveTags();
+	self->pProxyCommitData->acsBuilder->clearAliveTags();
 }
 
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
@@ -2106,11 +2116,16 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+				    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					m.populateChecksum();
 					m.setAccumulativeChecksumIndex(
 					    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex), true);
-					updateAccumulativeChecksum(self, m, tags);
+					updateAccumulativeChecksum(self->pProxyCommitData->dbgid,
+					                           self->pProxyCommitData->commitProxyIndex,
+					                           self->pProxyCommitData->acsBuilder,
+					                           m,
+					                           tags,
+					                           self->commitVersion);
 				}
 
 				WriteMutationRefVar var =
@@ -2132,11 +2147,16 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTags(ranges.begin().value().tags);
 
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+					    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
 						    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex), true);
-						updateAccumulativeChecksum(self, m, ranges.begin().value().tags);
+						updateAccumulativeChecksum(self->pProxyCommitData->dbgid,
+						                           self->pProxyCommitData->commitProxyIndex,
+						                           self->pProxyCommitData->acsBuilder,
+						                           m,
+						                           ranges.begin().value().tags,
+						                           self->commitVersion);
 					}
 
 					// check whether clear is sampled
@@ -2181,7 +2201,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTags(allSources);
 
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+					    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 						std::vector<Tag> tagsToUpdate;
 						for (const auto& tag : allSources) {
 							tagsToUpdate.push_back(tag);
@@ -2189,7 +2209,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
 						    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex), true);
-						updateAccumulativeChecksum(self, m, tagsToUpdate);
+						updateAccumulativeChecksum(self->pProxyCommitData->dbgid,
+						                           self->pProxyCommitData->commitProxyIndex,
+						                           self->pProxyCommitData->acsBuilder,
+						                           m,
+						                           tagsToUpdate,
+						                           self->commitVersion);
 					}
 				}
 
