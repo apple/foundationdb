@@ -1162,7 +1162,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 
-		// True if the tenant should should exist and return a result
+		// True if the tenant should exist and return a result
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end() &&
 		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
@@ -1729,7 +1729,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 
-		// True if the tenant group should should exist and return a result
+		// True if the tenant group should exist and return a result
 		auto itr = self->createdTenantGroups.find(tenantGroup);
 		state bool alreadyExists = itr != self->createdTenantGroups.end() &&
 		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
