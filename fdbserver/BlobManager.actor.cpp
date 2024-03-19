@@ -430,7 +430,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	int64_t manifestDumperSeqNo = 1;
 	bool enableManifestEncryption = false;
 	AsyncTrigger backupTrigger;
-	AsyncTrigger manifestCompletitionTrigger;
+	AsyncTrigger manifestCompletionTrigger;
 
 	Promise<Void> iAmReplaced;
 
@@ -5809,7 +5809,7 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 	bmData->stats.manifestSizeInBytes += bytes;
 	bmData->stats.lastManifestDumpTs = now();
-	bmData->manifestCompletitionTrigger.trigger();
+	bmData->manifestCompletionTrigger.trigger();
 	return Void();
 }
 
@@ -5865,7 +5865,7 @@ ACTOR Future<Void> truncateMutationsLoop(Reference<BlobManagerData> bmData) {
 						TraceEvent("BlobManifestDumped").detail("Seq", bmData->manifestDumperSeqNo);
 						break;
 					}
-					wait(bmData->manifestCompletitionTrigger.onTrigger());
+					wait(bmData->manifestCompletionTrigger.onTrigger());
 				}
 				// Truncate mutations up to lastFlushVersion -
 				wait(truncateMutations(bmData, lastFlushVersion));
