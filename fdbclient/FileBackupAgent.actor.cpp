@@ -806,7 +806,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> handleTenantBondary(EncryptedRangeFileWriter* self,
+	ACTOR static Future<Void> handleTenantBoundary(EncryptedRangeFileWriter* self,
 	                                              Key k,
 	                                              Value v,
 	                                              bool writeValue,
@@ -843,7 +843,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache, checkTenantCache));
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
-			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
+			wait(handleTenantBoundary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
 			return true;
 		}
 		return false;

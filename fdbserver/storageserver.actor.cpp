@@ -7521,7 +7521,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranuleChunk
 	}
 }
 
-// Read blob granules metadata. The key range can cross tenant bundary.
+// Read blob granules metadata. The key range can cross tenant boundary.
 ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(Transaction* tr,
                                                                                Database cx,
                                                                                KeyRangeRef keys,
