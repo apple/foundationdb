@@ -225,7 +225,7 @@ public:
 		// Returns true if otherAncestor is the previous ("greatest lesser") ancestor
 		bool otherAncestorPrev() const { return parent && parent->leftChild == this; }
 
-		// Returns true if otherAncestor is the next ("least greator") ancestor
+		// Returns true if otherAncestor is the next ("least greater") ancestor
 		bool otherAncestorNext() const { return parent && parent->rightChild == this; }
 
 		DecodedNode* getPrevAncestor() const { return otherAncestorPrev() ? otherAncestor : parent; }
