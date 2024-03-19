@@ -1829,7 +1829,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		data->oldestVersion.set(desiredVersion);
 		wait(finishedForgetting);
 		// TODO how do we yield here? This may not be enough, because compact() does the heavy lifting
-		// of compating the VersionedMap. We should probably look into per version compaction and then
+		// of compacting the VersionedMap. We should probably look into per version compaction and then
 		// we can yield after compacting one version
 		wait(yield(TaskPriority::CompactCache));
 
