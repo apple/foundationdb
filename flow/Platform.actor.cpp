@@ -3488,7 +3488,7 @@ ImageInfo getImageInfo() {
 
 size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #if !defined(__APPLE__)
-	// absl::GetStackTrace doesn't have an implementation for MacOS.
+	// absl::GetStackTrace doesn't have an implementation for macOS.
 	return absl::GetStackTrace(addresses, maxStackDepth, 0);
 #else
 	return backtrace(addresses, maxStackDepth);

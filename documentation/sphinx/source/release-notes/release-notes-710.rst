@@ -73,7 +73,7 @@ Release Notes
 ======
 * Released with AVX disabled.
 * Added redistribute fdbcli command to manually split shards. `(PR #10909) <https://github.com/apple/foundationdb/pull/10909>`_, `(PR #10936) <https://github.com/apple/foundationdb/pull/10936>`_, `(PR #10942) <https://github.com/apple/foundationdb/pull/10942>`_, `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_, and `(PR #10958) <https://github.com/apple/foundationdb/pull/10958>`_
-* Fixed a MacOS linking issue for go bindings. `(PR #10924) <https://github.com/apple/foundationdb/pull/10924>`_
+* Fixed a macOS linking issue for go bindings. `(PR #10924) <https://github.com/apple/foundationdb/pull/10924>`_
 * Added knobs to control backup retry delays for blob stores. `(PR #10947) <https://github.com/apple/foundationdb/pull/10947>`_
 * Fixed two use-after-free bugs for backup agents. `(PR #10951) <https://github.com/apple/foundationdb/pull/10951>`_
 * Added automatic range split for hot storage queue. `(PR #10932) <https://github.com/apple/foundationdb/pull/10932>`_

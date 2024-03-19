@@ -215,7 +215,7 @@ set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-VERSIONED_DISPLAY_NAME "foundationdb${FDB_VERSION}${FDB_BUILDTIME_STRING}${PRERELEASE_TAG}-clients")
 
 
-# MacOS needs a file extension for the LICENSE file
+# macOS needs a file extension for the LICENSE file
 configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYONLY)
 
 ################################################################################
