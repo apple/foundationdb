@@ -556,7 +556,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			// If the machineTeamRemover does not remove the machine team with the most machine teams,
 			// we may oscillate between building more server teams by teamBuilder() and removing those teams by
 			// teamRemover To avoid false positive in simulation, we skip the consistency check in this case.
-			// This is a corner case. This is a work-around if case the team number requirements cannot be satisfied.
+			// This is a corner case. This is a workaround if case the team number requirements cannot be satisfied.
 			//
 			// The checking for too many teams is disabled because teamRemover may not remove a team if it leads to 0
 			// team on a server
