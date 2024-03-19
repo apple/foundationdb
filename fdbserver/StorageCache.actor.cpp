@@ -1274,7 +1274,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		// TODO: double check the following block of code!!
 		// We want to make sure that we can't query below lastAvailable, by waiting for the oldestVersion to become
-		// lastAvaialble
+		// lastAvailable
 		auto navr = data->newestAvailableVersion.intersectingRanges(keys);
 		Version lastAvailable = invalidVersion;
 		for (auto r = navr.begin(); r != navr.end(); ++r) {
