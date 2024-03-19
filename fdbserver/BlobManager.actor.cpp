@@ -4697,7 +4697,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 
 	state std::vector<Future<Void>> deletions; // deletion work per file
 	state std::vector<Key> deletedFileKeys; // keys for deleted files
-	state std::vector<std::string> filesToDelete; // TODO: remove evenutally, just for debugging
+	state std::vector<std::string> filesToDelete; // TODO: remove eventually, just for debugging
 
 	// TODO: binary search these snapshot files for latestSnapshotVersion
 	for (int idx = files.snapshotFiles.size() - 1; idx >= 0; --idx) {
