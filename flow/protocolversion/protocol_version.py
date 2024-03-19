@@ -30,7 +30,7 @@ class ProtocolVersion:
     def __init__(self):
         self._default_version = None
         self._future_version = None
-        self._min_compatibile_version = None
+        self._min_compatible_version = None
         self._min_invalid_version = None
         self._left_most_check = None
         self._lsb_mask = None
@@ -44,7 +44,7 @@ class ProtocolVersion:
         self._future_version = version
 
     def set_min_compatible_version(self, version: int):
-        self._min_compatibile_version = version
+        self._min_compatible_version = version
 
     def set_min_invalid_version(self, version: int):
         self._min_invalid_version = version
@@ -65,7 +65,7 @@ class ProtocolVersion:
 
     @property
     def min_compatible_version(self):
-        return self._min_compatibile_version
+        return self._min_compatible_version
 
     @property
     def min_invalid_version(self):
