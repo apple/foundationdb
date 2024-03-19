@@ -1952,7 +1952,7 @@ public:
 				// Remove the machine team
 				bool foundRemovedMachineTeam = self->removeMachineTeam(mt);
 				// When we remove the last server team on a machine team in removeTeam(), we also remove the machine
-				// team This is needed for removeTeam() functoin. So here the removeMachineTeam() should not find the
+				// team This is needed for removeTeam() function. So here the removeMachineTeam() should not find the
 				// machine team
 				ASSERT(foundRemovedMachineTeam);
 				numMachineTeamRemoved++;
