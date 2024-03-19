@@ -168,7 +168,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	// Sets the whole user keyspace to be blobified
+	// Sets the whole user keyspace to be blobbified
 	ACTOR Future<Void> setUpBlobRange(Database cx) {
 		bool success = wait(cx->blobbifyRange(normalKeys));
 		ASSERT(success);

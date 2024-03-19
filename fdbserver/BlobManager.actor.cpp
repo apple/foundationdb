@@ -5688,8 +5688,8 @@ ACTOR Future<Void> tryFlushRange(Reference<BlobManagerData> bmData, KeyRange ran
 				throw; // terminate for unretryable error
 			}
 
-			// check if the range is blobified and then decide retry or skip.
-			// it may take long time to flush the whole key range and some ranges may have been unblobified or purged.
+			// check if the range is blobbified and then decide retry or skip.
+			// it may take long time to flush the whole key range and some ranges may have been unblobbified or purged.
 			// so we try to check that first when seeing non-fatal errors
 			bool knownRange = false;
 			for (auto& r : bmData->knownBlobRanges.intersectingRanges(range)) {
