@@ -56,7 +56,7 @@ static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSD
 
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
-const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
+const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this column family.
 const std::string manifestFilePrefix = "MANIFEST-";
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
 const KeyRef compactionTimestampPrefix("\xff\xff/CompactionTimestamp/"_sr);
