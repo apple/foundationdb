@@ -626,7 +626,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		// Check every version is larger than backup's startVersion
 		for (auto& [uid, info] : self->backups) {
 			if (self->recruitedEpoch == self->oldestBackupEpoch) {
-				// update update progress so far if previous epochs are done
+				// update progress so far if previous epochs are done
 				Version v = std::numeric_limits<Version>::max();
 				for (const auto& [tag, version] : tagVersions) {
 					v = std::min(v, version);
