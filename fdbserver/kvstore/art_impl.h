@@ -843,7 +843,7 @@ void art_tree::remove_child4(art_node4* n, art_node** ref, art_node** l, int dep
 	// If you have a fat node, you cannot compress when you get to one child
 	// So it can happen that the one child get removed
 	// At that point, you transform the fat node into a leaf: the fat key is not prefix of any subtree!
-	// This should only happen to a node4kv: if the node is normal, then already when there there is 1 child
+	// This should only happen to a node4kv: if the node is normal, then already when there is 1 child
 	// the node gets compressed.
 	// We still check for depth b/c we want to avoid that root becomes empty and becomes a leaf
 	else if (n->n.num_children == 0 && depth) {
