@@ -154,7 +154,7 @@ Java
 ----
 
 * ``ReadTransactionContext`` added next to ``TransactionContext``, allowing ``read()`` and ``readAsync()`` composable read-only operations on transactions.
-* The ``Future`` interface adds ``getInterruptibly()`` and ``blockInterruptibly()``, which propagate ``InterruptedExcetption`` to the calling code.
+* The ``Future`` interface adds ``getInterruptibly()`` and ``blockInterruptibly()``, which propagate ``InterruptedException`` to the calling code.
 * Exception-handling logic is reworked in ``map()``, ``flatMap()``, and ``rescue()`` to propagate ``OutOfMemoryError`` and ``RejectedExecutionException`` instead of the spurious ``SettableAlreadySet`` exception.
 * Performance is improved for applications that use many blocking-style ``get()`` calls.
 
