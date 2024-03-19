@@ -2438,7 +2438,7 @@ Future<Void> KVFileCheck(std::string filename, bool integrity) {
 	    keyValueStoreSQLite(filename, UID(0, 0), type, CheckChecksums(!integrity), CheckIntegrity(integrity));
 	ASSERT(store != nullptr);
 
-	// Wait for integry check to finish
+	// Wait for integrity check to finish
 	co_await store->readValue(StringRef());
 
 	if (store->getError().isError())
