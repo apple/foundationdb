@@ -400,7 +400,7 @@ void Coro_setup(Coro* self, void* arg) {
 
 void Coro_setup(Coro* self, void* arg) {
 	/*
-	setjmp/longjmp is flakey under Symbian.
+	setjmp/longjmp is flaky under Symbian.
 	If the setjmp is done inside the call then a crash occurs.
 	Inlining it here solves the problem
 	*/
