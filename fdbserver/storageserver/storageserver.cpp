@@ -144,7 +144,7 @@ bool canReplyWith(Error e) {
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
-	case error_code_mapper_bad_range_decriptor:
+	case error_code_mapper_bad_range_descriptor:
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
@@ -6008,7 +6008,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
 			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
-			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
+			ASSERT(e.code() == error_code_mapper_bad_range_descriptor);
 			throwException2 = true;
 		}
 		ASSERT(throwException2);
