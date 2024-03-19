@@ -61,7 +61,7 @@ static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_SYSTEM_DOM
 	ENCRYPT_HEADER_DOMAIN_ID
 };
 
-static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DETAULT_DOMAINS = {
+static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DEFAULT_DOMAINS = {
 	SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 	ENCRYPT_HEADER_DOMAIN_ID,
 	FDB_DEFAULT_ENCRYPT_DOMAIN_ID,
