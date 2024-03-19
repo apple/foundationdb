@@ -407,7 +407,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<AsyncV
 	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(dbInfo, headerCipherDetails, arena));
 	cipherKeysCtx.headerCipherKey = headerCipherKey;
 
-	// Populate 'Intialization Vector'
+	// Populate 'Initialization Vector'
 	ASSERT_EQ(ivRef.size(), AES_256_IV_LENGTH);
 	cipherKeysCtx.ivRef = StringRef(*arena, ivRef);
 
