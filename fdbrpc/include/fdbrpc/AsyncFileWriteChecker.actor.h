@@ -228,7 +228,7 @@ private:
 			state uint32_t page = self->lru.leastRecentlyUsedPage();
 			while (self->writing.find(page) != self->writing.end() || page == -1) {
 				// avoid concurrent ops
-				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
+				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHECKER_CHECKING_DELAY));
 				continue;
 			}
 			int64_t offset = page * checksumHistoryPageSize;
@@ -238,7 +238,7 @@ private:
 	}
 
 	ACTOR Future<Void> runChecksumLogger(AsyncFileWriteChecker* self) {
-		state double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
+		state double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHECKER_LOGGING_INTERVAL;
 		loop {
 			wait(delay(delayDuration));
 			// TODO: add more stats, such as total checked, current entries, budget

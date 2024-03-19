@@ -188,8 +188,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_PRIOR_MODIFICATION_DELAY,                        1.0 ); if( randomize && BUGGIFY ) MAX_PRIOR_MODIFICATION_DELAY = 10.0;
 
 	//AsyncFileWriteChecker
-	init( ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL,          60.0 );
-	init( ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY,             5.0 );
+	init( ASYNC_FILE_WRITE_CHECKER_LOGGING_INTERVAL,          60.0 );
+	init( ASYNC_FILE_WRITE_CHECKER_CHECKING_DELAY,             5.0 );
 
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
