@@ -1167,7 +1167,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	//     .detail("CurrentMetrics", stats.toString())
 	//     .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
 	//     .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
-	//     .detail("WriteBandwitdhStatus", bandwidthStatus)
+	//     .detail("WriteBandwidthStatus", bandwidthStatus)
 	//     .detail("SplitBecauseHighWriteBandWidth", writeSplit ? "Yes" : "No");
 
 	if (!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
