@@ -10989,7 +10989,7 @@ TEST_CASE(":/redwood/performance/set") {
 				int recs = recordsThisCommit;
 				int kvb = kvBytesThisCommit;
 
-				// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
+				// Capturing intervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
 				// actor state object
 				double* pIntervalStart = &intervalStart;
 
