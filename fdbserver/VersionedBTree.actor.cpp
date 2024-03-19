@@ -5977,7 +5977,7 @@ private:
 			ASSERT(!enableEncryptionDomain || (a.domainId.present() && b.domainId.present()));
 			if (!enableEncryptionDomain || a.domainId.get() == b.domainId.get()) {
 
-				// While the last page page has too much slack and the second to last page
+				// While the last page has too much slack and the second to last page
 				// has more than the minimum record count, shift a record from the second
 				// to last page to the last page.
 				while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
