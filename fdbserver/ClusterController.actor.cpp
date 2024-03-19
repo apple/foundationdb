@@ -3559,7 +3559,7 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded
+	// Test that if both A complains B and B complains A, only one of the server will be chosen as degraded
 	// server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
