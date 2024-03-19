@@ -7279,7 +7279,7 @@ private:
 					// If u's subtree is either all cleared or all unchanged
 					if (uniform) {
 						// We do not need to recurse to this subtree.  Next, let's see if we can embiggen u's range to
-						// include sibling subtrees also covered by (mBegin, mEnd) so we can not recurse to those, too.
+						// include sibling subtrees also covered by (mBegin, mEnd) so we cannot recurse to those, too.
 						// If the cursor is valid, u.subtreeUpperBound is the cursor's position, which is >= mEnd.key().
 						// If equal, no range expansion is possible.
 						if (cursor.valid() && mEnd.key() != u.subtreeUpperBound.key) {

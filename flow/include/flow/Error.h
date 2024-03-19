@@ -233,7 +233,7 @@ bool assert_check_ge(T const& a, U const& b) {
 EXTERNC void breakpoint_me();
 
 #ifdef FDB_CLEAN_BUILD
-#define NOT_IN_CLEAN static_assert(false, "This code can not be enabled in a clean build.");
+#define NOT_IN_CLEAN static_assert(false, "This code cannot be enabled in a clean build.");
 #else
 #define NOT_IN_CLEAN
 #endif
