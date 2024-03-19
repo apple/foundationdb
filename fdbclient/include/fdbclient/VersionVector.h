@@ -441,7 +441,7 @@ public:
 		}
 	}
 
-	// Figrue out the type that was used to serialize commit version deltas and call the above
+	// Figure out the type that was used to serialize commit version deltas and call the above
 	// method to do the deserialization.
 	// T: Type that was used to serialize tag ids (uint8_t/uint16_t)
 	template <typename T>
