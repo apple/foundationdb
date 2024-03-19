@@ -153,7 +153,7 @@ bool canReplyWith(Error e) {
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
-	case error_code_mapper_bad_range_decriptor:
+	case error_code_mapper_bad_range_descriptor:
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
@@ -4970,7 +4970,7 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
-					throw mapper_bad_range_decriptor();
+					throw mapper_bad_range_descriptor();
 				}
 				// when it is rangeQuery, insert Optional.empty as placeholder
 				vt.emplace_back(Optional<Tuple>());
@@ -5968,7 +5968,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 
 			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 		} catch (Error& e) {
-			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
+			ASSERT(e.code() == error_code_mapper_bad_range_descriptor);
 			throwException2 = true;
 		}
 		ASSERT(throwException2);
