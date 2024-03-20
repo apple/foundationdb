@@ -33,7 +33,7 @@
 #include "flow/actorcompiler.h"
 static double millisecondsPerSecond = 1000;
 
-// this class does checksum for the wrapped IAsyncFile in read and writes opertions.
+// this class does checksum for the wrapped IAsyncFile in read and writes operations.
 // it maintains a dynamic data structure to store the recently written page and its checksum.
 // it has an actor to continuously read and verify checksums for the recently written page,
 // and also deletes the corresponding entry upon a successful to avoid using too much memory.
