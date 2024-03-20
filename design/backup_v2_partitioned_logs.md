@@ -23,7 +23,7 @@ The design of old backup system is [here](https://github.com/apple/foundationdb/
 
 ## Terminology
 
-* **Blob storage**: blob storage is an object storage for unstructed data. Backup files are encoded in binary format and saved in blob storage, e.g., Amazon S3.
+* **Blob storage**: blob storage is an object storage for unstructured data. Backup files are encoded in binary format and saved in blob storage, e.g., Amazon S3.
 * **Version**: FDB continuously generate increasing number as version and use version to decide mutation ordering. Version number typically advance one million per second. To restore a FDB cluster to a specified date and time, the restore system first convert the date and time to the corresponding version number and restore the cluster to the version number.
 * **Epoch**: A generation of FDB’s transaction system. After a component of the transaction system failed, FDB automatically initiates a recovery and restores the system in a new healthy generation, which is called an epoch.
 * **Backup worker**: is a new role added to the FDB cluster that is responsible for pulling mutations from transaction logs and saving them to blob storage.
