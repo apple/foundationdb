@@ -5419,7 +5419,7 @@ ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWo
 					self->currentManagerStatusStream.get().sendError(connection_failed());
 
 					// hold a copy of the previous stream if it exists, so any waiting send calls don't get
-					// proken_promise before onChange
+					// broken_promise before onChange
 					ReplyPromiseStream<GranuleStatusReply> copy;
 					if (self->statusStreamInitialized) {
 						copy = self->currentManagerStatusStream.get();
