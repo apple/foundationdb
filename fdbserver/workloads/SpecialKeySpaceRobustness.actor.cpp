@@ -363,7 +363,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 		}
 		// test lock and unlock
-		// maske sure we lock the database
+		// make sure we lock the database
 		loop {
 			try {
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
