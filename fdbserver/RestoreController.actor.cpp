@@ -145,7 +145,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 	return Void();
 }
 
-// RestoreWorker that has restore controller role: Recruite a role for each worker
+// RestoreWorker that has restore controller role: Recruit a role for each worker
 ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWorker,
                                        Reference<RestoreControllerData> controllerData) {
 	state int nodeIndex = 0;
