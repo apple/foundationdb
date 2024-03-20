@@ -230,7 +230,7 @@ protected:
 		return errCode == error_code_no_cluster_file_found || errCode == error_code_connection_string_invalid;
 	}
 
-	// Complete the transaction with an (unretriable) error
+	// Complete the transaction with an (unretryable) error
 	void transactionFailed(fdb::Error err) {
 		ASSERT(err);
 		std::unique_lock<std::mutex> lock(mutex);
