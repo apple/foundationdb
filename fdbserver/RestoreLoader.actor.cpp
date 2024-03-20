@@ -1097,7 +1097,7 @@ bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap
 		}
 	} else { // Concatenate the val string with the same commitVersion
 		it->second.first =
-		    it->second.first.contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
+		    it->second.first.contents().withSuffix(val_input.contents()); // Assign the new Arena to the map's value
 		auto& currentPart = it->second.second;
 		if (part != (currentPart + 1)) {
 			// Check if the same range or log file has been processed more than once!
