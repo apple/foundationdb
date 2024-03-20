@@ -11926,7 +11926,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("Version", data->pendingAddRanges.begin()->first)
 				    .detail("DurableVersion", data->durableVersion.get());
 				addedRanges = true;
-				// Remove commit byte limit to make sure the private mutaiton(s) associated with the
+				// Remove commit byte limit to make sure the private mutation(s) associated with the
 				// `addRange` are committed.
 				unlimitedCommitBytes = UnlimitedCommitBytes::True;
 			}

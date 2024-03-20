@@ -479,7 +479,7 @@ private:
 				}
 			}
 
-			// Apply muation logs for system backup ranges after manifest version
+			// Apply mutation logs for system backup ranges after manifest version
 			Version manifestVersion = wait(getManifestVersion(self->db_));
 			for (auto& range : getSystemBackupRanges()) {
 				self->mlogRestoreRanges_.push_back(self->mlogRestoreRanges_.arena(), range);

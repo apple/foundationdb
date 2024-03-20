@@ -754,7 +754,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
 	if (tenantMapChanging) {
 		// If tenant map is changing, we need to wait until it's committed before processing next mutations.
-		// Next muations need the updated tenant map for filtering.
+		// Next mutations need the updated tenant map for filtering.
 		wait(commitAndUnlock);
 	} else {
 		addActor.send(commitAndUnlock);
