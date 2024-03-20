@@ -1836,7 +1836,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			CODE_PROBE(true, "using already encrypted mutation");
 			encryptedMutation = encryptedMutationOpt->get();
 			ASSERT(encryptedMutation.isEncrypted());
-			// During simulation check whether the encrypted mutation matches the decrpyted mutation
+			// During simulation check whether the encrypted mutation matches the decrypted mutation
 			if (g_network && g_network->isSimulated()) {
 				return writeMutationEncryptedMutation(self, domainId, mutation, encryptedMutationOpt, arena);
 			}
