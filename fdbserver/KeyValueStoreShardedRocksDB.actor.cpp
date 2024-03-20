@@ -1103,7 +1103,7 @@ public:
 					}
 					e.detail("NumLevels", numLevels);
 				}
-				TraceEvent(SevInfo, "KVSPhysialShardMetrics")
+				TraceEvent(SevInfo, "KVSPhysicalShardMetrics")
 				    .detail("NumActiveShards", shardManager->numActiveShards())
 				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards())
 				    .detail("NumSstFiles", numSstFiles);
