@@ -1803,7 +1803,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	}
 
 	// redo key alignment on full set of split points
-	// FIXME: only need to align propsedSplitKey in the middle
+	// FIXME: only need to align proposedSplitKey in the middle
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
 
 	if (BM_DEBUG) {
