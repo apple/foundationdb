@@ -1229,7 +1229,7 @@ art_leaf* art_tree::insert_leaf(art_node* n,
 
 		return l2;
 	} else {
-		// The key in the leaf is a supertset of the new key
+		// The key in the leaf is a superset of the new key
 		// So the leaf stays a leaf and the new key goes in the kv_node
 		art_node4_kv* new_node = (art_node4_kv*)alloc_kv_node(ART_NODE4_KV);
 		art_leaf* fat_leaf = make_leaf(k, value);
