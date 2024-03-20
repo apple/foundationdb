@@ -27,7 +27,7 @@ Release Notes
 
 7.3.26
 ======
-* Updated RocskDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
+* Updated RocksDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
 * Changed RocksDB rate limiter to all IO. `(PR #11016) <https://github.com/apple/foundationdb/pull/11016>`_
 * Added ``fdb_c_apiversion.g.h`` to OSX package. `(PR #11042) <https://github.com/apple/foundationdb/pull/11042>`_
 * Added write traffic metrics to ddMetricsGetRange. `(PR #10998) <https://github.com/apple/foundationdb/pull/10998>`_
