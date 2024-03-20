@@ -1631,7 +1631,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		// In the future after we enable tenant movement, this may be
-		// state bool configurationChanging = tenangGroupChanging || assignToDifferentCluster.
+		// state bool configurationChanging = tenantGroupChanging || assignToDifferentCluster.
 		state bool configurationChanging = tenantGroupChanging;
 
 		// If true, the options generated may include an unknown option
