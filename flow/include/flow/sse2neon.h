@@ -1,4 +1,4 @@
-///// THIS IS AN EXTRNAL PROJECT: https://github.com/DLTcollab/sse2neon /////
+///// THIS IS AN EXTERNAL PROJECT: https://github.com/DLTcollab/sse2neon /////
 
 #ifndef SSE2NEON_H
 #define SSE2NEON_H
