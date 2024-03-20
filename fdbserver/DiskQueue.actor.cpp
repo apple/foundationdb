@@ -527,7 +527,7 @@ public:
 		// If we are starting in file 1, we truncate file 0 in case it has been corrupted.
 		//  In particular, we are trying to avoid a dropped or corrupted write to the first page of file 0 causing it to
 		//  be sequenced before file 1, when in fact it contains many pages that follow file 1.  These ok pages may be
-		//  incorrectly read if the machine dies after overwritting the first page of file 0 and is then recovered
+		//  incorrectly read if the machine dies after overwriting the first page of file 0 and is then recovered
 		if (file == 1)
 			wait(self->truncateFile(self, 0, 0));
 
@@ -672,7 +672,7 @@ public:
 				// Begin pushing at the beginning of files[1]
 
 				// Truncate both files, since perhaps only the first pages are corrupted.  This avoids cases where
-				// overwritting the first page and then terminating makes subsequent pages valid upon recovery.
+				// overwriting the first page and then terminating makes subsequent pages valid upon recovery.
 				std::vector<Future<Void>> truncates;
 				for (int i = 0; i < 2; ++i)
 					if (self->files[i].size > 0)
