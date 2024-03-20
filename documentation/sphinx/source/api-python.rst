@@ -1411,7 +1411,7 @@ Subspaces
 .. method:: Subspace.pack_with_versionstamp(tuple)
 
     Returns the key encoding the specified tuple in the subspace so that it may be used as the key in the
-    :meth:`fdb.Transaction.set_versionstampe_key` method. The passed tuple must contain exactly one incomplete
+    :meth:`fdb.Transaction.set_versionstamped_key` method. The passed tuple must contain exactly one incomplete
     :class:`fdb.tuple.Versionstamp` instance or the method will raise an error. The behavior here is the same
     as if one used the :meth:`fdb.tuple.pack_with_versionstamp` method to appropriately pack together
     this subspace and the passed tuple.
