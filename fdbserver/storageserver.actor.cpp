@@ -11088,7 +11088,8 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 	}
 	if (msg.type == MutationRef::AccumulativeChecksum) {
 		AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(msg.param2);
-		ASSERT(data->acsValidator.validateAcs(data->thisServerID, data->tag, acsIndex, acsMutationState));
+		ASSERT(data->acsValidator.validateAcs(
+		    data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get()));
 		data->storage.makeAccumulativeChecksumDurable(acsIndex, acsMutationState);
 		// Zhe: Do we need read back here to check any lost write here?
 	} else {

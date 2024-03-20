@@ -28,9 +28,11 @@
 struct AccumulativeChecksumState {
 	constexpr static FileIdentifier file_identifier = 13804380;
 
-	AccumulativeChecksumState() : acs(0), cachedAcs(Optional<uint32_t>()), version(-1), outdated(false) {}
+	AccumulativeChecksumState()
+	  : acs(0), cachedAcs(Optional<uint32_t>()), version(-1), outdated(false), liveLatestVersion(Optional<Version>()) {}
 	AccumulativeChecksumState(uint32_t acs, Version version)
-	  : acs(acs), cachedAcs(Optional<uint32_t>()), version(version), outdated(false) {}
+	  : acs(acs), cachedAcs(Optional<uint32_t>()), version(version), outdated(false),
+	    liveLatestVersion(Optional<Version>()) {}
 
 	bool isValid() { return version != -1; }
 
@@ -47,6 +49,7 @@ struct AccumulativeChecksumState {
 	Optional<uint32_t> cachedAcs;
 	Version version;
 	bool outdated;
+	Optional<Version> liveLatestVersion;
 };
 
 #endif

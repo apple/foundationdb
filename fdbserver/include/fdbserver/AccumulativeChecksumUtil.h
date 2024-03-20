@@ -69,7 +69,11 @@ public:
 
 	void updateAcs(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
 
-	bool validateAcs(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsMutationState);
+	bool validateAcs(UID ssid,
+	                 Tag tag,
+	                 uint16_t acsIndex,
+	                 AccumulativeChecksumState acsMutationState,
+	                 Version ssVersion);
 
 	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState);
 
@@ -82,5 +86,11 @@ public:
 private:
 	bool outdated;
 };
+
+void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
+                                          std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                          MutationRef mutation,
+                                          std::vector<Tag> tags,
+                                          Version commitVersion);
 
 #endif

@@ -1945,47 +1945,6 @@ double pushToBackupMutations(CommitBatchContext* self,
 	return encryptionTime;
 }
 
-extern void updateAccumulativeChecksum(UID commitProxyId,
-                                       uint16_t commitProxyIndex,
-                                       std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
-                                       MutationRef mutation,
-                                       std::vector<Tag> tags,
-                                       Version commitVersion);
-void updateAccumulativeChecksum(UID commitProxyId,
-                                uint16_t commitProxyIndex,
-                                std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
-                                MutationRef mutation,
-                                std::vector<Tag> tags,
-                                Version commitVersion) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(acsBuilder->isValid());
-	ASSERT(mutation.checksum.present());
-	ASSERT(mutation.accumulativeChecksumIndex.present());
-	for (const auto& tag : tags) {
-		if (!tagSupportAccumulativeChecksum(tag)) {
-			continue;
-		}
-		acsBuilder->addAliveTag(tag);
-		Optional<AccumulativeChecksumState> oldAcsState = acsBuilder->get(tag);
-		std::string oldAcs = "";
-		if (oldAcsState.present()) {
-			oldAcs = acsBuilder->get(tag).get().toString();
-		}
-		acsBuilder->update(tag, mutation.checksum.get(), commitVersion);
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevInfo, "AcsBuilderUpdateAccumulativeChecksum", commitProxyId)
-			    .detail("AcsTag", tag)
-			    .detail("AcsIndex", mutation.accumulativeChecksumIndex.get())
-			    .detail("CommitVersion", commitVersion)
-			    .detail("OldAcs", oldAcs)
-			    .detail("NewAcs", acsBuilder->get(tag).get().toString())
-			    .detail("Mutation", mutation)
-			    .detail("CommitProxyIndex", commitProxyIndex);
-		}
-	}
-}
-
 void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
@@ -2120,12 +2079,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					m.populateChecksum();
 					m.setAccumulativeChecksumIndex(
 					    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex), true);
-					updateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-					                           self->pProxyCommitData->commitProxyIndex,
-					                           self->pProxyCommitData->acsBuilder,
-					                           m,
-					                           tags,
-					                           self->commitVersion);
+					acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
+					                                     self->pProxyCommitData->acsBuilder,
+					                                     m,
+					                                     tags,
+					                                     self->commitVersion);
 				}
 
 				WriteMutationRefVar var =
@@ -2151,12 +2109,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
 						    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex), true);
-						updateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-						                           self->pProxyCommitData->commitProxyIndex,
-						                           self->pProxyCommitData->acsBuilder,
-						                           m,
-						                           ranges.begin().value().tags,
-						                           self->commitVersion);
+						acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
+						                                     self->pProxyCommitData->acsBuilder,
+						                                     m,
+						                                     ranges.begin().value().tags,
+						                                     self->commitVersion);
 					}
 
 					// check whether clear is sampled
@@ -2209,12 +2166,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
 						    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex), true);
-						updateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-						                           self->pProxyCommitData->commitProxyIndex,
-						                           self->pProxyCommitData->acsBuilder,
-						                           m,
-						                           tagsToUpdate,
-						                           self->commitVersion);
+						acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
+						                                     self->pProxyCommitData->acsBuilder,
+						                                     m,
+						                                     tagsToUpdate,
+						                                     self->commitVersion);
 					}
 				}
 

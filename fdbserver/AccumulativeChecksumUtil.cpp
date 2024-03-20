@@ -35,6 +35,39 @@ bool tagSupportAccumulativeChecksum(Tag tag) {
 	return tag.locality > 0;
 }
 
+void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
+                                          std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                          MutationRef mutation,
+                                          std::vector<Tag> tags,
+                                          Version commitVersion) {
+	if (!mutation.checksum.present() || !mutation.accumulativeChecksumIndex.present()) {
+		return;
+	}
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
+	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
+	ASSERT(acsBuilder->isValid());
+	for (const auto& tag : tags) {
+		if (!tagSupportAccumulativeChecksum(tag)) {
+			continue;
+		}
+		acsBuilder->addAliveTag(tag);
+		uint32_t oldAcs = 0;
+		if (acsBuilder->get(tag).present()) {
+			oldAcs = acsBuilder->get(tag).get().acs;
+		}
+		acsBuilder->update(tag, mutation.checksum.get(), commitVersion);
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+			TraceEvent(SevInfo, "AcsBuilderUpdateAccumulativeChecksum", commitProxyId)
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", mutation.accumulativeChecksumIndex.get())
+			    .detail("CommitVersion", commitVersion)
+			    .detail("OldAcs", oldAcs)
+			    .detail("NewAcs", acsBuilder->get(tag).get().acs)
+			    .detail("Mutation", mutation);
+		}
+	}
+}
+
 uint32_t AccumulativeChecksumBuilder::update(Tag tag, uint32_t checksum, Version version) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
@@ -87,7 +120,7 @@ void AccumulativeChecksumValidator::updateAcs(UID ssid, Tag tag, MutationRef mut
 	Version atAcsVersion = 0;
 	if (acsTable.find(acsIndex) == acsTable.end()) {
 		oldAcs = 0;
-		newAcs = 0;
+		newAcs = checksum;
 		atAcsVersion = 0;
 		acsTable[acsIndex] = AccumulativeChecksumState(); // init
 	} else {
@@ -117,7 +150,8 @@ void AccumulativeChecksumValidator::updateAcs(UID ssid, Tag tag, MutationRef mut
 bool AccumulativeChecksumValidator::validateAcs(UID ssid,
                                                 Tag tag,
                                                 uint16_t acsIndex,
-                                                AccumulativeChecksumState acsMutationState) {
+                                                AccumulativeChecksumState acsMutationState,
+                                                Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(acsIndex) == acsTable.end()) {
@@ -126,12 +160,25 @@ bool AccumulativeChecksumValidator::validateAcs(UID ssid,
 	ASSERT(acsTable[acsIndex].cachedAcs.present());
 	uint32_t cachedAcs = acsTable[acsIndex].cachedAcs.get();
 
-	if (acsMutationState.version > acsTable[acsIndex].version) {
+	bool doUpdate = false;
+	if (acsTable[acsIndex].liveLatestVersion.present()) {
+		doUpdate = acsTable[acsIndex].liveLatestVersion.get() > acsMutationState.version;
+	} else {
+		// Initially, liveLatestVersion is not set. In this case,
+		// ssVersion must be the persisted version which is comparable
+		// to the acsMutationState.version
+		doUpdate = ssVersion >= acsMutationState.version;
+	}
+	acsTable[acsIndex].liveLatestVersion = acsMutationState.version;
+	if (doUpdate) {
 		if (cachedAcs != acsMutationState.acs) {
 			TraceEvent e(SevError, "AccumulativeChecksumValidateError", ssid);
 			e.detail("AcsTag", tag);
 			e.detail("AcsIndex", acsIndex);
 			e.detail("AcsValueToCheck", acsMutationState.acs);
+			e.detail("AcsMutationVersion", acsMutationState.version);
+			e.detail("AcsTableVersion", acsTable[acsIndex].version);
+			e.detail("SSVersion", ssVersion);
 			if (acsTable.find(acsIndex) == acsTable.end()) {
 				e.detail("Reason", "AcsIndexNotPresented");
 			} else {
@@ -185,7 +232,7 @@ bool AccumulativeChecksumValidator::isOutdated(UID ssid, Tag tag, uint16_t acsIn
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(acsIndex) == acsTable.end()) {
 		return false;
-	} else if (acsTable[acsIndex].outdated) {
+	} else if (!acsTable[acsIndex].outdated) {
 		return false;
 	} else {
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
