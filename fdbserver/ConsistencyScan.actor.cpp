@@ -1808,7 +1808,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 								*success = false;
 								return Void();
 							}
-							// All shards should be available in quiscence
+							// All shards should be available in quiescence
 							if (performQuiescentChecks && !storageServerInterfaces[i].isTss()) {
 								testFailure(
 								    "Storage server unavailable", performQuiescentChecks, success, failureIsError);
