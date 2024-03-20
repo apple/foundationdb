@@ -3383,7 +3383,7 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			// but it might also contain blob workers that died while the new manager was being recruited
 			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db, true));
 
-			// We could get the affinity list transactionally with the blob workers, however it is simpilier from an API
+			// We could get the affinity list transactionally with the blob workers, however it is simpler from an API
 			// perspective to get the affinities after the blob worker list, which ensures we will have the affinity for
 			// every worker returned.
 			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db, true));
