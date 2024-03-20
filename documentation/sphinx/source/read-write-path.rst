@@ -334,7 +334,7 @@ which is a typical database technique to increase transaction throughput.
 
 * **Step 8 (Make mutation messages durable in the queuing system)**:
   Proxy sends serialized mutation messages to the queuing system.
-  The queuing system will append the mutation to an append-only file, fsync it, and send the respnose back.
+  The queuing system will append the mutation to an append-only file, fsync it, and send the response back.
   Each message has a tag, which decides which process in the queuing system the message should be sent to.
   The queuing system returns to the proxy the minimum known committed version, which is the smallest commit version among all proxies.
   The minimum known commit version is used when the system recovers from fault.

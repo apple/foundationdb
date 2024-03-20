@@ -406,7 +406,7 @@ VaultResponse handleFetchBlobMetadata(const std::string& content) {
 
 	ASSERT(!response.failed);
 	response.buff = std::string(sb.GetString(), sb.GetSize());
-	//TraceEvent(SevDebug, "FetchBlobMetadataResponeStr").detail("Str", response.buff);
+	//TraceEvent(SevDebug, "FetchBlobMetadataResponseStr").detail("Str", response.buff);
 	return response;
 }
 
