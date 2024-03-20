@@ -174,7 +174,7 @@ public:
 	KeyRangeMap<Reference<CacheRangeInfo>> cachedRangeMap; // map of cached key-ranges
 	uint64_t cacheRangeChangeCounter; // Max( CacheRangeInfo->changecounter )
 
-	// TODO Add cache metrics, such as available memory/in-use memory etc to help dat adistributor assign cached ranges
+	// TODO Add cache metrics, such as available memory/in-use memory etc to help data distributor assign cached ranges
 	// StorageCacheMetrics metrics;
 
 	// newestAvailableVersion[k]
