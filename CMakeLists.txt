@@ -144,7 +144,7 @@ include(CompileCoverageTool)
 include(FlowCommands)
 
 ################################################################################
-# Vexilographer
+# Vexillographer
 ################################################################################
 
 include(CompileVexillographer)
