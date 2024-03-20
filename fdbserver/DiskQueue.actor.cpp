@@ -515,7 +515,7 @@ public:
 		files[1].popped += popped - pop0;
 	}
 
-	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
+	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and popped)
 	ACTOR static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* self, int file, int64_t page, int64_t debugSeq) {
 		self->files[file].popped = page * sizeof(Page);
 		if (file)
@@ -944,7 +944,7 @@ public:
 			if (!anyPopped)
 				return 0;
 
-			// To mark pages are poped, we push an empty page to specify that following pages were poped.
+			// To mark pages are popped, we push an empty page to specify that following pages were popped.
 			// maxPayLoad is the max. payload size, i.e., (page_size - page_header_size).
 			return Page::maxPayload;
 		} else
@@ -956,7 +956,7 @@ public:
 		if (!pushedPageCount()) {
 			if (!anyPopped)
 				return Void();
-			addEmptyPage(); // To remove poped pages, we push an empty page to specify that pages behind it were poped.
+			addEmptyPage(); // To remove popped pages, we push an empty page to specify that pages behind it were popped.
 		}
 		anyPopped = false;
 		backPage().popped = poppedSeq;
