@@ -40,6 +40,11 @@ void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
                                           MutationRef mutation,
                                           std::vector<Tag> tags,
                                           Version commitVersion) {
+	if (acsBuilder == nullptr) {
+		// ACS is open when acsBuilder is set
+		// Currently, acsBuilder is set only when the mutation is issued by commit proxy
+		return;
+	}
 	if (!mutation.checksum.present() || !mutation.accumulativeChecksumIndex.present()) {
 		return;
 	}
@@ -85,7 +90,7 @@ uint32_t AccumulativeChecksumBuilder::update(Tag tag, uint32_t checksum, Version
 	return newAcs;
 }
 
-void AccumulativeChecksumBuilder::resetTag(Tag tag) {
+void AccumulativeChecksumBuilder::resetTag(Tag tag, Version commitVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(tag) != acsTable.end()) {
@@ -93,7 +98,8 @@ void AccumulativeChecksumBuilder::resetTag(Tag tag) {
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsBuilderResetAccumulativeChecksum")
 			    .detail("AcsIndex", acsIndex)
-			    .detail("AcsTag", tag);
+			    .detail("AcsTag", tag)
+			    .detail("CommitVersion", commitVersion);
 		}
 	}
 }
@@ -124,6 +130,7 @@ void AccumulativeChecksumValidator::updateAcs(UID ssid, Tag tag, MutationRef mut
 		atAcsVersion = 0;
 		acsTable[acsIndex] = AccumulativeChecksumState(); // init
 	} else {
+		ASSERT(!acsTable[acsIndex].outdated);
 		atAcsVersion = acsTable[acsIndex].version;
 		if (!acsTable[acsIndex].cachedAcs.present()) {
 			oldAcs = acsTable[acsIndex].acs;
@@ -157,49 +164,47 @@ bool AccumulativeChecksumValidator::validateAcs(UID ssid,
 	if (acsTable.find(acsIndex) == acsTable.end()) {
 		return true;
 	}
+	ASSERT(!acsTable[acsIndex].outdated);
 	ASSERT(acsTable[acsIndex].cachedAcs.present());
 	uint32_t cachedAcs = acsTable[acsIndex].cachedAcs.get();
 
-	bool doUpdate = false;
-	if (acsTable[acsIndex].liveLatestVersion.present()) {
-		doUpdate = acsTable[acsIndex].liveLatestVersion.get() > acsMutationState.version;
-	} else {
-		// Initially, liveLatestVersion is not set. In this case,
-		// ssVersion must be the persisted version which is comparable
-		// to the acsMutationState.version
-		doUpdate = ssVersion >= acsMutationState.version;
+	if (acsMutationState.version <= acsTable[acsIndex].version) {
+		acsTable[acsIndex].cachedAcs.reset(); // drop cache
+		return true;
 	}
-	acsTable[acsIndex].liveLatestVersion = acsMutationState.version;
-	if (doUpdate) {
-		if (cachedAcs != acsMutationState.acs) {
-			TraceEvent e(SevError, "AccumulativeChecksumValidateError", ssid);
-			e.detail("AcsTag", tag);
-			e.detail("AcsIndex", acsIndex);
-			e.detail("AcsValueToCheck", acsMutationState.acs);
-			e.detail("AcsMutationVersion", acsMutationState.version);
-			e.detail("AcsTableVersion", acsTable[acsIndex].version);
-			e.detail("SSVersion", ssVersion);
-			if (acsTable.find(acsIndex) == acsTable.end()) {
-				e.detail("Reason", "AcsIndexNotPresented");
-			} else {
-				e.detail("Reason", "AcsValueMismatch");
-				e.detail("CachedAcs", cachedAcs);
-			}
-			return false; // Zhe: need to do something?
+	if (cachedAcs != acsMutationState.acs) {
+		TraceEvent e(SevError, "AccumulativeChecksumValidateError", ssid);
+		e.detail("AcsTag", tag);
+		e.detail("AcsIndex", acsIndex);
+		e.detail("AcsValueToCheck", acsMutationState.acs);
+		e.detail("AcsMutationVersion", acsMutationState.version);
+		e.detail("AcsTableVersion", acsTable[acsIndex].version);
+		e.detail("SSVersion", ssVersion);
+		if (acsTable.find(acsIndex) == acsTable.end()) {
+			e.detail("Reason", "AcsIndexNotPresented");
 		} else {
-			acsTable[acsIndex] = AccumulativeChecksumState(cachedAcs, acsMutationState.version); // with cleared cache
-			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-				TraceEvent(SevInfo, "AccumulativeChecksumValidated", ssid)
-				    .detail("AcsTag", tag)
-				    .detail("AcsIndex", acsIndex)
-				    .detail("AcsInTable", acsTable[acsIndex].toString());
-			}
+			e.detail("Reason", "AcsValueMismatch");
+			e.detail("CachedAcs", cachedAcs);
+		}
+		return false; // Zhe: need to do something?
+	} else {
+		acsTable[acsIndex] = AccumulativeChecksumState(cachedAcs, acsMutationState.version); // with cleared cache
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+			TraceEvent(SevInfo, "AccumulativeChecksumValidated", ssid)
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("AcsInTable", acsTable[acsIndex].toString())
+			    .detail("SSVersion", ssVersion);
 		}
 	}
 	return true;
 }
 
-void AccumulativeChecksumValidator::restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState) {
+void AccumulativeChecksumValidator::restore(UID ssid,
+                                            Tag tag,
+                                            uint16_t acsIndex,
+                                            AccumulativeChecksumState acsState,
+                                            Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(acsTable.find(acsIndex) == acsTable.end());
@@ -208,26 +213,31 @@ void AccumulativeChecksumValidator::restore(UID ssid, Tag tag, uint16_t acsIndex
 		TraceEvent(SevInfo, "AccumulativeChecksumValidatorRestore", ssid)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("AcsTag", tag)
-		    .detail("AcsState", acsState.toString());
+		    .detail("AcsState", acsState.toString())
+		    .detail("SSVersion", ssVersion);
 	}
 }
 
-void AccumulativeChecksumValidator::markAllAcsIndexOutdated(UID ssid, Tag tag) {
+void AccumulativeChecksumValidator::markAllAcsIndexOutdated(UID ssid, Tag tag, Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	outdated = true;
 	for (const auto& [acsIndex, acsState] : acsTable) {
 		acsTable[acsIndex].outdated = true;
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "MarkAcsValidatorAsOutdated", ssid)
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
-			    .detail("AcsState", acsState.toString());
+			    .detail("AcsState", acsState.toString())
+			    .detail("SSVersion", ssVersion);
 		}
 	}
 }
 
-bool AccumulativeChecksumValidator::isOutdated(UID ssid, Tag tag, uint16_t acsIndex, MutationRef mutation) {
+bool AccumulativeChecksumValidator::isOutdated(UID ssid,
+                                               Tag tag,
+                                               uint16_t acsIndex,
+                                               MutationRef mutation,
+                                               Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(acsIndex) == acsTable.end()) {
@@ -240,7 +250,8 @@ bool AccumulativeChecksumValidator::isOutdated(UID ssid, Tag tag, uint16_t acsIn
 			    .detail("Context", "Check with Acs mutation")
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
-			    .detail("Mutation", mutation);
+			    .detail("Mutation", mutation)
+			    .detail("SSVersion", ssVersion);
 		}
 		return true;
 	}
@@ -250,7 +261,7 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
-		m.setAccumulativeChecksumIndex(512, true);
+		m.setAccumulativeChecksumIndex(512);
 	}
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
 
@@ -283,7 +294,7 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	acsMutation.type = MutationRef::AccumulativeChecksum;
 	acsMutation.param1 = accumulativeChecksumKey;
 	acsMutation.param2 = accumulativeChecksumValue(AccumulativeChecksumState(1, 20));
-	acsMutation.setAccumulativeChecksumIndex(1, true);
+	acsMutation.setAccumulativeChecksumIndex(1);
 	acsMutation.populateChecksum();
 	BinaryWriter acsWr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
 	acsWr << acsMutation;

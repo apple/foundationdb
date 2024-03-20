@@ -41,7 +41,7 @@ public:
 
 	bool isValid() { return acsIndex != invalidAccumulativeChecksumIndex; }
 
-	void resetTag(Tag tag);
+	void resetTag(Tag tag, Version commitVersion);
 
 	uint32_t update(Tag tag, uint32_t checksum, Version version);
 
@@ -65,7 +65,7 @@ private:
 
 class AccumulativeChecksumValidator {
 public:
-	AccumulativeChecksumValidator() : outdated(false) {}
+	AccumulativeChecksumValidator() {}
 
 	void updateAcs(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
 
@@ -75,16 +75,13 @@ public:
 	                 AccumulativeChecksumState acsMutationState,
 	                 Version ssVersion);
 
-	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState);
+	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState, Version ssVersion);
 
-	void markAllAcsIndexOutdated(UID ssid, Tag tag);
+	void markAllAcsIndexOutdated(UID ssid, Tag tag, Version ssVersion);
 
-	bool isOutdated(UID ssid, Tag tag, uint16_t acsIndex, MutationRef mutation);
+	bool isOutdated(UID ssid, Tag tag, uint16_t acsIndex, MutationRef mutation, Version ssVersion);
 
 	std::unordered_map<uint16_t, AccumulativeChecksumState> acsTable;
-
-private:
-	bool outdated;
 };
 
 void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,

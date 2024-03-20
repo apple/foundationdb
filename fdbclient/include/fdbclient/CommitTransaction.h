@@ -171,10 +171,7 @@ struct MutationRef {
 
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
-	void setAccumulativeChecksumIndex(uint16_t index, bool doSet = false) {
-		if (!doSet) {
-			return;
-		}
+	void setAccumulativeChecksumIndex(uint16_t index) {
 		if (this->accumulativeChecksumIndex.present()) {
 			ASSERT(this->accumulativeChecksumIndex.get() == index);
 		} else {

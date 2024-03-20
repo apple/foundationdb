@@ -283,7 +283,7 @@ private:
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 				privatized.populateChecksum();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
 			}
 			toCommit->addTag(tag);
@@ -309,7 +309,7 @@ private:
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 				privatized.populateChecksum();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
 			}
 			toCommit->addTag(tag);
@@ -380,7 +380,7 @@ private:
 		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 		    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 			privatized.populateChecksum();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { cacheTag }, version);
 		}
 		toCommit->addTag(cacheTag);
@@ -431,7 +431,7 @@ private:
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					privatized.populateChecksum();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					acsBuilderUpdateAccumulativeChecksum(
 					    dbgid, acsBuilder, privatized, ranges.begin().value().tags, version);
 				}
@@ -445,7 +445,7 @@ private:
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					privatized.populateChecksum();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					std::vector<Tag> tags;
 					for (const auto& tag : allSources) {
 						tags.push_back(tag);
@@ -512,7 +512,7 @@ private:
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					privatized.populateChecksum();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					acsBuilderUpdateAccumulativeChecksum(
 					    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
 				}
@@ -549,7 +549,7 @@ private:
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 				privatized.populateChecksum();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				acsBuilderUpdateAccumulativeChecksum(
 				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
 			}
@@ -723,7 +723,7 @@ private:
 		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 		    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 			privatized.populateChecksum();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			std::vector<Tag> tags;
 			for (const auto& tag : allTags) {
 				tags.push_back(tag);
@@ -764,7 +764,7 @@ private:
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					privatized.populateChecksum();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
 				}
 
@@ -881,7 +881,7 @@ private:
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					privatized.populateChecksum();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					std::vector<Tag> tags;
 					for (const auto& tag : allTags) {
 						tags.push_back(tag);
@@ -1025,7 +1025,7 @@ private:
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 					    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 						privatized.populateChecksum();
-						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+						// privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 						acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
 					}
 
@@ -1059,7 +1059,7 @@ private:
 								    CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 								    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 									privatized.populateChecksum();
-									privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+									// privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 									acsBuilderUpdateAccumulativeChecksum(
 									    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
 								}
@@ -1075,18 +1075,18 @@ private:
 		if (!initialCommit) {
 			KeyRangeRef clearRange = range & serverTagKeys;
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    encryptMode.isEncryptionEnabled()) {
+			    !encryptMode.isEncryptionEnabled() && acsBuilder && updateAcsBuilderEntry) {
 				// For a removed tag, reset its corresponding entry in acsBuilder
-				if (acsBuilder) {
-					for (auto& kv :
-					     txnStateStore->readRange(clearRange).get()) { // read is expected to be immediately available
-						Tag tag = decodeServerTagValue(kv.value);
-						acsBuilder->resetTag(tag);
-						if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-							TraceEvent(SevInfo, "AcsBuilderResetTag", dbgid)
-							    .detail("AcsTag", tag)
-							    .detail("AcsIndex", accumulativeChecksumIndex);
-						}
+				// A mutation for tag removal is applied to the tags before its update
+				// So, resetting acsBuilder must be after issuing the tag
+				for (auto& kv :
+				     txnStateStore->readRange(clearRange).get()) { // read is expected to be immediately available
+					Tag tag = decodeServerTagValue(kv.value);
+					acsBuilder->resetTag(tag, version);
+					if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+						TraceEvent(SevInfo, "AcsBuilderResetTag", dbgid)
+						    .detail("AcsTag", tag)
+						    .detail("AcsIndex", accumulativeChecksumIndex);
 					}
 				}
 			}
@@ -1277,7 +1277,7 @@ private:
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 				privatized.populateChecksum();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				acsBuilderUpdateAccumulativeChecksum(
 				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
 			}
@@ -1312,7 +1312,7 @@ private:
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 					    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 						privatized.populateChecksum();
-						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 						acsBuilderUpdateAccumulativeChecksum(
 						    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
 					}
@@ -1404,7 +1404,7 @@ private:
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					privatized.populateChecksum();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					std::vector<Tag> tags;
 					for (const auto& tag : allTags) {
 						tags.push_back(tag);
@@ -1530,7 +1530,7 @@ private:
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 				mutationBegin.populateChecksum();
-				mutationBegin.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+				mutationBegin.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				std::vector<Tag> tags;
 				for (const auto& tag : allTags) {
 					tags.push_back(tag);
@@ -1542,7 +1542,7 @@ private:
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 				mutationEnd.populateChecksum();
-				mutationEnd.setAccumulativeChecksumIndex(accumulativeChecksumIndex, false);
+				mutationEnd.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				std::vector<Tag> tags;
 				for (const auto& tag : allTags) {
 					tags.push_back(tag);
