@@ -605,7 +605,7 @@ public:
 			    .detail("BytesWrittenAverageRate", 0)
 			    .detail("PriorityRecoverMove", 0)
 			    .detail("PriorityRebalanceUnderutilizedTeam", 0)
-			    .detail("PriorityRebalannceOverutilizedTeam", 0)
+			    .detail("PriorityRebalanceOverutilizedTeam", 0)
 			    .detail("PriorityTeamHealthy", 0)
 			    .detail("PriorityTeamContainsUndesiredServer", 0)
 			    .detail("PriorityTeamRedundant", 0)
