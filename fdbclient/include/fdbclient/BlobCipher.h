@@ -899,7 +899,7 @@ private:
 // This interface enables data block encryption. An invocation to encrypt() will
 // do two things:
 // 1) generate encrypted ciphertext for given plaintext input.
-// 2) generate BlobCipherEncryptHeader (including the 'header authTokens') and persit for decryption on reads.
+// 2) generate BlobCipherEncryptHeader (including the 'header authTokens') and persist for decryption on reads.
 
 class EncryptBlobCipherAes265Ctr final : NonCopyable, public ReferenceCounted<EncryptBlobCipherAes265Ctr> {
 public:
