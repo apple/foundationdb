@@ -3557,7 +3557,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	};
 
-	// Persist shard mappinng key range should not be in shardMap.
+	// Persist shard mapping key range should not be in shardMap.
 	explicit ShardedRocksDBKeyValueStore(const std::string& path, UID id)
 	  : rState(std::make_shared<ShardedRocksDBState>()), path(path), id(id),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
