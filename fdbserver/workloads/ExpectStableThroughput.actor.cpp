@@ -7,7 +7,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last include
 
-// This workload is meant to be run with the ThroughputQuotaWorklaod.
+// This workload is meant to be run with the ThroughputQuotaWorkload.
 // The ThroughputQuotaWorkload sets a total quota, and then this workload runs
 // with tagged transactions for a long duration, attempting to achieve a higher
 // throughput than the specified quota. The check phase of this workload then

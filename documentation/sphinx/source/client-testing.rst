@@ -456,7 +456,7 @@ The transaction context provides methods for implementation of the transaction l
    
    commit and finish the transaction. If the commit is successful, the execution proceeds to the
    continuation of ``execTransaction()``. In case of a retriable error the transaction is
-   automatically retried. A fatal error results in a failure of the workoad.
+   automatically retried. A fatal error results in a failure of the workload.
 
 
 .. function:: done() 
