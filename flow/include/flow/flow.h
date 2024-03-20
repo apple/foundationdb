@@ -61,7 +61,7 @@
 
 // Flow_CheckedContinuation.h depends on this header, so we first parse it
 // without relying on any imported Swift types.
-#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifndef SWIFT_HIDE_CHECKED_CONTINUATION
 #include "SwiftModules/Flow_CheckedContinuation.h"
 #endif /* SWIFT_HIDE_CHECKED_CONTINUATION */
 
@@ -958,7 +958,7 @@ template <class T>
 class Promise;
 
 #ifdef WITH_SWIFT
-#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifndef SWIFT_HIDE_CHECKED_CONTINUATION
 using flow_swift::FlowCheckedContinuation;
 
 template<class T>
@@ -1013,7 +1013,7 @@ public:
 
 template <class T>
 class SWIFT_SENDABLE
-#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifndef SWIFT_HIDE_CHECKED_CONTINUATION
 #ifdef WITH_SWIFT
 SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowFutureOps)
 #endif
@@ -1022,7 +1022,7 @@ SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowFutureOps)
 public:
 	using Element = T;
 #ifdef WITH_SWIFT
-#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifndef SWIFT_HIDE_CHECKED_CONTINUATION
 	using FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuation<T>;
 #endif
 #endif /* WITH_SWIFT */
