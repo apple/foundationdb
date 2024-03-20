@@ -286,7 +286,7 @@ def lockAndUnlock(logger):
         env=fdbcli_env,
     )
     process.stdout.readline()
-    # The randome passphrase we need to confirm to proceed the unlocking
+    # The random passphrase we need to confirm to proceed the unlocking
     line2 = process.stdout.readline()
     logger.debug("Random passphrase: {}".format(line2))
     output3, err = process.communicate(input=line2)
