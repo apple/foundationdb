@@ -385,7 +385,7 @@ class ArrayUtilTest {
 			byte[] expectedResults = arrays.get(i + 3);
 			byte[] results = ByteArrayUtil.replace(src, pattern, replacement);
 			String errorMsg = String.format(
-			    "results <%s> did not match expected results <%s> when replaceing <%s> with <%s> in <%s>",
+			    "results <%s> did not match expected results <%s> when replacing <%s> with <%s> in <%s>",
 			    ByteArrayUtil.printable(results), ByteArrayUtil.printable(expectedResults),
 			    ByteArrayUtil.printable(pattern), ByteArrayUtil.printable(replacement), ByteArrayUtil.printable(src));
 
