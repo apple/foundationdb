@@ -2115,7 +2115,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	// Checks and waits for few seconds if rocskdb is overloaded.
+	// Checks and waits for few seconds if rocksdb is overloaded.
 	ACTOR Future<Void> checkRocksdbState(RocksDBKeyValueStore* self) {
 		state uint64_t estPendCompactBytes;
 		state uint64_t numImmutableMemtables;

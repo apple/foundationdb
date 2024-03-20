@@ -3706,7 +3706,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	// Checks and waits for few seconds if rocskdb is overloaded.
+	// Checks and waits for few seconds if rocksdb is overloaded.
 	ACTOR Future<Void> checkRocksdbState(rocksdb::DB* db) {
 		state uint64_t estPendCompactBytes;
 		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
