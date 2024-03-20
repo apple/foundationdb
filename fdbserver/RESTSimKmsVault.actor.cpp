@@ -206,7 +206,7 @@ void addCipherDetailToRespDoc(rapidjson::Document& doc,
 	cipherDetails.PushBack(cipherDetail, doc.GetAllocator());
 }
 
-void addBlobMetadaToResDoc(rapidjson::Document& doc, rapidjson::Value& blobDetails, const EncryptCipherDomainId domId) {
+void addBlobMetadataToResDoc(rapidjson::Document& doc, rapidjson::Value& blobDetails, const EncryptCipherDomainId domId) {
 	Standalone<BlobMetadataDetailsRef> detailsRef = SimKmsVault::getBlobMetadata(domId, bgUrl);
 	rapidjson::Value blobDetail(rapidjson::kObjectType);
 
@@ -358,7 +358,7 @@ VaultResponse handleFetchKeysByKeyIds(const std::string& content) {
 	return response;
 }
 
-VaultResponse handleFetchBlobMetada(const std::string& content) {
+VaultResponse handleFetchBlobMetadata(const std::string& content) {
 	VaultResponse response;
 	rapidjson::Document doc;
 
@@ -390,7 +390,7 @@ VaultResponse handleFetchBlobMetada(const std::string& content) {
 	rapidjson::Value blobDetails(rapidjson::kArrayType);
 	for (const auto& blobDetail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
 		EncryptCipherDomainId domainId = blobDetail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64();
-		addBlobMetadaToResDoc(doc, blobDetails, domainId);
+		addBlobMetadataToResDoc(doc, blobDetails, domainId);
 	}
 	rapidjson::Value memberKey(BLOB_METADATA_DETAILS_TAG, result.GetAllocator());
 	result.AddMember(memberKey, blobDetails, result.GetAllocator());
@@ -423,7 +423,7 @@ ACTOR Future<Void> simKmsVaultRequestHandler(Reference<HTTP::IncomingRequest> re
 	} else if (request->resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE) == 0) {
 		vaultResponse = handleFetchKeysByDomainIds(request->data.content);
 	} else if (request->resource.compare(REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE) == 0) {
-		vaultResponse = handleFetchBlobMetada(request->data.content);
+		vaultResponse = handleFetchBlobMetadata(request->data.content);
 	} else {
 		TraceEvent("UnexpectedResource").detail("Resource", request->resource);
 		throw http_bad_response();
@@ -768,7 +768,7 @@ TEST_CASE("/restSimKmsVault/GetBlobMetadata/missingVersion") {
 	EncryptCipherDomainIdVec domIds;
 	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::MISSING_VERSION);
 
-	VaultResponse response = handleFetchBlobMetada(requestContent);
+	VaultResponse response = handleFetchBlobMetadata(requestContent);
 	ASSERT(response.failed);
 	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
 	ASSERT(detail.present());
@@ -781,7 +781,7 @@ TEST_CASE("/restSimKmsVault/GetBlobMetadata/invalidVersion") {
 	EncryptCipherDomainIdVec domIds;
 	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::INVALID_VERSION);
 
-	VaultResponse response = handleFetchBlobMetada(requestContent);
+	VaultResponse response = handleFetchBlobMetadata(requestContent);
 	ASSERT(response.failed);
 	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
 	ASSERT(detail.present());
@@ -794,7 +794,7 @@ TEST_CASE("/restSimKmsVault/GetByKeyIds/missingValidationTokens") {
 	EncryptCipherDomainIdVec domIds;
 	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::MISSING_VALIDATION_TOKEN);
 
-	VaultResponse response = handleFetchBlobMetada(requestContent);
+	VaultResponse response = handleFetchBlobMetadata(requestContent);
 	ASSERT(response.failed);
 	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
 	ASSERT(detail.present());
@@ -807,7 +807,7 @@ TEST_CASE("/restSimKmsVault/GetBlobMetadata/foo") {
 	EncryptCipherDomainIdVec domIds;
 	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds);
 
-	VaultResponse response = handleFetchBlobMetada(requestContent);
+	VaultResponse response = handleFetchBlobMetadata(requestContent);
 	validateBlobLookup(response, domIds);
 	return Void();
 }
