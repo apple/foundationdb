@@ -1709,7 +1709,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				messages.serializeBytes(messages2.toValue());
 			}
 		} else {
-			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+			// FIXME: Limit to approximately DESIRED_TOTAL_BYTES somehow.
 			RangeResult kvrefs = wait(self->persistentData->readRange(
 			    KeyRangeRef(
 			        persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
