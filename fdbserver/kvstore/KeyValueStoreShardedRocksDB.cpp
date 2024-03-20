@@ -3347,7 +3347,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    shardManager(path, id, rState, dbOptions, errorListener, eventListener, &counters, iteratorPool),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, rState, dbOptions.statistics)),
 	    latencyMetrics(std::make_shared<LatencyMetrics>()) {
-		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
+		// In simulation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
 		// will also block the network thread in a way that would be unacceptable in production but is a necessary
 		// evil here. When performing the reads in background threads in simulation, the event loop thinks there is
