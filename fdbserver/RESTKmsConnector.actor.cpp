@@ -148,7 +148,7 @@ struct KmsUrlStore {
 		std::sort(kmsUrls.begin(), kmsUrls.end(), [](const KmsUrlCtx<Params>& l, const KmsUrlCtx<Params>& r) {
 			// Sort the available URLs based on following rules:
 			// 1. URL with higher unresponsiveness-penalty are least preferred
-			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-respones are
+			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-responses are
 			// less preferred
 			// 3. Lastly, URLs with more malformed response messages are less preferred
 
