@@ -2059,7 +2059,7 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 			ASSERT_NE(std::memcmp(cipherKey->rawCipher(), baseCipher->key.get(), len), 0);
 		}
 	}
-	TraceEvent("TestLooksupDone").log();
+	TraceEvent("TestLookUpsDone").log();
 
 	// Ensure attempting to insert existing cipherKey (identical) more than once is treated as a NOP
 	try {
