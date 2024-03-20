@@ -11074,17 +11074,34 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 			ASSERT(false); // This is to check the completeness of setting acs index
 		}
 	}
+	uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
 	if (msg.type == MutationRef::SetValue && msg.param1 == lastEpochEndPrivateKey) {
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+			TraceEvent(SevInfo, "AcsValidatorSeeRecovery", data->thisServerID)
+			    .detail("AcsTag", data->tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("SSVersion", data->version.get());
+		}
 		// When receiving recovery transaction
 		// Mark all in-memory ACS states as outdated
 		data->acsValidator.markAllAcsIndexOutdated(data->thisServerID, data->tag, data->version.get());
 		// Mark all persisted ACS states as outdated
-		for (const auto& [acsIndex, acsState] : data->acsValidator.acsTable) {
+		for (const auto& [acsIdx, acsState] : data->acsValidator.acsTable) {
 			ASSERT(acsState.outdated);
-			data->storage.makeAccumulativeChecksumDurable(acsIndex, acsState);
+			data->storage.makeAccumulativeChecksumDurable(acsIdx, acsState);
+		}
+		if (data->acsValidator.acsTable.find(acsIndex) == data->acsValidator.acsTable.end()) {
+			// If this recovery mutation is the first mutation arriving at this SS,
+			// we are not be able to mark it as outdate.
+			// Simply add a placeholder.
+			// TODO: remove it when supporting recovery.
+			// At acs validator, any mutation at the recovery version should be added to the old table
+			// Any mutation after the recovery version should be added to the new table
+			data->acsValidator.acsTable[acsIndex] = AccumulativeChecksumState();
+			data->acsValidator.acsTable[acsIndex].outdated = true;
+			data->storage.makeAccumulativeChecksumDurable(acsIndex, data->acsValidator.acsTable[acsIndex]);
 		}
 	}
-	uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
 	if (data->acsValidator.isOutdated(data->thisServerID, data->tag, acsIndex, msg, data->version.get())) {
 		return;
 	}
