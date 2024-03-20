@@ -299,7 +299,7 @@ void Coro_switchTo_(Coro* self, Coro* next) {
 #if defined(USE_SETJMP) && defined(__x86_64__)
 
 void Coro_setup(Coro* self, void* arg) {
-	/* since ucontext seems to be broken on amg64 */
+	/* since ucontext seems to be broken on amd64 */
 
 	setjmp(self->env);
 	/* This is probably not nice in that it deals directly with
