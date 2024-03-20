@@ -1366,7 +1366,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
    will combine the ``tr_version`` and ``user_version`` to produce a byte string that
    lexicographically sorts appropriately with other ``Versionstamp`` instances. If this instance is
    incomplete, then the ``tr_version`` component gets filled in with dummy bytes that will cause it
-   to sort after every complete ``Verionstamp``'s serialized bytes.
+   to sort after every complete ``Versionstamp``'s serialized bytes.
 
 .. method:: Versionstamp.__eq__(other)
 .. method:: Versionstamp.__ne__(other)
