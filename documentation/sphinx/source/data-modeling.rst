@@ -537,7 +537,7 @@ FoundationDB's transactional guarantees ensure that, even when multiple clients 
 Key and value sizes
 ===================
 
-How you map your application data to keys and values can have a dramatic impact on performance. Below are some guidelines to consider as you design a data model. (For more general discussion of performance considerations, see :ref:`developer-guide-peformance-considerations`.)
+How you map your application data to keys and values can have a dramatic impact on performance. Below are some guidelines to consider as you design a data model. (For more general discussion of performance considerations, see :ref:`developer-guide-performance-considerations`.)
 
 * Structure keys so that range reads can efficiently retrieve the most frequently accessed data.
 

@@ -581,7 +581,7 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 		throw platform_error();
 	}
 
-	PERFORMACE_INFORMATION perf;
+	PERFORMANCE_INFORMATION perf;
 	if (!GetPerformanceInfo(&perf, sizeof(perf))) {
 		TraceEvent(SevError, "WindowsGetMemPerformanceInfo").GetLastError();
 		throw platform_error();

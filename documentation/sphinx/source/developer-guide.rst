@@ -766,7 +766,7 @@ If you only need to detect the *fact* of a change, and your response doesn't dep
             fdb.Future.wait_for_any(*watch_keys(db))
             yield
 
-.. _developer-guide-peformance-considerations:
+.. _developer-guide-performance-considerations:
 
 
 Performance considerations
