@@ -249,7 +249,7 @@ private:
 	// this method removes the page entry from checksum history upon a successful check
 	bool verifyChecksum(uint32_t page, uint32_t checksum, uint8_t* start) {
 		if (!lru.exist(page)) {
-			// it has already been verified succesfully and removed by checksumWorker
+			// it has already been verified successfully and removed by checksumWorker
 			return true;
 		}
 		WriteInfo history = lru.find(page);
