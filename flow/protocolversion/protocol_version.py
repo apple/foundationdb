@@ -158,7 +158,7 @@ class CMakeProtocolVersionSerializer(ProtocolVersionSerializerBase):
         raise NotImplementedError()
 
 
-class JSONProtocolVersionSerialzer(ProtocolVersionSerializerBase):
+class JSONProtocolVersionSerializer(ProtocolVersionSerializerBase):
     def _load(self, stream: io.TextIOWrapper) -> ProtocolVersion:
         raise NotImplementedError()
 
