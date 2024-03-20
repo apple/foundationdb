@@ -380,7 +380,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 		}
 		// test lock and unlock
-		// maske sure we lock the database
+		// make sure we lock the database
 		while (true) {
 			Error err;
 			try {
