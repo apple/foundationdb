@@ -2347,7 +2347,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		        numImmutableMemtables >= SERVER_KNOBS->ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT);
 	}
 
-	// Checks and waits for few seconds if rocskdb is overloaded.
+	// Checks and waits for few seconds if rocksdb is overloaded.
 	Future<Void> checkRocksdbState(RocksDBKeyValueStore* self) {
 		uint64_t estPendCompactBytes{ 0 };
 		uint64_t numImmutableMemtables{ 0 };

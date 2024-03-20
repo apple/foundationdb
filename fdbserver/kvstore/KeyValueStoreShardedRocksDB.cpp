@@ -3503,7 +3503,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
 	}
 
-	// Checks and waits for few seconds if rocskdb is overloaded.
+	// Checks and waits for few seconds if rocksdb is overloaded.
 	Future<Void> checkRocksdbState(rocksdb::DB* db) {
 		uint64_t estPendCompactBytes{ 0 };
 		int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
