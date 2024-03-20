@@ -600,7 +600,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	Future<Void> truncate() {
-		// Allow truncatation during zero copy reads but orphan the previous buffer
+		// Allow truncation during zero copy reads but orphan the previous buffer
 		if (zeroCopyRefCount != 0)
 			orphan();
 		truncated = true;
