@@ -707,7 +707,7 @@ private:
 
 	ACTOR static Future<Void> processStorageQueuingMetricsRequest(StorageQueuingMetricsRequest req) {
 		// dprint("Unsupported StorageQueuingMetricsRequest\n");
-		//  FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
+		//  FIXME get rid of this delay. it's a temp solution to avoid starvation scheduling of DD
 		//  processes
 		wait(delay(1));
 		req.reply.sendError(unsupported_operation());
