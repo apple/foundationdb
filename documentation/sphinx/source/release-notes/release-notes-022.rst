@@ -37,7 +37,7 @@ Language APIs
 * Java
 
 	* Compiles class files with 1.6 source and target flags.
-	* Single-jar packaging for all platforms. (In rare cases, setting the ``FDB_LIBRARY_PATH_FDB_JAVA`` environment variable will be requried if you previously relied on loading the library from a system path.)
+	* Single-jar packaging for all platforms. (In rare cases, setting the ``FDB_LIBRARY_PATH_FDB_JAVA`` environment variable will be required if you previously relied on loading the library from a system path.)
 
 * Ruby
    
