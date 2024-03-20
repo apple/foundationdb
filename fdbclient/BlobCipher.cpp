@@ -101,7 +101,7 @@ void validateEncryptHeaderAlgoHeaderVersion(const EncryptCipherMode cipherMode,
 		    .detail("AuthMode", authMode)
 		    .detail("AuthAlgo", authAlgo)
 		    .detail("AlgoHeaderVersion", version)
-		    .detail("MaxSsupportedVersion", maxSupportedVersion);
+		    .detail("MaxSupportedVersion", maxSupportedVersion);
 		throw not_implemented();
 	}
 }
