@@ -258,7 +258,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 	}
 
 	state double start = now();
-	state int oustandingReplies = requests.size();
+	state int outstandingReplies = requests.size();
 	loop {
 		try {
 			state std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
@@ -279,7 +279,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 						TraceEvent(SevInfo, "FastRestoreGetBatchReplies")
 						    .suppressFor(1.0)
 						    .detail("Requests", requests.size())
-						    .detail("OutstandingReplies", oustandingReplies)
+						    .detail("OutstandingReplies", outstandingReplies)
 						    .detail("ReplyIndex", i)
 						    .detail("ReplyIsReady", cmdReplies[i].isReady())
 						    .detail("ReplyIsError", cmdReplies[i].isError())
@@ -291,7 +291,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 						ongoingRepliesIndex.push_back(i);
 					}
 				}
-				ASSERT(ongoingReplies.size() == oustandingReplies);
+				ASSERT(ongoingReplies.size() == outstandingReplies);
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
@@ -303,17 +303,17 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
 					if (ongoingReplies[j].isReady()) {
 						std::get<2>(replyDurations[ongoingRepliesIndex[j]]) = now();
-						--oustandingReplies;
+						--outstandingReplies;
 					} else if (ongoingReplies[j].isError()) {
 						// When this happens,
-						// the above assertion ASSERT(ongoingReplies.size() == oustandingReplies) will fail
+						// the above assertion ASSERT(ongoingReplies.size() == outstandingReplies) will fail
 						TraceEvent(SevError, "FastRestoreGetBatchRepliesReplyError")
 						    .detail("OngoingReplyIndex", j)
 						    .detail("FutureError", ongoingReplies[j].getError().what());
 					}
 				}
 			}
-			ASSERT(oustandingReplies == 0);
+			ASSERT(outstandingReplies == 0);
 			if (trackRequestLatency && SERVER_KNOBS->FASTRESTORE_TRACK_REQUEST_LATENCY) {
 				// Calculate the latest end time for each interface
 				std::map<UID, double> maxEndTime;
