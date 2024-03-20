@@ -442,7 +442,7 @@ private:
 				ranges.push_back(KeyRangeRef(metadataVersionKey, metadataVersionKeyEnd));
 				state Version readVersion = wait(dumpRanges(self, splitter, ranges));
 
-				// blobGranuleHistoryKeys - Map granule to its parents and parent bundaries. for time-travel read
+				// blobGranuleHistoryKeys - Map granule to its parents and parent boundaries. for time-travel read
 				wait(dumpRange(self, splitter, blobGranuleHistoryKeys, [=](KeyValueRef row) {
 					return shouldDumpBlobGranuleHistoryKey(row, readVersion);
 				}));
