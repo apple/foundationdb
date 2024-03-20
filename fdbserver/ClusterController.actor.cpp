@@ -177,7 +177,7 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	};
 
 	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
-	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+	// check for disconnection since the latency between primary and satellite is across WAN and may not be very
 	// stable.
 	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
 	       transactionWorkerInList(degradationInfo.disconnectedServers,
