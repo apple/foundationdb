@@ -47,7 +47,7 @@ The integration works "both ways", i.e. Swift can call into Flow/C++ code, as we
 
 Swift generates clang modules which can be consumed in C++. For example, the module `fdbserver_swift` contains all swift code in `fdbserver/`.
 
-> Note: you can check, and add new files to the `_swift` targets by locating the command, e.g. `add_library(fdbserver_swft` in [fdbserver/CMakeLists.txt](fdbserver/CMakeLists.txt).
+> Note: you can check, and add new files to the `_swift` targets by locating the command, e.g. `add_library(fdbserver_swift` in [fdbserver/CMakeLists.txt](fdbserver/CMakeLists.txt).
 
 Then, you can then include the generated module in C++:
 
