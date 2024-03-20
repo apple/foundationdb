@@ -550,7 +550,7 @@ public:
 			// waitDataDistributorEnabled and then set to 0 before
 			// waitUntilDataDistributorExitSecurityMode. For this case,
 			// after waitUntilDataDistributorExitSecurityMode, DDMode is 0.
-			// The init loop does not break and the loop will stuct at
+			// The init loop does not break and the loop will stuck at
 			// waitDataDistributorEnabled in the next iteration.
 			TraceEvent("DataDistributorExitSecurityMode").log();
 
