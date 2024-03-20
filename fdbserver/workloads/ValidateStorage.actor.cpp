@@ -485,7 +485,7 @@ struct ValidateStorage : TestWorkload {
 		UID auditIdD = wait(self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality"));
 		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD);
-		wait(self->testGetAuditStateWhenNoOngingAudit(self, cx));
+		wait(self->testGetAuditStateWhenNoOngoingAudit(self, cx));
 		TraceEvent("TestGetAuditStateDone");
 		return Void();
 	}
@@ -506,7 +506,7 @@ struct ValidateStorage : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> testGetAuditStateWhenNoOngingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
+	ACTOR Future<Void> testGetAuditStateWhenNoOngoingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
 		TraceEvent("TestGetAuditStateBegin").detail("AuditType", type);
 		std::vector<AuditStorageState> res1 = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
 		if (res1.size() > 1) { // == 0 if empty range when testAuditStorageFunctionality
@@ -557,17 +557,17 @@ struct ValidateStorage : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> testGetAuditStateWhenNoOngingAudit(ValidateStorage* self, Database cx) {
-		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateHA));
+	ACTOR Future<Void> testGetAuditStateWhenNoOngoingAudit(ValidateStorage* self, Database cx) {
+		wait(self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateHA));
 		TraceEvent("TestGetAuditStateHADone");
 
-		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateReplica));
+		wait(self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateReplica));
 		TraceEvent("TestGetAuditStateReplicaDone");
 
-		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateLocationMetadata));
+		wait(self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateLocationMetadata));
 		TraceEvent("TestGetAuditStateShardLocationMetadataDone");
 
-		wait(self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateStorageServerShard));
+		wait(self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateStorageServerShard));
 		TraceEvent("TestGetAuditStateSSShardInfoDone");
 		return Void();
 	}

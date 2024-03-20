@@ -5077,7 +5077,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	// The trackShardAssignment is correct when at most 1 auditStorageServerShardQ runs
 	// at a time. Currently, this is guaranteed by setting serveAuditStorageParallelismLock == 1
 	// If serveAuditStorageParallelismLock > 1, we need to check trackShardAssignmentMinVersion
-	// to make sure no onging auditStorageServerShardQ is running
+	// to make sure no ongoing auditStorageServerShardQ is running
 	if (data->trackShardAssignmentMinVersion != invalidVersion) {
 		// Another auditStorageServerShardQ is running
 		req.reply.sendError(audit_storage_cancelled());
