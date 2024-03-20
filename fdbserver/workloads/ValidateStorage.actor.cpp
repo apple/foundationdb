@@ -694,14 +694,14 @@ struct ValidateStorage : TestWorkload {
 		};
 		state std::vector<KeyRange> progressRanges = shuffleRanges(progressRangesCollection);
 		state int i = 0;
-		state std::vector<KeyRange> alreadyPersisteRanges;
+		state std::vector<KeyRange> alreadyPersistedRanges;
 		for (; i < progressRanges.size(); i++) {
 			state AuditStorageState auditState(auditId, auditType);
 			auditState.range = progressRanges[i];
 			auditState.ddId = ddId;
 			auditState.setPhase(AuditPhase::Complete);
 			wait(self->persistAuditStateByRange(self, cx, auditState));
-			alreadyPersisteRanges.push_back(progressRanges[i]);
+			alreadyPersistedRanges.push_back(progressRanges[i]);
 			std::vector<AuditStorageState> auditStates = wait(getAuditStateByRange(cx, auditType, auditId, allKeys));
 			for (int i = 0; i < auditStates.size(); i++) {
 				KeyRange toCompare = auditStates[i].range;
@@ -709,8 +709,8 @@ struct ValidateStorage : TestWorkload {
 				bool fullyCovered = false;
 				std::vector<KeyRange> unCoveredRanges;
 				unCoveredRanges.push_back(toCompare);
-				// check if toCompare is overlapped/fullyCovered by alreadyPersisteRanges
-				for (const auto& persistedRange : alreadyPersisteRanges) {
+				// check if toCompare is overlapped/fullyCovered by alreadyPersistedRanges
+				for (const auto& persistedRange : alreadyPersistedRanges) {
 					KeyRange overlappedRange = toCompare & persistedRange;
 					if (!overlappedRange.empty()) {
 						overlapped = true;
@@ -725,10 +725,10 @@ struct ValidateStorage : TestWorkload {
 					unCoveredRanges = unCoveredRangesNow;
 				}
 				fullyCovered = unCoveredRanges.empty();
-				if (fullyCovered) { // toCompare is fully covered by alreadyPersisteRanges
+				if (fullyCovered) { // toCompare is fully covered by alreadyPersistedRanges
 					ASSERT(auditStates[i].getPhase() == AuditPhase::Complete);
 				} else {
-					// toCompare cannot be partially covered by alreadyPersisteRanges
+					// toCompare cannot be partially covered by alreadyPersistedRanges
 					ASSERT(!overlapped);
 					ASSERT(auditStates[i].getPhase() == AuditPhase::Invalid);
 				}
