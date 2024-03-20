@@ -113,7 +113,7 @@ std::string toString(BlobCipherMetrics::UsageType type);
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture
 // the ciphertext. Similarly, on decryption EncryptBuf is allocated using client supplied Arena and provided
 // to the AES library to capture decipher text and passed back to the clients. Given the object passed around
-// is reference-counted, it gets freed once refrenceCount goes to 0.
+// is reference-counted, it gets freed once referenceCount goes to 0.
 
 class EncryptBuf : public ReferenceCounted<EncryptBuf>, NonCopyable {
 public:
