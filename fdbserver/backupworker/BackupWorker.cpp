@@ -749,7 +749,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 			TraceEvent("BackupWorkerTrueUp", self->myId).detail("LastSavedVersion", it->second.lastSavedVersion);
 		}
 		// The true-up version can be larger than first message version, so keep
-		// the begin versions for later muation filtering.
+		// the begin versions for later mutation filtering.
 		beginVersions.push_back(it->second.lastSavedVersion);
 
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
