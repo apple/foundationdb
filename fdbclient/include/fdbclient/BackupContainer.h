@@ -292,7 +292,7 @@ public:
 
 	// Get exactly the files necessary to restore the key space filtered by the specified key ranges to targetVersion.
 	// If targetVersion is 'latestVersion', use the minimum restorable version in a snapshot.
-	// If logsOnly is set, only use log files in [beginVersion, targetVervions) in restore set.
+	// If logsOnly is set, only use log files in [beginVersion, targetVersions) in restore set.
 	// Returns non-present if restoring to the given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {},
