@@ -217,7 +217,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
-.. warning:: Localtiy based exclusions should only be used in FDB versions 7.1.42+, 7.3.26+ or newer. Older versions have limited support for locality based exclusions and therefore the usage of locality based exclusions on those older version is not recommended.
+.. warning:: Locality based exclusions should only be used in FDB versions 7.1.42+, 7.3.26+ or newer. Older versions have limited support for locality based exclusions and therefore the usage of locality based exclusions on those older version is not recommended.
 
 .. warning:: There is currently one known limitation with the locality based exclusions: If a process is serving as a log and the process is currently not reporting to the cluster, e.g. because of a partition, the process will not be detected by the exclude command. The exclusion is still initiated in the background but the exclude command itself will not block.
 
