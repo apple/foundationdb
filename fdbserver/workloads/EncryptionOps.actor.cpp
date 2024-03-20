@@ -59,12 +59,12 @@ struct WorkloadMetrics {
 	WorkloadMetrics() { reset(); }
 
 	double computeEncryptThroughputMBPS() {
-		// convert bytes -> MBs & nano-seonds -> seconds
+		// convert bytes -> MBs & nano-seconds -> seconds
 		return (totalBytes * NANO_SECOND) / (totalEncryptTimeNS * MEGA_BYTES);
 	}
 
 	double computeDecryptThroughputMBPS() {
-		// convert bytes -> MBs & nano-seonds -> seconds
+		// convert bytes -> MBs & nano-seconds -> seconds
 		return (totalBytes * NANO_SECOND) / (totalDecryptTimeNS * MEGA_BYTES);
 	}
 
