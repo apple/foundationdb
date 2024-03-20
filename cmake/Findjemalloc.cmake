@@ -88,7 +88,7 @@ macro(_configure_jemalloc_pic_target)
     set_target_properties(
       jemalloc_pic::jemalloc_pic
       PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${jemalloc_INCLUDE_DIRS}"
-                 IMPORTED_LOCATION "${jemalloc_pic_LIBRARTY}"
+                 IMPORTED_LOCATION "${jemalloc_pic_LIBRARY}"
                  VERSION "${jemalloc_VERSION}")
   endif()
 endmacro()
