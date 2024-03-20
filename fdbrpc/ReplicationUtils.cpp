@@ -250,7 +250,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,
 				auto oldBestFound =
 				    findBestPolicySetExpensive(oldBest, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
 				if (!oldBestFound) {
-					TraceEvent(SevError, "FBPSMissmatch").detail("Policy", policy->info());
+					TraceEvent(SevError, "FBPSMismatch").detail("Policy", policy->info());
 				} else {
 					ASSERT(mostUsedZoneCount(localitySet, bestResults) <= mostUsedZoneCount(localitySet, oldBest));
 				}
