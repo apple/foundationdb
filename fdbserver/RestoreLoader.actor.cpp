@@ -92,7 +92,7 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
 // Requests for earlier version batches are preferred; which is equivalent to
-// sendMuttionsRequests are preferred than loadingFileRequests
+// sendMutationsRequests are preferred than loadingFileRequests
 ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database cx) {
 	try {
 		state int curVBInflightReqs = 0;
