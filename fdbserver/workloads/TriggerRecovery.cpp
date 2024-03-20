@@ -129,7 +129,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 						tr.set("\xff\xff/reboot_worker"_sr, it.second);
 					}
 				}
-				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttemptedKillAll").log();
 				co_return;
 			} catch (Error& e) {
 				err = e;
@@ -150,7 +150,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					co_await changeResolverConfig(cx, this);
 				}
 				numRecoveriesDone++;
-				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedRecovery").detail("RecoveryNum", numRecoveriesDone);
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttemptedRecovery").detail("RecoveryNum", numRecoveriesDone);
 				if (injectFailureAfterFirstRecovery && numRecoveriesDone == 1) {
 					throw operation_failed();
 				}
