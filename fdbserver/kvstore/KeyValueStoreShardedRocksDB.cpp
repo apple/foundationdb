@@ -4554,7 +4554,7 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	iter0.reset();
 	iter1.reset();
 	ASSERT(!cpReader->inUse());
-	TraceEvent(SevDebug, "ShardedRocksCheckpointReaaderTested");
+	TraceEvent(SevDebug, "ShardedRocksCheckpointReaderTested");
 	std::vector<Future<Void>> closes;
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());
