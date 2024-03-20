@@ -1036,7 +1036,7 @@ private:
 	                         const int ciphertextLen,
 	                         const BlobCipherEncryptHeaderFlagsV1&,
 	                         const BlobCipherEncryptHeaderRef&);
-	void vaidateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef&, const BlobCipherEncryptHeaderFlagsV1&);
+	void validateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef&, const BlobCipherEncryptHeaderFlagsV1&);
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);

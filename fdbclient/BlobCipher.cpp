@@ -1417,7 +1417,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeaderFlagsV1(const uint32_t hea
 	}
 }
 
-void DecryptBlobCipherAes256Ctr::vaidateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef& headerRef,
+void DecryptBlobCipherAes256Ctr::validateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef& headerRef,
                                                                 const BlobCipherEncryptHeaderFlagsV1& flags) {
 	const EncryptHeaderCipherKCVs kcvs = headerRef.getKCVs();
 	Sha256KCV::checkEqual(textCipherKey, kcvs.textKCV);
@@ -1440,7 +1440,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
 	validateEncryptHeaderFlagsV1(headerRef.flagsVersion(), flags);
-	vaidateEncryptHeaderCipherKCVs(headerRef, flags);
+	validateEncryptHeaderCipherKCVs(headerRef, flags);
 	validateAuthTokensV1(ciphertext, ciphertextLen, flags, headerRef);
 
 	*authTokenMode = (EncryptAuthTokenMode)flags.authTokenMode;
