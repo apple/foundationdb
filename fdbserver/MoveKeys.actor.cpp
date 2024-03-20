@@ -2808,7 +2808,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						trace.detail("Begin", it.key);
 						trace.detail("End", keyServers[i + 1].key);
 						if (!dest.empty()) {
-							trace.detail("DropedDest", describe(dest));
+							trace.detail("DroppedDest", describe(dest));
 						}
 						trace.detail("NewTeamForDroppedShard", describe(teamForDroppedRange));
 					} else {
