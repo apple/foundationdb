@@ -145,7 +145,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("RestoreAssetMesssageIndex", batchData->processedFileState[req.asset].get())
+	    .detail("RestoreAssetMessageIndex", batchData->processedFileState[req.asset].get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
 	    .detail("PreviousVersionBatchState", batchData->vbState.get())
