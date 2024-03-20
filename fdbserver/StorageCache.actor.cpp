@@ -1836,7 +1836,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		// TODO what flowlock to acquire during compaction?
 		compactionInProgress.send(Void());
 		wait(delay(2.0)); // we want to wait at least some small amount of time before
-		// wait( delay(0, TaskPriority::CompactCache) ); //Setting compactionInProgess could cause the cache server to
+		// wait( delay(0, TaskPriority::CompactCache) ); //Setting compactionInProgress could cause the cache server to
 		// shut down, so delay to check for cancellation
 	}
 }

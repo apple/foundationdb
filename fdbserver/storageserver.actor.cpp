@@ -12257,7 +12257,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->counters.changeFeedMutationsDurable += durableChangeFeedMutations;
 
 		durableInProgress.send(Void());
-		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgress could cause the storage server to
 		                                             // shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
