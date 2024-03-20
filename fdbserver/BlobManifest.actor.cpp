@@ -610,7 +610,7 @@ private:
 
 		loop {
 			state std::vector<BlobManifestFile> allFiles = wait(BlobManifestFile::listAll(writer));
-			TraceEvent("BlobManfiestCleanup").detail("FileCount", allFiles.size());
+			TraceEvent("BlobManifestCleanup").detail("FileCount", allFiles.size());
 			int count = BlobManifest::count(allFiles);
 			if (count <= SERVER_KNOBS->BLOB_RESTORE_MANIFEST_RETENTION_MAX) {
 				return Void();
@@ -651,7 +651,7 @@ public:
 			wait(validate(self));
 		} catch (Error& e) {
 			dprint("WARNING: unexpected manifest loader error {}\n", e.what());
-			TraceEvent("BlobManfiestError").error(e).log();
+			TraceEvent("BlobManifestError").error(e).log();
 			throw;
 		}
 		return Void();
