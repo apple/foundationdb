@@ -124,7 +124,7 @@ if(NOT FDB_RELEASE)
   # Adding support to pass custom fdb_build timestamp, required to achieve
   # uniform naming across different builds
   set(FDB_BUILDTIME
-      "${FDB_BUILD_TIMESTMAP}"
+      "${FDB_BUILD_TIMESTAMP}"
       CACHE STRING "A timestamp for packages")
   set(FDB_BUILDTIME_STRING ".${FDB_BUILDTIME}")
   set(PRERELEASE_TAG "prerelease")
