@@ -508,7 +508,7 @@ TL;DR: Spilling involves less IOPS and is faster.  Peeking involves more IOPS an
 ### Spilling
 
 The most notable effect of the spilling changes is that the Disk Queue files
-will now grow to potentially terrabytes in size.
+will now grow to potentially terabytes in size.
 
  1. Spilling will occur in larger batches, which will result in a more
 sawtooth-like `BytesInput - BytesDurable` value.  I'm not aware that this will have any meaningful impact.
