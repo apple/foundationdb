@@ -122,7 +122,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 
 		wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-rocksdb-v1"));
 
-		// We probablistically validate that resetting perpetual_storage_wiggle_engine to none works as expected.
+		// We probabilistically validate that resetting perpetual_storage_wiggle_engine to none works as expected.
 		if (deterministicRandom()->coinflip()) {
 			TraceEvent("Test_ClearPerpetualStorageWiggleEngine").log();
 			bool change = wait(IssueConfigurationChange(cx, "perpetual_storage_wiggle_engine=none", true));
