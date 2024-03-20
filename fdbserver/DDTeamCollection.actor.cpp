@@ -5711,7 +5711,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	machine_info.erase(removedMachineInfo->machineID);
 	TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
 
-	// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
+	// We do not update machineLocalityMap when a machine is removed because we will do so when we use it in
 	// addBestMachineTeams()
 	// rebuildMachineLocalityMap();
 }
