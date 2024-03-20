@@ -2514,7 +2514,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// Send replies to clients
 	// TODO: should be timer_monotonic(), but gets compared to request time, which uses g_network->timer().
 	double endTime = g_network->timer();
-	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
+	// Reset all to zero, used to track the correct index of each commitTransactionRef on each resolver
 
 	std::fill(self->nextTr.begin(), self->nextTr.end(), 0);
 	std::unordered_map<uint8_t, int16_t> idCountsForKey;

@@ -540,7 +540,7 @@ private:
 		return true;
 	}
 
-	// Start a transcation to read range and append to splitter. Number of rows are limited by maxRowsPerTransaction.
+	// Start a transaction to read range and append to splitter. Number of rows are limited by maxRowsPerTransaction.
 	// It returns the last key that has been read.
 	ACTOR static Future<Key> dumpRange(Reference<BlobManifestDumper> self,
 	                                   Reference<BlobManifestFileSplitter> splitter,

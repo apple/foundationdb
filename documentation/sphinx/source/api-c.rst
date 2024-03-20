@@ -568,7 +568,7 @@ Tenant
 
    Destroys an :type:`FDBTenant` object. It must be called exactly once for each successful call to :func:`fdb_database_create_tenant()`. This function only destroys a handle to the tenant -- the tenant and its data will be fine!
 
-.. function:: fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTronsaction **out_transaction)
+.. function:: fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction **out_transaction)
 
    Creates a new transaction on the given tenant. This transaction will operate within the tenant's key-space and cannot access data outside the tenant. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
 
