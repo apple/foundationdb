@@ -255,7 +255,7 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 // 'authentication token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
 //
 // Encryption header support two modes of generation 'authentication tokens':
-// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
+// 1) SingleAuthTokenMode: the scheme generates single crypto-secure auth token to protect {cipherText +
 // header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
 // however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
 // The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
@@ -563,7 +563,7 @@ typedef struct BlobCipherEncryptHeader {
 	// 'authentication token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
 
 	// Encryption header support two modes of generation 'authentication tokens':
-	// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
+	// 1) SingleAuthTokenMode: the scheme generates single crypto-secure auth token to protect {cipherText +
 	// header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
 	// however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
 	// The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
