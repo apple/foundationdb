@@ -2141,7 +2141,7 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", measured_worker_stats.getTotalErrorCount());
 		fmt::fprintf(fp, "\"totalTimeouts\": %lu,", measured_worker_stats.getTotalTimeoutCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
-		fmt::fprintf(fp, "\"workerProcesseCPU\": %.8f,", cpu_util_worker_processes);
+		fmt::fprintf(fp, "\"workerProcessesCPU\": %.8f,", cpu_util_worker_processes);
 		fmt::fprintf(fp, "\"workerThreadCPU\": %.8f,", cpu_util_worker_threads);
 		fmt::fprintf(fp, "\"localNetworkCPU\": %.8f,", cpu_util_local_fdb_networks);
 		fmt::fprintf(fp, "\"externalNetworkCPU\": %.8f,", cpu_util_external_fdb_networks);
