@@ -3314,9 +3314,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			auto db = a.shard->db;
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				uint64_t deadlineMircos =
+				uint64_t deadlineMicros =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			}
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
@@ -3401,9 +3401,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto options = getReadOptions();
 			auto db = a.shard->db;
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				uint64_t deadlineMircos =
+				uint64_t deadlineMicros =
 				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			}
 
