@@ -134,7 +134,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 		state int numIterations = deterministicRandom()->randomInt(512, 786);
 		for (; numIterations > 0;) {
-			// Randomly select baseCipherIds to be lookedup in the cache
+			// Randomly select baseCipherIds to be looked up in the cache
 			int idx = deterministicRandom()->randomInt(1, cipherKeysVec.size());
 			int nIds = deterministicRandom()->randomInt(1, cipherKeysVec.size());
 			std::unordered_set<BlobCipherDetails> cipherDetails;
@@ -155,7 +155,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
 			        self->dbInfo, cipherDetails, BlobCipherMetrics::UsageType::TEST));
-			// Ensure the sanity of the lookedup data
+			// Ensure the sanity of the looked up data
 			for (auto item : cipherKeys) {
 				bool found = false;
 				for (auto key : cipherKeysVec) {
