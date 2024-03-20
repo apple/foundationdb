@@ -11328,7 +11328,7 @@ Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		co_await delay(0, TaskPriority::UpdateStorage); // Setting durableInProgess could cause the storage server to
+		co_await delay(0, TaskPriority::UpdateStorage); // Setting durableInProgress could cause the storage server to
 		                                                // shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
