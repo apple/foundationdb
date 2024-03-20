@@ -3273,7 +3273,7 @@ void outOfMemory() {
 	TraceEvent("MemSample")
 	    .detail("Count", memSampleSize)
 	    .detail("TotalSize", memSampleSize * ((int)(sizeof(void*) + sizeof(uint32_t) + sizeof(size_t))))
-	    .detail("SapmleCount", memSampleSize)
+	    .detail("SampleCount", memSampleSize)
 	    .detail("Hash", "memSamples")
 	    .detail("Bt", "na");
 	TRACEALLOCATOR(16);
