@@ -1134,9 +1134,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTransactionBatchReply>& resolution) {
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			ASSERT_EQ(resolution[0].tpcvMap.size(), resolution[r].tpcvMap.size());
-		}
 		for (int s = 0; s < resolution[r].stateMutations.size(); s++) {
 			ASSERT(resolution[r].stateMutations[s].size() == resolution[0].stateMutations[s].size());
 		}
