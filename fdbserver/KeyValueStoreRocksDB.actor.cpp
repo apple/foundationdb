@@ -147,6 +147,7 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	if (SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE > 0) {
 		options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
 	}

@@ -19,7 +19,7 @@ Release Notes
 
 7.3.28
 ======
-* Fixed a race condition in kvstorerockddb when accessing latencySample. `(PR #11043) <https://github.com/apple/foundationdb/pull/11114>`_
+* Fixed a race condition in kvstorerockddb when accessing latencySample. `(PR #11114) <https://github.com/apple/foundationdb/pull/11114>`_
 * Added support for physical shard move. `(PR #11086) <https://github.com/apple/foundationdb/pull/11086>`_
 * Disabled CPU based team selection in rebalance data move. `(PR #11110) <https://github.com/apple/foundationdb/pull/11110>`_
 
