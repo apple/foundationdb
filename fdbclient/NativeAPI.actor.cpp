@@ -840,9 +840,15 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	state std::vector<TrInfoChunk> commitQ;
 	state int txBytes = 0;
 
+	std::cout << "ClientStatusUpdateActor Step BeforeLoop" << std::endl;
+	TraceEvent("Test0226BeforeLoop").log();
+
 	loop {
 		// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
 		// the cyclic reference to self.
+		std::cout << ("ClientStatusUpdateActor") << " refreshTransaction" << std::endl;
+		TraceEvent("Test0226RefreshTransaction").log();
+		;
 		wait(refreshTransaction(cx, &tr));
 		try {
 			ASSERT(cx->clientStatusUpdater.outStatusQ.empty());
@@ -876,11 +882,14 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 
+			std::cout << ("ClientStatusUpdateActor") << "splitTransactionInfo" << std::endl;
+			TraceEvent("Test0226SplitTransactionInfo").log();
 			// Commit the chunks splitting into different transactions if needed
 			state int64_t dataSizeLimit =
 			    BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
 			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
+			state int32_t numItemsCommitted = 0;
 			ASSERT(commitQ.empty() && (txBytes == 0));
 			loop {
 				state std::vector<TrInfoChunk>::iterator iter = tracking_iter;
@@ -889,6 +898,8 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				try {
 					while (iter != trChunksQ.end()) {
 						if (iter->value.size() + iter->key.size() + txBytes > dataSizeLimit) {
+							printf("Commit trloginfochunk\n");
+							TraceEvent("Test0226CommitChunk").log();
 							wait(transactionInfoCommitActor(&tr, &commitQ));
 							tracking_iter = iter;
 							commitQ.clear();
@@ -896,9 +907,11 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 						}
 						commitQ.push_back(*iter);
 						txBytes += iter->value.size() + iter->key.size();
-						++iter;
+						++iter, ++numItemsCommitted;
 					}
 					if (!commitQ.empty()) {
+						printf("Commit trloginfochunk1\n");
+						TraceEvent("Test0226CommitChunkNonEmpty").log();
 						wait(transactionInfoCommitActor(&tr, &commitQ));
 						commitQ.clear();
 						txBytes = 0;
@@ -916,6 +929,8 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 					}
 				}
 			}
+			std::cout << ("ClientStatusUpdateActor") << " finish commit " << numItemsCommitted << std::endl;
+			TraceEvent("Test0226FinishCommit").log();
 			cx->clientStatusUpdater.outStatusQ.clear();
 			wait(cx->globalConfig->onInitialized());
 			double sampleRate =
@@ -924,19 +939,26 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
 			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
+			TraceEvent("Test0226ClientStatusUpdateActor").detail("Step", "StartDelExcessClntTxnEntriesActor").log();
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
+			std::cout << "ClientStatusUpdateActor"
+			          << " StartStatusDelayWait" << std::endl;
+			TraceEvent("Test0226StartStatusDelayWait").log();
 			wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+			std::cout << "ClientStatusUpdateActor"
+			          << " finishUpdateRound" << std::endl;
+			TraceEvent("Test0226finishUpdateRound").log();
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
 			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(e);
-			wait(delay(10.0));
+			wait(delay(/*10.0*/ 0.0));
 		}
-	}
+	} // loop
 }
 
 ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetReadVersionReply>> reply) {
@@ -2569,6 +2591,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
+		// to validate here
 		validateOptionValueNotPresent(value);
 		networkOptions.logClientInfo = false;
 		break;
@@ -5483,6 +5506,8 @@ void Transaction::operator=(Transaction&& r) noexcept {
 void Transaction::flushTrLogsIfEnabled() {
 	if (trState && trState->trLogInfo && trState->trLogInfo->logsAdded && trState->trLogInfo->trLogWriter.getData()) {
 		ASSERT(trState->trLogInfo->flushed == false);
+		printf("FlushTrLogsIfEnabled\n");
+		TraceEvent("Test0226FlushTrLogsIfEnabled").log();
 		trState->cx->clientStatusUpdater.inStatusQ.push_back(
 		    { trState->trLogInfo->identifier, std::move(trState->trLogInfo->trLogWriter) });
 		trState->trLogInfo->flushed = true;
@@ -8966,9 +8991,26 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	if (!cx->isError()) {
 		double clientSamplingProbability =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		std::cout << "Using clientSamplingProbability=" << clientSamplingProbability << std::endl;
+		std::cout << "networkOptions.logClientInfo.present()=" << networkOptions.logClientInfo.present() << std::endl;
+		std::cout << "((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY)="
+		          << ((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY)
+		          << std::endl;
+		TraceEvent("Test0226ClientSamplingProbability")
+			.detail("ClientSamplingProbability", clientSamplingProbability)
+			.detail("NetworkPresent", networkOptions.logClientInfo.present())
+			.log();
+		if (networkOptions.logClientInfo.present()) {
+			TraceEvent("Test0226NetworkInfo")
+				.detail("ClientSamplingProbability", clientSamplingProbability)
+				.detail("NetworkInfo", networkOptions.logClientInfo.get())
+				.log();
+		}
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
+			std::cout << "Enabling TrLogInfo" << std::endl;
+			TraceEvent("Test0226EnableTrLogInfo").log();
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}

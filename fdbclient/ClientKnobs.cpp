@@ -257,7 +257,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TIMEOUT_RETRY_UPPER_BOUND,               20.0 );
 
 	// Client Status Info
-	init(CSI_SAMPLING_PROBABILITY, -1.0);
+	init(CSI_SAMPLING_PROBABILITY, 1.0);
 	init(CSI_SIZE_LIMIT, std::numeric_limits<int64_t>::max());
 	if (randomize && BUGGIFY) {
 		CSI_SAMPLING_PROBABILITY = deterministicRandom()->random01() / 10; // rand range 0 - 0.1
