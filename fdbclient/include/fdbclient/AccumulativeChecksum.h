@@ -33,7 +33,8 @@ struct AccumulativeChecksumState {
 	  : acs(acs), version(version), epoch(epoch) {}
 
 	std::string toString() const {
-		return "AccumulativeChecksumState: [ACS]: " + std::to_string(acs) + ", [Version]: " + std::to_string(version);
+		return "AccumulativeChecksumState: [ACS]: " + std::to_string(acs) + ", [Version]: " + std::to_string(version) +
+		       ", [Epoch]: " + std::to_string(epoch);
 	}
 
 	template <class Ar>
