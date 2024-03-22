@@ -43,7 +43,7 @@ public:
 
 	void resetTag(Tag tag, Version commitVersion);
 
-	uint32_t update(Tag tag, uint32_t checksum, Version version);
+	uint32_t update(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
 
 	Optional<AccumulativeChecksumState> get(Tag tag);
 
@@ -64,30 +64,39 @@ private:
 };
 
 class AccumulativeChecksumValidator {
+	struct AccumulativeChecksumEntry {
+		AccumulativeChecksumEntry() {}
+		AccumulativeChecksumEntry(AccumulativeChecksumState acsState) : acsState(acsState) {}
+
+		Optional<AccumulativeChecksumState> acsState;
+		Optional<Version> liveLatestVersion;
+		std::vector<MutationRef> cachedMutations;
+	};
+
 public:
 	AccumulativeChecksumValidator() {}
 
-	void updateAcs(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
+	void cacheMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
 
 	bool validateAcs(UID ssid,
 	                 Tag tag,
 	                 uint16_t acsIndex,
 	                 AccumulativeChecksumState acsMutationState,
-	                 Version ssVersion);
+	                 Version ssVersion,
+	                 bool& updated);
 
 	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState, Version ssVersion);
 
-	void markAllAcsIndexOutdated(UID ssid, Tag tag, Version ssVersion);
+	std::unordered_map<uint16_t, AccumulativeChecksumEntry> acsTable;
 
-	bool isOutdated(UID ssid, Tag tag, uint16_t acsIndex, MutationRef mutation, Version ssVersion);
-
-	std::unordered_map<uint16_t, AccumulativeChecksumState> acsTable;
+	LogEpoch epoch = 0;
 };
 
 void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
                                           std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                           MutationRef mutation,
                                           std::vector<Tag> tags,
-                                          Version commitVersion);
+                                          Version commitVersion,
+                                          LogEpoch epoch);
 
 #endif

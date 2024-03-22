@@ -63,7 +63,7 @@ public:
 	                           const VectorRef<MutationRef>& mutations_,
 	                           IKeyValueStore* txnStateStore_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange), encryptMode(EncryptionAtRestMode::DISABLED) {}
+	    confChange(dummyConfChange), encryptMode(EncryptionAtRestMode::DISABLED), epoch(Optional<LogEpoch>()) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
@@ -91,7 +91,8 @@ public:
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
-	    acsBuilder(proxyCommitData_.acsBuilder), updateAcsBuilderEntry(updateAcsBuilderEntry_) {
+	    acsBuilder(proxyCommitData_.acsBuilder), updateAcsBuilderEntry(updateAcsBuilderEntry_),
+	    epoch(proxyCommitData_.epoch) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -111,7 +112,7 @@ public:
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
-	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex) {
+	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -179,6 +180,8 @@ private:
 
 	// when updateAcsBuilderEntry, acsBuild entry of a tag is reset if the tag is removed
 	bool updateAcsBuilderEntry = false;
+
+	Optional<LogEpoch> epoch;
 
 private:
 	// The following variables are used internally
@@ -281,10 +284,11 @@ private:
 			    .detail("Tag", tag.toString());
 
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
+				ASSERT(epoch.present());
+				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
 			}
 			toCommit->addTag(tag);
 			writeMutation(privatized);
@@ -307,10 +311,11 @@ private:
 
 			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", "LogProtocolMessage");
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
+				ASSERT(epoch.present());
+				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
 			}
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
@@ -378,10 +383,11 @@ private:
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
 		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-		    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+		    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 			privatized.populateChecksum();
 			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
-			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { cacheTag }, version);
+			ASSERT(epoch.present());
+			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { cacheTag }, version, epoch.get());
 		}
 		toCommit->addTag(cacheTag);
 		writeMutation(privatized);
@@ -429,11 +435,12 @@ private:
 			if (firstRange == ranges.end()) {
 				ranges.begin().value().populateTags();
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					ASSERT(epoch.present());
 					acsBuilderUpdateAccumulativeChecksum(
-					    dbgid, acsBuilder, privatized, ranges.begin().value().tags, version);
+					    dbgid, acsBuilder, privatized, ranges.begin().value().tags, version, epoch.get());
 				}
 				toCommit->addTags(ranges.begin().value().tags);
 			} else {
@@ -443,14 +450,15 @@ private:
 					allSources.insert(r.value().tags.begin(), r.value().tags.end());
 				}
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					std::vector<Tag> tags;
 					for (const auto& tag : allSources) {
 						tags.push_back(tag);
 					}
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version);
+					ASSERT(epoch.present());
+					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
 				}
 				toCommit->addTags(allSources);
 			}
@@ -510,11 +518,12 @@ private:
 			if (tagV.present()) {
 				TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized);
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					ASSERT(epoch.present());
 					acsBuilderUpdateAccumulativeChecksum(
-					    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
+					    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
 				}
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
 				writeMutation(privatized);
@@ -547,11 +556,12 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				ASSERT(epoch.present());
 				acsBuilderUpdateAccumulativeChecksum(
-				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
+				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
 			}
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			writeMutation(privatized);
@@ -711,7 +721,6 @@ private:
 
 		if (m.param1 == lastEpochEndKey) {
 			toCommit->addTags(allTags);
-			TraceEvent("ZheRecovery").detail("AllTags", allTags);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
 			TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", "LogProtocolMessage");
 		}
@@ -721,14 +730,15 @@ private:
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", privatized);
 		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-		    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+		    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 			privatized.populateChecksum();
 			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			std::vector<Tag> tags;
 			for (const auto& tag : allTags) {
 				tags.push_back(tag);
 			}
-			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version);
+			ASSERT(epoch.present());
+			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
 		}
 		toCommit->addTags(allTags);
 		writeMutation(privatized);
@@ -762,10 +772,11 @@ private:
 				    .detail("Checkpoint", checkpoint.toString());
 
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
+					ASSERT(epoch.present());
+					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
 				}
 
 				toCommit->addTag(tag);
@@ -879,14 +890,15 @@ private:
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					std::vector<Tag> tags;
 					for (const auto& tag : allTags) {
 						tags.push_back(tag);
 					}
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version);
+					ASSERT(epoch.present());
+					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
 				}
 				writeMutation(privatized);
 			}
@@ -1023,10 +1035,13 @@ private:
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+					    !encryptMode.isEncryptionEnabled() &&
+					    acsBuilder != nullptr) { // ACS does not support encryption
 						privatized.populateChecksum();
-						// privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
-						acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version);
+						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+						ASSERT(epoch.present());
+						acsBuilderUpdateAccumulativeChecksum(
+						    dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
 					}
 
 					toCommit->addTag(tag);
@@ -1056,12 +1071,17 @@ private:
 								    .detail("M", privatized);
 
 								if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM &&
-								    CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-								    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+								    CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM && !encryptMode.isEncryptionEnabled() &&
+								    acsBuilder != nullptr) { // ACS does not support encryption
 									privatized.populateChecksum();
-									// privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
-									acsBuilderUpdateAccumulativeChecksum(
-									    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
+									privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+									ASSERT(epoch.present());
+									acsBuilderUpdateAccumulativeChecksum(dbgid,
+									                                     acsBuilder,
+									                                     privatized,
+									                                     { decodeServerTagValue(tagV.get()) },
+									                                     version,
+									                                     epoch.get());
 								}
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
 								writeMutation(privatized);
@@ -1275,11 +1295,12 @@ private:
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				ASSERT(epoch.present());
 				acsBuilderUpdateAccumulativeChecksum(
-				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
+				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
 			}
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			writeMutation(privatized);
@@ -1310,11 +1331,13 @@ private:
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+					    !encryptMode.isEncryptionEnabled() &&
+					    acsBuilder != nullptr) { // ACS does not support encryption
 						privatized.populateChecksum();
 						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+						ASSERT(epoch.present());
 						acsBuilderUpdateAccumulativeChecksum(
-						    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version);
+						    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
 					}
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					writeMutation(privatized);
@@ -1402,14 +1425,15 @@ private:
 					privatized.param2 = systemKeys.begin.withSuffix(subspace.begin).withSuffix("\xff\xff"_sr, arena);
 				}
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					std::vector<Tag> tags;
 					for (const auto& tag : allTags) {
 						tags.push_back(tag);
 					}
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version);
+					ASSERT(epoch.present());
+					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
 				}
 				writeMutation(privatized);
 			}
@@ -1528,26 +1552,28 @@ private:
 			    .detail("MBegin", mutationBegin)
 			    .detail("MEnd", mutationEnd);
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 				mutationBegin.populateChecksum();
 				mutationBegin.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				std::vector<Tag> tags;
 				for (const auto& tag : allTags) {
 					tags.push_back(tag);
 				}
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, mutationBegin, tags, version);
+				ASSERT(epoch.present());
+				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, mutationBegin, tags, version, epoch.get());
 			}
 			toCommit->addTags(allTags);
 			writeMutation(mutationBegin);
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
 				mutationEnd.populateChecksum();
 				mutationEnd.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				std::vector<Tag> tags;
 				for (const auto& tag : allTags) {
 					tags.push_back(tag);
 				}
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, mutationEnd, tags, version);
+				ASSERT(epoch.present());
+				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, mutationEnd, tags, version, epoch.get());
 			}
 			toCommit->addTags(allTags);
 			writeMutation(mutationEnd);

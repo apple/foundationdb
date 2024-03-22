@@ -347,15 +347,6 @@ struct MutationRef {
 			populateChecksum();
 			uint8_t cType = createTypeWithChecksum(this->type);
 			uint32_t cs = this->checksum.get();
-			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-				TraceEvent(SevInfo, "SerializeMutationWithChecksumBeforeAddingCsToParam2")
-				    .detail("MType", this->type)
-				    .detail("Param1", this->param1.toString())
-				    .detail("Param2", this->param2.toString())
-				    .detail("Checksum", cs)
-				    .detail("AcsIndex",
-				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
-			}
 			Standalone<StringRef> cParam2 = param2.withSuffix(StringRef((uint8_t*)&cs, 4));
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM && this->accumulativeChecksumIndex.present()) {
 				cType = createTypeWithAccumulativeChecksumIndex(cType);

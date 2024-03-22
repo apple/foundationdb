@@ -11059,60 +11059,23 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 		// Ignore if msg.checksum and msg.accumulativeChecksumIndex are not set
 		return;
 	}
-	if (msg.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-	    (!msg.accumulativeChecksumIndex.present() ||
-	     msg.accumulativeChecksumIndex.get() == invalidAccumulativeChecksumIndex)) {
-		TraceEvent(SevWarnAlways, "MissingAccumulativeChecksumIndex", data->thisServerID)
-		    .suppressFor(10.0)
-		    .detail("Mutation", msg)
-		    .detail("AcsIndexPresent", msg.accumulativeChecksumIndex.present())
-		    .detail("ResolverGeneratePrivateMutation", SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
-		if (g_network->isSimulated()) {
-			// It is possible that acs index missed right after ACS feature knob turns ON
-			// However, in current simulation tests, this scenario does not happen
-			// We need a restart test to test switching ACS feature knob
-			ASSERT(false); // This is to check the completeness of setting acs index
-		}
-	}
-	uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
-	if (msg.type == MutationRef::SetValue && msg.param1 == lastEpochEndPrivateKey) {
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevInfo, "AcsValidatorSeeRecovery", data->thisServerID)
-			    .detail("AcsTag", data->tag)
-			    .detail("AcsIndex", acsIndex)
-			    .detail("SSVersion", data->version.get());
-		}
-		// When receiving recovery transaction
-		// Mark all in-memory ACS states as outdated
-		data->acsValidator.markAllAcsIndexOutdated(data->thisServerID, data->tag, data->version.get());
-		// Mark all persisted ACS states as outdated
-		for (const auto& [acsIdx, acsState] : data->acsValidator.acsTable) {
-			ASSERT(acsState.outdated);
-			data->storage.makeAccumulativeChecksumDurable(acsIdx, acsState);
-		}
-		if (data->acsValidator.acsTable.find(acsIndex) == data->acsValidator.acsTable.end()) {
-			// If this recovery mutation is the first mutation arriving at this SS,
-			// we are not be able to mark it as outdate.
-			// Simply add a placeholder.
-			// TODO: remove it when supporting recovery.
-			// At acs validator, any mutation at the recovery version should be added to the old table
-			// Any mutation after the recovery version should be added to the new table
-			data->acsValidator.acsTable[acsIndex] = AccumulativeChecksumState();
-			data->acsValidator.acsTable[acsIndex].outdated = true;
-			data->storage.makeAccumulativeChecksumDurable(acsIndex, data->acsValidator.acsTable[acsIndex]);
-		}
-	}
-	if (data->acsValidator.isOutdated(data->thisServerID, data->tag, acsIndex, msg, data->version.get())) {
-		return;
-	}
 	if (msg.type == MutationRef::AccumulativeChecksum) {
+		uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
 		AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(msg.param2);
-		ASSERT(data->acsValidator.validateAcs(
-		    data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get()));
-		data->storage.makeAccumulativeChecksumDurable(acsIndex, data->acsValidator.acsTable[acsIndex]);
-		// Zhe: Do we need read back here to check any lost write here?
+		bool updated = false;
+		if (data->acsValidator.validateAcs(
+		        data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get(), updated)) {
+			ASSERT(data->acsValidator.acsTable[acsIndex].acsState.present());
+			if (updated) {
+				data->storage.makeAccumulativeChecksumDurable(acsIndex,
+				                                              data->acsValidator.acsTable[acsIndex].acsState.get());
+				// If there is a lost write when persisting data, this storage server will be removed.
+			}
+		} else {
+			ASSERT(false);
+		}
 	} else {
-		data->acsValidator.updateAcs(data->thisServerID, data->tag, msg, data->version.get());
+		data->acsValidator.cacheMutation(data->thisServerID, data->tag, msg, data->version.get());
 	}
 	return;
 }

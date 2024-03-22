@@ -28,13 +28,9 @@
 struct AccumulativeChecksumState {
 	constexpr static FileIdentifier file_identifier = 13804380;
 
-	AccumulativeChecksumState()
-	  : acs(0), cachedAcs(Optional<uint32_t>()), version(-1), outdated(false), liveLatestVersion(Optional<Version>()) {}
-	AccumulativeChecksumState(uint32_t acs, Version version)
-	  : acs(acs), cachedAcs(Optional<uint32_t>()), version(version), outdated(false),
-	    liveLatestVersion(Optional<Version>()) {}
-
-	bool isValid() { return version != -1; }
+	AccumulativeChecksumState() : acs(0), version(-1), epoch(0) {}
+	AccumulativeChecksumState(uint32_t acs, Version version, LogEpoch epoch)
+	  : acs(acs), version(version), epoch(epoch) {}
 
 	std::string toString() const {
 		return "AccumulativeChecksumState: [ACS]: " + std::to_string(acs) + ", [Version]: " + std::to_string(version);
@@ -42,14 +38,12 @@ struct AccumulativeChecksumState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, acs, version, outdated);
+		serializer(ar, acs, version, epoch);
 	}
 
 	uint32_t acs;
-	Optional<uint32_t> cachedAcs;
 	Version version;
-	bool outdated;
-	Optional<Version> liveLatestVersion;
+	LogEpoch epoch;
 };
 
 #endif
