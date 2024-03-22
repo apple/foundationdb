@@ -36,18 +36,10 @@ bool tagSupportAccumulativeChecksum(Tag tag) {
 }
 
 bool mutationSupportAccumulativeChecksum(MutationRef mutation) {
-	if (timeKeeperPrefixRange.contains(mutation.param1)) {
-		return false; // bypass time keeper for now, TODO: remove later
-	}
-	if (mutation.type == MutationRef::ClearRange &&
-	    serverTagKeys.withPrefix(systemKeys.begin).intersects(KeyRangeRef(mutation.param1, mutation.param2))) {
-		// bypass private mutation of removal of server tag now, TODO: remove later
-		return false;
-	}
 	/*if (mutation.param1 >= systemKeys.begin) {
 	    return false; // Only support user data at this time
 	}*/
-	return true;
+	return true; // We want to support all mutations
 }
 
 void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
@@ -76,8 +68,8 @@ void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
 			continue;
 		}
 		uint32_t oldAcs = 0;
-		if (acsBuilder->get(tag).present()) {
-			oldAcs = acsBuilder->get(tag).get().acs;
+		if (acsBuilder->acsTable.find(tag) != acsBuilder->acsTable.end()) {
+			oldAcs = acsBuilder->acsTable[tag].acsState.acs;
 		}
 		acsBuilder->update(tag, mutation.checksum.get(), commitVersion, epoch);
 		appliedCount = appliedCount + 1;
@@ -87,7 +79,7 @@ void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
 			    .detail("AcsIndex", mutation.accumulativeChecksumIndex.get())
 			    .detail("CommitVersion", commitVersion)
 			    .detail("OldAcs", oldAcs)
-			    .detail("NewAcs", acsBuilder->get(tag).get().acs)
+			    .detail("NewAcs", acsBuilder->acsTable[tag].acsState.acs)
 			    .detail("Mutation", mutation);
 		}
 	}
@@ -107,22 +99,27 @@ uint32_t AccumulativeChecksumBuilder::update(Tag tag, uint32_t checksum, Version
 	if (acsTable.find(tag) == acsTable.end()) {
 		newAcs = checksum;
 	} else {
-		ASSERT(version >= acsTable[tag].version);
+		ASSERT(version >= acsTable[tag].acsState.version);
 		ASSERT(version >= currentVersion);
-		newAcs = calculateAccumulativeChecksum(acsTable[tag].acs, checksum);
+		newAcs = calculateAccumulativeChecksum(acsTable[tag].acsState.acs, checksum);
 	}
-	acsTable[tag] = AccumulativeChecksumState(newAcs, version, epoch);
+	acsTable[tag] = Entry(AccumulativeChecksumState(newAcs, version, epoch));
 	currentVersion = version;
 	return newAcs;
 }
 
-void AccumulativeChecksumBuilder::resetTag(Tag tag, Version commitVersion) {
+void AccumulativeChecksumBuilder::removeTag(Tag tag, Version commitVersion, bool immediate) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(tag) != acsTable.end()) {
-		acsTable.erase(tag);
+		if (immediate) {
+			acsTable.erase(tag);
+		} else {
+			acsTable[tag].removed = true;
+		}
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevInfo, "AcsBuilderResetAccumulativeChecksum")
+			TraceEvent(SevInfo, "AcsBuilderRemoveAcsTag")
+			    .detail("Immediate", immediate)
 			    .detail("AcsIndex", acsIndex)
 			    .detail("AcsTag", tag)
 			    .detail("CommitVersion", commitVersion);
@@ -130,13 +127,18 @@ void AccumulativeChecksumBuilder::resetTag(Tag tag, Version commitVersion) {
 	}
 }
 
-Optional<AccumulativeChecksumState> AccumulativeChecksumBuilder::get(Tag tag) {
+void AccumulativeChecksumBuilder::addTag(Tag tag, Version commitVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	if (acsTable.find(tag) == acsTable.end()) {
-		return Optional<AccumulativeChecksumState>();
+	if (acsTable.find(tag) != acsTable.end()) {
+		acsTable[tag].removed = false;
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+			TraceEvent(SevInfo, "AcsBuilderAddBackAcsTag")
+			    .detail("AcsIndex", acsIndex)
+			    .detail("AcsTag", tag)
+			    .detail("CommitVersion", commitVersion);
+		}
 	}
-	return acsTable[tag];
 }
 
 // Add mutations to cache
@@ -151,7 +153,7 @@ void AccumulativeChecksumValidator::cacheMutation(UID ssid, Tag tag, MutationRef
 	uint16_t acsIndex = mutation.accumulativeChecksumIndex.get();
 	Version atAcsVersion = 0;
 	if (acsTable.find(acsIndex) == acsTable.end()) {
-		acsTable[acsIndex] = AccumulativeChecksumEntry(); // init
+		acsTable[acsIndex] = Entry(); // init
 	}
 	acsTable[acsIndex].cachedMutations.push_back(mutation);
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
@@ -174,7 +176,7 @@ bool AccumulativeChecksumValidator::validateAcs(UID ssid,
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (acsTable.find(acsIndex) == acsTable.end()) {
-		acsTable[acsIndex] = AccumulativeChecksumEntry(acsMutationState); // with cleared cache
+		acsTable[acsIndex] = Entry(acsMutationState); // with cleared cache
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevError, "AccumulativeChecksumSkipValidation", ssid)
 			    .detail("AcsTag", tag)
@@ -249,7 +251,7 @@ bool AccumulativeChecksumValidator::validateAcs(UID ssid,
 		updated = false;
 		return false; // Zhe: need to do something?
 	} else {
-		acsTable[acsIndex] = AccumulativeChecksumEntry(
+		acsTable[acsIndex] = Entry(
 		    AccumulativeChecksumState(newAcs, acsMutationState.version, acsMutationState.epoch)); // with cleared cache
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AccumulativeChecksumValidated", ssid)
@@ -276,7 +278,7 @@ void AccumulativeChecksumValidator::restore(UID ssid,
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(acsTable.find(acsIndex) == acsTable.end());
-	acsTable[acsIndex] = AccumulativeChecksumEntry(acsState); // with cleared cache
+	acsTable[acsIndex] = Entry(acsState); // with cleared cache
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AccumulativeChecksumValidatorRestore", ssid)
 		    .detail("AcsIndex", acsIndex)

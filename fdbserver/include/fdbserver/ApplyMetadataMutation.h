@@ -101,7 +101,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version popVersion,
                             bool initialCommit,
                             bool provisionalCommitProxy,
-                            bool updateAcsBuilderEntry);
+                            int updateAcsBuilderEntry);
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,

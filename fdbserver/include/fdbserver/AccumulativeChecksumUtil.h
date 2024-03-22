@@ -36,29 +36,36 @@ uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uin
 bool tagSupportAccumulativeChecksum(Tag tag);
 
 class AccumulativeChecksumBuilder {
+	struct Entry {
+		Entry() : acsState(AccumulativeChecksumState()), removed(false) {}
+		Entry(AccumulativeChecksumState acsState) : acsState(acsState), removed(false) {}
+
+		AccumulativeChecksumState acsState;
+		bool removed;
+	};
+
 public:
 	AccumulativeChecksumBuilder(uint16_t acsIndex) : acsIndex(acsIndex), currentVersion(0) {}
 
 	bool isValid() { return acsIndex != invalidAccumulativeChecksumIndex; }
 
-	void resetTag(Tag tag, Version commitVersion);
+	void removeTag(Tag tag, Version commitVersion, bool immediate);
+
+	void addTag(Tag tag, Version commitVersion);
 
 	uint32_t update(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
 
-	Optional<AccumulativeChecksumState> get(Tag tag);
-
-	std::unordered_map<Tag, AccumulativeChecksumState> getAcsTable() const { return acsTable; }
+	std::unordered_map<Tag, Entry> acsTable;
 
 private:
 	uint16_t acsIndex;
-	std::unordered_map<Tag, AccumulativeChecksumState> acsTable;
 	Version currentVersion;
 };
 
 class AccumulativeChecksumValidator {
-	struct AccumulativeChecksumEntry {
-		AccumulativeChecksumEntry() {}
-		AccumulativeChecksumEntry(AccumulativeChecksumState acsState) : acsState(acsState) {}
+	struct Entry {
+		Entry() {}
+		Entry(AccumulativeChecksumState acsState) : acsState(acsState) {}
 
 		Optional<AccumulativeChecksumState> acsState;
 		Optional<Version> liveLatestVersion;
@@ -79,7 +86,7 @@ public:
 
 	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState, Version ssVersion);
 
-	std::unordered_map<uint16_t, AccumulativeChecksumEntry> acsTable;
+	std::unordered_map<uint16_t, Entry> acsTable;
 
 	LogEpoch epoch = 0;
 };

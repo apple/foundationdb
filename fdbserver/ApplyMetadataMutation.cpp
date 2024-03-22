@@ -78,7 +78,7 @@ public:
 	                           Version popVersion_,
 	                           bool initialCommit_,
 	                           bool provisionalCommitProxy_,
-	                           bool updateAcsBuilderEntry_)
+	                           int updateAcsBuilderEntry_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
@@ -178,8 +178,11 @@ private:
 
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 
-	// when updateAcsBuilderEntry, acsBuild entry of a tag is reset if the tag is removed
-	bool updateAcsBuilderEntry = false;
+	// updateAcsBuilderEntry decides how to update acsBuilder for adding/removing a tag
+	// 0: disable
+	// 1: adding/removing a tag happens in previous versions
+	// 2: adding/removing a tag happens in the current version
+	int updateAcsBuilderEntry = 0;
 
 	Optional<LogEpoch> epoch;
 
@@ -324,6 +327,12 @@ private:
 			writeMutation(privatized);
 		}
 		if (!initialCommit) {
+			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+			    !encryptMode.isEncryptionEnabled() && acsBuilder && updateAcsBuilderEntry > 0) {
+				if (updateAcsBuilderEntry == 2) {
+					acsBuilder->addTag(decodeServerTagValue(m.param2), version);
+				}
+			}
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			if (storageCache) {
 				auto cacheItr = storageCache->find(id);
@@ -1095,18 +1104,14 @@ private:
 		if (!initialCommit) {
 			KeyRangeRef clearRange = range & serverTagKeys;
 			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled() && acsBuilder && updateAcsBuilderEntry) {
-				// For a removed tag, reset its corresponding entry in acsBuilder
-				// A mutation for tag removal is applied to the tags before its update
-				// So, resetting acsBuilder must be after issuing the tag
+			    !encryptMode.isEncryptionEnabled() && acsBuilder && updateAcsBuilderEntry > 0) {
 				for (auto& kv :
 				     txnStateStore->readRange(clearRange).get()) { // read is expected to be immediately available
 					Tag tag = decodeServerTagValue(kv.value);
-					acsBuilder->resetTag(tag, version);
-					if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-						TraceEvent(SevInfo, "AcsBuilderResetTag", dbgid)
-						    .detail("AcsTag", tag)
-						    .detail("AcsIndex", accumulativeChecksumIndex);
+					if (updateAcsBuilderEntry == 1) {
+						acsBuilder->removeTag(tag, version, /*immediate=*/true);
+					} else {
+						acsBuilder->removeTag(tag, version, /*immediate=*/false);
 					}
 				}
 			}
@@ -1661,7 +1666,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version popVersion,
                             bool initialCommit,
                             bool provisionalCommitProxy,
-                            bool updateAcsBuilderEntry) {
+                            int updateAcsBuilderEntry) {
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,

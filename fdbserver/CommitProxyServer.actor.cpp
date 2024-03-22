@@ -1611,7 +1611,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       /* popVersion= */ 0,
 				                       /* initialCommit */ false,
 				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional,
-				                       /* updateAcsBuilderEntry */ true);
+				                       /* updateAcsBuilderEntry */ 1);
 			}
 
 			if (self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() &&
@@ -1715,7 +1715,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			                       self->commitVersion + 1,
 			                       /* initialCommit= */ false,
 			                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional,
-			                       /* updateAcsBuilderEntry */ true);
+			                       /* updateAcsBuilderEntry */ 2);
 		}
 
 		if (self->firstStateMutations) {
@@ -1956,14 +1956,20 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled()); // ACS does not support encryption
 	ASSERT(self->pProxyCommitData->acsBuilder->isValid());
-	std::unordered_map<Tag, AccumulativeChecksumState> acsTable = self->pProxyCommitData->acsBuilder->getAcsTable();
 	const uint16_t acsIndex = getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex);
-	for (const auto& [tag, acsState] : acsTable) {
-		ASSERT(tagSupportAccumulativeChecksum(tag));
+	for (auto it = self->pProxyCommitData->acsBuilder->acsTable.cbegin();
+	     it != self->pProxyCommitData->acsBuilder->acsTable.cend();) {
+		ASSERT(tagSupportAccumulativeChecksum(it->first));
+		if (it->second.removed) {
+			it = self->pProxyCommitData->acsBuilder->acsTable.erase(it); // Remove the entry if the tag has been removed
+			continue;
+		}
+		auto acsState = it->second.acsState;
 		ASSERT(acsState.version <= self->commitVersion);
-		if (acsState.version != self->commitVersion) {
+		if (acsState.version < self->commitVersion) {
 			// not updated in the current batch
 			// need not send acs mutation for this tag
+			it++;
 			continue;
 		}
 		ASSERT(acsState.epoch == self->pProxyCommitData->epoch);
@@ -1976,14 +1982,15 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsBuilderIssueAccumulativeChecksumMutation", self->pProxyCommitData->dbgid)
 			    .detail("Acs", acsState.acs)
-			    .detail("AcsTag", tag)
+			    .detail("AcsTag", it->first)
 			    .detail("AcsIndex", acsIndex)
 			    .detail("CommitVersion", self->commitVersion)
 			    .detail("Mutation", acsMutation)
 			    .detail("CommitProxyIndex", self->pProxyCommitData->commitProxyIndex);
 		}
-		self->toCommit.addTag(tag);
+		self->toCommit.addTag(it->first);
 		self->toCommit.writeTypedMessage(acsMutation);
+		it++;
 	}
 }
 
@@ -3715,7 +3722,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       /* popVersion= */ 0,
 		                       /* initialCommit= */ true,
 		                       /* provisionalCommitProxy */ pContext->pCommitData->provisional,
-		                       /* updateAcsBuilderEntry= */ false);
+		                       /* updateAcsBuilderEntry= */ 3);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
