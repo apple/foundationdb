@@ -44,9 +44,9 @@ bool mutationSupportAccumulativeChecksum(MutationRef mutation) {
 		// bypass private mutation of removal of server tag now, TODO: remove later
 		return false;
 	}
-	if (mutation.param1 >= systemKeys.begin) {
-		return false; // Only support user data at this time
-	}
+	/*if (mutation.param1 >= systemKeys.begin) {
+	    return false; // Only support user data at this time
+	}*/
 	return true;
 }
 
@@ -75,7 +75,6 @@ void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
 		if (!tagSupportAccumulativeChecksum(tag)) {
 			continue;
 		}
-		acsBuilder->addAliveTag(tag);
 		uint32_t oldAcs = 0;
 		if (acsBuilder->get(tag).present()) {
 			oldAcs = acsBuilder->get(tag).get().acs;

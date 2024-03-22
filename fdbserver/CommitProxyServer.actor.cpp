@@ -1957,21 +1957,25 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled()); // ACS does not support encryption
 	ASSERT(self->pProxyCommitData->acsBuilder->isValid());
 	std::unordered_map<Tag, AccumulativeChecksumState> acsTable = self->pProxyCommitData->acsBuilder->getAcsTable();
-	std::unordered_set<Tag> acsAliveTags = self->pProxyCommitData->acsBuilder->getAliveTags();
 	const uint16_t acsIndex = getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex);
-	for (const auto& tag : acsAliveTags) {
+	for (const auto& [tag, acsState] : acsTable) {
 		ASSERT(tagSupportAccumulativeChecksum(tag));
-		ASSERT(acsTable[tag].version <= self->commitVersion);
-		ASSERT(acsTable[tag].epoch == self->pProxyCommitData->epoch);
+		ASSERT(acsState.version <= self->commitVersion);
+		if (acsState.version != self->commitVersion) {
+			// not updated in the current batch
+			// need not send acs mutation for this tag
+			continue;
+		}
+		ASSERT(acsState.epoch == self->pProxyCommitData->epoch);
 		MutationRef acsMutation;
 		acsMutation.type = MutationRef::AccumulativeChecksum;
 		acsMutation.param1 = accumulativeChecksumKey;
 		acsMutation.param2 = accumulativeChecksumValue(
-		    AccumulativeChecksumState(acsTable[tag].acs, self->commitVersion, self->pProxyCommitData->epoch));
+		    AccumulativeChecksumState(acsState.acs, self->commitVersion, self->pProxyCommitData->epoch));
 		acsMutation.setAccumulativeChecksumIndex(acsIndex);
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsBuilderIssueAccumulativeChecksumMutation", self->pProxyCommitData->dbgid)
-			    .detail("Acs", acsTable[tag].acs)
+			    .detail("Acs", acsState.acs)
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
 			    .detail("CommitVersion", self->commitVersion)
@@ -1981,7 +1985,6 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		self->toCommit.addTag(tag);
 		self->toCommit.writeTypedMessage(acsMutation);
 	}
-	self->pProxyCommitData->acsBuilder->clearAliveTags();
 }
 
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'

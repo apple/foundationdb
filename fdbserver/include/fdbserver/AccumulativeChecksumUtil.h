@@ -47,20 +47,12 @@ public:
 
 	Optional<AccumulativeChecksumState> get(Tag tag);
 
-	void addAliveTag(Tag tag) { tags.insert(tag); }
-
-	void clearAliveTags() { tags.clear(); }
-
-	std::unordered_set<Tag> getAliveTags() { return tags; }
-
 	std::unordered_map<Tag, AccumulativeChecksumState> getAcsTable() const { return acsTable; }
 
 private:
 	uint16_t acsIndex;
 	std::unordered_map<Tag, AccumulativeChecksumState> acsTable;
-	std::unordered_set<Tag> tagsToReset;
 	Version currentVersion;
-	std::unordered_set<Tag> tags;
 };
 
 class AccumulativeChecksumValidator {
