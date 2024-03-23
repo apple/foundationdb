@@ -28,21 +28,23 @@
 struct AccumulativeChecksumState {
 	constexpr static FileIdentifier file_identifier = 13804380;
 
-	AccumulativeChecksumState() : acs(0), version(-1), epoch(0) {}
-	AccumulativeChecksumState(uint32_t acs, Version version, LogEpoch epoch)
-	  : acs(acs), version(version), epoch(epoch) {}
+	AccumulativeChecksumState() : acs(0), version(-1), epoch(0), acsIndex(0) {}
+	AccumulativeChecksumState(uint16_t acsIndex, uint32_t acs, Version version, LogEpoch epoch)
+	  : acsIndex(acsIndex), acs(acs), version(version), epoch(epoch) {}
 
 	std::string toString() const {
-		return "AccumulativeChecksumState: [ACS]: " + std::to_string(acs) + ", [Version]: " + std::to_string(version) +
+		return "AccumulativeChecksumState: [ACS Index]: " + std::to_string(acsIndex) +
+		       ", [Acs]: " + std::to_string(acs) + ", [Version]: " + std::to_string(version) +
 		       ", [Epoch]: " + std::to_string(epoch);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, acs, version, epoch);
+		serializer(ar, acsIndex, acs, version, epoch);
 	}
 
 	uint32_t acs;
+	uint16_t acsIndex;
 	Version version;
 	LogEpoch epoch;
 };

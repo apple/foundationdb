@@ -11062,14 +11062,14 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 	if (msg.type == MutationRef::AccumulativeChecksum) {
 		uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
 		AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(msg.param2);
-		Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator.validateAcs(
+		Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator.processAccumulativeChecksum(
 		    data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get());
 		if (stateToPersist.present()) {
 			data->storage.makeAccumulativeChecksumDurable(acsIndex, stateToPersist.get());
 			// If there is a lost write when persisting data, this storage server will be removed.
 		}
 	} else {
-		data->acsValidator.cacheMutation(data->thisServerID, data->tag, msg, data->version.get());
+		data->acsValidator.addMutation(data->thisServerID, data->tag, msg, data->version.get());
 	}
 	return;
 }
@@ -12553,7 +12553,8 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 }
 
 void StorageServerDisk::makeAccumulativeChecksumDurable(uint16_t acsIndex, AccumulativeChecksumState acsState) {
-	Key acsKey = persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&acsIndex, 2));
+	Key acsKey = persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&acsState.epoch, 8))
+	                 .withSuffix(StringRef((uint8_t*)&acsIndex, 2));
 	Value acsValue = accumulativeChecksumValue(acsState);
 	storage->set(KeyValueRef(acsKey, acsValue));
 	*kvCommitLogicalBytes += acsKey.expectedSize() + acsValue.expectedSize();
@@ -12687,9 +12688,11 @@ void restoreAccumulativeChecksumValidator(StorageServer* data, RangeResult accum
 	ASSERT(!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM);
 	data->bytesRestored += accumulativeChecksums.logicalSize();
 	for (int acsLoc = 0; acsLoc < accumulativeChecksums.size(); acsLoc++) {
-		StringRef acsIndexStr = accumulativeChecksums[acsLoc].key.removePrefix(persistAccumulativeChecksumKeys.begin);
-		uint16_t acsIndex = *(const uint16_t*)(acsIndexStr.begin());
+		StringRef keyStr = accumulativeChecksums[acsLoc].key.removePrefix(persistAccumulativeChecksumKeys.begin);
+		LogEpoch epoch = *(const uint64_t*)(keyStr.substr(0, 8).begin());
+		uint16_t acsIndex = *(const uint16_t*)(keyStr.substr(8, 2).begin());
 		AccumulativeChecksumState acsState = decodeAccumulativeChecksum(accumulativeChecksums[acsLoc].value);
+		ASSERT(acsIndex == acsState.acsIndex && epoch == acsState.epoch);
 		data->acsValidator.restore(data->thisServerID, data->tag, acsIndex, acsState, data->version.get());
 	}
 	return;

@@ -77,8 +77,7 @@ public:
 	                           Version version,
 	                           Version popVersion_,
 	                           bool initialCommit_,
-	                           bool provisionalCommitProxy_,
-	                           int updateAcsBuilderEntry_)
+	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
@@ -91,8 +90,7 @@ public:
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
-	    acsBuilder(proxyCommitData_.acsBuilder), updateAcsBuilderEntry(updateAcsBuilderEntry_),
-	    epoch(proxyCommitData_.epoch) {
+	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -177,12 +175,6 @@ private:
 	uint16_t accumulativeChecksumIndex = invalidAccumulativeChecksumIndex;
 
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
-
-	// updateAcsBuilderEntry decides how to update acsBuilder for adding/removing a tag
-	// 0: disable
-	// 1: adding/removing a tag happens in previous versions
-	// 2: adding/removing a tag happens in the current version
-	int updateAcsBuilderEntry = 0;
 
 	Optional<LogEpoch> epoch;
 
@@ -1654,8 +1646,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit,
-                            bool provisionalCommitProxy,
-                            int updateAcsBuilderEntry) {
+                            bool provisionalCommitProxy) {
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1668,8 +1659,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           version,
 	                           popVersion,
 	                           initialCommit,
-	                           provisionalCommitProxy,
-	                           updateAcsBuilderEntry)
+	                           provisionalCommitProxy)
 	    .apply();
 }
 

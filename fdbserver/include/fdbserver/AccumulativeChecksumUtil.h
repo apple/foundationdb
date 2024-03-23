@@ -72,13 +72,13 @@ class AccumulativeChecksumValidator {
 public:
 	AccumulativeChecksumValidator() {}
 
-	void cacheMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
+	void addMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
 
-	Optional<AccumulativeChecksumState> validateAcs(UID ssid,
-	                                                Tag tag,
-	                                                uint16_t acsIndex,
-	                                                AccumulativeChecksumState acsMutationState,
-	                                                Version ssVersion);
+	Optional<AccumulativeChecksumState> processAccumulativeChecksum(UID ssid,
+	                                                                Tag tag,
+	                                                                uint16_t acsIndex,
+	                                                                AccumulativeChecksumState acsMutationState,
+	                                                                Version ssVersion);
 
 	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState, Version ssVersion);
 

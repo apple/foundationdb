@@ -35,13 +35,6 @@ bool tagSupportAccumulativeChecksum(Tag tag) {
 	return tag.locality >= 0;
 }
 
-bool mutationSupportAccumulativeChecksum(MutationRef mutation) {
-	/*if (mutation.param1 >= systemKeys.begin) {
-	    return false; // Only support user data at this time
-	}*/
-	return true; // We want to support all mutations
-}
-
 void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
                                           std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                           MutationRef mutation,
@@ -54,9 +47,6 @@ void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
 		return;
 	}
 	if (!mutation.checksum.present() || !mutation.accumulativeChecksumIndex.present()) {
-		return;
-	}
-	if (!mutationSupportAccumulativeChecksum(mutation)) {
 		return;
 	}
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
@@ -103,7 +93,7 @@ uint32_t AccumulativeChecksumBuilder::update(Tag tag, uint32_t checksum, Version
 		ASSERT(version >= currentVersion);
 		newAcs = calculateAccumulativeChecksum(acsTable[tag].acsState.acs, checksum);
 	}
-	acsTable[tag] = Entry(AccumulativeChecksumState(newAcs, version, epoch));
+	acsTable[tag] = Entry(AccumulativeChecksumState(acsIndex, newAcs, version, epoch));
 	currentVersion = version;
 	return newAcs;
 }
@@ -123,10 +113,7 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, Version commitVersion) {
 }
 
 // Add mutations to cache
-void AccumulativeChecksumValidator::cacheMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion) {
-	if (!mutationSupportAccumulativeChecksum(mutation)) {
-		return;
-	}
+void AccumulativeChecksumValidator::addMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(mutation.checksum.present());
@@ -149,7 +136,7 @@ void AccumulativeChecksumValidator::cacheMutation(UID ssid, Tag tag, MutationRef
 
 // Validate and update acs table
 // Return acs state to persist
-Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::validateAcs(
+Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumulativeChecksum(
     UID ssid,
     Tag tag,
     uint16_t acsIndex,
@@ -157,6 +144,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::validateAcs(
     Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
+	ASSERT(acsIndex == acsMutationState.acsIndex);
 	if (acsTable.find(acsIndex) == acsTable.end()) {
 		acsTable[acsIndex] = Entry(acsMutationState); // with cleared cache
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
@@ -230,10 +218,11 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::validateAcs(
 		    .detail("AcsToValidate", acsMutationState.acs)
 		    .detail("Epoch", acsMutationState.epoch)
 		    .detail("Init", init);
-		// force to reconcile
-		return acsMutationState; // Zhe: need to do something?
+		// Currently, force to reconcile
+		// Zhe: need to do something?
+		return acsMutationState;
 	} else {
-		AccumulativeChecksumState newState(newAcs, acsMutationState.version, acsMutationState.epoch);
+		AccumulativeChecksumState newState(acsIndex, newAcs, acsMutationState.version, acsMutationState.epoch);
 		acsTable[acsIndex] = Entry(newState); // with cleared cache
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsValidatorAcsMutationValidated", ssid)
@@ -306,7 +295,7 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	MutationRef acsMutation;
 	acsMutation.type = MutationRef::AccumulativeChecksum;
 	acsMutation.param1 = accumulativeChecksumKey;
-	acsMutation.param2 = accumulativeChecksumValue(AccumulativeChecksumState(1, 20, 0));
+	acsMutation.param2 = accumulativeChecksumValue(AccumulativeChecksumState(1, 1, 20, 0));
 	acsMutation.setAccumulativeChecksumIndex(1);
 	acsMutation.populateChecksum();
 	BinaryWriter acsWr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
