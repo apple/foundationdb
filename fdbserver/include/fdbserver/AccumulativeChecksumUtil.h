@@ -37,11 +37,10 @@ bool tagSupportAccumulativeChecksum(Tag tag);
 
 class AccumulativeChecksumBuilder {
 	struct Entry {
-		Entry() : acsState(AccumulativeChecksumState()), removed(false) {}
-		Entry(AccumulativeChecksumState acsState) : acsState(acsState), removed(false) {}
+		Entry() : acsState(AccumulativeChecksumState()) {}
+		Entry(AccumulativeChecksumState acsState) : acsState(acsState) {}
 
 		AccumulativeChecksumState acsState;
-		bool removed;
 	};
 
 public:
@@ -49,9 +48,7 @@ public:
 
 	bool isValid() { return acsIndex != invalidAccumulativeChecksumIndex; }
 
-	void removeTag(Tag tag, Version commitVersion, bool immediate);
-
-	void addTag(Tag tag, Version commitVersion);
+	void newTag(Tag tag, Version commitVersion);
 
 	uint32_t update(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
 
@@ -77,12 +74,11 @@ public:
 
 	void cacheMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
 
-	bool validateAcs(UID ssid,
-	                 Tag tag,
-	                 uint16_t acsIndex,
-	                 AccumulativeChecksumState acsMutationState,
-	                 Version ssVersion,
-	                 bool& updated);
+	Optional<AccumulativeChecksumState> validateAcs(UID ssid,
+	                                                Tag tag,
+	                                                uint16_t acsIndex,
+	                                                AccumulativeChecksumState acsMutationState,
+	                                                Version ssVersion);
 
 	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState, Version ssVersion);
 

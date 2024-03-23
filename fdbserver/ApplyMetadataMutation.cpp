@@ -306,6 +306,13 @@ private:
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
 
+		// At this point, this tag will be visible to others
+		// So, acsBuilder should create an brand new acsState for this tag
+		// If there exists an old acsState, overwite it
+		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+		    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
+			acsBuilder->newTag(decodeServerTagValue(m.param2), version);
+		}
 		if (toCommit) {
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
@@ -327,12 +334,6 @@ private:
 			writeMutation(privatized);
 		}
 		if (!initialCommit) {
-			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled() && acsBuilder && updateAcsBuilderEntry > 0) {
-				if (updateAcsBuilderEntry == 2) {
-					acsBuilder->addTag(decodeServerTagValue(m.param2), version);
-				}
-			}
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			if (storageCache) {
 				auto cacheItr = storageCache->find(id);
@@ -1103,18 +1104,6 @@ private:
 
 		if (!initialCommit) {
 			KeyRangeRef clearRange = range & serverTagKeys;
-			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !encryptMode.isEncryptionEnabled() && acsBuilder && updateAcsBuilderEntry > 0) {
-				for (auto& kv :
-				     txnStateStore->readRange(clearRange).get()) { // read is expected to be immediately available
-					Tag tag = decodeServerTagValue(kv.value);
-					if (updateAcsBuilderEntry == 1) {
-						acsBuilder->removeTag(tag, version, /*immediate=*/true);
-					} else {
-						acsBuilder->removeTag(tag, version, /*immediate=*/false);
-					}
-				}
-			}
 			txnStateStore->clear(clearRange);
 			if (storageCache && clearRange.singleKeyRange()) {
 				storageCache->erase(decodeServerTagKey(clearRange.begin));

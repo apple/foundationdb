@@ -1960,10 +1960,6 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	for (auto it = self->pProxyCommitData->acsBuilder->acsTable.cbegin();
 	     it != self->pProxyCommitData->acsBuilder->acsTable.cend();) {
 		ASSERT(tagSupportAccumulativeChecksum(it->first));
-		if (it->second.removed) {
-			it = self->pProxyCommitData->acsBuilder->acsTable.erase(it); // Remove the entry if the tag has been removed
-			continue;
-		}
 		auto acsState = it->second.acsState;
 		ASSERT(acsState.version <= self->commitVersion);
 		if (acsState.version < self->commitVersion) {

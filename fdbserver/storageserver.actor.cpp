@@ -11062,17 +11062,11 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 	if (msg.type == MutationRef::AccumulativeChecksum) {
 		uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
 		AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(msg.param2);
-		bool updated = false;
-		if (data->acsValidator.validateAcs(
-		        data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get(), updated)) {
-			ASSERT(data->acsValidator.acsTable[acsIndex].acsState.present());
-			if (updated) {
-				data->storage.makeAccumulativeChecksumDurable(acsIndex,
-				                                              data->acsValidator.acsTable[acsIndex].acsState.get());
-				// If there is a lost write when persisting data, this storage server will be removed.
-			}
-		} else {
-			ASSERT(false);
+		Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator.validateAcs(
+		    data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get());
+		if (stateToPersist.present()) {
+			data->storage.makeAccumulativeChecksumDurable(acsIndex, stateToPersist.get());
+			// If there is a lost write when persisting data, this storage server will be removed.
 		}
 	} else {
 		data->acsValidator.cacheMutation(data->thisServerID, data->tag, msg, data->version.get());
