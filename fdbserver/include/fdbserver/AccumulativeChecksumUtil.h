@@ -35,8 +35,6 @@ uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uin
 
 bool tagSupportAccumulativeChecksum(Tag tag);
 
-bool mutationSupportAccumulativeChecksum(const MutationRef& mutation);
-
 class AccumulativeChecksumBuilder {
 	struct Entry {
 		Entry() : acsState(AccumulativeChecksumState()) {}

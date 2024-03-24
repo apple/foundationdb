@@ -35,10 +35,6 @@ bool tagSupportAccumulativeChecksum(Tag tag) {
 	return tag.locality >= 0;
 }
 
-bool mutationSupportAccumulativeChecksum(const MutationRef& mutation) {
-	return mutation.checksum.present() && mutation.accumulativeChecksumIndex.present();
-}
-
 void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
                                               const std::vector<Tag>& tags,
                                               LogEpoch epoch,
@@ -46,7 +42,7 @@ void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
                                               Version commitVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(mutationSupportAccumulativeChecksum(mutation));
+	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	int appliedCount = 0;
 	for (const auto& tag : tags) {
 		if (!tagSupportAccumulativeChecksum(tag)) {

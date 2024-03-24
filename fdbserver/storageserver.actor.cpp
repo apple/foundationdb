@@ -11060,26 +11060,6 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 		// Ignore if msg.checksum and msg.accumulativeChecksumIndex are not set
 		return;
 	}
-	// Here we use the same logic as SS remove itself when recieving tag change private mutation
-	// to decide whether to disable the acs validator
-	if ((msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
-	    msg.param1.substr(1).startsWith(serverTagPrefix)) {
-		UID serverTagKey = decodeServerTagKey(msg.param1.substr(1));
-		bool matchesThisServer = serverTagKey == data->thisServerID;
-		bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
-		// Remove SS if another SS is now assigned our tag, or this server was removed by deleting our tag entry
-		// Since TSS don't have tags, they check for their pair's tag. If a TSS is in quarantine, it will stick
-		// around until its pair is removed or it is finished quarantine.
-		if ((msg.type == MutationRef::SetValue &&
-		     ((!data->isTss() && !matchesThisServer) || (data->isTss() && !matchesTssPair))) ||
-		    (msg.type == MutationRef::ClearRange &&
-		     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
-			// If a set tag private mutation assigns its tag to a different SS
-			// Disable the acsValidator
-			// This storage server will be removed
-			data->acsValidator.disable = true;
-		}
-	}
 	if (data->acsValidator.disable) {
 		return;
 	}
@@ -11270,9 +11250,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							    .detail("Mutation", msg);
 							ASSERT(false);
 						}
-						if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
-							doAccumulativeChecksum(data, msg);
-						}
 					}
 					if (msg.type == MutationRef::AccumulativeChecksum) {
 						continue; // Bypass ACS mutation
@@ -11434,6 +11411,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					msg = msg.decrypt(
 					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
 					decryptionTime += decryptionTimeV;
+				} else if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
+					// We have to check accumulative checksum when iterating through cloneCursor2,
+					// where ss removal by tag assignment takes effect immediately
+					doAccumulativeChecksum(data, msg);
 				}
 				if (msg.type == MutationRef::AccumulativeChecksum) {
 					continue; // bypass any acs mutation
