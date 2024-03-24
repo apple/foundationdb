@@ -12721,8 +12721,8 @@ void cleanUpAccumulativeChecksumValidatorState(StorageServer* data) {
 	for (auto& [acsIndex, entry] : data->acsValidator.acsTable) {
 		for (auto it = entry.acsStates.cbegin(); it != entry.acsStates.cend();) {
 			if (it->first < largestEpoch && it->second.version <= data->durableVersion.get()) {
-				it = entry.acsStates.erase(it);
 				data->storage.clearAccumulativeChecksumState(it->second);
+				it = entry.acsStates.erase(it);
 			} else {
 				it++;
 			}
