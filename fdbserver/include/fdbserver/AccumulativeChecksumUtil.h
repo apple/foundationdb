@@ -35,6 +35,8 @@ uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uin
 
 bool tagSupportAccumulativeChecksum(Tag tag);
 
+bool mutationSupportAccumulativeChecksum(const MutationRef& mutation);
+
 class AccumulativeChecksumBuilder {
 	struct Entry {
 		Entry() : acsState(AccumulativeChecksumState()) {}
@@ -50,21 +52,30 @@ public:
 
 	void newTag(Tag tag, Version commitVersion);
 
-	uint32_t update(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
+	void addMutation(const MutationRef& mutation,
+	                 const std::vector<Tag>& tags,
+	                 LogEpoch epoch,
+	                 UID commitProxyId,
+	                 Version commitVersion);
 
 	std::unordered_map<Tag, Entry> acsTable;
 
 private:
 	uint16_t acsIndex;
 	Version currentVersion;
+
+	uint32_t updateTable(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
 };
 
 class AccumulativeChecksumValidator {
 	struct Entry {
 		Entry() {}
-		Entry(AccumulativeChecksumState acsState) : acsState(acsState) {}
+		void newAcsState(const AccumulativeChecksumState& acsState) {
+			acsStates[acsState.epoch] = acsState; // overwrite if exists
+			cachedMutations.clear();
+		}
 
-		Optional<AccumulativeChecksumState> acsState;
+		std::unordered_map<LogEpoch, AccumulativeChecksumState> acsStates;
 		Optional<Version> liveLatestVersion;
 		std::vector<MutationRef> cachedMutations;
 	};
@@ -72,26 +83,18 @@ class AccumulativeChecksumValidator {
 public:
 	AccumulativeChecksumValidator() {}
 
-	void addMutation(UID ssid, Tag tag, MutationRef mutation, Version ssVersion);
+	void addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion);
 
-	Optional<AccumulativeChecksumState> processAccumulativeChecksum(UID ssid,
+	Optional<AccumulativeChecksumState> processAccumulativeChecksum(const AccumulativeChecksumState& acsMutationState,
+	                                                                UID ssid,
 	                                                                Tag tag,
-	                                                                uint16_t acsIndex,
-	                                                                AccumulativeChecksumState acsMutationState,
 	                                                                Version ssVersion);
 
-	void restore(UID ssid, Tag tag, uint16_t acsIndex, AccumulativeChecksumState acsState, Version ssVersion);
+	void restore(const AccumulativeChecksumState& acsState, UID ssid, Tag tag, Version ssVersion);
 
 	std::unordered_map<uint16_t, Entry> acsTable;
 
 	LogEpoch epoch = 0;
 };
-
-void acsBuilderUpdateAccumulativeChecksum(UID commitProxyId,
-                                          std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
-                                          MutationRef mutation,
-                                          std::vector<Tag> tags,
-                                          Version commitVersion,
-                                          LogEpoch epoch);
 
 #endif

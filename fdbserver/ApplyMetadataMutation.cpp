@@ -283,7 +283,7 @@ private:
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				ASSERT(epoch.present());
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
+				acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
 			}
 			toCommit->addTag(tag);
 			writeMutation(privatized);
@@ -317,7 +317,7 @@ private:
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				ASSERT(epoch.present());
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
+				acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
 			}
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
@@ -389,7 +389,7 @@ private:
 			privatized.populateChecksum();
 			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			ASSERT(epoch.present());
-			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { cacheTag }, version, epoch.get());
+			acsBuilder->addMutation(privatized, { cacheTag }, epoch.get(), dbgid, version);
 		}
 		toCommit->addTag(cacheTag);
 		writeMutation(privatized);
@@ -441,8 +441,7 @@ private:
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					ASSERT(epoch.present());
-					acsBuilderUpdateAccumulativeChecksum(
-					    dbgid, acsBuilder, privatized, ranges.begin().value().tags, version, epoch.get());
+					acsBuilder->addMutation(privatized, ranges.begin().value().tags, epoch.get(), dbgid, version);
 				}
 				toCommit->addTags(ranges.begin().value().tags);
 			} else {
@@ -460,7 +459,7 @@ private:
 						tags.push_back(tag);
 					}
 					ASSERT(epoch.present());
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
+					acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
 				}
 				toCommit->addTags(allSources);
 			}
@@ -524,8 +523,8 @@ private:
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					ASSERT(epoch.present());
-					acsBuilderUpdateAccumulativeChecksum(
-					    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
+					acsBuilder->addMutation(
+					    privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
 				}
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
 				writeMutation(privatized);
@@ -562,8 +561,7 @@ private:
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				ASSERT(epoch.present());
-				acsBuilderUpdateAccumulativeChecksum(
-				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
+				acsBuilder->addMutation(privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
 			}
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			writeMutation(privatized);
@@ -740,7 +738,7 @@ private:
 				tags.push_back(tag);
 			}
 			ASSERT(epoch.present());
-			acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
+			acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
 		}
 		toCommit->addTags(allTags);
 		writeMutation(privatized);
@@ -778,7 +776,7 @@ private:
 					privatized.populateChecksum();
 					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					ASSERT(epoch.present());
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
+					acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
 				}
 
 				toCommit->addTag(tag);
@@ -900,7 +898,7 @@ private:
 						tags.push_back(tag);
 					}
 					ASSERT(epoch.present());
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
+					acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
 				}
 				writeMutation(privatized);
 			}
@@ -1042,8 +1040,7 @@ private:
 						privatized.populateChecksum();
 						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 						ASSERT(epoch.present());
-						acsBuilderUpdateAccumulativeChecksum(
-						    dbgid, acsBuilder, privatized, { tag }, version, epoch.get());
+						acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
 					}
 
 					toCommit->addTag(tag);
@@ -1078,12 +1075,8 @@ private:
 									privatized.populateChecksum();
 									privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 									ASSERT(epoch.present());
-									acsBuilderUpdateAccumulativeChecksum(dbgid,
-									                                     acsBuilder,
-									                                     privatized,
-									                                     { decodeServerTagValue(tagV.get()) },
-									                                     version,
-									                                     epoch.get());
+									acsBuilder->addMutation(
+									    privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
 								}
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
 								writeMutation(privatized);
@@ -1285,8 +1278,7 @@ private:
 				privatized.populateChecksum();
 				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				ASSERT(epoch.present());
-				acsBuilderUpdateAccumulativeChecksum(
-				    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
+				acsBuilder->addMutation(privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
 			}
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			writeMutation(privatized);
@@ -1322,8 +1314,8 @@ private:
 						privatized.populateChecksum();
 						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 						ASSERT(epoch.present());
-						acsBuilderUpdateAccumulativeChecksum(
-						    dbgid, acsBuilder, privatized, { decodeServerTagValue(tagV.get()) }, version, epoch.get());
+						acsBuilder->addMutation(
+						    privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
 					}
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					writeMutation(privatized);
@@ -1419,7 +1411,7 @@ private:
 						tags.push_back(tag);
 					}
 					ASSERT(epoch.present());
-					acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, privatized, tags, version, epoch.get());
+					acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
 				}
 				writeMutation(privatized);
 			}
@@ -1546,7 +1538,7 @@ private:
 					tags.push_back(tag);
 				}
 				ASSERT(epoch.present());
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, mutationBegin, tags, version, epoch.get());
+				acsBuilder->addMutation(mutationBegin, tags, epoch.get(), dbgid, version);
 			}
 			toCommit->addTags(allTags);
 			writeMutation(mutationBegin);
@@ -1559,7 +1551,7 @@ private:
 					tags.push_back(tag);
 				}
 				ASSERT(epoch.present());
-				acsBuilderUpdateAccumulativeChecksum(dbgid, acsBuilder, mutationEnd, tags, version, epoch.get());
+				acsBuilder->addMutation(mutationEnd, tags, epoch.get(), dbgid, version);
 			}
 			toCommit->addTags(allTags);
 			writeMutation(mutationEnd);

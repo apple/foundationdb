@@ -588,8 +588,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 				backupMutation.populateChecksum();
 				backupMutation.setAccumulativeChecksumIndex(
 				    getCommitProxyAccumulativeChecksumIndex(self->commitProxyIndex));
-				acsBuilderUpdateAccumulativeChecksum(
-				    self->dbgid, self->acsBuilder, backupMutation, tags, commitVersion, self->epoch);
+				self->acsBuilder->addMutation(backupMutation, tags, self->epoch, self->dbgid, commitVersion);
 			}
 
 			toCommit->writeTypedMessage(backupMutation);
@@ -2083,16 +2082,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				    !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 					m.populateChecksum();
 					m.setAccumulativeChecksumIndex(
-					    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
-					acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-					                                     self->pProxyCommitData->acsBuilder,
-					                                     m,
-					                                     tags,
-					                                     self->commitVersion,
-					                                     self->pProxyCommitData->epoch);
+					    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
+					pProxyCommitData->acsBuilder->addMutation(
+					    m, tags, pProxyCommitData->epoch, pProxyCommitData->dbgid, self->commitVersion);
 				}
 
 				WriteMutationRefVar var =
@@ -2114,16 +2109,15 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTags(ranges.begin().value().tags);
 
 					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+					    !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
-						    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
-						acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-						                                     self->pProxyCommitData->acsBuilder,
-						                                     m,
-						                                     ranges.begin().value().tags,
-						                                     self->commitVersion,
-						                                     self->pProxyCommitData->epoch);
+						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
+						pProxyCommitData->acsBuilder->addMutation(m,
+						                                          ranges.begin().value().tags,
+						                                          pProxyCommitData->epoch,
+						                                          pProxyCommitData->dbgid,
+						                                          self->commitVersion);
 					}
 
 					// check whether clear is sampled
@@ -2175,13 +2169,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						}
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
-						    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
-						acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-						                                     self->pProxyCommitData->acsBuilder,
-						                                     m,
-						                                     tagsToUpdate,
-						                                     self->commitVersion,
-						                                     self->pProxyCommitData->epoch);
+						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
+						pProxyCommitData->acsBuilder->addMutation(
+						    m, tagsToUpdate, pProxyCommitData->epoch, pProxyCommitData->dbgid, self->commitVersion);
 					}
 				}
 
@@ -2318,16 +2308,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    idempotencyIdSet.param2 = kv.value;
 		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
 		    if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-		        !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+		        !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 			    idempotencyIdSet.populateChecksum();
 			    idempotencyIdSet.setAccumulativeChecksumIndex(
-			        getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
-			    acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-			                                         self->pProxyCommitData->acsBuilder,
-			                                         idempotencyIdSet,
-			                                         tags,
-			                                         self->commitVersion,
-			                                         self->pProxyCommitData->epoch);
+			        getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
+			    pProxyCommitData->acsBuilder->addMutation(
+			        idempotencyIdSet, tags, pProxyCommitData->epoch, pProxyCommitData->dbgid, self->commitVersion);
 		    }
 		    self->toCommit.addTags(tags);
 		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
@@ -2349,16 +2335,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		// We already have an arena with an appropriate lifetime handy
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
 		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-		    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+		    !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
 			pProxyCommitData->idempotencyClears[i].populateChecksum();
 			pProxyCommitData->idempotencyClears[i].setAccumulativeChecksumIndex(
-			    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
-			acsBuilderUpdateAccumulativeChecksum(self->pProxyCommitData->dbgid,
-			                                     self->pProxyCommitData->acsBuilder,
-			                                     pProxyCommitData->idempotencyClears[i],
-			                                     tags,
-			                                     self->commitVersion,
-			                                     self->pProxyCommitData->epoch);
+			    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
+			pProxyCommitData->acsBuilder->addMutation(pProxyCommitData->idempotencyClears[i],
+			                                          tags,
+			                                          pProxyCommitData->epoch,
+			                                          pProxyCommitData->dbgid,
+			                                          self->commitVersion);
 		}
 		WriteMutationRefVar var = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));

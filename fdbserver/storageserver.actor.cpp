@@ -553,7 +553,7 @@ struct StorageServerDisk {
 	                                 int64_t& bytesLeft,
 	                                 UnlimitedCommitBytes unlimitedCommitBytes);
 	void makeVersionDurable(Version version);
-	void makeAccumulativeChecksumDurable(uint16_t acsIndex, AccumulativeChecksumState acsState);
+	void makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState);
 	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
 
@@ -11060,16 +11060,15 @@ void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
 		return;
 	}
 	if (msg.type == MutationRef::AccumulativeChecksum) {
-		uint16_t acsIndex = msg.accumulativeChecksumIndex.get();
 		AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(msg.param2);
 		Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator.processAccumulativeChecksum(
-		    data->thisServerID, data->tag, acsIndex, acsMutationState, data->version.get());
+		    acsMutationState, data->thisServerID, data->tag, data->version.get());
 		if (stateToPersist.present()) {
-			data->storage.makeAccumulativeChecksumDurable(acsIndex, stateToPersist.get());
+			data->storage.makeAccumulativeChecksumDurable(stateToPersist.get());
 			// If there is a lost write when persisting data, this storage server will be removed.
 		}
 	} else {
-		data->acsValidator.addMutation(data->thisServerID, data->tag, msg, data->version.get());
+		data->acsValidator.addMutation(msg, data->thisServerID, data->tag, data->version.get());
 	}
 	return;
 }
@@ -12552,9 +12551,9 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 	//     .detail("ToVersion", version);
 }
 
-void StorageServerDisk::makeAccumulativeChecksumDurable(uint16_t acsIndex, AccumulativeChecksumState acsState) {
+void StorageServerDisk::makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState) {
 	Key acsKey = persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&acsState.epoch, 8))
-	                 .withSuffix(StringRef((uint8_t*)&acsIndex, 2));
+	                 .withSuffix(StringRef((uint8_t*)&acsState.acsIndex, 2));
 	Value acsValue = accumulativeChecksumValue(acsState);
 	storage->set(KeyValueRef(acsKey, acsValue));
 	*kvCommitLogicalBytes += acsKey.expectedSize() + acsValue.expectedSize();
@@ -12684,7 +12683,7 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 	return Void();
 }
 
-void restoreAccumulativeChecksumValidator(StorageServer* data, RangeResult accumulativeChecksums) {
+void restoreAccumulativeChecksumValidator(StorageServer* data, const RangeResult& accumulativeChecksums) {
 	ASSERT(!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM);
 	data->bytesRestored += accumulativeChecksums.logicalSize();
 	for (int acsLoc = 0; acsLoc < accumulativeChecksums.size(); acsLoc++) {
@@ -12693,7 +12692,7 @@ void restoreAccumulativeChecksumValidator(StorageServer* data, RangeResult accum
 		uint16_t acsIndex = *(const uint16_t*)(keyStr.substr(8, 2).begin());
 		AccumulativeChecksumState acsState = decodeAccumulativeChecksum(accumulativeChecksums[acsLoc].value);
 		ASSERT(acsIndex == acsState.acsIndex && epoch == acsState.epoch);
-		data->acsValidator.restore(data->thisServerID, data->tag, acsIndex, acsState, data->version.get());
+		data->acsValidator.restore(acsState, data->thisServerID, data->tag, data->version.get());
 	}
 	return;
 }
