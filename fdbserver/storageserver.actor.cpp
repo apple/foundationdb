@@ -554,6 +554,7 @@ struct StorageServerDisk {
 	                                 UnlimitedCommitBytes unlimitedCommitBytes);
 	void makeVersionDurable(Version version);
 	void makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState);
+	void clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState);
 	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
 
@@ -12559,6 +12560,14 @@ void StorageServerDisk::makeAccumulativeChecksumDurable(const AccumulativeChecks
 	*kvCommitLogicalBytes += acsKey.expectedSize() + acsValue.expectedSize();
 }
 
+void StorageServerDisk::clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState) {
+	Key acsKey = persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&acsState.epoch, 8))
+	                 .withSuffix(StringRef((uint8_t*)&acsState.acsIndex, 2));
+	storage->clear(singleKeyRange(acsKey));
+	++(*kvClearRanges);
+	++(*kvClearSingleKey);
+}
+
 // Update data->storage to persist tss quarantine state
 void StorageServerDisk::makeTssQuarantineDurable() {
 	storage->set(KeyValueRef(persistTssQuarantine, "1"_sr));
@@ -12693,6 +12702,39 @@ void restoreAccumulativeChecksumValidator(StorageServer* data, const RangeResult
 		AccumulativeChecksumState acsState = decodeAccumulativeChecksum(accumulativeChecksums[acsLoc].value);
 		ASSERT(acsIndex == acsState.acsIndex && epoch == acsState.epoch);
 		data->acsValidator.restore(acsState, data->thisServerID, data->tag, data->version.get());
+	}
+	return;
+}
+
+void cleanUpAccumulativeChecksumValidatorState(StorageServer* data) {
+	// Step 1: find the latest epoch
+	LogEpoch largestEpoch = 0;
+	for (const auto& [acsIndex, entry] : data->acsValidator.acsTable) {
+		for (const auto& [epoch, acsState] : entry.acsStates) {
+			if (epoch > largestEpoch) {
+				largestEpoch = epoch;
+			}
+		}
+	}
+	// Step 2: for any old epoch, if its version is covered by the persist version,
+	// this acsState will be never used again. So, clear it from both memory and disk
+	for (auto& [acsIndex, entry] : data->acsValidator.acsTable) {
+		for (auto it = entry.acsStates.cbegin(); it != entry.acsStates.cend();) {
+			if (it->first < largestEpoch && it->second.version <= data->durableVersion.get()) {
+				it = entry.acsStates.erase(it);
+				data->storage.clearAccumulativeChecksumState(it->second);
+			} else {
+				it++;
+			}
+		}
+	}
+	// Step 3: if an acsIndex has no acsState, clear the entry in memory
+	for (auto it = data->acsValidator.acsTable.cbegin(); it != data->acsValidator.acsTable.cend();) {
+		if (it->second.acsStates.empty()) {
+			it = data->acsValidator.acsTable.erase(it);
+		} else {
+			it++;
+		}
 	}
 	return;
 }
@@ -12833,6 +12875,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	// Restore acs validator from persisted disk
 	if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
 		restoreAccumulativeChecksumValidator(data, fAccumulativeChecksum.get());
+		cleanUpAccumulativeChecksumValidatorState(data);
 	}
 
 	state RangeResult assigned = fShardAssigned.get();
