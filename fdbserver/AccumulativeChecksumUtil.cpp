@@ -93,7 +93,7 @@ uint32_t AccumulativeChecksumBuilder::updateTable(Tag tag, uint32_t checksum, Ve
 	return newAcs;
 }
 
-void AccumulativeChecksumBuilder::newTag(Tag tag, Version commitVersion) {
+void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	bool overwrite = acsTable.find(tag) != acsTable.end();
@@ -103,7 +103,8 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, Version commitVersion) {
 		    .detail("AcsIndex", acsIndex)
 		    .detail("AcsTag", tag)
 		    .detail("CommitVersion", commitVersion)
-		    .detail("Overwrite", overwrite);
+		    .detail("Overwrite", overwrite)
+		    .detail("SSID", ssid);
 	}
 }
 

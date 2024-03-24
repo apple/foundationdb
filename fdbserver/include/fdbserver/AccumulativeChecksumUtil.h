@@ -50,7 +50,7 @@ public:
 
 	bool isValid() { return acsIndex != invalidAccumulativeChecksumIndex; }
 
-	void newTag(Tag tag, Version commitVersion);
+	void newTag(Tag tag, UID ssid, Version commitVersion);
 
 	void addMutation(const MutationRef& mutation,
 	                 const std::vector<Tag>& tags,
@@ -95,6 +95,8 @@ public:
 	std::unordered_map<uint16_t, Entry> acsTable;
 
 	LogEpoch epoch = 0;
+
+	bool disable = false;
 };
 
 #endif

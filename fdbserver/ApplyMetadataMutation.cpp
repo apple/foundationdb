@@ -303,7 +303,7 @@ private:
 		// If there exists an old acsState, overwite it
 		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 		    !encryptMode.isEncryptionEnabled() && acsBuilder != nullptr) { // ACS does not support encryption
-			acsBuilder->newTag(decodeServerTagValue(m.param2), version);
+			acsBuilder->newTag(tag, id, version);
 		}
 		if (toCommit) {
 			MutationRef privatized = m;
