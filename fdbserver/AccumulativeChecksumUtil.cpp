@@ -188,6 +188,8 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 			newAcs = calculateAccumulativeChecksum(newAcs, acsTable[acsIndex].cachedMutations[i].checksum.get());
 		}
 	}
+	checkedMutations = checkedMutations + acsTable[acsIndex].cachedMutations.size();
+	checkedVersions = checkedVersions + 1;
 	Version newVersion = acsMutationState.version;
 	if (newAcs != acsMutationState.acs) {
 		TraceEvent(SevError, "AcsValidatorAcsMutationMismatch", ssid)

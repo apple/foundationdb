@@ -95,6 +95,30 @@ public:
 	LogEpoch epoch = 0;
 
 	bool disable = false;
+
+	uint64_t checkedMutations = 0;
+
+	uint64_t checkedVersions = 0;
+
+	uint64_t totalMutations = 0;
+
+	uint64_t getAndClearCheckedMutations() {
+		uint64_t res = checkedMutations;
+		checkedMutations = 0;
+		return res;
+	}
+
+	uint64_t getAndClearCheckedVersions() {
+		uint64_t res = checkedVersions;
+		checkedVersions = 0;
+		return res;
+	}
+
+	uint64_t getAndClearTotalMutations() {
+		uint64_t res = totalMutations;
+		totalMutations = 0;
+		return res;
+	}
 };
 
 #endif

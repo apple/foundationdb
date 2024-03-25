@@ -11255,7 +11255,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						continue; // Bypass ACS mutation
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
-
+					data->acsValidator.totalMutations++;
 					if (!collectingCipherKeys) {
 						if (firstMutation && msg.param1.startsWith(systemKeys.end))
 							hasPrivateData = true;
@@ -13327,6 +13327,9 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			              UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
 			                  self->thisServerID.second() ^ self->ssPairID.get().second()));
 		    }
+		    te.detail("ACSCheckedMutationsSinceLastPrint", self->acsValidator.getAndClearCheckedMutations());
+		    te.detail("ACSCheckedVersionsSinceLastPrint", self->acsValidator.getAndClearCheckedVersions());
+		    te.detail("TotalMutations", self->acsValidator.getAndClearTotalMutations());
 	    }));
 
 	wait(serveStorageMetricsRequests(self, ssi));
