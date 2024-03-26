@@ -60,11 +60,12 @@ public:
 	                 UID commitProxyId,
 	                 Version commitVersion);
 
-	std::unordered_map<Tag, Entry> acsTable;
+	const std::unordered_map<Tag, Entry>& getAcsTable() { return acsTable; }
 
 private:
 	uint16_t acsIndex;
 	Version currentVersion;
+	std::unordered_map<Tag, Entry> acsTable;
 
 	uint32_t updateTable(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
 };
@@ -101,17 +102,7 @@ public:
 
 	void restore(const AccumulativeChecksumState& acsState, UID ssid, Tag tag, Version ssVersion);
 
-	std::unordered_map<uint16_t, Entry> acsTable;
-
-	LogEpoch epoch = 0;
-
-	bool disable = false;
-
-	uint64_t checkedMutations = 0;
-
-	uint64_t checkedVersions = 0;
-
-	uint64_t totalMutations = 0;
+	std::vector<AccumulativeChecksumState> cleanUpOutdatedAcsStates(Version ssDurableVersion);
 
 	uint64_t getAndClearCheckedMutations() {
 		uint64_t res = checkedMutations;
@@ -130,6 +121,14 @@ public:
 		totalMutations = 0;
 		return res;
 	}
+
+	void incrementTotalMutations() { totalMutations++; }
+
+private:
+	std::unordered_map<uint16_t, Entry> acsTable;
+	uint64_t checkedMutations = 0;
+	uint64_t checkedVersions = 0;
+	uint64_t totalMutations = 0;
 };
 
 #endif

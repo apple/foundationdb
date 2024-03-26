@@ -1954,7 +1954,7 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled()); // ACS does not support encryption
 	ASSERT(self->pProxyCommitData->acsBuilder->isValid());
 	const uint16_t acsIndex = getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex);
-	for (const auto& [tag, entry] : self->pProxyCommitData->acsBuilder->acsTable) {
+	for (const auto& [tag, entry] : self->pProxyCommitData->acsBuilder->getAcsTable()) {
 		ASSERT(tagSupportAccumulativeChecksum(tag));
 		const AccumulativeChecksumState& acsState = entry.acsState;
 		ASSERT(acsState.version <= self->commitVersion);

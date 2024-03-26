@@ -259,6 +259,43 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 	}
 }
 
+// Clear all outdated ACS states and entries and return removed ACS states
+std::vector<AccumulativeChecksumState> AccumulativeChecksumValidator::cleanUpOutdatedAcsStates(
+    Version ssDurableVersion) {
+	std::vector<AccumulativeChecksumState> removedStates;
+
+	// Step 1: find the latest epoch
+	LogEpoch largestEpoch = 0;
+	for (const auto& [acsIndex, entry] : acsTable) {
+		for (const auto& [epoch, acsState] : entry.acsStates) {
+			if (epoch > largestEpoch) {
+				largestEpoch = epoch;
+			}
+		}
+	}
+	// Step 2: for any old epoch, if its version is covered by the persist version,
+	// this acsState will be never used again. So, clear it from both memory and disk
+	for (auto& [acsIndex, entry] : acsTable) {
+		for (auto it = entry.acsStates.cbegin(); it != entry.acsStates.cend();) {
+			if (it->first < largestEpoch && it->second.version <= ssDurableVersion) {
+				removedStates.push_back(it->second);
+				it = entry.acsStates.erase(it);
+			} else {
+				it++;
+			}
+		}
+	}
+	// Step 3: if an acsIndex has no acsState, clear the entry in memory
+	for (auto it = acsTable.cbegin(); it != acsTable.cend();) {
+		if (it->second.acsStates.empty()) {
+			it = acsTable.erase(it);
+		} else {
+			it++;
+		}
+	}
+	return removedStates;
+}
+
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
