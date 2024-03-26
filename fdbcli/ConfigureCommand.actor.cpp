@@ -190,11 +190,6 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
 		break;
-	case ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL:
-		printf("Database created\n");
-		fprintf(stderr,
-		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
-		break;
 	case ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
 		printf("Database created\n");
 		fprintf(
@@ -259,11 +254,6 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		break;
-	case ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL:
-		printf("Configuration changed\n");
-		fprintf(stderr,
-		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
 	case ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
 		printf("Configuration changed\n");
