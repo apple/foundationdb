@@ -406,7 +406,7 @@ public:
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
 
-	// Valdiate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
+	// Validate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;

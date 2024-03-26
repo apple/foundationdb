@@ -199,7 +199,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 	    .detail("MaxAuditIdToClear", maxAuditIdToClear);
 
 	try {
-		loop { // Cleanup until succeed or facing unretriable error
+		loop { // Cleanup until succeed or facing unretryable error
 			try {
 				state std::vector<AuditStorageState> auditStates =
 				    wait(getAuditStates(cx, auditType, /*newFirst=*/false));
@@ -373,7 +373,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
+		TraceEvent(SevWarn, "AuditUtilPersistedNewAuditStateUnretryableError", auditId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 		ASSERT_WE_THINK(e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict);

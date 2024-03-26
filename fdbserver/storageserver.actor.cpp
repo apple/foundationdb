@@ -153,7 +153,7 @@ bool canReplyWith(Error e) {
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
-	case error_code_mapper_bad_range_decriptor:
+	case error_code_mapper_bad_range_descriptor:
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
@@ -584,7 +584,7 @@ struct StorageServerDisk {
 	}
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
-	// Read the key that is equal or greater then 'key' from the storage engine.
+	// Read the key that is equal or greater than 'key' from the storage engine.
 	// For example, readNextKeyInclusive("a") should return:
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
@@ -2908,13 +2908,13 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 			state RangeResult res =
 			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			if (!res.empty()) {
-				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
+				TraceEvent(SevDebug, "FetchCheckpointKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
 				    .detail("FirstReturnedKey", res.front().key)
 				    .detail("LastReturnedKey", res.back().key)
 				    .detail("Size", res.size());
 			} else {
-				TraceEvent(SevInfo, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
+				TraceEvent(SevInfo, "FetchCheckpointKeyValuesEmptyRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID);
 			}
 
@@ -4970,7 +4970,7 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
-					throw mapper_bad_range_decriptor();
+					throw mapper_bad_range_descriptor();
 				}
 				// when it is rangeQuery, insert Optional.empty as placeholder
 				vt.emplace_back(Optional<Tuple>());
@@ -5077,7 +5077,7 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 	// The trackShardAssignment is correct when at most 1 auditStorageServerShardQ runs
 	// at a time. Currently, this is guaranteed by setting serveAuditStorageParallelismLock == 1
 	// If serveAuditStorageParallelismLock > 1, we need to check trackShardAssignmentMinVersion
-	// to make sure no onging auditStorageServerShardQ is running
+	// to make sure no ongoing auditStorageServerShardQ is running
 	if (data->trackShardAssignmentMinVersion != invalidVersion) {
 		// Another auditStorageServerShardQ is running
 		req.reply.sendError(audit_storage_cancelled());
@@ -5968,7 +5968,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 
 			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 		} catch (Error& e) {
-			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
+			ASSERT(e.code() == error_code_mapper_bad_range_descriptor);
 			throwException2 = true;
 		}
 		ASSERT(throwException2);
@@ -7521,7 +7521,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranuleChunk
 	}
 }
 
-// Read blob granules metadata. The key range can cross tenant bundary.
+// Read blob granules metadata. The key range can cross tenant boundary.
 ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(Transaction* tr,
                                                                                Database cx,
                                                                                KeyRangeRef keys,
@@ -9256,8 +9256,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			if (!updates.empty()) {
 				TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdates", data->thisServerID)
 				    .detail("MoveInShard", moveInShard->toString())
-				    .detail("MinVerion", updates.front().version)
-				    .detail("MaxVerion", updates.back().version)
+				    .detail("MinVersion", updates.front().version)
+				    .detail("MaxVersion", updates.back().version)
 				    .detail("TargetVersion", version)
 				    .detail("HighWatermark", highWatermark)
 				    .detail("Size", updates.size());
@@ -11926,7 +11926,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("Version", data->pendingAddRanges.begin()->first)
 				    .detail("DurableVersion", data->durableVersion.get());
 				addedRanges = true;
-				// Remove commit byte limit to make sure the private mutaiton(s) associated with the
+				// Remove commit byte limit to make sure the private mutation(s) associated with the
 				// `addRange` are committed.
 				unlimitedCommitBytes = UnlimitedCommitBytes::True;
 			}
@@ -11961,7 +11961,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->fetchKeysBytesBudget += bytesLeft;
 			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 
-			// Dependng on how negative the fetchKeys budget was it could still be used up
+			// Depending on how negative the fetchKeys budget was it could still be used up
 			if (!data->fetchKeysBudgetUsed.get()) {
 				wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
 			}
@@ -12137,7 +12137,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
 
 		if (removeKVSRanges) {
-			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
+			TraceEvent(SevDebug, "RemoveKVSRangesCommitted", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
 			    .detail("DesiredVersion", desiredVersion)
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
@@ -12257,7 +12257,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->counters.changeFeedMutationsDurable += durableChangeFeedMutations;
 
 		durableInProgress.send(Void());
-		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgress could cause the storage server to
 		                                             // shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was

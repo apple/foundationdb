@@ -576,7 +576,7 @@ private:
 	}
 
 	void rollRandomClose() {
-		// make sure connections between parenta and their childs are not closed
+		// make sure connections between parents and their children are not closed
 		if (!stableConnection &&
 		    now() - g_simulator->lastConnectionFailure > g_simulator->connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
@@ -965,7 +965,7 @@ private:
 			        opId.shortString().c_str());
 
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
-		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
+		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_error
 
 		return Void();
 	}

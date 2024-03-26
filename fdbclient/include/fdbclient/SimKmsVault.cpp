@@ -62,7 +62,7 @@ int SimKmsVaultKeyCtx::getKeyLen(const EncryptCipherBaseKeyId id) {
 
 class SimKmsVaultCtx : NonCopyable, public ReferenceCounted<SimKmsVaultCtx> {
 public:
-	// Public visibility constructior ONLY to assist FlowSingleton instance creation.
+	// Public visibility constructor ONLY to assist FlowSingleton instance creation.
 	// API Note: Constructor is expected to be instantiated only in simulation mode.
 
 	explicit SimKmsVaultCtx(bool ignored) {

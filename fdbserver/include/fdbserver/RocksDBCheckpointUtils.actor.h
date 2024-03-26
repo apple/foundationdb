@@ -79,7 +79,7 @@ struct SstFileMetaData {
 	SstFileMetaData()
 	  : file_number(0), file_type(2), size(0), temperature(0), smallest_seqno(0), largest_seqno(0),
 	    num_reads_sampled(0), being_compacted(false), num_entries(0), num_deletions(0), oldest_blob_file_number(0),
-	    oldest_ancester_time(0), file_creation_time(0), epoch_number(0) {}
+	    oldest_ancestor_time(0), file_creation_time(0), epoch_number(0) {}
 
 	SstFileMetaData(const std::string& _relative_filename,
 	                const std::string& _directory,
@@ -98,7 +98,7 @@ struct SstFileMetaData {
 	                uint64_t _num_entries,
 	                uint64_t _num_deletions,
 	                uint64_t _oldest_blob_file_number,
-	                uint64_t _oldest_ancester_time,
+	                uint64_t _oldest_ancestor_time,
 	                uint64_t _file_creation_time,
 	                uint64_t _epoch_number,
 	                const std::string& _name,
@@ -109,7 +109,7 @@ struct SstFileMetaData {
 	    largest_seqno(_largest_seqno), smallestkey(_smallestkey), largestkey(_largestkey),
 	    num_reads_sampled(_num_reads_sampled), being_compacted(_being_compacted), num_entries(_num_entries),
 	    num_deletions(_num_deletions), oldest_blob_file_number(_oldest_blob_file_number),
-	    oldest_ancester_time(_oldest_ancester_time), file_creation_time(_file_creation_time),
+	    oldest_ancestor_time(_oldest_ancestor_time), file_creation_time(_file_creation_time),
 	    epoch_number(_epoch_number), name(_name), db_path(_db_path) {}
 
 	// The name of the file within its directory (e.g. "123456.sst")
@@ -154,7 +154,7 @@ struct SstFileMetaData {
 	// 0 if the information is not available.
 	//
 	// Note: for TTL blob files, it contains the start of the expiration range.
-	uint64_t oldest_ancester_time;
+	uint64_t oldest_ancestor_time;
 	// Timestamp when the SST file is created, provided by
 	// SystemClock::GetCurrentTime(). 0 if the information is not available.
 	uint64_t file_creation_time;
@@ -197,7 +197,7 @@ struct SstFileMetaData {
 		           num_entries,
 		           num_deletions,
 		           oldest_blob_file_number,
-		           oldest_ancester_time,
+		           oldest_ancestor_time,
 		           file_creation_time,
 		           epoch_number,
 		           name,
@@ -235,7 +235,7 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::num_entries,
 		           SstFileMetaData::num_deletions,
 		           SstFileMetaData::oldest_blob_file_number,
-		           SstFileMetaData::oldest_ancester_time,
+		           SstFileMetaData::oldest_ancestor_time,
 		           SstFileMetaData::file_creation_time,
 		           SstFileMetaData::epoch_number,
 		           SstFileMetaData::name,

@@ -286,7 +286,7 @@ def lockAndUnlock(logger):
         env=fdbcli_env,
     )
     process.stdout.readline()
-    # The randome passphrease we need to confirm to proceed the unlocking
+    # The random passphrase we need to confirm to proceed the unlocking
     line2 = process.stdout.readline()
     logger.debug("Random passphrase: {}".format(line2))
     output3, err = process.communicate(input=line2)
@@ -623,9 +623,9 @@ def transaction(logger):
     assert lines[2] == "`key' is `value'"
     assert lines[3].startswith("Committed (") and lines[3].endswith(")")
     # validate commit version is larger than the read version
-    commit_verion = int(lines[3][len("Committed (") : -1])
-    logger.debug("Commit version: {}".format(commit_verion))
-    assert commit_verion >= read_version
+    commit_version = int(lines[3][len("Committed (") : -1])
+    logger.debug("Commit version: {}".format(commit_version))
+    assert commit_version >= read_version
     # check the transaction is committed
     output2 = run_fdbcli_command("get", "key")
     assert output2 == "`key' is `value'"
@@ -1222,7 +1222,7 @@ ERROR: assigned_cluster is only valid in metacluster configuration.
 ERROR: Tenant configuration is invalid (2140)
     """.strip()
     output = run_fdbcli_command_and_get_error(
-        "tenant configure tenant assigned_cluster=nonexist"
+        "tenant configure tenant assigned_cluster=nonexistent"
     )
     assert output == expected_output
 

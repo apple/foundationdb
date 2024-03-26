@@ -146,7 +146,7 @@ struct RemoveClusterImpl {
 				}
 			}
 		} else {
-			CODE_PROBE(true, "Data cluster remove non-existent cluster");
+			CODE_PROBE(true, "Data cluster remove nonexistent cluster");
 		}
 
 		// Insert a tombstone marking this cluster removed even if we aren't registered

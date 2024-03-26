@@ -550,7 +550,7 @@ public:
 			// waitDataDistributorEnabled and then set to 0 before
 			// waitUntilDataDistributorExitSecurityMode. For this case,
 			// after waitUntilDataDistributorExitSecurityMode, DDMode is 0.
-			// The init loop does not break and the loop will stuct at
+			// The init loop does not break and the loop will stuck at
 			// waitDataDistributorEnabled in the next iteration.
 			TraceEvent("DataDistributorExitSecurityMode").log();
 
@@ -605,7 +605,7 @@ public:
 			    .detail("BytesWrittenAverageRate", 0)
 			    .detail("PriorityRecoverMove", 0)
 			    .detail("PriorityRebalanceUnderutilizedTeam", 0)
-			    .detail("PriorityRebalannceOverutilizedTeam", 0)
+			    .detail("PriorityRebalanceOverutilizedTeam", 0)
 			    .detail("PriorityTeamHealthy", 0)
 			    .detail("PriorityTeamContainsUndesiredServer", 0)
 			    .detail("PriorityTeamRedundant", 0)
@@ -2456,7 +2456,7 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 		state int i = 0;
 		for (; i < interfs.size(); ++i) {
 			state StorageServerInterface targetServer = interfs[i];
-			// Currently, Tss server may not follow the auit consistency rule
+			// Currently, Tss server may not follow the audit consistency rule
 			// Thus, skip if the server is tss
 			if (targetServer.isTss()) {
 				continue;

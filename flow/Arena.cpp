@@ -75,7 +75,7 @@ void makeUndefined(void* addr, size_t size) {
 		VALGRIND_MAKE_MEM_UNDEFINED(addr, size);
 	}
 }
-#elif defined(ADDRESS_SANITZER)
+#elif defined(ADDRESS_SANITIZER)
 void allowAccess(ArenaBlock* b) {
 	if (b) {
 		ASAN_UNPOISON_MEMORY_REGION(b, ArenaBlock::TINY_HEADER);

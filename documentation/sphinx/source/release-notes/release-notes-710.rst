@@ -87,7 +87,7 @@ Release Notes
 ======
 * Released with AVX disabled.
 * Added redistribute fdbcli command to manually split shards. `(PR #10909) <https://github.com/apple/foundationdb/pull/10909>`_, `(PR #10936) <https://github.com/apple/foundationdb/pull/10936>`_, `(PR #10942) <https://github.com/apple/foundationdb/pull/10942>`_, `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_, and `(PR #10958) <https://github.com/apple/foundationdb/pull/10958>`_
-* Fixed a MacOS linking issue for go bindings. `(PR #10924) <https://github.com/apple/foundationdb/pull/10924>`_
+* Fixed a macOS linking issue for go bindings. `(PR #10924) <https://github.com/apple/foundationdb/pull/10924>`_
 * Added knobs to control backup retry delays for blob stores. `(PR #10947) <https://github.com/apple/foundationdb/pull/10947>`_
 * Fixed two use-after-free bugs for backup agents. `(PR #10951) <https://github.com/apple/foundationdb/pull/10951>`_
 * Added automatic range split for hot storage queue. `(PR #10932) <https://github.com/apple/foundationdb/pull/10932>`_
@@ -205,8 +205,8 @@ Release Notes
 * Fixed a data distribution bug where exclusions can become stuck because DD cannot build new teams. `(PR #9035) <https://github.com/apple/foundationdb/pull/9035>`_
 * Added FoundationDB version to ProcessMetrics. `(PR #9037) <https://github.com/apple/foundationdb/pull/9037>`_
 * Removed RocksDB read iterator destruction from the commit path. `(PR #8971) <https://github.com/apple/foundationdb/pull/8971>`_
-* Added determinstic degraded server selection in gray failure detection. `(PR #9001) <https://github.com/apple/foundationdb/pull/9001>`_
-* Fixed an interger overflow bug that causes fetching backup files to fail. `(PR #8996) <https://github.com/apple/foundationdb/pull/8996>`_
+* Added deterministic degraded server selection in gray failure detection. `(PR #9001) <https://github.com/apple/foundationdb/pull/9001>`_
+* Fixed an integer overflow bug that causes fetching backup files to fail. `(PR #8996) <https://github.com/apple/foundationdb/pull/8996>`_
 * Fixed a log router race condition that blocks remote tlogs forever. `(PR #8966) <https://github.com/apple/foundationdb/pull/8966>`_
 * Fixed a backup worker assertion failure. `(PR #8887) <https://github.com/apple/foundationdb/pull/8887>`_
 * Upgraded RocksDB to 7.7.3 version. `(PR #8880) <https://github.com/apple/foundationdb/pull/8880>`_

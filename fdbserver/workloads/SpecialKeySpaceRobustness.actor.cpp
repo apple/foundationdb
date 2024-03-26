@@ -128,7 +128,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 			tx->reset();
 		}
-		// "Exclude" same address multiple times, and only the first excluson should trigger a system metadata update.
+		// "Exclude" same address multiple times, and only the first exclusion should trigger a system metadata update.
 		{
 			try {
 				state std::string excludeWorker;
@@ -363,7 +363,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 		}
 		// test lock and unlock
-		// maske sure we lock the database
+		// make sure we lock the database
 		loop {
 			try {
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);

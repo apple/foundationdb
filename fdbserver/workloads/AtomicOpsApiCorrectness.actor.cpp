@@ -89,7 +89,7 @@ public:
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	// Test Atomic ops on non existing keys that results in a set
+	// Test Atomic ops on nonexistent keys that results in a set
 	ACTOR Future<Void> testAtomicOpSetOnNonExistingKey(Database cx,
 	                                                   AtomicOpsApiCorrectnessWorkload* self,
 	                                                   uint32_t opType,
@@ -153,7 +153,7 @@ public:
 		return Void();
 	}
 
-	// Test Atomic ops on non existing keys that results in a unset
+	// Test Atomic ops on nonexistent keys that results in a unset
 	ACTOR Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx,
 	                                                     AtomicOpsApiCorrectnessWorkload* self,
 	                                                     uint32_t opType,

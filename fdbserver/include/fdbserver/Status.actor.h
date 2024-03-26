@@ -55,7 +55,7 @@ Future<StatusReply> clusterGetStatus(
     Version const& datacenterVersionDifference,
     Version const& dcLogServerVersionDifference,
     Version const& dcStorageServerVersionDifference,
-    ConfigBroadcaster const* const& conifgBroadcaster,
+    ConfigBroadcaster const* const& configBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
     metacluster::MetaclusterMetrics const& metaclusterMetrics);
 

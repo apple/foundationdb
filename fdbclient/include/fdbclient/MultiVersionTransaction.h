@@ -161,7 +161,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*databaseCreateSnapshot)(FDBDatabase* database,
 	                                     uint8_t const* uid,
 	                                     int uidLength,
-	                                     uint8_t const* snapshotCommmand,
+	                                     uint8_t const* snapshotCommand,
 	                                     int snapshotCommandLength);
 	FDBFuture* (*databaseCreateSharedState)(FDBDatabase* database);
 	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);

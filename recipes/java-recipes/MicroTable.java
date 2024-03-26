@@ -168,7 +168,7 @@ public class MicroTable {
 		 * 10	Clarence Thomas		Bush (41)	Yale
 		 *
 		 * During the test, we make one row change (replacing Kagan with
-		 * her predcessor, John Paul Stevens) and one column change
+		 * her predecessor, John Paul Stevens) and one column change
 		 * (replacing the short forms of the Presidential names with
 		 * longer versions).
 		 */

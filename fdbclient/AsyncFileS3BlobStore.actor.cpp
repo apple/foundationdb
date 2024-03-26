@@ -35,7 +35,7 @@ Future<int> AsyncFileS3BlobStoreRead::read(void* data, int length, int64_t offse
 }
 
 ACTOR Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
-	printf("Starting fake sender %d which will send send %d bytes.\n", id, bytes);
+	printf("Starting fake sender %d which will send %d bytes.\n", id, bytes);
 	state double ts = timer();
 	state int total = 0;
 	while (total < bytes) {

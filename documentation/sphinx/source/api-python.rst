@@ -168,7 +168,7 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-external-client-directory|
 
-    .. note:: |tls-options-burb|
+    .. note:: |tls-options-blurb|
 
     .. method :: fdb.options.set_tls_plugin(plugin_path_or_name)
 
@@ -1366,7 +1366,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
    will combine the ``tr_version`` and ``user_version`` to produce a byte string that
    lexicographically sorts appropriately with other ``Versionstamp`` instances. If this instance is
    incomplete, then the ``tr_version`` component gets filled in with dummy bytes that will cause it
-   to sort after every complete ``Verionstamp``'s serialized bytes.
+   to sort after every complete ``Versionstamp``'s serialized bytes.
 
 .. method:: Versionstamp.__eq__(other)
 .. method:: Versionstamp.__ne__(other)
@@ -1411,7 +1411,7 @@ Subspaces
 .. method:: Subspace.pack_with_versionstamp(tuple)
 
     Returns the key encoding the specified tuple in the subspace so that it may be used as the key in the
-    :meth:`fdb.Transaction.set_versionstampe_key` method. The passed tuple must contain exactly one incomplete
+    :meth:`fdb.Transaction.set_versionstamped_key` method. The passed tuple must contain exactly one incomplete
     :class:`fdb.tuple.Versionstamp` instance or the method will raise an error. The behavior here is the same
     as if one used the :meth:`fdb.tuple.pack_with_versionstamp` method to appropriately pack together
     this subspace and the passed tuple.

@@ -1709,7 +1709,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				messages.serializeBytes(messages2.toValue());
 			}
 		} else {
-			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+			// FIXME: Limit to approximately DESIRED_TOTAL_BYTES somehow.
 			RangeResult kvrefs = wait(self->persistentData->readRange(
 			    KeyRangeRef(
 			        persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
@@ -2366,8 +2366,8 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	TraceEvent("TLogExecCmdPopEnable")
 	    .detail("UidStr", enablePopReq.snapUID.toString())
 	    .detail("IgnorePopUid", self->ignorePopUid)
-	    .detail("IgnporePopRequest", self->ignorePopRequest)
-	    .detail("IgnporePopDeadline", self->ignorePopDeadline)
+	    .detail("IgnorePopRequest", self->ignorePopRequest)
+	    .detail("IgnorePopDeadline", self->ignorePopDeadline)
 	    .detail("PersistentDataVersion", logData->persistentDataVersion)
 	    .detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion)
 	    .detail("QueueCommittedVersion", logData->queueCommittedVersion.get())

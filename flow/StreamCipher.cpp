@@ -198,7 +198,7 @@ TEST_CASE("flow/StreamCipher") {
 		while (index < plaintext.size()) {
 			const auto chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), plaintext.size() - index);
 			const auto encrypted = encryptor.encrypt(&plaintext[index], chunkSize, arena);
-			TraceEvent("StreamCipherTestEcryptedChunk")
+			TraceEvent("StreamCipherTestEncryptedChunk")
 			    .detail("EncryptedSize", encrypted.size())
 			    .detail("EncryptedOffset", encryptedOffset)
 			    .detail("Index", index);

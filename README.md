@@ -150,9 +150,9 @@ cpack -G DEB
 
 For RPM simply replace `DEB` with `RPM`.
 
-### MacOS
+### macOS
 
-The build under MacOS will work the same way as on Linux. To get boost and ninja you can use [Homebrew](https://brew.sh/).
+The build under macOS will work the same way as on Linux. To get boost and ninja you can use [Homebrew](https://brew.sh/).
 
 ```sh
 cmake -G Ninja <PATH_TO_FOUNDATIONDB_SOURCE>

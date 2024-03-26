@@ -479,7 +479,7 @@ private:
 				}
 			}
 
-			// Apply muation logs for system backup ranges after manifest version
+			// Apply mutation logs for system backup ranges after manifest version
 			Version manifestVersion = wait(getManifestVersion(self->db_));
 			for (auto& range : getSystemBackupRanges()) {
 				self->mlogRestoreRanges_.push_back(self->mlogRestoreRanges_.arena(), range);
@@ -707,7 +707,7 @@ private:
 
 	ACTOR static Future<Void> processStorageQueuingMetricsRequest(StorageQueuingMetricsRequest req) {
 		// dprint("Unsupported StorageQueuingMetricsRequest\n");
-		//  FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
+		//  FIXME get rid of this delay. it's a temp solution to avoid starvation scheduling of DD
 		//  processes
 		wait(delay(1));
 		req.reply.sendError(unsupported_operation());

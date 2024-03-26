@@ -534,7 +534,7 @@ public class AsyncUtil {
 	 *  function, which requires that the handler return a regular value, this
 	 *  method requires that the handler return a {@link CompletableFuture}.
 	 *  The returned future will then be ready with the result of the
-	 *  handler's future (or an error if that future completes excpetionally).
+	 *  handler's future (or an error if that future completes exceptionally).
 	 *  The handler will execute on the passed {@link Executor}.
 	 *
 	 * @param future future to compose the handler onto

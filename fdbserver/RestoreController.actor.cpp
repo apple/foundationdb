@@ -145,7 +145,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 	return Void();
 }
 
-// RestoreWorker that has restore controller role: Recruite a role for each worker
+// RestoreWorker that has restore controller role: Recruit a role for each worker
 ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWorker,
                                        Reference<RestoreControllerData> controllerData) {
 	state int nodeIndex = 0;
@@ -357,7 +357,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	self->dumpVersionBatches(self->versionBatches);
 
 	state std::vector<Future<Void>> fBatches;
-	state std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batchs
+	state std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batches
 	for (auto& vb : self->versionBatches) {
 		versionBatches.push_back(vb.second);
 	}

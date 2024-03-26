@@ -614,7 +614,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		ASSERT(r == size);
 		content = buf.toString();
 
-		// Any exceptions from hehre forward are parse failures
+		// Any exceptions from here forward are parse failures
 		errorEventType = "BlobCredentialFileParseFailed";
 		json_spirit::mValue json;
 		json_spirit::read_string(content, json);
@@ -1063,7 +1063,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		} else if (retryable) {
 			// We will wait delay seconds before the next retry, start with nextRetryDelay.
 			double delay = nextRetryDelay;
-			// conenctionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
+			// connectionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
 			// so there is no point of waiting too long, instead retry more aggressively
 			double limit =
 			    connectionFailed ? bstore->knobs.max_delay_connection_failed : bstore->knobs.max_delay_retryable_error;
@@ -1102,7 +1102,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			if (err.present()) {
 				int code = err.get().code();
 
-				// If we get a timed_out error during the the connect() phase, we'll call that connection_failed despite
+				// If we get a timed_out error during the connect() phase, we'll call that connection_failed despite
 				// the fact that there was technically never a 'connection' to begin with.  It differentiates between an
 				// active connection timing out vs a connection timing out, though not between an active connection
 				// failing vs connection attempt failing.
@@ -1506,7 +1506,7 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	}
 
 	// ************* TASK 1: CREATE A CANONICAL REQUEST *************
-	// Create Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
+	// Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
 	std::vector<std::string> queryParameters;
 	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, true);
 

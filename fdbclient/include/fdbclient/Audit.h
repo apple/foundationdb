@@ -77,7 +77,7 @@ struct AuditStorageState {
 	UID id;
 	UID ddId; // ddId indicates this audit is managed by which dd
 	// ddId is used to check if dd has changed
-	// When a new dd starts in the middle of an onging audit,
+	// When a new dd starts in the middle of an ongoing audit,
 	// The ongoing audit's ddId gets updated
 	// When SS updates the progress, it checks ddId
 	// If the ddId is updated, SS Audit actors of the old dd will stop themselves

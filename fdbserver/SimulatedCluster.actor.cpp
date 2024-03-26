@@ -2180,7 +2180,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 		if (generateMachineTeamTestConfig) {
 			// When DESIRED_TEAMS_PER_SERVER is set to 1, the desired machine team number is 5
 			// while the max possible machine team number is 10.
-			// If machine_count > 5, we can still test the effectivenss of machine teams
+			// If machine_count > 5, we can still test the effectiveness of machine teams
 			// Note: machine_count may be much larger than 5 because we may have a big replication factor
 			machine_count = std::max(machine_count,
 			                         deterministicRandom()->randomInt(

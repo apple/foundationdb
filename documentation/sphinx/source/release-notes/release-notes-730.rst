@@ -27,7 +27,7 @@ Release Notes
 
 7.3.26
 ======
-* Updated RocskDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
+* Updated RocksDB version to 8.6.7. `(PR #11043) <https://github.com/apple/foundationdb/pull/11043>`_
 * Changed RocksDB rate limiter to all IO. `(PR #11016) <https://github.com/apple/foundationdb/pull/11016>`_
 * Added ``fdb_c_apiversion.g.h`` to OSX package. `(PR #11042) <https://github.com/apple/foundationdb/pull/11042>`_
 * Added write traffic metrics to ddMetricsGetRange. `(PR #10998) <https://github.com/apple/foundationdb/pull/10998>`_
@@ -70,7 +70,7 @@ Release Notes
 7.3.16
 ======
 * Released with AVX disabled.
-* Added location_metadata fdbcli to query shard locations and assignements. `(PR #10428) <https://github.com/apple/foundationdb/pull/10428>`_
+* Added location_metadata fdbcli to query shard locations and assignments. `(PR #10428) <https://github.com/apple/foundationdb/pull/10428>`_
 * Added degraded/disconnected peer recovery in gray failure. `(PR #10541) <https://github.com/apple/foundationdb/pull/10541>`_
 * Added replica and metadata audit support. `(PR #10631) <https://github.com/apple/foundationdb/pull/10631>`_
 * Added a SecurityMode for data distributor where data movements are not allowed but auditStorage is enabled. `(PR #10660) <https://github.com/apple/foundationdb/pull/10660>`_

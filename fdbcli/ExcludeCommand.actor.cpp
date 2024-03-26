@@ -455,7 +455,7 @@ CommandFactory excludeFactory(
     CommandHelp(
         "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>]\n"
         "        [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>]\n"
-        "        [locality_processid:<excludeprocessid>] [locality_<KEY>:<localtyvalue>]",
+        "        [locality_processid:<excludeprocessid>] [locality_<KEY>:<localityvalue>]",
         "exclude servers from the database by IP address or locality",
         "If no addresses or localities are specified, lists the set of excluded addresses and localities.\n"
         "\n"

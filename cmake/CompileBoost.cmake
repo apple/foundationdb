@@ -177,7 +177,7 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 
 # The precompiled boost silently broke in CI.  While investigating, I considered extending
 # the old check with something like this, so that it would fail loudly if it found a bad
-# pre-existing boost.  It turns out the error messages we get from CMake explain what is
+# preexisting boost.  It turns out the error messages we get from CMake explain what is
 # wrong with Boost.  Rather than reimplementing that, I just deleted this logic.  This
 # approach is simpler, has better ergonomics and should be easier to maintain.  If the build
 # is picking up your locally installed or partial version of boost, and you don't want

@@ -92,7 +92,7 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
 // Requests for earlier version batches are preferred; which is equivalent to
-// sendMuttionsRequests are preferred than loadingFileRequests
+// sendMutationsRequests are preferred than loadingFileRequests
 ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database cx) {
 	try {
 		state int curVBInflightReqs = 0;
@@ -449,7 +449,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				mutation = decryptedMutation;
 			}
 
-			// Skip mutation whose commitVesion < range kv's version
+			// Skip mutation whose commitVersion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
 				cc->oldLogMutations += 1;
 				wait(yield()); // avoid potential stack overflows
@@ -1097,7 +1097,7 @@ bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap
 		}
 	} else { // Concatenate the val string with the same commitVersion
 		it->second.first =
-		    it->second.first.contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
+		    it->second.first.contents().withSuffix(val_input.contents()); // Assign the new Arena to the map's value
 		auto& currentPart = it->second.second;
 		if (part != (currentPart + 1)) {
 			// Check if the same range or log file has been processed more than once!
@@ -1181,7 +1181,7 @@ ACTOR Future<Void> _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions
 				mutation = decryptedMutation;
 			}
 			// Should this mutation be skipped?
-			// Skip mutation whose commitVesion < range kv's version
+			// Skip mutation whose commitVersion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {
 				cc->oldLogMutations += 1;
 			} else {

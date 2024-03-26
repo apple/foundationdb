@@ -391,7 +391,7 @@ timestamp and a text description of the changes being made. To keep the size of
 the configuration database manageable, a compaction process runs periodically
 (defaulting to every five minutes) which compacts individual mutations into a
 simplified snapshot of key-value pairs. Compaction is controlled by the
-``ConfigBroadcaster``, using information it peridiodically requests from
+``ConfigBroadcaster``, using information it periodically requests from
 ``ConfigNode``s. Compaction will only compact up to the minimum known version
 across *all* ``ConfigNode``s. This means that if one ``ConfigNode`` is
 permanently partitioned from the ``ConfigBroadcaster`` or from clients, no

@@ -42,7 +42,7 @@ VERSION="1.6"
 if [ "${#}" -lt 2 ]
 then
 	echo 'run_binding_tester.sh <number of cycles> <error file>'
-	echo '   cycles:   number of cycles to run test (0 => unlimitted)'
+	echo '   cycles:   number of cycles to run test (0 => unlimited)'
 	echo ''
 	echo '   Modifiable Environment Variables:'
 	echo '       CONCURRENCY:   number of concurrent requests'

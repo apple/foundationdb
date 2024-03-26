@@ -177,7 +177,7 @@ struct ClogTlogWorkload : TestWorkload {
 		state bool useGrayFailureToRecover = false;
 		if (deterministicRandom()->coinflip() && self->useDisconnection) {
 			// Use gray failure instead of exclusion to recover the cluster.
-			TraceEvent("ClogTlogUseGrayFailreToRecover").log();
+			TraceEvent("ClogTlogUseGrayFailureToRecover").log();
 			useGrayFailureToRecover = true;
 		}
 

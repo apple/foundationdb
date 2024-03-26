@@ -402,7 +402,7 @@ public:
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 		for (auto& it : id_worker) {
 			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the appropiate fitness
+			// not be one of the excluded addrs from req and have the appropriate fitness
 			if (workerAvailable(it.second, false) &&
 			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
@@ -3127,7 +3127,7 @@ public:
 			}
 		}
 
-		auto deterministicDecendingOrder = [](const std::pair<int, NetworkAddress>& a,
+		auto deterministicDescendingOrder = [](const std::pair<int, NetworkAddress>& a,
 		                                      const std::pair<int, NetworkAddress>& b) -> bool {
 			return a.first > b.first || (a.first == b.first && a.second < b.second);
 		};
@@ -3137,13 +3137,13 @@ public:
 		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
-		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDecendingOrder);
+		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDescendingOrder);
 
 		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
 		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
 			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
 		}
-		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), deterministicDecendingOrder);
+		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), deterministicDescendingOrder);
 
 		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
 		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded

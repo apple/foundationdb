@@ -424,7 +424,7 @@ public actor MasterDataActor {
 extension MasterData {
     var swiftActorImpl: MasterDataActor {
         #if FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
-        // During the generationg of the C++ header for this module, we do not
+        // During the generation of the C++ header for this module, we do not
         // yet have access to `getSwiftImpl` API.
         return MasterDataActor()
         #else

@@ -806,7 +806,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> handleTenantBondary(EncryptedRangeFileWriter* self,
+	ACTOR static Future<Void> handleTenantBoundary(EncryptedRangeFileWriter* self,
 	                                              Key k,
 	                                              Value v,
 	                                              bool writeValue,
@@ -843,7 +843,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache, checkTenantCache));
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
-			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
+			wait(handleTenantBoundary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
 			return true;
 		}
 		return false;
@@ -5247,11 +5247,11 @@ public:
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
+				// Note: we always lock DB here in case DB is modified at the backupRanges boundary.
 				for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
 					auto range = backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
-					// Register the request request in DB, which will be picked up by restore worker leader
+					// Register the request in DB, which will be picked up by restore worker leader
 					struct RestoreRequest restoreRequest(restoreIndex,
 					                                     restoreTag,
 					                                     bcUrl,

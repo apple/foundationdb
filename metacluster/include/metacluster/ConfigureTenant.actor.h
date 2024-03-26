@@ -154,7 +154,7 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
 		if (!tenantEntry.present()) {
-			CODE_PROBE(true, "Configure non-existent tenant");
+			CODE_PROBE(true, "Configure nonexistent tenant");
 			throw tenant_not_found();
 		}
 
@@ -266,7 +266,7 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
 		if (!tenantEntry.present()) {
-			CODE_PROBE(true, "Configure tenant state for non-existent tenant", probe::decoration::rare);
+			CODE_PROBE(true, "Configure tenant state for nonexistent tenant", probe::decoration::rare);
 			throw tenant_not_found();
 		}
 

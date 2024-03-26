@@ -535,7 +535,7 @@ _range = range
 
 def range(t):
     """Returns a slice of keys that includes all tuples of greater
-    length than the specified tuple that that start with the
+    length than the specified tuple that start with the
     specified elements.
 
     e.g. range(('a', 'b')) includes all tuples ('a', 'b', ...)"""

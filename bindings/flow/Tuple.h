@@ -115,7 +115,7 @@ private:
 	static const uint8_t TRUE_CODE;
 	static const uint8_t UUID_CODE;
 	// Java Tuple layer VERSIONSTAMP has 96 bits(12 bytes).
-	// It has additional 2 bytes user code than the internal VERSIONTAMP of size 10 bytes
+	// It has additional 2 bytes user code than the internal VERSIONSTAMP of size 10 bytes
 	static const uint8_t VERSIONSTAMP_96_CODE;
 
 	Tuple(const StringRef& data);

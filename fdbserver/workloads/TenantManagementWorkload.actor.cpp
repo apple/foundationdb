@@ -1162,7 +1162,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 
-		// True if the tenant should should exist and return a result
+		// True if the tenant should exist and return a result
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end() &&
 		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
@@ -1631,7 +1631,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		// In the future after we enable tenant movement, this may be
-		// state bool configurationChanging = tenangGroupCanging || assignToDifferentCluster.
+		// state bool configurationChanging = tenantGroupChanging || assignToDifferentCluster.
 		state bool configurationChanging = tenantGroupChanging;
 
 		// If true, the options generated may include an unknown option
@@ -1729,7 +1729,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 
-		// True if the tenant group should should exist and return a result
+		// True if the tenant group should exist and return a result
 		auto itr = self->createdTenantGroups.find(tenantGroup);
 		state bool alreadyExists = itr != self->createdTenantGroups.end() &&
 		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
@@ -1946,7 +1946,7 @@ struct TenantManagementWorkload : TestWorkload {
 				state Error err = e;
 				if (err.code() == error_code_tenant_not_found) {
 					ASSERT(!tenantPresent);
-					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
+					CODE_PROBE(true, "Attempted to read key from nonexistent tenant");
 					return Void();
 				} else if (err.code() == error_code_tenant_locked) {
 					ASSERT(!lockAware);

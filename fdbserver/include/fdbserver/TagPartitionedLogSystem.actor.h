@@ -325,7 +325,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer,
 	                                     Reference<AsyncVar<bool>> failed);
 
-	// returns the log group's knownComittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
+	// returns the log group's knownCommittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
 	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,

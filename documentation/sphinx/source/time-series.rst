@@ -69,7 +69,7 @@ Or maybe you want to track individual pages so you have a record of page access 
     subspace_pages = FDB::Subspace.new(['pages-counter'])
 
     # then use atomic add again with a tuple sorted by time and counter
-    tr.add(subpace_pages.pack([page_ID, year, month, day, hour]), [1].pack('q<'))
+    tr.add(subspace_pages.pack([page_ID, year, month, day, hour]), [1].pack('q<'))
 
     # then retrieving any information about this page just requires specifying the time range you want to return the associated counter values
     tr.get(subspace_pages.pack([year, month, day, hour]))
@@ -85,7 +85,7 @@ Putting it all together, your application just updates the primary copy of the d
         tr.set(FDB::Tuple.pack([year, month, day, seconds]), FDB::Tuple.pack([website_ID, page_ID, browser_ID]))
         tr.set(subspace_website_index.pack([website_ID, year, month, day, seconds]), value)
         tr.add(subspace_count.pack([website_ID, year, month]), [1].pack('q<'))
-        tr.add(subpace_pages.pack([page_ID, year, month, day, hour]), [1].pack('q<'))
+        tr.add(subspace_pages.pack([page_ID, year, month, day, hour]), [1].pack('q<'))
     end
 
 Ordering and Transactions

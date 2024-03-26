@@ -69,4 +69,4 @@ struct CompressionUtils {
 	static std::unordered_set<CompressionFilter> supportedFilters;
 };
 
-#endif // FLOW_COMPRRESSION_UTILS_H
+#endif // FLOW_COMPRESSION_UTILS_H

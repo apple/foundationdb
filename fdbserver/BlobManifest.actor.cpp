@@ -442,7 +442,7 @@ private:
 				ranges.push_back(KeyRangeRef(metadataVersionKey, metadataVersionKeyEnd));
 				state Version readVersion = wait(dumpRanges(self, splitter, ranges));
 
-				// blobGranuleHistoryKeys - Map granule to its parents and parent bundaries. for time-travel read
+				// blobGranuleHistoryKeys - Map granule to its parents and parent boundaries. for time-travel read
 				wait(dumpRange(self, splitter, blobGranuleHistoryKeys, [=](KeyValueRef row) {
 					return shouldDumpBlobGranuleHistoryKey(row, readVersion);
 				}));
@@ -540,7 +540,7 @@ private:
 		return true;
 	}
 
-	// Start a transcation to read range and append to splitter. Number of rows are limited by maxRowsPerTransaction.
+	// Start a transaction to read range and append to splitter. Number of rows are limited by maxRowsPerTransaction.
 	// It returns the last key that has been read.
 	ACTOR static Future<Key> dumpRange(Reference<BlobManifestDumper> self,
 	                                   Reference<BlobManifestFileSplitter> splitter,
@@ -610,7 +610,7 @@ private:
 
 		loop {
 			state std::vector<BlobManifestFile> allFiles = wait(BlobManifestFile::listAll(writer));
-			TraceEvent("BlobManfiestCleanup").detail("FileCount", allFiles.size());
+			TraceEvent("BlobManifestCleanup").detail("FileCount", allFiles.size());
 			int count = BlobManifest::count(allFiles);
 			if (count <= SERVER_KNOBS->BLOB_RESTORE_MANIFEST_RETENTION_MAX) {
 				return Void();
@@ -651,7 +651,7 @@ public:
 			wait(validate(self));
 		} catch (Error& e) {
 			dprint("WARNING: unexpected manifest loader error {}\n", e.what());
-			TraceEvent("BlobManfiestError").error(e).log();
+			TraceEvent("BlobManifestError").error(e).log();
 			throw;
 		}
 		return Void();

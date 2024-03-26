@@ -42,22 +42,22 @@ namespace ph = std::placeholders;
 // We can use this to suppress expected exceptions, and take action
 // if we don't get an exception wqe should have gotten.
 struct ExceptionContract {
-	enum occurance_t { Never = 0, Possible = 1, Always = 2 };
+	enum occurrence_t { Never = 0, Possible = 1, Always = 2 };
 
 	std::string func;
-	std::map<int, occurance_t> expected;
+	std::map<int, occurrence_t> expected;
 	std::function<void(TraceEvent&)> augment;
 
 	ExceptionContract(const char* func_, const std::function<void(TraceEvent&)>& augment_)
 	  : func(func_), augment(augment_) {}
-	ExceptionContract& operator=(const std::map<int, occurance_t>& e) {
+	ExceptionContract& operator=(const std::map<int, occurrence_t>& e) {
 		expected = e;
 		return *this;
 	}
 
-	static occurance_t possibleButRequiredIf(bool in) { return in ? Always : Possible; }
-	static occurance_t requiredIf(bool in) { return in ? Always : Never; }
-	static occurance_t possibleIf(bool in) { return in ? Possible : Never; }
+	static occurrence_t possibleButRequiredIf(bool in) { return in ? Always : Possible; }
+	static occurrence_t requiredIf(bool in) { return in ? Always : Never; }
+	static occurrence_t possibleIf(bool in) { return in ? Possible : Never; }
 
 	void handleException(const Error& e, Reference<ITransaction> tr) const {
 		// We should always ignore these.

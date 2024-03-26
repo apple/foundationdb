@@ -38,7 +38,7 @@ const std::unordered_map<std::string, RESTConnectionType> RESTConnectionType::su
 RESTConnectionType RESTConnectionType::getConnectionType(const std::string& protocol) {
 	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
 	if (itr == RESTConnectionType::supportedConnTypes.end()) {
-		TraceEvent("RESTConnectionTypeUnsupportedPrototocol").detail("Protocol", protocol);
+		TraceEvent("RESTConnectionTypeUnsupportedProtocol").detail("Protocol", protocol);
 		CODE_PROBE(true, "REST URI unsupported protocol");
 		throw rest_unsupported_protocol();
 	}
@@ -53,7 +53,7 @@ bool RESTConnectionType::isProtocolSupported(const std::string& protocol) {
 bool RESTConnectionType::isSecure(const std::string& protocol) {
 	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
 	if (itr == RESTConnectionType::supportedConnTypes.end()) {
-		TraceEvent("RESTConnectionTypeUnsupportedPrototocol").detail("Protocol", protocol);
+		TraceEvent("RESTConnectionTypeUnsupportedProtocol").detail("Protocol", protocol);
 		throw rest_unsupported_protocol();
 	}
 	return itr->second.secure == RESTConnectionType::SECURE_CONNECTION;

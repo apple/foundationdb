@@ -189,7 +189,7 @@ public:
 	template <class T>
 	auto When(FutureStream<T> const& futureStream, std::invocable<T const&> auto fun) {
 		static_assert(std::is_same_v<decltype(fun(std::declval<T const&>())), void>,
-		              "When-handler must return void (and't can't be awaitable)");
+		              "When-handler must return void (and can't be awaitable)");
 		if (noop) {
 			return getNoop(futureStream);
 		}

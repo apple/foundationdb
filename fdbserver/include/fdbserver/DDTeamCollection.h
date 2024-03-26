@@ -624,7 +624,7 @@ protected:
 	// The empty team is used as the starting point to move data to the remote DB
 	// begin : the start of the team member ID
 	// end : end of the team member ID
-	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
+	// isInitialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
 	// when the team added at init() when we recreate teams by looking up DB
 	template <class InputIt>
 	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {

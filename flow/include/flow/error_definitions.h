@@ -216,7 +216,7 @@ ERROR( invalid_config_db_key, 2028, "Invalid configuration database key provided
 ERROR( invalid_config_path, 2029, "Invalid configuration path" )
 ERROR( mapper_bad_index, 2030, "The index in K[] or V[] is not a valid number or out of range" )
 ERROR( mapper_no_such_key, 2031, "A mapped key is not set in database" )
-ERROR( mapper_bad_range_decriptor, 2032, "\"{...}\" must be the last element of the mapper tuple" )
+ERROR( mapper_bad_range_descriptor, 2032, "\"{...}\" must be the last element of the mapper tuple" )
 ERROR( quick_get_key_values_has_more, 2033, "One of the mapped range queries is too large" )
 ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the same SS" )
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )

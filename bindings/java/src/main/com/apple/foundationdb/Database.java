@@ -485,7 +485,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *  transaction may be executed twice. For more information about how to reason
 	 *  about these situations see
 	 * <a href="/foundationdb/developer-guide.html#transactions-with-unknown-results"
-	 *   target="_blank">the FounationDB Developer Guide</a>
+	 *   target="_blank">the FoundationDB Developer Guide</a>
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
@@ -527,7 +527,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *  transaction may be executed twice. For more information about how to reason
 	 *  about these situations see
 	 * <a href="/foundationdb/developer-guide.html#transactions-with-unknown-results"
-	 *   target="_blank">the FounationDB Developer Guide</a><br>
+	 *   target="_blank">the FoundationDB Developer Guide</a><br>
 	 * <br>
 	 * Any errors encountered executing {@code retryable}, or received from the
 	 *  database, will be set on the returned {@code CompletableFuture}.

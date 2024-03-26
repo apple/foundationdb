@@ -515,7 +515,7 @@ public:
 		files[1].popped += popped - pop0;
 	}
 
-	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
+	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and popped)
 	ACTOR static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* self, int file, int64_t page, int64_t debugSeq) {
 		self->files[file].popped = page * sizeof(Page);
 		if (file)
@@ -527,7 +527,7 @@ public:
 		// If we are starting in file 1, we truncate file 0 in case it has been corrupted.
 		//  In particular, we are trying to avoid a dropped or corrupted write to the first page of file 0 causing it to
 		//  be sequenced before file 1, when in fact it contains many pages that follow file 1.  These ok pages may be
-		//  incorrectly read if the machine dies after overwritting the first page of file 0 and is then recovered
+		//  incorrectly read if the machine dies after overwriting the first page of file 0 and is then recovered
 		if (file == 1)
 			wait(self->truncateFile(self, 0, 0));
 
@@ -672,7 +672,7 @@ public:
 				// Begin pushing at the beginning of files[1]
 
 				// Truncate both files, since perhaps only the first pages are corrupted.  This avoids cases where
-				// overwritting the first page and then terminating makes subsequent pages valid upon recovery.
+				// overwriting the first page and then terminating makes subsequent pages valid upon recovery.
 				std::vector<Future<Void>> truncates;
 				for (int i = 0; i < 2; ++i)
 					if (self->files[i].size > 0)
@@ -944,7 +944,7 @@ public:
 			if (!anyPopped)
 				return 0;
 
-			// To mark pages are poped, we push an empty page to specify that following pages were poped.
+			// To mark pages are popped, we push an empty page to specify that following pages were popped.
 			// maxPayLoad is the max. payload size, i.e., (page_size - page_header_size).
 			return Page::maxPayload;
 		} else
@@ -956,7 +956,7 @@ public:
 		if (!pushedPageCount()) {
 			if (!anyPopped)
 				return Void();
-			addEmptyPage(); // To remove poped pages, we push an empty page to specify that pages behind it were poped.
+			addEmptyPage(); // To remove popped pages, we push an empty page to specify that pages behind it were popped.
 		}
 		anyPopped = false;
 		backPage().popped = poppedSeq;
@@ -996,7 +996,7 @@ public:
 	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
 
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
-	// to be changed to understand the new intiailizeRecovery protocol.
+	// to be changed to understand the new initializeRecovery protocol.
 	location getNextReadLocation() const override { return nextReadLocation; }
 	location getNextPushLocation() const override {
 		ASSERT(initialized);

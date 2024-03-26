@@ -3248,7 +3248,7 @@ public:
 		snapshots.push_back({ version, makeReference<DWALPagerSnapshot>(this, meta, version) });
 	}
 
-	// Set the pending oldest versiont to keep as of the next commit
+	// Set the pending oldest version to keep as of the next commit
 	void setOldestReadableVersion(Version v) override {
 		ASSERT(v >= header.oldestVersion);
 		ASSERT(v <= header.committedVersion);
@@ -3740,7 +3740,7 @@ public:
 
 		int64_t reusable = reusablePageSpace + reusableQueueSpace + reusablePagerSlackSpace;
 
-		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
+		// Space currently in use by old page versions have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
 		return StorageBytes(free, total, pagerPhysicalSize, free + reusable, temp);
@@ -5126,7 +5126,7 @@ public:
 				ASSERT(entry.height > 1);
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
-				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
+				// RedwoodRecordRef::DeltaValueOnly as the delta type to skip key decoding
 				BTreePage::ValueTree::Cursor c(makeReference<BTreePage::ValueTree::DecodeCache>(dbBegin, dbEnd),
 				                               btPage.valueTree());
 				ASSERT(c.moveFirst());
@@ -5404,7 +5404,7 @@ public:
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
 		wait(self->commit(self->getLastCommittedVersion() + 1));
 
-		// Loop commits until the the lazy delete queue is completely processed.
+		// Loop commits until the lazy delete queue is completely processed.
 		loop {
 			wait(self->commit(self->getLastCommittedVersion() + 1));
 
@@ -5977,7 +5977,7 @@ private:
 			ASSERT(!enableEncryptionDomain || (a.domainId.present() && b.domainId.present()));
 			if (!enableEncryptionDomain || a.domainId.get() == b.domainId.get()) {
 
-				// While the last page page has too much slack and the second to last page
+				// While the last page has too much slack and the second to last page
 				// has more than the minimum record count, shift a record from the second
 				// to last page to the last page.
 				while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
@@ -7279,7 +7279,7 @@ private:
 					// If u's subtree is either all cleared or all unchanged
 					if (uniform) {
 						// We do not need to recurse to this subtree.  Next, let's see if we can embiggen u's range to
-						// include sibling subtrees also covered by (mBegin, mEnd) so we can not recurse to those, too.
+						// include sibling subtrees also covered by (mBegin, mEnd) so we cannot recurse to those, too.
 						// If the cursor is valid, u.subtreeUpperBound is the cursor's position, which is >= mEnd.key().
 						// If equal, no range expansion is possible.
 						if (cursor.valid() && mEnd.key() != u.subtreeUpperBound.key) {
@@ -7401,7 +7401,7 @@ private:
 			debug_print(addPrefix(context, update->toString()));
 
 			// TODO(yiwu): check whether we can pass decodeUpperBound as nextBoundary when the last slice
-			// have childenChanged=true.
+			// have childrenChanged=true.
 			modifier.applyUpdate(*slices.back(),
 			                     modifier.changesMade || slices.back()->childrenChanged ? &update->subtreeUpperBound
 			                                                                            : &update->decodeUpperBound);
@@ -10989,7 +10989,7 @@ TEST_CASE(":/redwood/performance/set") {
 				int recs = recordsThisCommit;
 				int kvb = kvBytesThisCommit;
 
-				// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
+				// Capturing intervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
 				// actor state object
 				double* pIntervalStart = &intervalStart;
 

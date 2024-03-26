@@ -426,7 +426,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			}
 		}
 	} else {
-		CODE_PROBE(true, "Delete non-existent tenant");
+		CODE_PROBE(true, "Delete nonexistent tenant");
 	}
 
 	if (clusterType == ClusterType::METACLUSTER_DATA) {

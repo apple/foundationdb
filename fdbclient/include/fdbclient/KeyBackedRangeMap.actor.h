@@ -155,7 +155,7 @@ public:
 	}
 
 	// Update the range from begin to end by either applying valueUpdate to it, or if replace is true then replace
-	// the the range with the given value.
+	// the range with the given value.
 	// Adjacent ranges that are identical will be coalesced in the update transaction.
 	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
 	ACTOR template <class Transaction>

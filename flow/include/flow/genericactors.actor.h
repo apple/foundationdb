@@ -2401,7 +2401,7 @@ private:
 };
 
 // Utility class to provide FLOW compliant singleton pattern.
-// In similuation, the approach allows per-virtual process singleton as desired compared to one singleton instance
+// In simulation, the approach allows per-virtual process singleton as desired compared to one singleton instance
 // shared across all virtual processes if 'static singleton' pattern is implemented.
 //
 // API NOTE: Client are expected to pass functor allowing instantiation of the template class

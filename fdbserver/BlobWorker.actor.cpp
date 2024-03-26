@@ -407,7 +407,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<AsyncV
 	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(dbInfo, headerCipherDetails, arena));
 	cipherKeysCtx.headerCipherKey = headerCipherKey;
 
-	// Populate 'Intialization Vector'
+	// Populate 'Initialization Vector'
 	ASSERT_EQ(ivRef.size(), AES_256_IV_LENGTH);
 	cipherKeysCtx.ivRef = StringRef(*arena, ivRef);
 
@@ -2562,7 +2562,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					// ASSERT(!deltas.mutations.empty());
 					if (!deltas.mutations.empty()) {
 						if (deltas.mutations.size() == 1 && deltas.mutations.back().param1 == lastEpochEndPrivateKey) {
-							// Note rollbackVerision is durable, [rollbackVersion+1 - deltas.version] needs to
+							// Note rollbackVersion is durable, [rollbackVersion+1 - deltas.version] needs to
 							// be tossed For correctness right now, there can be no waits and yields either in
 							// rollback handling or in handleBlobGranuleFileRequest once waitForVersion has
 							// succeeded, otherwise this will race and clobber results
@@ -5419,7 +5419,7 @@ ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWo
 					self->currentManagerStatusStream.get().sendError(connection_failed());
 
 					// hold a copy of the previous stream if it exists, so any waiting send calls don't get
-					// proken_promise before onChange
+					// broken_promise before onChange
 					ReplyPromiseStream<GranuleStatusReply> copy;
 					if (self->statusStreamInitialized) {
 						copy = self->currentManagerStatusStream.get();

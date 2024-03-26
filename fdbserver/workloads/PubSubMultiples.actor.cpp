@@ -99,7 +99,7 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	}
 
 	/*ACTOR*/ Future<Void> messageSender(PubSubMultiplesWorkload* self, Database cx) {
-		// use a possion loop and post messages to feeds
+		// use a posting loop and post messages to feeds
 		return Void();
 	}
 

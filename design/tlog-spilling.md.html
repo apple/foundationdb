@@ -508,7 +508,7 @@ TL;DR: Spilling involves less IOPS and is faster.  Peeking involves more IOPS an
 ### Spilling
 
 The most notable effect of the spilling changes is that the Disk Queue files
-will now grow to potentially terrabytes in size.
+will now grow to potentially terabytes in size.
 
  1. Spilling will occur in larger batches, which will result in a more
 sawtooth-like `BytesInput - BytesDurable` value.  I'm not aware that this will have any meaningful impact.
@@ -571,7 +571,7 @@ minor impacts on recovery times:
 
 		If this turns out to be an issue, it's trivial to address.  There's no
 		reason to do only a binary search when drives support parallel requests.  A
-		32-way search could reasonably be done, and would would make a 4TB Disk
+		32-way search could reasonably be done, and would make a 4TB Disk
 		Queue file faster to recover than a 4GB one currently.
 
 3.  Disk queue files can now shrink.
@@ -597,7 +597,7 @@ minor impacts on recovery times:
 
 `UPDATE_STORAGE_BYTE_LIMIT`
 : How many bytes of mutations should be spilled at once in a spill-by-value TLog.<br>
-  This knob is pre-existing, and has only been "changed" to only apply to spill-by-value.<br>
+  This knob is preexisting, and has only been "changed" to only apply to spill-by-value.<br>
 
 `TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK`
 : How many batches of spilled data index batches should be read from disk to serve one peek request.<br>

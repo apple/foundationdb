@@ -37,7 +37,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // DD Configuration for a key range range.
-// There are many properties here, all Optional, because for a given key range range a property
+// There are many properties here, all Optional, because for a given key range a property
 // can be unspecified which means it continues the setting of the preceding range.
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;

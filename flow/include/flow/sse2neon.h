@@ -1,4 +1,4 @@
-///// THIS IS AN EXTRNAL PROJECT: https://github.com/DLTcollab/sse2neon /////
+///// THIS IS AN EXTERNAL PROJECT: https://github.com/DLTcollab/sse2neon /////
 
 #ifndef SSE2NEON_H
 #define SSE2NEON_H
@@ -2029,7 +2029,7 @@ FORCE_INLINE __m128i _mm_max_epi16(__m128i a, __m128i b) {
 }
 
 // epi versions of min/max
-// Computes the pariwise maximums of the four signed 32-bit integer values of a
+// Computes the pairwise maximums of the four signed 32-bit integer values of a
 // and b.
 //
 // A 128-bit parameter that can be defined with the following equations:
@@ -2043,7 +2043,7 @@ FORCE_INLINE __m128i _mm_max_epi32(__m128i a, __m128i b) {
 	return vreinterpretq_m128i_s32(vmaxq_s32(vreinterpretq_s32_m128i(a), vreinterpretq_s32_m128i(b)));
 }
 
-// Computes the pariwise minima of the four signed 32-bit integer values of a
+// Computes the pairwise minima of the four signed 32-bit integer values of a
 // and b.
 //
 // A 128-bit parameter that can be defined with the following equations:

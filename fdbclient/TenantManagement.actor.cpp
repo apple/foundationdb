@@ -77,7 +77,7 @@ bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMap
 	return false;
 }
 
-// validates whether the the ID created by adding delta to baseID is a valid ID in the same tenant prefix
+// validates whether the ID created by adding delta to baseID is a valid ID in the same tenant prefix
 int64_t computeNextTenantId(int64_t baseId, int64_t delta) {
 	if ((baseId & 0xFFFFFFFFFFFF) + delta > 0xFFFFFFFFFFFF) {
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "NoMoreTenantIds")
@@ -90,7 +90,7 @@ int64_t computeNextTenantId(int64_t baseId, int64_t delta) {
 	return baseId + delta;
 }
 
-// returns the maximum allowable tenant id in which the 2 byte prefix is not overriden
+// returns the maximum allowable tenant id in which the 2 byte prefix is not overridden
 int64_t getMaxAllowableTenantId(int64_t curTenantId) {
 	// The maximum tenant id allowed is 1 for the first 48 bits (6 bytes) with the first 16 bits (2 bytes) being the
 	// tenant prefix

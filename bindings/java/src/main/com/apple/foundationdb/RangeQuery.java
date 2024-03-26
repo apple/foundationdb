@@ -209,7 +209,7 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 
 		private synchronized void startNextFetch() {
 			if(fetchOutstanding)
-				throw new IllegalStateException("Reentrant call not allowed"); // This can not be called reentrantly
+				throw new IllegalStateException("Reentrant call not allowed"); // This cannot be called reentrantly
 			if(isCancelled)
 				return;
 

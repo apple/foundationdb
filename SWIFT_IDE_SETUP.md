@@ -11,7 +11,7 @@ Note that Swift 5.9 (or higher) is required for the build at the time of writing
 You can download Swift toolchains from [https://www.swift.org/download/](https://www.swift.org/download/), 
 or by using the experimental https://github.com/swift-server/swiftly which simplifies this process.
 
-## VSCode + Cross Compilation (MacOS to Linux)
+## VSCode + Cross Compilation (macOS to Linux)
 
 ## Host toolchain setup
 

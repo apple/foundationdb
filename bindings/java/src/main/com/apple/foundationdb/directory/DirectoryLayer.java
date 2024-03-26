@@ -111,7 +111,7 @@ public class DirectoryLayer implements Directory {
 	 * control where the directory metadata and contents, respectively, are
 	 * stored. The default root directory has a node subspace with raw prefix
 	 * {@code \xFE} and a content subspace with no prefix.
-	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
+	 * Prefixes cannot be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
 	 * @see #getDefault
 	 */
@@ -143,7 +143,7 @@ public class DirectoryLayer implements Directory {
 	 * {@code \xFE} and a content subspace with no prefix. Specifying more
 	 * restrictive values for the node subspace and content subspace will allow
 	 * using the directory layer alongside other content in a database.
-	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
+	 * Prefixes cannot be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
 	 * @param nodeSubspace a {@link Subspace} used to store directory metadata
 	 * @param contentSubspace a {@link Subspace} used to store directory content
@@ -178,7 +178,7 @@ public class DirectoryLayer implements Directory {
 
 	/**
 	 * Creates a new {@code DirectoryLayer} formed with a specified node subspace and default content subspace.
-	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
+	 * Prefixes cannot be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
 	 * @param nodeSubspace a {@link Subspace} used to store directory metadata
 	 * @return a {@code DirectoryLayer} formed with {@code nodeSubspace} and a default content subspace
@@ -189,7 +189,7 @@ public class DirectoryLayer implements Directory {
 
 	/**
 	 * Creates a new {@code DirectoryLayer} formed with a default node subspace and specified content subspace.
-	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
+	 * Prefixes cannot be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
 	 * @param contentSubspace a {@link Subspace} used to store directory content
 	 * @return a {@code DirectoryLayer} formed with a {@code contentSubspace} and a default node subspace
@@ -202,7 +202,7 @@ public class DirectoryLayer implements Directory {
 	 * Gets the default instance of the DirectoryLayer. The default instance
 	 * is created with the default node and content subspaces.
 	 *
-	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
+	 * Prefixes cannot be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
 	 * @return the default {@code DirectoryLayer}
 	 */

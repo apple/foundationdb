@@ -593,7 +593,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	int batchIndex; // version batch index
 	RestoreAsset asset; // Unique identifier for the current restore asset
 
-	Version msgIndex; // Monitonically increasing index of mutation messages
+	Version msgIndex; // Monotonically increasing index of mutation messages
 	bool isRangeFile;
 	VersionedMutationsVec versionedMutations; // Versioned mutations may be at different versions parsed by one loader
 

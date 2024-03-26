@@ -1120,7 +1120,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 
 	// There are the bounds inside of which we are happy with the shard size.
 	// getShardSizeBounds() will always have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
-	//  so will will never attempt to merge that shard with the one previous.
+	//  so will never attempt to merge that shard with the one previous.
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
@@ -1167,7 +1167,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	//     .detail("CurrentMetrics", stats.toString())
 	//     .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
 	//     .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
-	//     .detail("WriteBandwitdhStatus", bandwidthStatus)
+	//     .detail("WriteBandwidthStatus", bandwidthStatus)
 	//     .detail("SplitBecauseHighWriteBandWidth", writeSplit ? "Yes" : "No");
 
 	if (!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
@@ -2019,7 +2019,7 @@ void PhysicalShardCollection::initPhysicalShardCollection(KeyRange keys,
 		}
 	} else {
 		// If any physicalShard restored when DD init is the anonymousShard,
-		// Then DD enters Transition state where DD graduatelly moves Shard (or KeyRange)
+		// Then DD enters Transition state where DD gradually moves Shard (or KeyRange)
 		// out of the anonymousShard
 		setTransitionCheck();
 	}

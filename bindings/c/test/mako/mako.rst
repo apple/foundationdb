@@ -178,10 +178,10 @@ Format
 
 Transaction Specification Examples
 ----------------------------------
-- | 100 GETs (Non-commited)
+- | 100 GETs (Non-committed)
   | ``g100``
 
-- | 10 GET RANGE with Range of 50 (Non-commited)
+- | 10 GET RANGE with Range of 50 (Non-committed)
   | ``gr10:50``
 
 - | 90 GETs and 10 Updates (Committed)

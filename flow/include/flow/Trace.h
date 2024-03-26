@@ -414,7 +414,7 @@ public:
 	// Return the number of invocations of TraceEvent() at the specified logging level.
 	static unsigned long CountEventsLoggedAt(Severity);
 
-	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
+	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This is just a place to store fields
 
 	const TraceEventFields& getFields() const { return fields; }
 	Severity getSeverity() const { return severity; }

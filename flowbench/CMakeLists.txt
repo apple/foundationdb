@@ -14,7 +14,7 @@ elseif(EXISTS /opt/googlebenchmark-f91b6b-g++ AND NOT USE_LIBCXX)
   target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" /opt/googlebenchmark-f91b6b-g++/include)
   target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b-g++/lib64)
 else()
-  ## This seems to be copy-pasted from the the google benchmark documentation.
+  ## This seems to be copy-pasted from the google benchmark documentation.
   ## It breaks if you attempt to re-use a build of googlebenchmark across FDB
   ## builds.
 

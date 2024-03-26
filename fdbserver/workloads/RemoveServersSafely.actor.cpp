@@ -683,8 +683,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Step", "Excluding localities with failed option")
 				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
 				    .detail("FailedAddresses", describe(toKillMarkFailedArray))
-				    .detail("FailedLocaitiesSize", toKillLocalitiesFailed.size())
-				    .detail("FailedLocaities", describe(toKillLocalitiesFailed));
+				    .detail("FailedLocalitiesSize", toKillLocalitiesFailed.size())
+				    .detail("FailedLocalities", describe(toKillLocalitiesFailed));
 
 				wait(excludeLocalities(cx, toKillLocalitiesFailed, true));
 			} else {
@@ -703,8 +703,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Step", "Excluding localities without failed option")
 			    .detail("AddressesSize", toKillArray.size())
 			    .detail("Addresses", describe(toKillArray))
-			    .detail("LocaitiesSize", toKillLocalities.size())
-			    .detail("Locaities", describe(toKillLocalities));
+			    .detail("LocalitiesSize", toKillLocalities.size())
+			    .detail("Localities", describe(toKillLocalities));
 
 			wait(excludeLocalities(cx, toKillLocalities, false));
 		} else {

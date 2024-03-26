@@ -373,7 +373,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 			    !newServer.isError(error_code_request_maybe_delivered))
 				throw newServer.getError();
 
-			CODE_PROBE(true, "initial storage recuitment loop failed to get new server");
+			CODE_PROBE(true, "initial storage recruitment loop failed to get new server");
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
 			if (!dcId_tags.count(recruits.storageServers[idx].locality.dcId())) {

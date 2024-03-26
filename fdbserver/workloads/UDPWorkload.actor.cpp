@@ -259,7 +259,7 @@ struct UDPWorkload : TestWorkload {
 		}
 		m.emplace_back("Sent", totalSent, Averaged::False);
 		m.emplace_back("Received", totalReceived, Averaged::False);
-		m.emplace_back("Acknknowledged", totalAcked, Averaged::False);
+		m.emplace_back("Acknowledged", totalAcked, Averaged::False);
 		m.emplace_back("Successes", totalSuccess, Averaged::False);
 	}
 };

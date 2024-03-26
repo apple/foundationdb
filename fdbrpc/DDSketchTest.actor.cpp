@@ -43,7 +43,7 @@ TEST_CASE("/fdbrpc/ddsketch/correctness") {
 	DDSketch<double> dd;
 
 	for (int i = 0; i < 4000; i++) {
-		// This generates a uniform real disitribution between the range of
+		// This generates a uniform real distribution between the range of
 		// [0.0004, 0.01]
 		double sample = (static_cast<double>(deterministicRandom()->randomSkewedUInt32(40, 1000)) / 100000);
 		dd.addSample(sample);

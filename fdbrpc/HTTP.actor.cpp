@@ -397,7 +397,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		// Now truncate the buffer to just the dechunked contiguous content.
 		r->content.erase(r->contentLen);
 	} else {
-		// Some unrecogize response content scheme is being used.
+		// Some unrecognize response content scheme is being used.
 		throw http_bad_response();
 	}
 

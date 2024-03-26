@@ -145,7 +145,7 @@ class LogParser:
         _logger.error("Exception {} args: {}".format(type(e), e.args))
         _logger.error("Line: '{}'".format(linenr))
         obj["Severity"] = "warning"
-        obj["Type"] = "TestInfastructureLogLineGarbled"
+        obj["Type"] = "TestInfrastructureLogLineGarbled"
         obj["isLastLine"] = "TestFailure"
         obj["TraceLine"] = linenr
         obj["File"] = self.infile

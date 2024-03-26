@@ -376,7 +376,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						std::vector<GetKeyValuesReply> keyValueReplies;
 						for (int j = 0; j < replies.size(); j++) {
 							auto reply = replies[j].get();
-							ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
+							ASSERT(reply.present() && !reply.get().error.present()); // has thrown earlier of error
 							keyValueReplies.push_back(reply.get());
 						}
 						// keyServers and keyValueReplies must follow the same order

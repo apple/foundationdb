@@ -33,7 +33,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/genericactors.actor.h"
 
-// Valdiate at-rest encryption guarantees. If enabled, test injects a known 'marker' in Key and/or Values
+// Validate at-rest encryption guarantees. If enabled, test injects a known 'marker' in Key and/or Values
 // inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) can scanned to find if
 // 'plaintext marker' is present.
 const std::string ENCRYPTION_AT_REST_MARKER_STRING = "Expecto..Patronum...";

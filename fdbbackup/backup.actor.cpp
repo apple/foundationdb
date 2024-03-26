@@ -1697,7 +1697,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	return json;
 }
 
-// Check for unparsable or expired statuses and delete them.
+// Check for unparseable or expired statuses and delete them.
 // First checks the first doc in the key range, and if it is valid, alive and not "me" then
 // returns.  Otherwise, checks the rest of the range as well.
 ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,

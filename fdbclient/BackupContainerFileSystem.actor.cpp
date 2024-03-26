@@ -851,7 +851,7 @@ public:
 			return false;
 		}
 
-		// for each range in tags, check all tags from 1 are continouous
+		// for each range in tags, check all tags from 1 are continuous
 		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
 				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {

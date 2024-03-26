@@ -253,8 +253,8 @@ public:
 	double MAX_PRIOR_MODIFICATION_DELAY;
 
 	// AsyncFileWriteChecker
-	double ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
-	double ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY;
+	double ASYNC_FILE_WRITE_CHECKER_LOGGING_INTERVAL;
+	double ASYNC_FILE_WRITE_CHECKER_CHECKING_DELAY;
 
 	// GenericActors
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
@@ -296,7 +296,7 @@ public:
 	bool RESOLVE_PREFER_IPV4_ADDR;
 
 	// Sim2
-	// FIMXE: more parameters could be factored out
+	// FIXME: more parameters could be factored out
 	double MIN_OPEN_TIME;
 	double MAX_OPEN_TIME;
 	int64_t SIM_DISK_IOPS;

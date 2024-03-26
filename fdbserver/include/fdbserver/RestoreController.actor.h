@@ -436,7 +436,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 			maxVBVersion = std::max(maxVBVersion, vb.endVersion);
 			versionBatches->emplace(vb.beginVersion, vb);
 		}
-		// Invariant: The last vb endverion should be no smaller than targetVersion
+		// Invariant: The last vb endversion should be no smaller than targetVersion
 		if (maxVBVersion < targetVersion) {
 			// Q: Is the restorable version always less than the maximum version from all backup filenames?
 			// A: This is true for the raw backup files returned by backup container before we remove the empty files.

@@ -57,7 +57,7 @@ private:
 	uint64_t generation;
 	TenantMapByPrefix tenantCache;
 
-	// Map from tenant group names to the list of tenants, cumumlative storage used by
+	// Map from tenant group names to the list of tenants, cumulative storage used by
 	// all the tenants in the group, and its storage quota.
 	TenantStorageMap tenantStorageMap;
 

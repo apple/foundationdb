@@ -26,7 +26,7 @@
 #include "fdbclient/CommitTransaction.h"
 
 struct SpanContextMessage {
-	// This message is pushed into the the transaction logs' memory to inform
+	// This message is pushed into the transaction logs' memory to inform
 	// it what transaction subsequent mutations were a part of. This allows
 	// transaction logs and storage servers to associate mutations with a
 	// transaction identifier, called a span context.

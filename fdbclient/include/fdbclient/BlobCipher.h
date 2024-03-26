@@ -113,7 +113,7 @@ std::string toString(BlobCipherMetrics::UsageType type);
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture
 // the ciphertext. Similarly, on decryption EncryptBuf is allocated using client supplied Arena and provided
 // to the AES library to capture decipher text and passed back to the clients. Given the object passed around
-// is reference-counted, it gets freed once refrenceCount goes to 0.
+// is reference-counted, it gets freed once referenceCount goes to 0.
 
 class EncryptBuf : public ReferenceCounted<EncryptBuf>, NonCopyable {
 public:
@@ -255,7 +255,7 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 // 'authentication token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
 //
 // Encryption header support two modes of generation 'authentication tokens':
-// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
+// 1) SingleAuthTokenMode: the scheme generates single crypto-secure auth token to protect {cipherText +
 // header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
 // however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
 // The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
@@ -563,7 +563,7 @@ typedef struct BlobCipherEncryptHeader {
 	// 'authentication token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
 
 	// Encryption header support two modes of generation 'authentication tokens':
-	// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
+	// 1) SingleAuthTokenMode: the scheme generates single crypto-secure auth token to protect {cipherText +
 	// header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
 	// however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
 	// The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
@@ -899,7 +899,7 @@ private:
 // This interface enables data block encryption. An invocation to encrypt() will
 // do two things:
 // 1) generate encrypted ciphertext for given plaintext input.
-// 2) generate BlobCipherEncryptHeader (including the 'header authTokens') and persit for decryption on reads.
+// 2) generate BlobCipherEncryptHeader (including the 'header authTokens') and persist for decryption on reads.
 
 class EncryptBlobCipherAes265Ctr final : NonCopyable, public ReferenceCounted<EncryptBlobCipherAes265Ctr> {
 public:
@@ -1036,7 +1036,7 @@ private:
 	                         const int ciphertextLen,
 	                         const BlobCipherEncryptHeaderFlagsV1&,
 	                         const BlobCipherEncryptHeaderRef&);
-	void vaidateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef&, const BlobCipherEncryptHeaderFlagsV1&);
+	void validateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef&, const BlobCipherEncryptHeaderFlagsV1&);
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);
