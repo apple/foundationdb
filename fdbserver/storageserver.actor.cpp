@@ -217,6 +217,18 @@ static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 static const KeyRangeRef persistAccumulativeChecksumKeys =
     KeyRangeRef(PERSIST_PREFIX "AccumulativeChecksum/"_sr, PERSIST_PREFIX "AccumulativeChecksum0"_sr);
 
+inline Key encodePersistAccumulativeChecksumKey(LogEpoch epoch, uint16_t acsIndex) {
+	return persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&epoch, 8))
+	    .withSuffix(StringRef((uint8_t*)&acsIndex, 2));
+}
+
+inline std::pair<LogEpoch, uint16_t> decodePersistAccumulativeChecksumKey(const Key& key) {
+	StringRef keyStr = key.removePrefix(persistAccumulativeChecksumKeys.begin);
+	LogEpoch epoch = *(const uint64_t*)(keyStr.substr(0, 8).begin());
+	uint16_t acsIndex = *(const uint16_t*)(keyStr.substr(8, 2).begin());
+	return std::make_pair(epoch, acsIndex);
+}
+
 // MoveInUpdates caches new updates of a move-in shard, before that shard is ready to accept writes.
 struct MoveInUpdates {
 	MoveInUpdates() : spilled(MoveInUpdatesSpilled::False) {}
@@ -12557,16 +12569,14 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 }
 
 void StorageServerDisk::makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState) {
-	Key acsKey = persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&acsState.epoch, 8))
-	                 .withSuffix(StringRef((uint8_t*)&acsState.acsIndex, 2));
+	Key acsKey = encodePersistAccumulativeChecksumKey(acsState.epoch, acsState.acsIndex);
 	Value acsValue = accumulativeChecksumValue(acsState);
 	storage->set(KeyValueRef(acsKey, acsValue));
 	*kvCommitLogicalBytes += acsKey.expectedSize() + acsValue.expectedSize();
 }
 
 void StorageServerDisk::clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState) {
-	Key acsKey = persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&acsState.epoch, 8))
-	                 .withSuffix(StringRef((uint8_t*)&acsState.acsIndex, 2));
+	Key acsKey = encodePersistAccumulativeChecksumKey(acsState.epoch, acsState.acsIndex);
 	storage->clear(singleKeyRange(acsKey));
 	++(*kvClearRanges);
 	++(*kvClearSingleKey);
@@ -12700,11 +12710,9 @@ void restoreAccumulativeChecksumValidator(StorageServer* data, const RangeResult
 	ASSERT(!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM);
 	data->bytesRestored += accumulativeChecksums.logicalSize();
 	for (int acsLoc = 0; acsLoc < accumulativeChecksums.size(); acsLoc++) {
-		StringRef keyStr = accumulativeChecksums[acsLoc].key.removePrefix(persistAccumulativeChecksumKeys.begin);
-		LogEpoch epoch = *(const uint64_t*)(keyStr.substr(0, 8).begin());
-		uint16_t acsIndex = *(const uint16_t*)(keyStr.substr(8, 2).begin());
+		std::pair<LogEpoch, uint16_t> res = decodePersistAccumulativeChecksumKey(accumulativeChecksums[acsLoc].key);
 		AccumulativeChecksumState acsState = decodeAccumulativeChecksum(accumulativeChecksums[acsLoc].value);
-		ASSERT(acsIndex == acsState.acsIndex && epoch == acsState.epoch);
+		ASSERT(res.first == acsState.epoch && res.second == acsState.acsIndex);
 		data->acsValidator.restore(acsState, data->thisServerID, data->tag, data->version.get());
 	}
 	return;
