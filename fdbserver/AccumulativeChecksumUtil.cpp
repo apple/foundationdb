@@ -32,6 +32,7 @@ uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uin
 }
 
 bool tagSupportAccumulativeChecksum(Tag tag) {
+	// TODO: add log router tag, i.e., -2, so that new backup (backup workers) can be supported.
 	return tag.locality >= 0;
 }
 

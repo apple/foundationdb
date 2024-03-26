@@ -243,7 +243,7 @@ struct MutationRef {
 				    .setMaxFieldLength(-1)
 				    .setMaxEventLength(-1)
 				    .detail("Reason", "Param2 size is wrong with both checksum and acs index")
-				    .detail("Param2", this->param2.toString().c_str())
+				    .detail("Param2", this->param2)
 				    .detail("Mutation", toString());
 				this->corrupted = true;
 			}
@@ -253,7 +253,7 @@ struct MutationRef {
 				    .setMaxFieldLength(-1)
 				    .setMaxEventLength(-1)
 				    .detail("Reason", "Param2 size is wrong with checksum and without acs index")
-				    .detail("Param2Size", this->param2.toString().c_str())
+				    .detail("Param2Size", this->param2)
 				    .detail("Mutation", toString());
 				this->corrupted = true;
 			}
@@ -356,8 +356,8 @@ struct MutationRef {
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 				TraceEvent(SevInfo, "SerializeMutationWithChecksum")
 				    .detail("MType", cType)
-				    .detail("Param1", this->param1.toString())
-				    .detail("Param2", cParam2.toString())
+				    .detail("Param1", this->param1)
+				    .detail("Param2", cParam2)
 				    .detail("Checksum", cs)
 				    .detail("AcsIndex",
 				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
@@ -383,7 +383,7 @@ struct MutationRef {
 					    .setMaxFieldLength(-1)
 					    .setMaxEventLength(-1)
 					    .detail("Reason", "Param1 is not end with \\x00 for single key clear range")
-					    .detail("Param1", param1.toString())
+					    .detail("Param1", param1)
 					    .detail("Mutation", toString());
 					this->corrupted = true;
 				}
@@ -393,8 +393,8 @@ struct MutationRef {
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 				TraceEvent(SevInfo, "DeserializeMutationWithChecksum")
 				    .detail("MType", this->type)
-				    .detail("Param1", this->param1.toString())
-				    .detail("Param2", this->param2.toString())
+				    .detail("Param1", this->param1)
+				    .detail("Param2", this->param2)
 				    .detail("Checksum", this->checksum.present() ? this->checksum.get() : 0)
 				    .detail("AcsIndex",
 				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);

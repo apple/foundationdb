@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@
 struct AccumulativeChecksumState {
 	constexpr static FileIdentifier file_identifier = 13804380;
 
-	AccumulativeChecksumState() : acs(0), version(-1), epoch(0), acsIndex(0) {}
+	AccumulativeChecksumState() : acs(0), version(invalidVersion), epoch(0), acsIndex(0) {}
 	AccumulativeChecksumState(uint16_t acsIndex, uint32_t acs, Version version, LogEpoch epoch)
 	  : acsIndex(acsIndex), acs(acs), version(version), epoch(epoch) {}
 
