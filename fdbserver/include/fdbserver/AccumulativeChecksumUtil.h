@@ -74,6 +74,11 @@ private:
 class AccumulativeChecksumValidator {
 	struct Entry {
 		Entry() {}
+
+		Entry(const MutationRef& mutation) { cachedMutations.push_back(mutation); }
+
+		Entry(const AccumulativeChecksumState& acsState) { acsStates[acsState.epoch] = acsState; }
+
 		void newAcsState(const AccumulativeChecksumState& acsState) {
 			acsStates[acsState.epoch] = acsState; // overwrite if exists
 			cachedMutations.clear();
