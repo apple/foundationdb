@@ -67,9 +67,7 @@ enum class ConfigurationResult {
 	LOCKED_NOT_NEW,
 	SUCCESS_WARN_PPW_GRADUAL,
 	SUCCESS,
-	SUCCESS_WARN_ROCKSDB_EXPERIMENTAL,
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
-	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_IS_REGISTERED,
 	ENCRYPTION_AT_REST_MODE_ALREADY_SET,
@@ -297,7 +295,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	// due to DD can die at the same time
 	state bool resetPPWStats = false;
 	state bool warnPPWGradual = false;
-	state bool warnRocksDBIsExperimental = false;
 	state bool warnShardedRocksDBIsExperimental = false;
 
 	loop {
@@ -493,9 +490,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					           newConfig.perpetualStorageWiggleSpeed == 0) {
 						warnPPWGradual = true;
 					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
-					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-						warnRocksDBIsExperimental = true;
-					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 						warnShardedRocksDBIsExperimental = true;
 					}
@@ -569,9 +563,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						if (v != m[initIdKey.toString()])
 							return ConfigurationResult::DATABASE_ALREADY_CREATED;
 						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
-						         std::to_string(KeyValueStoreType::SSD_ROCKSDB_V1))
-							return ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL;
-						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
 						         std::to_string(KeyValueStoreType::SSD_SHARDED_ROCKSDB))
 							return ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
 						else
@@ -587,8 +578,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	if (warnPPWGradual) {
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
-	} else if (warnRocksDBIsExperimental) {
-		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
 	} else if (warnShardedRocksDBIsExperimental) {
 		return ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
 	} else {
