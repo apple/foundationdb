@@ -125,7 +125,7 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID
 	if (it == acsTable.end()) {
 		acsTable[acsIndex] = Entry(mutation); // Init with mutation: add mutation to cache
 	} else {
-		it->second.cachedMutations.push_back(mutation);
+		it->second.cachedMutations.push_back(it->second.cachedMutations.arena(), mutation);
 	}
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorAddMutation", ssid)

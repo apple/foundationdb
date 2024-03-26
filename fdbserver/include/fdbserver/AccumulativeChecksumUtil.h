@@ -75,7 +75,7 @@ class AccumulativeChecksumValidator {
 	struct Entry {
 		Entry() {}
 
-		Entry(const MutationRef& mutation) { cachedMutations.push_back(mutation); }
+		Entry(const MutationRef& mutation) { cachedMutations.push_back(cachedMutations.arena(), mutation); }
 
 		Entry(const AccumulativeChecksumState& acsState) { acsStates[acsState.epoch] = acsState; }
 
@@ -86,7 +86,7 @@ class AccumulativeChecksumValidator {
 
 		std::unordered_map<LogEpoch, AccumulativeChecksumState> acsStates;
 		Optional<Version> liveLatestVersion;
-		std::vector<MutationRef> cachedMutations;
+		Standalone<VectorRef<MutationRef>> cachedMutations; // Do we really want to do deep copy here?
 	};
 
 public:
