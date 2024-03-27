@@ -115,13 +115,22 @@ public:
 		return res;
 	}
 
+	uint64_t getAndClearTotalAcsMutations() {
+		uint64_t res = totalAcsMutations;
+		totalAcsMutations = 0;
+		return res;
+	}
+
 	void incrementTotalMutations() { totalMutations++; }
+
+	void incrementTotalAcsMutations() { totalAcsMutations++; }
 
 private:
 	std::unordered_map<uint16_t, Entry> acsTable;
 	uint64_t checkedMutations = 0;
 	uint64_t checkedVersions = 0;
 	uint64_t totalMutations = 0;
+	uint64_t totalAcsMutations = 0;
 };
 
 #endif

@@ -11256,6 +11256,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 					data->acsValidator.incrementTotalMutations();
+					if (isAccumulativeChecksumMutation(msg)) {
+						data->acsValidator.incrementTotalAcsMutations();
+					}
 					if (!collectingCipherKeys) {
 						if (firstMutation && msg.param1.startsWith(systemKeys.end))
 							hasPrivateData = true;
@@ -11412,8 +11415,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
 					decryptionTime += decryptionTimeV;
 				} else if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM && msg.checksum.present() &&
-				           msg.accumulativeChecksumIndex.present() &&
-				           !(msg.type == MutationRef::SetValue && msg.param1 == accumulativeChecksumKey)) {
+				           msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
 					// We have to check accumulative checksum when iterating through cloneCursor2,
 					// where ss removal by tag assignment takes effect immediately
 					data->acsValidator.addMutation(msg, data->thisServerID, data->tag, data->version.get());
@@ -13284,6 +13286,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		    te.detail("ACSCheckedMutationsSinceLastPrint", self->acsValidator.getAndClearCheckedMutations());
 		    te.detail("ACSCheckedVersionsSinceLastPrint", self->acsValidator.getAndClearCheckedVersions());
 		    te.detail("TotalMutations", self->acsValidator.getAndClearTotalMutations());
+		    te.detail("TotalAcsMutations", self->acsValidator.getAndClearTotalAcsMutations());
 	    }));
 
 	wait(serveStorageMetricsRequests(self, ssi));
