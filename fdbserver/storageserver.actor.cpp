@@ -12555,13 +12555,6 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 	//     .detail("ToVersion", version);
 }
 
-void StorageServerDisk::makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState) {
-	Key acsKey = encodePersistAccumulativeChecksumKey(acsState.epoch, acsState.acsIndex);
-	Value acsValue = accumulativeChecksumValue(acsState);
-	storage->set(KeyValueRef(acsKey, acsValue));
-	*kvCommitLogicalBytes += acsKey.expectedSize() + acsValue.expectedSize();
-}
-
 void StorageServerDisk::clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState) {
 	Key acsKey = encodePersistAccumulativeChecksumKey(acsState.epoch, acsState.acsIndex);
 	storage->clear(singleKeyRange(acsKey));
