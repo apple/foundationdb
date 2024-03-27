@@ -43,6 +43,11 @@
 
 ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
+enum ComparisonType {
+	TSS_COMPARISON = 0,
+	REPLICA_COMPARISON = 1,
+};
+
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
 	bool released;
@@ -147,7 +152,7 @@ Future<Void> tssComparison(Req req,
 				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
 				        : SevError,
-				    TSS_mismatchTraceName(req));
+				    LB_mismatchTraceName(req, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
@@ -211,7 +216,7 @@ Future<Void> tssComparison(Req req,
 						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 						                            ? SevWarnAlways
 						                            : SevError,
-						                        TSS_mismatchTraceName(req));
+						                        LB_mismatchTraceName(req, TSS_COMPARISON));
 						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
 					}
 				} else {
@@ -249,53 +254,74 @@ Future<Void> replicaComparison(Req req,
 	state int srcErrorCode = error_code_success;
 	state ErrorOr<Resp> src;
 
+	if (ssTeam->size() <= 1) {
+		return Void();
+	}
+
 	wait(store(src, fSource));
 
-	if (!src.isError()) {
-		Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
+	if (src.isError()) {
+		srcErrorCode = src.getError().code();
+	} else {
+		state Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
 
-		if (!srcLB.present() || !srcLB.get().error.present()) {
-			// if there is more than 1 SS in the team, attempt to verify that the other SS servers have the same
-			// data
-			state std::vector<Future<ErrorOr<Resp>>> restOfTeamFutures;
+		if (srcLB.present() && srcLB.get().error.present()) {
+			srcErrorCode = srcLB.get().error.get().code();
+		} else if (!srcLB.present() || !srcLB.get().error.present()) {
+			// Verify that the other SS servers in the team have the same data.
+			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
 			restOfTeamFutures.reserve(ssTeam->size() - 1);
 			for (int i = 0; i < ssTeam->size(); i++) {
 				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
 				if (si->getEndpoint().token.first() !=
 				    srcEndpointId) { // don't re-request to SS we already have a response from
-					resetReply(req);
-					restOfTeamFutures.push_back(si->tryGetReply(req));
+					if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
+						resetReply(req);
+						restOfTeamFutures.push_back(
+						    timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT));
+					}
 				}
 			}
 
 			wait(waitForAllReady(restOfTeamFutures));
 
 			int numError = 0;
-			int numMatchSS = 0;
-			int numMatchNeither = 0;
-			for (Future<ErrorOr<Resp>> f : restOfTeamFutures) {
-				if (!f.canGet() || f.get().isError()) {
+			int numMismatch = 0;
+			int numFetchReplicaTimeout = 0;
+			for (Future<Optional<ErrorOr<Resp>>> f : restOfTeamFutures) {
+				if (!f.canGet()) {
+					numError++;
+				} else if (!f.get().present()) {
+					numFetchReplicaTimeout++;
+				} else if (f.get().get().isError()) {
 					numError++;
 				} else {
-					Optional<LoadBalancedReply> fLB = getLoadBalancedReply(&f.get().get());
+					Optional<LoadBalancedReply> fLB = getLoadBalancedReply(&f.get().get().get());
+
+					ASSERT(srcLB.present() ==
+					       fLB.present()); // getLoadBalancedReply returned different responses for same templated type
+
 					if (fLB.present() && fLB.get().error.present()) {
 						numError++;
-					} else if (TSS_doCompare(src.get(), f.get().get())) {
-						numMatchSS++;
-					} else {
-						numMatchNeither++;
+					} else if (fLB.present() &&
+					           !TSS_doCompare(
+					               src.get(),
+					               f.get().get().get())) { // re-use TSS compare logic to compare the replicas
+						numMismatch++;
+						TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, TSS_COMPARISON));
+						mismatchEvent.detail("ReplicaFetchErrors", numError)
+						    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
+						// Re-use TSS trace mechanism to log replica mismatch information.
+						TSS_traceMismatch(mismatchEvent, req, src.get(), f.get().get().get());
 					}
 				}
 			}
 
-			TraceEvent("ReplicaComparison").detail("TeamCheckErrors", numError).detail("TeamCheckMatchSS", numMatchSS);
-
-			if (numError || numMatchNeither) {
+			if (numMismatch) {
 				throw storage_replica_comparison_error();
 			}
 		}
 	}
-
 	return Void();
 }
 
@@ -350,18 +376,18 @@ struct RequestData : NonCopyable {
 		}
 	}
 
-	void maybeDoReplicaComparison(RequestStream<Request, P> const* stream,
-	                              Request& request,
-	                              QueueModel* model,
-	                              Future<Reply> ssResponse,
-	                              Reference<MultiInterface<Multi>> alternatives,
-	                              RequestStream<Request, P> Interface::*channel) {
-		if (model && compareReplicas) {
+	Future<Void> maybeDoReplicaComparison(RequestStream<Request, P> const* stream,
+	                                      Request& request,
+	                                      QueueModel* model,
+	                                      Future<Reply> ssResponse,
+	                                      Reference<MultiInterface<Multi>> alternatives,
+	                                      RequestStream<Request, P> Interface::*channel) {
+		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			resetReply(request);
-
-			comparisonResult =
-			    replicaComparison(request, ssResponse, stream->getEndpoint().token.first(), alternatives, channel);
+			return replicaComparison(request, ssResponse, stream->getEndpoint().token.first(), alternatives, channel);
 		}
+
+		return Void();
 	}
 
 	// Initializes the request state and starts it, possibly after a backoff delay
@@ -389,7 +415,6 @@ struct RequestData : NonCopyable {
 			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
 			response = stream->tryGetReply(request);
 			maybeDuplicateTSSRequest(stream, request, model, response, alternatives, channel);
-			maybeDoReplicaComparison(stream, request, model, response, alternatives, channel);
 		}
 
 		requestProcessed = false;
@@ -721,6 +746,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			// Only the first location is available.
 			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+				//wait(firstRequestData.maybeDoReplicaComparison(
+				    //stream, request, model, firstRequestData.response, alternatives, channel));
 				return result.get();
 			}
 
@@ -745,6 +772,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				when(ErrorOr<REPLY_TYPE(Request)> result =
 				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+						//wait(firstRequestData.maybeDoReplicaComparison(
+						    //stream, request, model, firstRequestData.response, alternatives, channel));
 						return result.get();
 					}
 
@@ -752,6 +781,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				}
 				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
+						//wait(secondRequestData.maybeDoReplicaComparison(
+						    //stream, request, model, secondRequestData.response, alternatives, channel));
 						return result.get();
 					}
 
@@ -793,14 +824,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						}
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-							wait(firstRequestData.comparisonResult);
-							/*
-							wait(replicaComparison(request,
-							                      firstRequestData.response,
-							                       stream->getEndpoint().token.first(),
-							                       alternatives,
-							                       channel));
-							                       */
+							wait(firstRequestData.maybeDoReplicaComparison(
+							    stream, request, model, firstRequestData.response, alternatives, channel));
 							return result.get();
 						}
 
