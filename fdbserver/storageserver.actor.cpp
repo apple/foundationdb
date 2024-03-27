@@ -12834,12 +12834,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	// Restore acs validator from persisted disk
 	if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
 		restoreAccumulativeChecksumValidator(data, fAccumulativeChecksum.get());
-		std::vector<AccumulativeChecksumState> removedStates =
-		    data->acsValidator.cleanUpOutdatedAcsStates(data->durableVersion.get());
-		for (const auto& removedState : removedStates) {
-			// For each removed state, clear the persist data
-			data->storage.clearAccumulativeChecksumState(removedState);
-		}
 	}
 
 	state RangeResult assigned = fShardAssigned.get();

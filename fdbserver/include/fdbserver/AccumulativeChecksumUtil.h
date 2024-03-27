@@ -78,14 +78,9 @@ class AccumulativeChecksumValidator {
 
 		Entry(const MutationRef& mutation) { cachedMutations.push_back(cachedMutations.arena(), mutation); }
 
-		Entry(const AccumulativeChecksumState& acsState) { acsStates[acsState.epoch] = acsState; }
+		Entry(const AccumulativeChecksumState& acsState) : acsState(acsState) {}
 
-		void newAcsState(const AccumulativeChecksumState& acsState) {
-			acsStates[acsState.epoch] = acsState; // overwrite if exists
-			cachedMutations.clear();
-		}
-
-		std::unordered_map<LogEpoch, AccumulativeChecksumState> acsStates;
+		Optional<AccumulativeChecksumState> acsState;
 		Optional<Version> liveLatestVersion;
 		Standalone<VectorRef<MutationRef>> cachedMutations; // Do we really want to do deep copy here?
 	};
@@ -101,8 +96,6 @@ public:
 	                                                                Version ssVersion);
 
 	void restore(const AccumulativeChecksumState& acsState, UID ssid, Tag tag, Version ssVersion);
-
-	std::vector<AccumulativeChecksumState> cleanUpOutdatedAcsStates(Version ssDurableVersion);
 
 	uint64_t getAndClearCheckedMutations() {
 		uint64_t res = checkedMutations;

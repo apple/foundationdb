@@ -163,12 +163,11 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		}
 		return acsMutationState;
 	}
-	auto jt = it->second.acsStates.find(epoch);
-	const bool epochExists = jt != it->second.acsStates.end();
-	if (epochExists && acsMutationState.version <= jt->second.version) {
+	if (it->second.acsState.present() && (acsMutationState.version < it->second.acsState.get().version ||
+	                                      acsMutationState.epoch < it->second.acsState.get().epoch)) {
 		it->second.cachedMutations.clear();
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevInfo, "AcsValidatorAcsMutationSkip", ssid)
+			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
 			    .detail("Reason", "Acs Mutation Too Old")
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
@@ -178,13 +177,16 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		}
 		return Optional<AccumulativeChecksumState>();
 	}
+	if (it->second.acsState.present() && acsMutationState.epoch > it->second.acsState.get().epoch) {
+		it->second.acsState = Optional<AccumulativeChecksumState>(); // reset if new epoch comes
+	}
 	// Apply mutations in cache to acs
 	ASSERT(it->second.cachedMutations.size() >= 1);
-	uint32_t oldAcs = epochExists ? jt->second.acs : 0;
-	Version oldVersion = epochExists ? jt->second.version : 0;
+	uint32_t oldAcs = it->second.acsState.present() ? it->second.acsState.get().acs : 0;
+	Version oldVersion = it->second.acsState.present() ? it->second.acsState.get().version : 0;
 	uint32_t newAcs = 0;
 	bool init = false;
-	if (!epochExists) {
+	if (!it->second.acsState.present()) {
 		init = true;
 		ASSERT(it->second.cachedMutations[0].checksum.present());
 		newAcs = it->second.cachedMutations[0].checksum.get();
@@ -194,7 +196,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		}
 	} else {
 		init = false;
-		newAcs = jt->second.acs;
+		newAcs = it->second.acsState.get().acs;
 		for (int i = 0; i < it->second.cachedMutations.size(); i++) {
 			ASSERT(it->second.cachedMutations[i].checksum.present());
 			newAcs = calculateAccumulativeChecksum(newAcs, it->second.cachedMutations[i].checksum.get());
@@ -221,7 +223,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		return acsMutationState;
 	} else {
 		AccumulativeChecksumState newState(acsIndex, newAcs, acsMutationState.version, acsMutationState.epoch);
-		it->second.newAcsState(newState); // with cleared cache
+		it->second = Entry(newState); // with cleared cache
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsValidatorAcsMutationValidated", ssid)
 			    .detail("AcsTag", tag)
@@ -245,10 +247,7 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
 	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const uint16_t& acsIndex = acsState.acsIndex;
-	if (acsTable.find(acsIndex) == acsTable.end()) {
-		acsTable[acsIndex] = Entry(); // with cleared cache
-	}
-	acsTable[acsIndex].newAcsState(acsState);
+	acsTable[acsIndex] = Entry(acsState); // with cleared cache
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorRestore", ssid)
 		    .detail("AcsIndex", acsIndex)
@@ -257,43 +256,6 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 		    .detail("SSVersion", ssVersion)
 		    .detail("Epoch", acsState.epoch);
 	}
-}
-
-// Clear all outdated ACS states and entries and return removed ACS states
-std::vector<AccumulativeChecksumState> AccumulativeChecksumValidator::cleanUpOutdatedAcsStates(
-    Version ssDurableVersion) {
-	std::vector<AccumulativeChecksumState> removedStates;
-
-	// Step 1: find the latest epoch
-	LogEpoch largestEpoch = 0;
-	for (const auto& [acsIndex, entry] : acsTable) {
-		for (const auto& [epoch, acsState] : entry.acsStates) {
-			if (epoch > largestEpoch) {
-				largestEpoch = epoch;
-			}
-		}
-	}
-	// Step 2: for any old epoch, if its version is covered by the persist version,
-	// this acsState will be never used again. So, clear it from both memory and disk
-	for (auto& [acsIndex, entry] : acsTable) {
-		for (auto it = entry.acsStates.cbegin(); it != entry.acsStates.cend();) {
-			if (it->first < largestEpoch && it->second.version <= ssDurableVersion) {
-				removedStates.push_back(it->second);
-				it = entry.acsStates.erase(it);
-			} else {
-				it++;
-			}
-		}
-	}
-	// Step 3: if an acsIndex has no acsState, clear the entry in memory
-	for (auto it = acsTable.cbegin(); it != acsTable.cend();) {
-		if (it->second.acsStates.empty()) {
-			it = acsTable.erase(it);
-		} else {
-			it++;
-		}
-	}
-	return removedStates;
 }
 
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
