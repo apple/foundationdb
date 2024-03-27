@@ -1965,8 +1965,8 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		}
 		ASSERT(acsState.epoch == self->pProxyCommitData->epoch);
 		MutationRef acsMutation;
-		acsMutation.type = MutationRef::AccumulativeChecksum;
-		acsMutation.param1 = accumulativeChecksumKey;
+		acsMutation.type = MutationRef::SetValue;
+		acsMutation.param1 = accumulativeChecksumKey; // private mutation
 		acsMutation.param2 = accumulativeChecksumValue(
 		    AccumulativeChecksumState(acsIndex, acsState.acs, self->commitVersion, self->pProxyCommitData->epoch));
 		acsMutation.setAccumulativeChecksumIndex(acsIndex);

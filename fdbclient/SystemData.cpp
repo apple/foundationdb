@@ -303,7 +303,7 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
-const KeyRef accumulativeChecksumKey = "\xff/accumulativeChecksum"_sr;
+const KeyRef accumulativeChecksumKey = "\xff\xff/accumulativeChecksum"_sr;
 
 const Value accumulativeChecksumValue(const AccumulativeChecksumState& acsState) {
 	return ObjectWriter::toValue(acsState, IncludeVersion());
@@ -1253,7 +1253,7 @@ bool isBackupLogMutation(const MutationRef& m) {
 	       (backupLogKeys.contains(m.param1) || applyLogKeys.contains(m.param1));
 }
 bool isAccumulativeChecksumMutation(const MutationRef& m) {
-	return m.type == MutationRef::AccumulativeChecksum;
+	return m.type == MutationRef::SetValue && m.param1 == accumulativeChecksumKey;
 }
 // static_assert( backupLogKeys.begin.size() == backupLogPrefixBytes, "backupLogPrefixBytes incorrect" );
 const KeyRef backupVersionKey = "\xff/backupDataFormat"_sr;

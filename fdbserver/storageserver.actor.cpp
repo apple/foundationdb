@@ -10931,6 +10931,21 @@ private:
 			    .detail("KeyCount", keyCount)
 			    .detail("ValSize", valSize)
 			    .detail("Seed", seed);
+		} else if (m.type == MutationRef::SetValue && m.param1 == accumulativeChecksumKey &&
+		           !CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
+			ASSERT(m.checksum.present() && m.accumulativeChecksumIndex.present());
+			AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(m.param2);
+			Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator.processAccumulativeChecksum(
+			    acsMutationState, data->thisServerID, data->tag, data->version.get());
+			if (stateToPersist.present()) {
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV,
+				    MutationRef(
+				        MutationRef::SetValue,
+				        encodePersistAccumulativeChecksumKey(stateToPersist.get().epoch, stateToPersist.get().acsIndex),
+				        accumulativeChecksumValue(stateToPersist.get())));
+			}
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11063,27 +11078,6 @@ ACTOR Future<Void> tssDelayForever() {
 			return Void();
 		}
 	}
-}
-
-// Update ACS validator and validate ACS
-void doAccumulativeChecksum(StorageServer* data, MutationRef msg) {
-	ASSERT(!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM);
-	if (!msg.checksum.present() || !msg.accumulativeChecksumIndex.present()) {
-		// Ignore if msg.checksum and msg.accumulativeChecksumIndex are not set
-		return;
-	}
-	if (msg.type == MutationRef::AccumulativeChecksum) {
-		AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(msg.param2);
-		Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator.processAccumulativeChecksum(
-		    acsMutationState, data->thisServerID, data->tag, data->version.get());
-		if (stateToPersist.present()) {
-			data->storage.makeAccumulativeChecksumDurable(stateToPersist.get());
-			// If there is a lost write when persisting data, this storage server will be removed.
-		}
-	} else {
-		data->acsValidator.addMutation(msg, data->thisServerID, data->tag, data->version.get());
-	}
-	return;
 }
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
@@ -11260,9 +11254,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							ASSERT(false);
 						}
 					}
-					if (msg.type == MutationRef::AccumulativeChecksum) {
-						continue; // Bypass ACS mutation
-					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 					data->acsValidator.incrementTotalMutations();
 					if (!collectingCipherKeys) {
@@ -11420,13 +11411,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					msg = msg.decrypt(
 					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
 					decryptionTime += decryptionTimeV;
-				} else if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM) {
+				} else if (!CLIENT_KNOBS->SS_BYPASS_ACCUMULATIVE_CHECKSUM && msg.checksum.present() &&
+				           msg.accumulativeChecksumIndex.present() &&
+				           !(msg.type == MutationRef::SetValue && msg.param1 == accumulativeChecksumKey)) {
 					// We have to check accumulative checksum when iterating through cloneCursor2,
 					// where ss removal by tag assignment takes effect immediately
-					doAccumulativeChecksum(data, msg);
-				}
-				if (msg.type == MutationRef::AccumulativeChecksum) {
-					continue; // bypass any acs mutation
+					data->acsValidator.addMutation(msg, data->thisServerID, data->tag, data->version.get());
 				}
 
 				Span span("SS:update"_loc, spanContext);

@@ -94,7 +94,6 @@ struct MutationRef {
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
 		Encrypted, /* Represents an encrypted mutation and cannot be used directly before decrypting */
-		AccumulativeChecksum, /* Used to propagate accumulative checksum from commit proxy to storage server */
 		MAX_ATOMIC_OP
 	};
 

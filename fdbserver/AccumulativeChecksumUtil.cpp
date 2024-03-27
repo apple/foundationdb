@@ -330,9 +330,11 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	ASSERT(de.validateChecksum());
 
 	MutationRef acsMutation;
-	acsMutation.type = MutationRef::AccumulativeChecksum;
+	LogEpoch epoch = 0;
+	uint16_t acsIndex = 1;
+	acsMutation.type = MutationRef::SetValue;
 	acsMutation.param1 = accumulativeChecksumKey;
-	acsMutation.param2 = accumulativeChecksumValue(AccumulativeChecksumState(1, 1, 20, 0));
+	acsMutation.param2 = accumulativeChecksumValue(AccumulativeChecksumState(acsIndex, 1, 20, epoch));
 	acsMutation.setAccumulativeChecksumIndex(1);
 	acsMutation.populateChecksum();
 	BinaryWriter acsWr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
