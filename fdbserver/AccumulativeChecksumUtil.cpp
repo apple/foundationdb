@@ -21,21 +21,6 @@
 #include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
 
-uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex) {
-	// We leave flexibility in acs index generated from different components
-	// Acs index ends with 1 indicates the mutation is from a commit proxy
-	return commitProxyIndex * 10 + 1;
-}
-
-uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uint32_t newChecksum) {
-	return currentAccumulativeChecksum ^ newChecksum;
-}
-
-bool tagSupportAccumulativeChecksum(Tag tag) {
-	// TODO: add log router tag, i.e., -2, so that new backup (backup workers) can be supported.
-	return tag.locality >= 0;
-}
-
 void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
                                               const std::vector<Tag>& tags,
                                               LogEpoch epoch,
@@ -106,12 +91,19 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
 	Version atAcsVersion = 0;
-	auto it = acsTable.find(acsIndex);
-	if (it == acsTable.end()) {
-		acsTable[acsIndex] = Entry(mutation); // Init with mutation: add mutation to cache
-	} else {
-		it->second.cachedMutations.push_back(it->second.cachedMutations.arena(), mutation);
+	if (!cachedMutations.empty()) {
+		ASSERT(cachedMutations[0].accumulativeChecksumIndex.present());
+		if (cachedMutations[0].accumulativeChecksumIndex.get() != acsIndex) {
+			TraceEvent(SevError, "AcsValidatorMissingAcs", ssid)
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("MissingAcsIndex", cachedMutations[0].accumulativeChecksumIndex.get())
+			    .detail("Mutation", mutation.toString())
+			    .detail("LastAcsVersion", atAcsVersion)
+			    .detail("SSVersion", ssVersion);
+		}
 	}
+	cachedMutations.push_back(cachedMutations.arena(), mutation);
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorAddMutation", ssid)
 		    .detail("AcsTag", tag)
@@ -135,7 +127,8 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 	if (it == acsTable.end()) {
 		// Unexpected, since we assign acs mutation in commit batch
 		// So, there must be acs entry set up when adding the mutations of the batch
-		acsTable[acsIndex] = Entry(acsMutationState); // with cleared cache
+		acsTable[acsIndex] = Entry(acsMutationState);
+		cachedMutations.clear();
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
 			    .detail("Reason", "No Entry")
@@ -148,7 +141,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 	}
 	if (it->second.acsState.present() && (acsMutationState.version < it->second.acsState.get().version ||
 	                                      acsMutationState.epoch < it->second.acsState.get().epoch)) {
-		it->second.cachedMutations.clear();
+		cachedMutations.clear();
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
 			    .detail("Reason", "Acs Mutation Too Old")
@@ -164,28 +157,28 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		it->second.acsState = Optional<AccumulativeChecksumState>(); // reset if new epoch comes
 	}
 	// Apply mutations in cache to acs
-	ASSERT(it->second.cachedMutations.size() >= 1);
+	ASSERT(cachedMutations.size() >= 1);
 	uint32_t oldAcs = it->second.acsState.present() ? it->second.acsState.get().acs : 0;
 	Version oldVersion = it->second.acsState.present() ? it->second.acsState.get().version : 0;
 	uint32_t newAcs = 0;
 	bool init = false;
 	if (!it->second.acsState.present()) {
 		init = true;
-		ASSERT(it->second.cachedMutations[0].checksum.present());
-		newAcs = it->second.cachedMutations[0].checksum.get();
-		for (int i = 1; i < it->second.cachedMutations.size(); i++) {
-			ASSERT(it->second.cachedMutations[i].checksum.present());
-			newAcs = calculateAccumulativeChecksum(newAcs, it->second.cachedMutations[i].checksum.get());
+		ASSERT(cachedMutations[0].checksum.present());
+		newAcs = cachedMutations[0].checksum.get();
+		for (int i = 1; i < cachedMutations.size(); i++) {
+			ASSERT(cachedMutations[i].checksum.present());
+			newAcs = calculateAccumulativeChecksum(newAcs, cachedMutations[i].checksum.get());
 		}
 	} else {
 		init = false;
 		newAcs = it->second.acsState.get().acs;
-		for (int i = 0; i < it->second.cachedMutations.size(); i++) {
-			ASSERT(it->second.cachedMutations[i].checksum.present());
-			newAcs = calculateAccumulativeChecksum(newAcs, it->second.cachedMutations[i].checksum.get());
+		for (int i = 0; i < cachedMutations.size(); i++) {
+			ASSERT(cachedMutations[i].checksum.present());
+			newAcs = calculateAccumulativeChecksum(newAcs, cachedMutations[i].checksum.get());
 		}
 	}
-	checkedMutations = checkedMutations + it->second.cachedMutations.size();
+	checkedMutations = checkedMutations + cachedMutations.size();
 	checkedVersions = checkedVersions + 1;
 	Version newVersion = acsMutationState.version;
 	if (newAcs != acsMutationState.acs) {
@@ -202,10 +195,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("Init", init);
 		// Currently, force to reconcile
 		// Zhe: need to do something?
-		return acsMutationState;
 	} else {
-		AccumulativeChecksumState newState(acsIndex, newAcs, acsMutationState.version, acsMutationState.epoch);
-		it->second = Entry(newState); // with cleared cache
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsValidatorAcsMutationValidated", ssid)
 			    .detail("AcsTag", tag)
@@ -218,8 +208,10 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 			    .detail("Epoch", acsMutationState.epoch)
 			    .detail("Init", init);
 		}
-		return newState;
 	}
+	it->second = Entry(acsMutationState);
+	cachedMutations.clear();
+	return acsMutationState;
 }
 
 void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acsState,
@@ -239,14 +231,35 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 }
 
 void AccumulativeChecksumValidator::clearCache(UID ssid, Tag tag, Version ssVersion) {
-	for (const auto& [acsIndex, acsState] : acsTable) {
-		if (!acsState.cachedMutations.empty()) {
-			TraceEvent(SevError, "AcsValidatorCachedMutationNotChecked", ssid)
-			    .detail("AcsIndex", acsIndex)
-			    .detail("AcsTag", tag)
-			    .detail("SSVersion", ssVersion);
-		}
+	if (!cachedMutations.empty()) {
+		TraceEvent(SevError, "AcsValidatorCachedMutationNotChecked", ssid)
+		    .detail("AcsTag", tag)
+		    .detail("SSVersion", ssVersion);
 	}
+}
+
+uint64_t AccumulativeChecksumValidator::getAndClearCheckedMutations() {
+	uint64_t res = checkedMutations;
+	checkedMutations = 0;
+	return res;
+}
+
+uint64_t AccumulativeChecksumValidator::getAndClearCheckedVersions() {
+	uint64_t res = checkedVersions;
+	checkedVersions = 0;
+	return res;
+}
+
+uint64_t AccumulativeChecksumValidator::getAndClearTotalMutations() {
+	uint64_t res = totalMutations;
+	totalMutations = 0;
+	return res;
+}
+
+uint64_t AccumulativeChecksumValidator::getAndClearTotalAcsMutations() {
+	uint64_t res = totalAcsMutations;
+	totalAcsMutations = 0;
+	return res;
 }
 
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {

@@ -29,11 +29,20 @@
 static const uint16_t invalidAccumulativeChecksumIndex = 0;
 static const uint16_t resolverAccumulativeChecksumIndex = 2;
 
-uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex);
+inline uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex) {
+	// We leave flexibility in acs index generated from different components
+	// Acs index ends with 1 indicates the mutation is from a commit proxy
+	return commitProxyIndex * 10 + 1;
+}
 
-uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uint32_t newChecksum);
+inline uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecksum, uint32_t newChecksum) {
+	return currentAccumulativeChecksum ^ newChecksum;
+}
 
-bool tagSupportAccumulativeChecksum(Tag tag);
+inline bool tagSupportAccumulativeChecksum(Tag tag) {
+	// TODO: add log router tag, i.e., -2, so that new backup (backup workers) can be supported.
+	return tag.locality >= 0;
+}
 
 // A builder to generate accumulative checksum and keep tracking
 // the accumulative checksum for each tag
@@ -67,12 +76,9 @@ class AccumulativeChecksumValidator {
 	struct Entry {
 		Entry() {}
 
-		Entry(const MutationRef& mutation) { cachedMutations.push_back(cachedMutations.arena(), mutation); }
-
 		Entry(const AccumulativeChecksumState& acsState) : acsState(acsState) {}
 
 		Optional<AccumulativeChecksumState> acsState;
-		Standalone<VectorRef<MutationRef>> cachedMutations; // Do we really want to do deep copy here?
 	};
 
 public:
@@ -89,29 +95,13 @@ public:
 
 	void clearCache(UID ssid, Tag tag, Version ssVersion);
 
-	uint64_t getAndClearCheckedMutations() {
-		uint64_t res = checkedMutations;
-		checkedMutations = 0;
-		return res;
-	}
+	uint64_t getAndClearCheckedMutations();
 
-	uint64_t getAndClearCheckedVersions() {
-		uint64_t res = checkedVersions;
-		checkedVersions = 0;
-		return res;
-	}
+	uint64_t getAndClearCheckedVersions();
 
-	uint64_t getAndClearTotalMutations() {
-		uint64_t res = totalMutations;
-		totalMutations = 0;
-		return res;
-	}
+	uint64_t getAndClearTotalMutations();
 
-	uint64_t getAndClearTotalAcsMutations() {
-		uint64_t res = totalAcsMutations;
-		totalAcsMutations = 0;
-		return res;
-	}
+	uint64_t getAndClearTotalAcsMutations();
 
 	void incrementTotalMutations() { totalMutations++; }
 
@@ -119,6 +109,7 @@ public:
 
 private:
 	std::unordered_map<uint16_t, Entry> acsTable;
+	Standalone<VectorRef<MutationRef>> cachedMutations; // Do we really want to do deep copy here?
 	uint64_t checkedMutations = 0;
 	uint64_t checkedVersions = 0;
 	uint64_t totalMutations = 0;
