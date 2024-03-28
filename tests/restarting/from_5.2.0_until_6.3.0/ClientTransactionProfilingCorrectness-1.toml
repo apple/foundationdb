@@ -1,8 +1,10 @@
+[[test]]
 testTitle=ClientTransactionProfilingCorrectness
-clearAfterTest=true
-timeout=2100
+clearAfterTest=false
 runSetup=true
+timeout=2100
 
+    [[test.workload]]
     testName=ApiCorrectness
     numKeys=5000
     onlyLowerCase=true
@@ -20,7 +22,12 @@ runSetup=true
     numClears=100
     numClearRanges=10
     maxTransactionBytes=500000
-    randomTestDuration=60
+    randomTestDuration=30
 
+    [[test.workload]]
     testName=ClientTransactionProfileCorrectness
 
+    [[test.workload]]
+    testName=SaveAndKill
+    restartInfoLocation=simfdb/restartInfo.ini
+    testDuration=60

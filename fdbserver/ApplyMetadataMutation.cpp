@@ -63,7 +63,7 @@ public:
 	                           const VectorRef<MutationRef>& mutations_,
 	                           IKeyValueStore* txnStateStore_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange), encryptMode(EncryptionAtRestMode::DISABLED) {}
+	    confChange(dummyConfChange), encryptMode(EncryptionAtRestMode::DISABLED), epoch(Optional<LogEpoch>()) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
@@ -89,7 +89,8 @@ public:
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
-	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)) {
+	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
+	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -109,7 +110,7 @@ public:
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
-	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex) {
+	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
@@ -172,6 +173,10 @@ private:
 
 	// indicate which commit proxy / resolver applies mutations
 	uint16_t accumulativeChecksumIndex = invalidAccumulativeChecksumIndex;
+
+	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
+
+	Optional<LogEpoch> epoch;
 
 private:
 	// The following variables are used internally
@@ -265,7 +270,6 @@ private:
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivateMutation", dbgid)
 			    .detail("Original", m)
@@ -274,6 +278,12 @@ private:
 			    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)))
 			    .detail("Tag", tag.toString());
 
+			if (acsBuilder != nullptr) {
+				privatized.populateChecksum();
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				ASSERT(epoch.present());
+				acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
+			}
 			toCommit->addTag(tag);
 			writeMutation(privatized);
 		}
@@ -287,14 +297,25 @@ private:
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
 
+		// At this point, this tag will be visible to others
+		// So, acsBuilder should create an brand new acsState for this tag
+		// If there exists an old acsState, overwite it
+		if (acsBuilder != nullptr) {
+			acsBuilder->newTag(tag, id, version);
+		}
 		if (toCommit) {
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
 			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", "LogProtocolMessage");
+			if (acsBuilder != nullptr) {
+				privatized.populateChecksum();
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				ASSERT(epoch.present());
+				acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
+			}
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
 			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", privatized);
@@ -335,7 +356,6 @@ private:
 			if (toCommit) {
 				MutationRef privatized = m;
 				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 				cachedRangeInfo[k] = privatized;
@@ -359,9 +379,14 @@ private:
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
 		privatized.clearChecksumAndAccumulativeIndex();
-		privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
+		if (acsBuilder != nullptr) {
+			privatized.populateChecksum();
+			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+			ASSERT(epoch.present());
+			acsBuilder->addMutation(privatized, { cacheTag }, epoch.get(), dbgid, version);
+		}
 		toCommit->addTag(cacheTag);
 		writeMutation(privatized);
 	}
@@ -401,19 +426,34 @@ private:
 			KeyRange r = std::get<0>(decodeChangeFeedValue(m.param2));
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			auto ranges = keyInfo->intersectingRanges(r);
 			auto firstRange = ranges.begin();
 			++firstRange;
 			if (firstRange == ranges.end()) {
 				ranges.begin().value().populateTags();
+				if (acsBuilder != nullptr) {
+					privatized.populateChecksum();
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					ASSERT(epoch.present());
+					acsBuilder->addMutation(privatized, ranges.begin().value().tags, epoch.get(), dbgid, version);
+				}
 				toCommit->addTags(ranges.begin().value().tags);
 			} else {
 				std::set<Tag> allSources;
 				for (auto r : ranges) {
 					r.value().populateTags();
 					allSources.insert(r.value().tags.begin(), r.value().tags.end());
+				}
+				if (acsBuilder != nullptr) {
+					privatized.populateChecksum();
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					std::vector<Tag> tags;
+					for (const auto& tag : allSources) {
+						tags.push_back(tag);
+					}
+					ASSERT(epoch.present());
+					acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
 				}
 				toCommit->addTags(allSources);
 			}
@@ -467,12 +507,18 @@ private:
 			// send private mutation to SS that it now has a TSS pair
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
 			if (tagV.present()) {
 				TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized);
+				if (acsBuilder != nullptr) {
+					privatized.populateChecksum();
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					ASSERT(epoch.present());
+					acsBuilder->addMutation(
+					    privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
+				}
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
 				writeMutation(privatized);
 			}
@@ -501,9 +547,14 @@ private:
 		if (tagV.present()) {
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
+			if (acsBuilder != nullptr) {
+				privatized.populateChecksum();
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				ASSERT(epoch.present());
+				acsBuilder->addMutation(privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
+			}
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			writeMutation(privatized);
 		}
@@ -668,9 +719,18 @@ private:
 
 		MutationRef privatized = m;
 		privatized.clearChecksumAndAccumulativeIndex();
-		privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", privatized);
+		if (acsBuilder != nullptr) {
+			privatized.populateChecksum();
+			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+			std::vector<Tag> tags;
+			for (const auto& tag : allTags) {
+				tags.push_back(tag);
+			}
+			ASSERT(epoch.present());
+			acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
+		}
 		toCommit->addTags(allTags);
 		writeMutation(privatized);
 	}
@@ -693,7 +753,6 @@ private:
 				const Tag tag = decodeServerTagValue(tagValue.get());
 				MutationRef privatized = m;
 				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
 				    .detail("Original", m)
@@ -702,6 +761,13 @@ private:
 				    .detail("TagKey", serverTagKeyFor(ssID))
 				    .detail("Tag", tag.toString())
 				    .detail("Checkpoint", checkpoint.toString());
+
+				if (acsBuilder != nullptr) {
+					privatized.populateChecksum();
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					ASSERT(epoch.present());
+					acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
+				}
 
 				toCommit->addTag(tag);
 				writeMutation(privatized);
@@ -811,8 +877,18 @@ private:
 
 				MutationRef privatized = m;
 				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+
+				if (acsBuilder != nullptr) {
+					privatized.populateChecksum();
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					std::vector<Tag> tags;
+					for (const auto& tag : allTags) {
+						tags.push_back(tag);
+					}
+					ASSERT(epoch.present());
+					acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
+				}
 				writeMutation(privatized);
 			}
 
@@ -942,11 +1018,17 @@ private:
 				if (toCommit) {
 					MutationRef privatized = m;
 					privatized.clearChecksumAndAccumulativeIndex();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(privatized.param1, arena);
 
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
+
+					if (acsBuilder != nullptr) {
+						privatized.populateChecksum();
+						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+						ASSERT(epoch.present());
+						acsBuilder->addMutation(privatized, { tag }, epoch.get(), dbgid, version);
+					}
 
 					toCommit->addTag(tag);
 					writeMutation(privatized);
@@ -967,13 +1049,20 @@ private:
 							if (tagV.present()) {
 								MutationRef privatized = m;
 								privatized.clearChecksumAndAccumulativeIndex();
-								privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 								privatized.param1 = maybeTssRange.begin.withPrefix(systemKeys.begin, arena);
 								privatized.param2 =
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
 								TraceEvent(SevDebug, "SendingPrivatized_TSSClearServerTag", dbgid)
 								    .detail("M", privatized);
+
+								if (acsBuilder != nullptr) {
+									privatized.populateChecksum();
+									privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+									ASSERT(epoch.present());
+									acsBuilder->addMutation(
+									    privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
+								}
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
 								writeMutation(privatized);
 							}
@@ -1166,10 +1255,15 @@ private:
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
 			privatized.clearChecksumAndAccumulativeIndex();
-			privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
+			if (acsBuilder != nullptr) {
+				privatized.populateChecksum();
+				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				ASSERT(epoch.present());
+				acsBuilder->addMutation(privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
+			}
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			writeMutation(privatized);
 		}
@@ -1195,10 +1289,16 @@ private:
 
 					MutationRef privatized = m;
 					privatized.clearChecksumAndAccumulativeIndex();
-					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
+					if (acsBuilder != nullptr) {
+						privatized.populateChecksum();
+						privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+						ASSERT(epoch.present());
+						acsBuilder->addMutation(
+						    privatized, { decodeServerTagValue(tagV.get()) }, epoch.get(), dbgid, version);
+					}
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					writeMutation(privatized);
 				}
@@ -1277,13 +1377,22 @@ private:
 
 				MutationRef privatized;
 				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
 				privatized.type = MutationRef::ClearRange;
 				privatized.param1 = systemKeys.begin.withSuffix(std::max(range.begin, subspace.begin), arena);
 				if (range.end < subspace.end) {
 					privatized.param2 = systemKeys.begin.withSuffix(range.end, arena);
 				} else {
 					privatized.param2 = systemKeys.begin.withSuffix(subspace.begin).withSuffix("\xff\xff"_sr, arena);
+				}
+				if (acsBuilder != nullptr) {
+					privatized.populateChecksum();
+					privatized.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+					std::vector<Tag> tags;
+					for (const auto& tag : allTags) {
+						tags.push_back(tag);
+					}
+					ASSERT(epoch.present());
+					acsBuilder->addMutation(privatized, tags, epoch.get(), dbgid, version);
 				}
 				writeMutation(privatized);
 			}
@@ -1401,8 +1510,28 @@ private:
 			TraceEvent(SevDebug, "SendingPrivatized_CachedKeyRange", dbgid)
 			    .detail("MBegin", mutationBegin)
 			    .detail("MEnd", mutationEnd);
+			if (acsBuilder != nullptr) {
+				mutationBegin.populateChecksum();
+				mutationBegin.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				std::vector<Tag> tags;
+				for (const auto& tag : allTags) {
+					tags.push_back(tag);
+				}
+				ASSERT(epoch.present());
+				acsBuilder->addMutation(mutationBegin, tags, epoch.get(), dbgid, version);
+			}
 			toCommit->addTags(allTags);
 			writeMutation(mutationBegin);
+			if (acsBuilder != nullptr) {
+				mutationEnd.populateChecksum();
+				mutationEnd.setAccumulativeChecksumIndex(accumulativeChecksumIndex);
+				std::vector<Tag> tags;
+				for (const auto& tag : allTags) {
+					tags.push_back(tag);
+				}
+				ASSERT(epoch.present());
+				acsBuilder->addMutation(mutationEnd, tags, epoch.get(), dbgid, version);
+			}
 			toCommit->addTags(allTags);
 			writeMutation(mutationEnd);
 		}

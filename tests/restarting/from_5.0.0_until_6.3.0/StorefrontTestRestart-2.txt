@@ -1,7 +1,0 @@
-testTitle=StorefrontTest
-runSetup=false
-testName=Storefront
-actorsPerClient=20
-transactionsPerSecond=200
-itemCount=20000
-maxOrderSize=4

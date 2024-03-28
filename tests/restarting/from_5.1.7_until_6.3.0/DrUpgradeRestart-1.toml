@@ -1,18 +1,25 @@
-extraDatabaseMode=Local
+[configuration]
+extraDB=3
 
+[[test]]
 testTitle=DrUpgrade
-runSetup=false
 clearAfterTest=false
 simBackupAgents=BackupToDB
-waitForQuiescenceBegin=false
 
+    [[test.workload]]
     testName=Cycle
     nodeCount=30000
     transactionsPerSecond=1000.0
     testDuration=30.0
     expectedRate=0
 
+    [[test.workload]]
     testName=BackupToDBUpgrade
     backupAfter=10.0
+    stopDifferentialAfter=50.0
     backupRangesCount=-1
-    stopDifferentialAfter=70.0
+
+    [[test.workload]]  
+    testName=SaveAndKill
+    restartInfoLocation=simfdb/restartInfo.ini
+    testDuration=40.0
