@@ -196,6 +196,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
 	init( BLOB_GRANULE_RESTORE_CHECK_INTERVAL,      10 );
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
+	// FIXME Remove this when client latency issue is resolved
+	init(WRITE_CLIENT_LATENCY_TRACEEVENT,         false);
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );

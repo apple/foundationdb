@@ -840,9 +840,17 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	state std::vector<TrInfoChunk> commitQ;
 	state int txBytes = 0;
 
+	if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+		std::cout << "ClientStatusUpdateActor BeforeLoop" << std::endl;
+		TraceEvent("ClientStatusUpdateActorBeforeLoop").log();
+	}
 	loop {
 		// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
 		// the cyclic reference to self.
+		if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+			std::cout << "ClientStatusUpdateActor refreshTransaction" << std::endl;
+			TraceEvent("ClientStatusUpdateActorRefreshTransaction").log();
+		}
 		wait(refreshTransaction(cx, &tr));
 		try {
 			ASSERT(cx->clientStatusUpdater.outStatusQ.empty());
@@ -881,6 +889,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			    BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT)
 			            : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
+			state int32_t numItemsCommitted = 0;
 			ASSERT(commitQ.empty() && (txBytes == 0));
 			loop {
 				state std::vector<TrInfoChunk>::iterator iter = tracking_iter;
@@ -889,6 +898,10 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				try {
 					while (iter != trChunksQ.end()) {
 						if (iter->value.size() + iter->key.size() + txBytes > dataSizeLimit) {
+							if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+								std::cout << "Commit trloginfochunk" << std::endl;
+								TraceEvent("CommitChunk").log();
+							}
 							wait(transactionInfoCommitActor(&tr, &commitQ));
 							tracking_iter = iter;
 							commitQ.clear();
@@ -897,8 +910,13 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 						commitQ.push_back(*iter);
 						txBytes += iter->value.size() + iter->key.size();
 						++iter;
+						++numItemsCommitted;
 					}
 					if (!commitQ.empty()) {
+						if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+							std::cout << "Commit trloginfochunkNonEmpty" << std::endl;
+							TraceEvent("CommitChunkNonEmpty").log();
+						}
 						wait(transactionInfoCommitActor(&tr, &commitQ));
 						commitQ.clear();
 						txBytes = 0;
@@ -916,6 +934,10 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 					}
 				}
 			}
+			if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+				std::cout << "ClientStatusUpdateActor FinishCommit " << numItemsCommitted << std::endl;
+				TraceEvent("ClientStatusUpdateActorFinishCommit").log();
+			}
 			cx->clientStatusUpdater.outStatusQ.clear();
 			wait(cx->globalConfig->onInitialized());
 			double sampleRate =
@@ -928,6 +950,10 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
 			wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+			if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+				std::cout << "ClientStatusUpdateActor finishUpdateRound" << std::endl;
+				TraceEvent("ClientStatusUpdateActorFinishUpdateRound").log();
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
@@ -2676,8 +2702,14 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (g_network)
 		throw network_already_setup();
 
-	if (!networkOptions.logClientInfo.present())
+	if (!networkOptions.logClientInfo.present()) {
+		if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+			std::cout << "EnableLogClient" << std::endl;
+			TraceEvent("EnableLogClient").log();
+		}
+		// here it enables log client anyway for all txn, if disabled, no longer see CP has it
 		networkOptions.logClientInfo = true;
+	}
 
 	setupGlobalKnobs();
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
@@ -5482,6 +5514,10 @@ void Transaction::operator=(Transaction&& r) noexcept {
 
 void Transaction::flushTrLogsIfEnabled() {
 	if (trState && trState->trLogInfo && trState->trLogInfo->logsAdded && trState->trLogInfo->trLogWriter.getData()) {
+		if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+			std::cout << "FlushTrLogsIfEnabled, flushed=" << trState->trLogInfo->flushed << std::endl;
+			TraceEvent("Test0226FlushTrLogsIfEnabled").detail("Flushed", trState->trLogInfo->flushed).log();
+		}
 		ASSERT(trState->trLogInfo->flushed == false);
 		trState->cx->clientStatusUpdater.inStatusQ.push_back(
 		    { trState->trLogInfo->identifier, std::move(trState->trLogInfo->trLogWriter) });
@@ -8966,6 +9002,22 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	if (!cx->isError()) {
 		double clientSamplingProbability =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		if (CLIENT_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+			std::cout << "Using clientSamplingProbability=" << clientSamplingProbability << std::endl
+			          << "networkOptions.logClientInfo.present()=" << networkOptions.logClientInfo.present()
+			          << std::endl
+			          << "BUGGIFY=" << BUGGIFY << std::endl;
+			TraceEvent("ClientSamplingProbabilityLogger")
+			    .detail("ClientSamplingProbability", clientSamplingProbability)
+			    .detail("NetworkPresent", networkOptions.logClientInfo.present())
+			    .log();
+			if (networkOptions.logClientInfo.present()) {
+				TraceEvent("ClientSamplingProbabilityNetworkInfo")
+				    .detail("NetworkInfo", networkOptions.logClientInfo.get())
+				    .log();
+				std::cout << "networkOptions.logClientInfo.get()=" << networkOptions.logClientInfo.get() << std::endl;
+			}
+		}
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
