@@ -330,12 +330,6 @@ struct MutationRef {
 					uint16_t acsIdx = this->accumulativeChecksumIndex.get();
 					cEmpty = cEmpty.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
 				}
-				if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-					TraceEvent(SevInfo, "SerializeMutationWithChecksum")
-					    .detail("Checksum", cs)
-					    .detail("AcsIndex",
-					            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
-				}
 				serializer(ar, cType, param2, cEmpty);
 			} else {
 				serializer(ar, type, param2, empty);
@@ -351,15 +345,6 @@ struct MutationRef {
 				cType = createTypeWithAccumulativeChecksumIndex(cType);
 				uint16_t acsIdx = this->accumulativeChecksumIndex.get();
 				cParam2 = cParam2.withSuffix(StringRef((uint8_t*)&acsIdx, 2));
-			}
-			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-				TraceEvent(SevInfo, "SerializeMutationWithChecksum")
-				    .detail("MType", cType)
-				    .detail("Param1", this->param1)
-				    .detail("Param2", cParam2)
-				    .detail("Checksum", cs)
-				    .detail("AcsIndex",
-				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
 			}
 			serializer(ar, cType, param1, cParam2);
 		} else {
@@ -388,15 +373,6 @@ struct MutationRef {
 				}
 				param2 = param1;
 				param1 = param2.substr(0, param2.size() - 1);
-			}
-			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-				TraceEvent(SevInfo, "DeserializeMutationWithChecksum")
-				    .detail("MType", this->type)
-				    .detail("Param1", this->param1)
-				    .detail("Param2", this->param2)
-				    .detail("Checksum", this->checksum.present() ? this->checksum.get() : 0)
-				    .detail("AcsIndex",
-				            this->accumulativeChecksumIndex.present() ? this->accumulativeChecksumIndex.get() : 0);
 			}
 			if (!validateChecksum()) {
 				TraceEvent(SevError, "MutationRefCorruptionDetected")

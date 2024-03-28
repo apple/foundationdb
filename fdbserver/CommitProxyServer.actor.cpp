@@ -583,8 +583,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			auto& tags = self->tagsForKey(backupMutation.param1);
 			toCommit->addTags(tags);
 
-			if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-			    !self->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+			if (self->acsBuilder != nullptr) {
 				backupMutation.populateChecksum();
 				backupMutation.setAccumulativeChecksumIndex(
 				    getCommitProxyAccumulativeChecksumIndex(self->commitProxyIndex));
@@ -1949,14 +1948,10 @@ double pushToBackupMutations(CommitBatchContext* self,
 }
 
 void addAccumulativeChecksumMutations(CommitBatchContext* self) {
-	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM);
-	ASSERT(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled()); // ACS does not support encryption
-	ASSERT(self->pProxyCommitData->acsBuilder->isValid());
+	ASSERT(self->pProxyCommitData->acsBuilder != nullptr);
 	const uint16_t acsIndex = getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex);
-	for (const auto& [tag, entry] : self->pProxyCommitData->acsBuilder->getAcsTable()) {
+	for (const auto& [tag, acsState] : self->pProxyCommitData->acsBuilder->getAcsTable()) {
 		ASSERT(tagSupportAccumulativeChecksum(tag));
-		const AccumulativeChecksumState& acsState = entry.acsState;
 		ASSERT(acsState.version <= self->commitVersion);
 		if (acsState.version < self->commitVersion) {
 			// Have not updated in the current commit batch
@@ -2081,8 +2076,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					ASSERT(encryptedMutation.get().isEncrypted());
 				}
 
-				if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				    !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+				if (pProxyCommitData->acsBuilder != nullptr) {
 					m.populateChecksum();
 					m.setAccumulativeChecksumIndex(
 					    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
@@ -2108,8 +2102,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
 
-					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+					if (pProxyCommitData->acsBuilder != nullptr) {
 						m.populateChecksum();
 						m.setAccumulativeChecksumIndex(
 						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
@@ -2161,8 +2154,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    .detail("To", allSources);
 					self->toCommit.addTags(allSources);
 
-					if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-					    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+					if (self->pProxyCommitData->acsBuilder != nullptr) {
 						std::vector<Tag> tagsToUpdate;
 						for (const auto& tag : allSources) {
 							tagsToUpdate.push_back(tag);
@@ -2307,8 +2299,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    idempotencyIdSet.param1 = kv.key;
 		    idempotencyIdSet.param2 = kv.value;
 		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
-		    if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-		        !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+		    if (pProxyCommitData->acsBuilder != nullptr) {
 			    idempotencyIdSet.populateChecksum();
 			    idempotencyIdSet.setAccumulativeChecksumIndex(
 			        getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
@@ -2334,8 +2325,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		self->toCommit.addTags(tags);
 		// We already have an arena with an appropriate lifetime handy
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
-		if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-		    !pProxyCommitData->encryptMode.isEncryptionEnabled()) { // ACS does not support encryption
+		if (pProxyCommitData->acsBuilder != nullptr) {
 			pProxyCommitData->idempotencyClears[i].populateChecksum();
 			pProxyCommitData->idempotencyClears[i].setAccumulativeChecksumIndex(
 			    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
@@ -2434,8 +2424,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		tpcvMap = self->tpcvMap;
 	}
-	if (CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-	    !self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+	if (self->pProxyCommitData->acsBuilder != nullptr) {
 		// Issue acs mutation at the end of this commit batch
 		addAccumulativeChecksumMutations(self);
 	}

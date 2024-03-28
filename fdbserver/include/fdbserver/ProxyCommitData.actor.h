@@ -272,7 +272,7 @@ struct ProxyCommitData {
 
 	AsyncVar<bool> triggerCommit;
 
-	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder;
+	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 	LogEpoch epoch;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
@@ -355,8 +355,10 @@ struct ProxyCommitData {
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
 	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
-	    acsBuilder(
-	        std::make_shared<AccumulativeChecksumBuilder>(getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))),
+	    acsBuilder(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && !encryptMode.isEncryptionEnabled()
+	                   ? std::make_shared<AccumulativeChecksumBuilder>(
+	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
+	                   : nullptr),
 	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
