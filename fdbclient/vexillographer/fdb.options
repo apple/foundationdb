@@ -351,6 +351,8 @@ description is not currently required but encouraged.
             description="Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized"
             paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."
             persistent="true" sensitive="true"/>
+    <Option name="enable_replica_consistency_check" code="4000"
+            description="Enables replica consistency check, which compares the results returned by all replicas for a given read request, in load balance." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

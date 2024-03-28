@@ -1,0 +1,31 @@
+[configuration]
+storageEngineExcludeTypes = [5]
+
+[[knobs]]
+enable_replica_consistency_check_on_reads = true
+
+[[test]]
+testTitle = 'ApiCorrectnessWithConsistencyCheck'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'ApiCorrectness'
+    numKeys = 5000
+    onlyLowerCase = true
+    shortKeysRatio = 0.5
+    minShortKeyLength = 1
+    maxShortKeyLength = 3
+    minLongKeyLength = 1
+    maxLongKeyLength = 128
+    minValueLength = 1
+    maxValueLength = 1000
+    numGets = 1000
+    numGetRanges = 100
+    numGetRangeSelectors = 100
+    numGetKeys = 100
+    numClears = 100
+    numClearRanges = 10
+    maxTransactionBytes = 500000
+    randomTestDuration = 60

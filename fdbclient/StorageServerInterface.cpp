@@ -39,8 +39,8 @@ bool TSS_doCompare(const GetValueReply& src, const GetValueReply& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetValueRequest& req) {
-	return "TSSMismatchGetValue";
+const char* LB_mismatchTraceName(const GetValueRequest& req, const ComparisonType& type) {
+	return type == TSS_COMPARISON ? "TSSMismatchGetValue" : "ReplicaMismatchGetValue";
 }
 
 template <>
@@ -98,8 +98,8 @@ bool TSS_doCompare(const GetKeyReply& src, const GetKeyReply& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetKeyRequest& req) {
-	return "TSSMismatchGetKey";
+const char* LB_mismatchTraceName(const GetKeyRequest& req, const ComparisonType& type) {
+	return type == TSS_COMPARISON ? "TSSMismatchGetKey" : "ReplicaMismatchGetKey";
 }
 
 template <>
@@ -122,8 +122,8 @@ bool TSS_doCompare(const GetKeyValuesReply& src, const GetKeyValuesReply& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetKeyValuesRequest& req) {
-	return "TSSMismatchGetKeyValues";
+const char* LB_mismatchTraceName(const GetKeyValuesRequest& req, const ComparisonType& type) {
+	return type == TSS_COMPARISON ? "TSSMismatchGetKeyValues" : "ReplicaMismatchGetKeyValues";
 }
 
 static void traceKeyValuesSummary(TraceEvent& event,
@@ -222,8 +222,8 @@ bool TSS_doCompare(const GetMappedKeyValuesReply& src, const GetMappedKeyValuesR
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetMappedKeyValuesRequest& req) {
-	return "TSSMismatchGetMappedKeyValues";
+const char* LB_mismatchTraceName(const GetMappedKeyValuesRequest& req, const ComparisonType& type) {
+	return type == TSS_COMPARISON ? "TSSMismatchGetMappedKeyValues" : "ReplicaMismatchGetMappedKeyValues";
 }
 
 template <>
@@ -252,8 +252,8 @@ bool TSS_doCompare(const GetKeyValuesStreamReply& src, const GetKeyValuesStreamR
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetKeyValuesStreamRequest& req) {
-	return "TSSMismatchGetKeyValuesStream";
+const char* LB_mismatchTraceName(const GetKeyValuesStreamRequest& req, const ComparisonType& type) {
+	return type == TSS_COMPARISON ? "TSSMismatchGetKeyValuesStream" : "ReplicaMismatchGetKeyValuesStream";
 }
 
 // TODO this is all duplicated from above, simplify?
@@ -282,7 +282,7 @@ bool TSS_doCompare(const WatchValueReply& src, const WatchValueReply& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const WatchValueRequest& req) {
+const char* LB_mismatchTraceName(const WatchValueRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
@@ -302,7 +302,7 @@ bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const SplitMetricsRequest& req) {
+const char* LB_mismatchTraceName(const SplitMetricsRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
@@ -322,7 +322,7 @@ bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& 
 }
 
 template <>
-const char* TSS_mismatchTraceName(const ReadHotSubRangeRequest& req) {
+const char* LB_mismatchTraceName(const ReadHotSubRangeRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
@@ -342,7 +342,7 @@ bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const SplitRangeRequest& req) {
+const char* LB_mismatchTraceName(const SplitRangeRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
@@ -363,7 +363,7 @@ bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChan
 }
 
 template <>
-const char* TSS_mismatchTraceName(const OverlappingChangeFeedsRequest& req) {
+const char* LB_mismatchTraceName(const OverlappingChangeFeedsRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
@@ -386,7 +386,7 @@ bool TSS_doCompare(const StorageMetrics& src, const StorageMetrics& tss) {
 }
 
 template <>
-const char* TSS_mismatchTraceName(const WaitMetricsRequest& req) {
+const char* LB_mismatchTraceName(const WaitMetricsRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
@@ -406,7 +406,7 @@ bool TSS_doCompare(const BlobGranuleFileReply& src, const BlobGranuleFileReply& 
 }
 
 template <>
-const char* TSS_mismatchTraceName(const BlobGranuleFileRequest& req) {
+const char* LB_mismatchTraceName(const BlobGranuleFileRequest& req, const ComparisonType& type) {
 	ASSERT(false);
 	return "";
 }
