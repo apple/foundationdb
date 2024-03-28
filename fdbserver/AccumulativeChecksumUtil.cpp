@@ -81,12 +81,11 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersio
 		    .detail("AcsIndex", acsIndex)
 		    .detail("AcsTag", tag)
 		    .detail("CommitVersion", commitVersion)
-		    .detail("Overwrite", exist)
+		    .detail("Exist", exist)
 		    .detail("SSID", ssid);
 	}
 }
 
-// Add mutations to cache
 void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion) {
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
@@ -115,8 +114,6 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID
 	}
 }
 
-// Validate and update acs table
-// Return acs state to persist
 Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumulativeChecksum(
     const AccumulativeChecksumState& acsMutationState,
     UID ssid,

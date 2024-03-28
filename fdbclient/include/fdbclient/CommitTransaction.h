@@ -171,11 +171,24 @@ struct MutationRef {
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
 	void setAccumulativeChecksumIndex(uint16_t index) {
-		if (this->accumulativeChecksumIndex.present()) {
-			ASSERT(this->accumulativeChecksumIndex.get() == index);
-		} else {
-			this->accumulativeChecksumIndex = index;
+		if (withAccumulativeChecksumIndex()) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
+			    .detail("Reason", "Type already has acsIndex flag when setting acsIndex")
+			    .detail("Mutation", toString());
+			this->corrupted = true;
 		}
+		if (this->accumulativeChecksumIndex.present() && this->accumulativeChecksumIndex.get() != index) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
+			    .detail("Reason", "AcsIndex mismatch existing one when setting a new acsIndex")
+			    .detail("NewAcsIndex", index)
+			    .detail("Mutation", toString());
+			this->corrupted = true;
+		}
+		this->accumulativeChecksumIndex = index;
 		return;
 	}
 
@@ -252,7 +265,7 @@ struct MutationRef {
 				    .setMaxFieldLength(-1)
 				    .setMaxEventLength(-1)
 				    .detail("Reason", "Param2 size is wrong with checksum and without acs index")
-				    .detail("Param2Size", this->param2)
+				    .detail("Param2", this->param2)
 				    .detail("Mutation", toString());
 				this->corrupted = true;
 			}
