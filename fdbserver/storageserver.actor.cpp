@@ -13292,6 +13292,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			    te.detail("ACSCheckedVersionsSinceLastPrint", self->acsValidator->getAndClearCheckedVersions());
 			    te.detail("TotalMutations", self->acsValidator->getAndClearTotalMutations());
 			    te.detail("TotalAcsMutations", self->acsValidator->getAndClearTotalAcsMutations());
+			    te.detail("TotalAddedMutations", self->acsValidator->getAndClearTotalAddedMutations());
 		    }
 	    }));
 

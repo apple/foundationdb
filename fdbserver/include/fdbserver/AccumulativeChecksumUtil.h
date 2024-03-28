@@ -28,6 +28,7 @@
 
 static const uint16_t invalidAccumulativeChecksumIndex = 0;
 static const uint16_t resolverAccumulativeChecksumIndex = 2;
+static const uint32_t initialAccumulativeChecksum = 0;
 
 inline uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex) {
 	// We leave flexibility in acs index generated from different components
@@ -42,6 +43,15 @@ inline uint32_t calculateAccumulativeChecksum(uint32_t currentAccumulativeChecks
 inline bool tagSupportAccumulativeChecksum(Tag tag) {
 	// TODO: add log router tag, i.e., -2, so that new backup (backup workers) can be supported.
 	return tag.locality >= 0;
+}
+
+inline uint32_t aggregateAcs(uint32_t startAcs, Standalone<VectorRef<MutationRef>> mutations) {
+	uint32_t newAcs = startAcs;
+	for (const auto& mutation : mutations) {
+		ASSERT(mutation.checksum.present());
+		newAcs = calculateAccumulativeChecksum(newAcs, mutation.checksum.get());
+	}
+	return newAcs;
 }
 
 // A builder to generate accumulative checksum and keep tracking
@@ -73,14 +83,6 @@ private:
 // A validator to check if the accumulative checksum is correct for
 // each version that has mutations
 class AccumulativeChecksumValidator {
-	struct Entry {
-		Entry() {}
-
-		Entry(const AccumulativeChecksumState& acsState) : acsState(acsState) {}
-
-		Optional<AccumulativeChecksumState> acsState;
-	};
-
 public:
 	AccumulativeChecksumValidator() {}
 
@@ -103,17 +105,20 @@ public:
 
 	uint64_t getAndClearTotalAcsMutations();
 
+	uint64_t getAndClearTotalAddedMutations();
+
 	void incrementTotalMutations() { totalMutations++; }
 
 	void incrementTotalAcsMutations() { totalAcsMutations++; }
 
 private:
-	std::unordered_map<uint16_t, Entry> acsTable;
+	std::unordered_map<uint16_t, AccumulativeChecksumState> acsTable;
 	Standalone<VectorRef<MutationRef>> cachedMutations; // Do we really want to do deep copy here?
 	uint64_t checkedMutations = 0;
 	uint64_t checkedVersions = 0;
 	uint64_t totalMutations = 0;
 	uint64_t totalAcsMutations = 0;
+	uint64_t totalAddedMutations = 0;
 };
 
 #endif
