@@ -662,6 +662,9 @@ private:
 	}
 
 	void checkClientInfo(MutationRef m) {
+		if (!SERVER_KNOBS->WRITE_CLIENT_LATENCY_TRACEEVENT) {
+			return;
+		}
 		if (!m.param1.startsWith(fdbClientInfoPrefixRange.begin)) {
 			return;
 		}
