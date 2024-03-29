@@ -72,24 +72,46 @@ public:
 	void newTag(Tag tag, UID ssid, Version commitVersion);
 
 	// Called when commit proxy assigning tags to a mutation (e.g. mutation, private mutation)
-	// Update ACS value for each tag assigned to the mutation
-	void addMutation(const MutationRef& mutation,
-	                 const std::vector<Tag>& tags,
-	                 LogEpoch epoch,
-	                 UID commitProxyId,
-	                 Version commitVersion);
+	// Update ACS value for the input tag assigned to the mutation
+	void addMutation(const MutationRef& mutation, Tag tag, LogEpoch epoch, UID commitProxyId, Version commitVersion);
 
 	// Return read-only ACS map
 	const std::unordered_map<Tag, AccumulativeChecksumState>& getAcsTable() { return acsTable; }
 
 private:
-	uint16_t acsIndex;
+	uint16_t acsIndex; // Essentially, this is the ID of commit proxy
 	Version currentVersion;
 	std::unordered_map<Tag, AccumulativeChecksumState> acsTable;
 
 	// Update ACS state of the input tag to the input values
 	uint32_t updateTable(Tag tag, uint32_t checksum, Version version, LogEpoch epoch);
 };
+
+// This function changes the input mutation by populating checksum and setting ACS index in the mutation ref
+// Add the input mutation and the corresponding inputTag to ACS builder
+void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                                     MutationRef& mutation,
+                                                     Tag inputTag,
+                                                     uint16_t acsIndex,
+                                                     LogEpoch epoch,
+                                                     Version commitVersion,
+                                                     UID commitProxyId);
+
+void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                                     MutationRef& mutation,
+                                                     const std::vector<Tag>& inputTags,
+                                                     uint16_t acsIndex,
+                                                     LogEpoch epoch,
+                                                     Version commitVersion,
+                                                     UID commitProxyId);
+
+void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                                     MutationRef& mutation,
+                                                     const std::set<Tag>& inputTags,
+                                                     uint16_t acsIndex,
+                                                     LogEpoch epoch,
+                                                     Version commitVersion,
+                                                     UID commitProxyId);
 
 // A validator to check if the accumulative checksum is correct for
 // each version that has mutations
@@ -150,15 +172,15 @@ public:
 private:
 	std::unordered_map<uint16_t, AccumulativeChecksumState> acsTable;
 
-	// Any mutation is added to cachedMutations at first. Those mutations
+	// Any mutation is added to mutationBuffer at first. Those mutations
 	// will be consumed to generate ACS value until SS receives the first
 	// following ACS mutation.
-	Standalone<VectorRef<MutationRef>> cachedMutations; // TODO: Do we really need deep copy here?
-	uint64_t checkedMutations = 0;
-	uint64_t checkedVersions = 0;
-	uint64_t totalMutations = 0;
-	uint64_t totalAcsMutations = 0;
-	uint64_t totalAddedMutations = 0;
+	Standalone<VectorRef<MutationRef>> mutationBuffer;
+	uint64_t checkedMutations = 0; // the number of mutations checked by ACS
+	uint64_t checkedVersions = 0; // the number of versions checked by ACS
+	uint64_t totalMutations = 0; // the number of mutations received by SS
+	uint64_t totalAcsMutations = 0; // the number of ACS mutations received by SS
+	uint64_t totalAddedMutations = 0; // the number of mutations added to mutationBuffer
 };
 
 #endif

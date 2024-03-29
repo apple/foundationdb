@@ -21,42 +21,74 @@
 #include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
 
+void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                                     MutationRef& mutation,
+                                                     Tag inputTag,
+                                                     uint16_t acsIndex,
+                                                     LogEpoch epoch,
+                                                     Version commitVersion,
+                                                     UID commitProxyId) {
+	mutation.populateChecksum();
+	mutation.setAccumulativeChecksumIndex(acsIndex);
+	acsBuilder->addMutation(mutation, inputTag, epoch, commitProxyId, commitVersion);
+	return;
+}
+
+void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                                     MutationRef& mutation,
+                                                     const std::vector<Tag>& inputTags,
+                                                     uint16_t acsIndex,
+                                                     LogEpoch epoch,
+                                                     Version commitVersion,
+                                                     UID commitProxyId) {
+	mutation.populateChecksum();
+	mutation.setAccumulativeChecksumIndex(acsIndex);
+	for (const auto& inputTag : inputTags) {
+		acsBuilder->addMutation(mutation, inputTag, epoch, commitProxyId, commitVersion);
+	}
+	return;
+}
+
+void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
+                                                     MutationRef& mutation,
+                                                     const std::set<Tag>& inputTags,
+                                                     uint16_t acsIndex,
+                                                     LogEpoch epoch,
+                                                     Version commitVersion,
+                                                     UID commitProxyId) {
+	mutation.populateChecksum();
+	mutation.setAccumulativeChecksumIndex(acsIndex);
+	for (const auto& inputTag : inputTags) {
+		acsBuilder->addMutation(mutation, inputTag, epoch, commitProxyId, commitVersion);
+	}
+	return;
+}
+
 void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
-                                              const std::vector<Tag>& tags,
+                                              Tag tag,
                                               LogEpoch epoch,
                                               UID commitProxyId,
                                               Version commitVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present() && !mutation.isEncrypted());
-	int appliedCount = 0;
-	for (const auto& tag : tags) {
-		if (!tagSupportAccumulativeChecksum(tag)) {
-			continue;
-		}
-		uint32_t oldAcs = 0;
-		auto it = acsTable.find(tag);
-		if (it != acsTable.end()) {
-			oldAcs = it->second.acs;
-		}
-		uint32_t newAcs = updateTable(tag, mutation.checksum.get(), commitVersion, epoch);
-		appliedCount = appliedCount + 1;
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevInfo, "AcsBuilderAddMutation", commitProxyId)
-			    .detail("AcsTag", tag)
-			    .detail("AcsIndex", mutation.accumulativeChecksumIndex.get())
-			    .detail("CommitVersion", commitVersion)
-			    .detail("OldAcs", oldAcs)
-			    .detail("NewAcs", newAcs)
-			    .detail("Mutation", mutation);
-		}
+	if (!tagSupportAccumulativeChecksum(tag)) {
+		return;
 	}
-	if (appliedCount == 0 && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-		TraceEvent(SevError, "AcsBuilderNotValidTagToUpdate", commitProxyId)
-		    .detail("AcsTags", describe(tags))
+	uint32_t oldAcs = 0;
+	auto it = acsTable.find(tag);
+	if (it != acsTable.end()) {
+		oldAcs = it->second.acs;
+	}
+	uint32_t newAcs = updateTable(tag, mutation.checksum.get(), commitVersion, epoch);
+	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
+		TraceEvent(SevInfo, "AcsBuilderAddMutation", commitProxyId)
+		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", mutation.accumulativeChecksumIndex.get())
 		    .detail("CommitVersion", commitVersion)
+		    .detail("OldAcs", oldAcs)
+		    .detail("NewAcs", newAcs)
 		    .detail("Mutation", mutation);
 	}
+	return;
 }
 
 uint32_t AccumulativeChecksumBuilder::updateTable(Tag tag, uint32_t checksum, Version version, LogEpoch epoch) {
@@ -94,19 +126,19 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
 	Version atAcsVersion = 0;
-	if (!cachedMutations.empty()) {
-		ASSERT(cachedMutations[0].accumulativeChecksumIndex.present());
-		if (cachedMutations[0].accumulativeChecksumIndex.get() != acsIndex) {
+	if (!mutationBuffer.empty()) {
+		ASSERT(mutationBuffer[0].accumulativeChecksumIndex.present());
+		if (mutationBuffer[0].accumulativeChecksumIndex.get() != acsIndex) {
 			TraceEvent(SevError, "AcsValidatorMissingAcs", ssid)
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
-			    .detail("MissingAcsIndex", cachedMutations[0].accumulativeChecksumIndex.get())
+			    .detail("MissingAcsIndex", mutationBuffer[0].accumulativeChecksumIndex.get())
 			    .detail("Mutation", mutation.toString())
 			    .detail("LastAcsVersion", atAcsVersion)
 			    .detail("SSVersion", ssVersion);
 		}
 	}
-	cachedMutations.push_back(cachedMutations.arena(), mutation);
+	mutationBuffer.push_back(mutationBuffer.arena(), mutation);
 	totalAddedMutations++;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorAddMutation", ssid)
@@ -131,7 +163,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		// Unexpected. Since we assign acs mutation in commit batch
 		// So, there must be acs entry set up when adding the mutations of the batch
 		acsTable[acsIndex] = acsMutationState;
-		cachedMutations.clear();
+		mutationBuffer.clear();
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
 			    .detail("Reason", "No Entry")
@@ -143,7 +175,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		return acsMutationState;
 	}
 	if ((acsMutationState.version < it->second.version || acsMutationState.epoch < it->second.epoch)) {
-		cachedMutations.clear();
+		mutationBuffer.clear();
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
 			    .detail("Reason", "Acs Mutation Too Old")
@@ -162,11 +194,11 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		cleared = true;
 	}
 	// Apply mutations in cache to acs
-	ASSERT(cachedMutations.size() >= 1);
+	ASSERT(mutationBuffer.size() >= 1);
 	uint32_t oldAcs = !cleared ? it->second.acs : initialAccumulativeChecksum;
 	Version oldVersion = !cleared ? it->second.version : 0;
-	uint32_t newAcs = aggregateAcs(oldAcs, cachedMutations);
-	checkedMutations = checkedMutations + cachedMutations.size();
+	uint32_t newAcs = aggregateAcs(oldAcs, mutationBuffer);
+	checkedMutations = checkedMutations + mutationBuffer.size();
 	checkedVersions = checkedVersions + 1;
 	Version newVersion = acsMutationState.version;
 	if (newAcs != acsMutationState.acs) {
@@ -198,7 +230,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		}
 	}
 	it->second = acsMutationState;
-	cachedMutations.clear();
+	mutationBuffer.clear();
 	return acsMutationState;
 }
 
@@ -221,7 +253,7 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 
 void AccumulativeChecksumValidator::clearCache(UID ssid, Tag tag, Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	if (!cachedMutations.empty()) {
+	if (!mutationBuffer.empty()) {
 		TraceEvent(SevError, "AcsValidatorCachedMutationNotChecked", ssid)
 		    .detail("AcsTag", tag)
 		    .detail("SSVersion", ssVersion);

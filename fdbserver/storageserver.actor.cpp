@@ -218,6 +218,8 @@ static const KeyRangeRef persistAccumulativeChecksumKeys =
     KeyRangeRef(PERSIST_PREFIX "AccumulativeChecksum/"_sr, PERSIST_PREFIX "AccumulativeChecksum0"_sr);
 
 inline Key encodePersistAccumulativeChecksumKey(LogEpoch epoch, uint16_t acsIndex) {
+	epoch = bigEndian64(epoch);
+	acsIndex = bigEndian16(acsIndex);
 	return persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&epoch, 8))
 	    .withSuffix(StringRef((uint8_t*)&acsIndex, 2));
 }
@@ -226,7 +228,7 @@ inline std::pair<LogEpoch, uint16_t> decodePersistAccumulativeChecksumKey(const 
 	StringRef keyStr = key.removePrefix(persistAccumulativeChecksumKeys.begin);
 	LogEpoch epoch = *(const uint64_t*)(keyStr.substr(0, 8).begin());
 	uint16_t acsIndex = *(const uint16_t*)(keyStr.substr(8, 2).begin());
-	return std::make_pair(epoch, acsIndex);
+	return std::make_pair(fromBigEndian64(epoch), fromBigEndian16(acsIndex));
 }
 
 // MoveInUpdates caches new updates of a move-in shard, before that shard is ready to accept writes.
@@ -12565,13 +12567,6 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
 	//     .detail("ToVersion", version);
-}
-
-void StorageServerDisk::clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState) {
-	Key acsKey = encodePersistAccumulativeChecksumKey(acsState.epoch, acsState.acsIndex);
-	storage->clear(singleKeyRange(acsKey));
-	++(*kvClearRanges);
-	++(*kvClearSingleKey);
 }
 
 // Update data->storage to persist tss quarantine state

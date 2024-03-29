@@ -584,10 +584,14 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			toCommit->addTags(tags);
 
 			if (self->acsBuilder != nullptr) {
-				backupMutation.populateChecksum();
-				backupMutation.setAccumulativeChecksumIndex(
-				    getCommitProxyAccumulativeChecksumIndex(self->commitProxyIndex));
-				self->acsBuilder->addMutation(backupMutation, tags, self->epoch, self->dbgid, commitVersion);
+				updateMutationWithAcsAndAddMutationToAcsBuilder(
+				    self->acsBuilder,
+				    backupMutation,
+				    tags,
+				    getCommitProxyAccumulativeChecksumIndex(self->commitProxyIndex),
+				    self->epoch,
+				    commitVersion,
+				    self->dbgid);
 			}
 
 			toCommit->writeTypedMessage(backupMutation);
@@ -2077,11 +2081,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				if (pProxyCommitData->acsBuilder != nullptr) {
-					m.populateChecksum();
-					m.setAccumulativeChecksumIndex(
-					    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
-					pProxyCommitData->acsBuilder->addMutation(
-					    m, tags, pProxyCommitData->epoch, pProxyCommitData->dbgid, self->commitVersion);
+					updateMutationWithAcsAndAddMutationToAcsBuilder(
+					    pProxyCommitData->acsBuilder,
+					    m,
+					    tags,
+					    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+					    pProxyCommitData->epoch,
+					    self->commitVersion,
+					    pProxyCommitData->dbgid);
 				}
 
 				WriteMutationRefVar var =
@@ -2103,14 +2110,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTags(ranges.begin().value().tags);
 
 					if (pProxyCommitData->acsBuilder != nullptr) {
-						m.populateChecksum();
-						m.setAccumulativeChecksumIndex(
-						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
-						pProxyCommitData->acsBuilder->addMutation(m,
-						                                          ranges.begin().value().tags,
-						                                          pProxyCommitData->epoch,
-						                                          pProxyCommitData->dbgid,
-						                                          self->commitVersion);
+						updateMutationWithAcsAndAddMutationToAcsBuilder(
+						    pProxyCommitData->acsBuilder,
+						    m,
+						    ranges.begin().value().tags,
+						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+						    pProxyCommitData->epoch,
+						    self->commitVersion,
+						    pProxyCommitData->dbgid);
 					}
 
 					// check whether clear is sampled
@@ -2155,15 +2162,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTags(allSources);
 
 					if (self->pProxyCommitData->acsBuilder != nullptr) {
-						std::vector<Tag> tagsToUpdate;
-						for (const auto& tag : allSources) {
-							tagsToUpdate.push_back(tag);
-						}
-						m.populateChecksum();
-						m.setAccumulativeChecksumIndex(
-						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
-						pProxyCommitData->acsBuilder->addMutation(
-						    m, tagsToUpdate, pProxyCommitData->epoch, pProxyCommitData->dbgid, self->commitVersion);
+						updateMutationWithAcsAndAddMutationToAcsBuilder(
+						    pProxyCommitData->acsBuilder,
+						    m,
+						    allSources,
+						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+						    pProxyCommitData->epoch,
+						    self->commitVersion,
+						    pProxyCommitData->dbgid);
 					}
 				}
 
@@ -2299,13 +2305,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    idempotencyIdSet.param1 = kv.key;
 		    idempotencyIdSet.param2 = kv.value;
 		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
-		    if (pProxyCommitData->acsBuilder != nullptr) {
-			    idempotencyIdSet.populateChecksum();
-			    idempotencyIdSet.setAccumulativeChecksumIndex(
-			        getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
-			    pProxyCommitData->acsBuilder->addMutation(
-			        idempotencyIdSet, tags, pProxyCommitData->epoch, pProxyCommitData->dbgid, self->commitVersion);
-		    }
 		    self->toCommit.addTags(tags);
 		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 			    CODE_PROBE(true, "encrypting idempotency mutation");
@@ -2316,6 +2315,16 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			    ASSERT(encryptedMutation.isEncrypted());
 			    self->toCommit.writeTypedMessage(encryptedMutation);
 		    } else {
+			    if (pProxyCommitData->acsBuilder != nullptr) {
+				    updateMutationWithAcsAndAddMutationToAcsBuilder(
+				        pProxyCommitData->acsBuilder,
+				        idempotencyIdSet,
+				        tags,
+				        getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+				        pProxyCommitData->epoch,
+				        self->commitVersion,
+				        pProxyCommitData->dbgid);
+			    }
 			    self->toCommit.writeTypedMessage(idempotencyIdSet);
 		    }
 	    });
@@ -2326,14 +2335,14 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		// We already have an arena with an appropriate lifetime handy
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
 		if (pProxyCommitData->acsBuilder != nullptr) {
-			pProxyCommitData->idempotencyClears[i].populateChecksum();
-			pProxyCommitData->idempotencyClears[i].setAccumulativeChecksumIndex(
-			    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex));
-			pProxyCommitData->acsBuilder->addMutation(pProxyCommitData->idempotencyClears[i],
-			                                          tags,
-			                                          pProxyCommitData->epoch,
-			                                          pProxyCommitData->dbgid,
-			                                          self->commitVersion);
+			updateMutationWithAcsAndAddMutationToAcsBuilder(
+			    pProxyCommitData->acsBuilder,
+			    pProxyCommitData->idempotencyClears[i],
+			    tags,
+			    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+			    pProxyCommitData->epoch,
+			    self->commitVersion,
+			    pProxyCommitData->dbgid);
 		}
 		WriteMutationRefVar var = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
