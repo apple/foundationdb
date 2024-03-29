@@ -2323,6 +2323,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	bool firstMessage = true;
 	for (auto m : self->msg.messages) {
 		if (firstMessage) {
+			ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR ||
+			       pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size());
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
