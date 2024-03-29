@@ -1416,8 +1416,6 @@ public:
 	Optional<EncryptionAtRestMode> encryptionMode;
 	Reference<GetEncryptCipherKeysMonitor> getEncryptCipherKeysMonitor;
 
-	std::shared_ptr<AccumulativeChecksumValidator> acsValidator = nullptr;
-
 	struct Counters : CommonStorageCounters {
 
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
@@ -1637,6 +1635,8 @@ public:
 	// Tenant metadata to manage connection to blob store for fetchKeys()
 	BGTenantMap tenantData;
 
+	std::shared_ptr<AccumulativeChecksumValidator> acsValidator = nullptr;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
@@ -1700,8 +1700,9 @@ public:
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
 	    tenantData(db),
-	    acsValidator(CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM ? std::make_shared<AccumulativeChecksumValidator>()
-	                                                            : nullptr) {
+	    acsValidator(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM
+	                     ? std::make_shared<AccumulativeChecksumValidator>()
+	                     : nullptr) {
 		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());

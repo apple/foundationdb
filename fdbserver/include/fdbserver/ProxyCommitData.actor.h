@@ -225,7 +225,6 @@ struct ProxyCommitData {
 	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
 	bool firstProxy;
-	uint16_t commitProxyIndex; // decided when the cluster controller recruits commit proxies
 	double lastCoalesceTime;
 	bool locked;
 	Optional<Value> metadataVersion;
@@ -272,6 +271,7 @@ struct ProxyCommitData {
 
 	AsyncVar<bool> triggerCommit;
 
+	uint16_t commitProxyIndex; // decided when the cluster controller recruits commit proxies
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 	LogEpoch epoch;
 
@@ -355,7 +355,8 @@ struct ProxyCommitData {
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
 	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
-	    acsBuilder(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && !encryptMode.isEncryptionEnabled()
+	    acsBuilder(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+	                       !encryptMode.isEncryptionEnabled()
 	                   ? std::make_shared<AccumulativeChecksumBuilder>(
 	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
 	                   : nullptr),

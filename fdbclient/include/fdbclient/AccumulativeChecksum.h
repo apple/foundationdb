@@ -30,7 +30,7 @@ struct AccumulativeChecksumState {
 
 	AccumulativeChecksumState() : acs(0), version(invalidVersion), epoch(0), acsIndex(0) {}
 	AccumulativeChecksumState(uint16_t acsIndex, uint32_t acs, Version version, LogEpoch epoch)
-	  : acsIndex(acsIndex), acs(acs), version(version), epoch(epoch) {}
+	  : acs(acs), acsIndex(acsIndex), version(version), epoch(epoch) {}
 
 	std::string toString() const {
 		return "AccumulativeChecksumState: [ACS Index]: " + std::to_string(acsIndex) +

@@ -26,6 +26,7 @@ void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
                                               LogEpoch epoch,
                                               UID commitProxyId,
                                               Version commitVersion) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present() && !mutation.isEncrypted());
 	int appliedCount = 0;
 	for (const auto& tag : tags) {
@@ -59,6 +60,7 @@ void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
 }
 
 uint32_t AccumulativeChecksumBuilder::updateTable(Tag tag, uint32_t checksum, Version version, LogEpoch epoch) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	uint32_t newAcs = 0;
 	auto it = acsTable.find(tag);
 	if (it == acsTable.end()) {
@@ -75,6 +77,7 @@ uint32_t AccumulativeChecksumBuilder::updateTable(Tag tag, uint32_t checksum, Ve
 }
 
 void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersion) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	bool exist = acsTable.erase(tag) > 0;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsBuilderNewAcsTag")
@@ -87,6 +90,7 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersio
 }
 
 void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
 	Version atAcsVersion = 0;
@@ -119,6 +123,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
     UID ssid,
     Tag tag,
     Version ssVersion) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const LogEpoch& epoch = acsMutationState.epoch;
 	const uint16_t& acsIndex = acsMutationState.acsIndex;
 	auto it = acsTable.find(acsIndex);
@@ -201,6 +206,7 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
                                             UID ssid,
                                             Tag tag,
                                             Version ssVersion) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const uint16_t& acsIndex = acsState.acsIndex;
 	acsTable[acsIndex] = acsState;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
@@ -214,6 +220,7 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 }
 
 void AccumulativeChecksumValidator::clearCache(UID ssid, Tag tag, Version ssVersion) {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	if (!cachedMutations.empty()) {
 		TraceEvent(SevError, "AcsValidatorCachedMutationNotChecked", ssid)
 		    .detail("AcsTag", tag)
@@ -222,30 +229,35 @@ void AccumulativeChecksumValidator::clearCache(UID ssid, Tag tag, Version ssVers
 }
 
 uint64_t AccumulativeChecksumValidator::getAndClearCheckedMutations() {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	uint64_t res = checkedMutations;
 	checkedMutations = 0;
 	return res;
 }
 
 uint64_t AccumulativeChecksumValidator::getAndClearCheckedVersions() {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	uint64_t res = checkedVersions;
 	checkedVersions = 0;
 	return res;
 }
 
 uint64_t AccumulativeChecksumValidator::getAndClearTotalMutations() {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	uint64_t res = totalMutations;
 	totalMutations = 0;
 	return res;
 }
 
 uint64_t AccumulativeChecksumValidator::getAndClearTotalAcsMutations() {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	uint64_t res = totalAcsMutations;
 	totalAcsMutations = 0;
 	return res;
 }
 
 uint64_t AccumulativeChecksumValidator::getAndClearTotalAddedMutations() {
+	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	uint64_t res = totalAddedMutations;
 	totalAddedMutations = 0;
 	return res;
@@ -254,9 +266,7 @@ uint64_t AccumulativeChecksumValidator::getAndClearTotalAddedMutations() {
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
-	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
-		m.setAccumulativeChecksumIndex(512);
-	}
+	m.setAccumulativeChecksumIndex(512);
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
 
 	wr << m;
@@ -284,30 +294,23 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 
 	ASSERT(de.validateChecksum());
 
-	MutationRef acsMutation;
+	Standalone<MutationRef> acsMutation;
 	LogEpoch epoch = 0;
 	uint16_t acsIndex = 1;
+	Standalone<StringRef> param2 = accumulativeChecksumValue(AccumulativeChecksumState(acsIndex, 1, 20, epoch));
 	acsMutation.type = MutationRef::SetValue;
 	acsMutation.param1 = accumulativeChecksumKey;
-	acsMutation.param2 = accumulativeChecksumValue(AccumulativeChecksumState(acsIndex, 1, 20, epoch));
+	acsMutation.param2 = param2;
 	acsMutation.setAccumulativeChecksumIndex(1);
 	acsMutation.populateChecksum();
-	BinaryWriter acsWr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
+	BinaryWriter acsWr(IncludeVersion());
 	acsWr << acsMutation;
 	Standalone<StringRef> acsValue = acsWr.toValue();
-	TraceEvent("EncodedMutation").detail("RawBytes", acsValue);
-	BinaryReader acsRd(acsValue, AssumeVersion(ProtocolVersion::withMutationChecksum()));
+	BinaryReader acsRd(acsValue, IncludeVersion());
 	Standalone<MutationRef> acsDe;
 	acsRd >> acsDe;
-	printf("Deserialized mutation: %s\n", acsDe.toString().c_str());
-	if (acsDe.type != acsMutation.type || acsDe.param1 != acsMutation.param1 || acsDe.param2 != acsMutation.param2) {
-		TraceEvent(SevError, "MutationMismatch")
-		    .detail("OldType", acsMutation.type)
-		    .detail("NewType", acsDe.type)
-		    .detail("OldParam1", acsMutation.param1)
-		    .detail("NewParam1", acsDe.param1)
-		    .detail("OldParam2", acsMutation.param2)
-		    .detail("NewParam2", acsDe.param2);
+	if (acsDe.type != MutationRef::SetValue || acsDe.param1 != accumulativeChecksumKey || acsDe.param2 != param2) {
+		TraceEvent(SevError, "AcsMutationMismatch");
 		ASSERT(false);
 	}
 	ASSERT(acsDe.validateChecksum());

@@ -171,6 +171,9 @@ struct MutationRef {
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
 	void setAccumulativeChecksumIndex(uint16_t index) {
+		if (!CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			return;
+		}
 		if (withAccumulativeChecksumIndex()) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
 			    .setMaxFieldLength(-1)
@@ -274,6 +277,9 @@ struct MutationRef {
 
 	// Generate 32 bits checksum and set it to this->checksum
 	void populateChecksum() {
+		if (!CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			return;
+		}
 		if (withChecksum()) {
 			TraceEvent(SevError, "MutationRefUnexpectedError")
 			    .setMaxFieldLength(-1)
