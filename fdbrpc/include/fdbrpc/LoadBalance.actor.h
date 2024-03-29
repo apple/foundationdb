@@ -336,6 +336,7 @@ struct RequestData : NonCopyable {
 	Future<Reply> response;
 	Reference<ModelHolder> modelHolder;
 	TriedAllOptions triedAllOptions{ false };
+	RequestStream<Request, P> const* requestStream = nullptr;
 
 	bool requestStarted = false; // true once the request has been sent to an alternative
 	bool requestProcessed = false; // true once a response has been received and handled by checkAndProcessResult
@@ -383,7 +384,6 @@ struct RequestData : NonCopyable {
 	                                      Reference<MultiInterface<Multi>> alternatives,
 	                                      RequestStream<Request, P> Interface::*channel) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
-			resetReply(request);
 			return replicaComparison(request, ssResponse, stream->getEndpoint().token.first(), alternatives, channel);
 		}
 
@@ -400,6 +400,7 @@ struct RequestData : NonCopyable {
 	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through for TSS check
 	    RequestStream<Request, P> Interface::*channel) {
 		modelHolder = Reference<ModelHolder>();
+		requestStream = stream;
 		requestStarted = false;
 
 		if (backoff > 0) {
@@ -505,7 +506,6 @@ struct RequestData : NonCopyable {
 	// processed so we can update the queue model.
 	void makeLaggingRequest() {
 		ASSERT(response.isValid());
-		ASSERT(!response.isReady());
 		ASSERT(modelHolder);
 		ASSERT(modelHolder->model);
 
@@ -746,8 +746,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			// Only the first location is available.
 			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-				//wait(firstRequestData.maybeDoReplicaComparison(
-				    //stream, request, model, firstRequestData.response, alternatives, channel));
+				// Do consistency check, if requested.
+				wait(firstRequestData.maybeDoReplicaComparison(
+				    stream, request, model, firstRequestData.response, alternatives, channel));
 				return result.get();
 			}
 
@@ -768,26 +769,37 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 
+			state bool firstRequestSuccessful = false;
+			state bool secondRequestSuccessful = false;
+
 			loop choose {
 				when(ErrorOr<REPLY_TYPE(Request)> result =
 				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-						//wait(firstRequestData.maybeDoReplicaComparison(
-						    //stream, request, model, firstRequestData.response, alternatives, channel));
-						return result.get();
+						firstRequestSuccessful = true;
+						break;
 					}
 
 					firstRequestEndpoint = Optional<uint64_t>();
 				}
 				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
-						//wait(secondRequestData.maybeDoReplicaComparison(
-						    //stream, request, model, secondRequestData.response, alternatives, channel));
-						return result.get();
+						secondRequestSuccessful = true;
 					}
 
 					break;
 				}
+			}
+
+			if (firstRequestSuccessful || secondRequestSuccessful) {
+				// Do consistency check, by comparing storage replicas, if requested.
+				state RequestData<Request, Interface, Multi, P>* requestData =
+				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
+				wait(requestData->maybeDoReplicaComparison(
+				    requestData->requestStream, request, model, requestData->response, alternatives, channel));
+
+				ASSERT(requestData->response.isReady());
+				return requestData->response.get().get();
 			}
 
 			if (++numAttempts >= alternatives->size()) {
@@ -824,6 +836,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						}
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+							// Do consistency check, by comparing storage replicas, if requested.
 							wait(firstRequestData.maybeDoReplicaComparison(
 							    stream, request, model, firstRequestData.response, alternatives, channel));
 							return result.get();
