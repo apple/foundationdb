@@ -103,17 +103,17 @@ public:
 	struct WriteInfo {
 		WriteInfo() : checksum(0), timestamp(0) {}
 		uint32_t checksum;
-		uint32_t timestamp; // keep a precision of ms
+		uint64_t timestamp; // keep a precision of ms
 	};
 
-	static uint32_t transformTime(double unixTime) { return (uint32_t)(unixTime * millisecondsPerSecond); }
+	static uint64_t transformTime(double unixTime) { return (uint64_t)(unixTime * millisecondsPerSecond); }
 
 	class LRU {
 	private:
-		int64_t step;
+		uint64_t step;
 		std::string fileName;
-		std::map<int, uint32_t> stepToKey;
-		std::map<uint32_t, int> keyToStep; // std::map is to support ::truncate
+		std::map<uint64_t, uint32_t> stepToKey;
+		std::map<uint32_t, uint64_t> keyToStep; // std::map is to support ::truncate
 		std::unordered_map<uint32_t, AsyncFileWriteChecker::WriteInfo> pageContents;
 
 	public:
@@ -137,7 +137,7 @@ public:
 			auto it = keyToStep.lower_bound(page);
 			// iterate through keyToStep, to find corresponding entries in stepToKey
 			while (it != keyToStep.end()) {
-				int step = it->second;
+				uint64_t step = it->second;
 				auto next = it;
 				next++;
 				keyToStep.erase(it);
@@ -148,7 +148,7 @@ public:
 
 		uint32_t randomPage() {
 			if (keyToStep.size() == 0) {
-				return -1;
+				return 0;
 			}
 			auto it = keyToStep.begin();
 			std::advance(it, deterministicRandom()->randomInt(0, (int)keyToStep.size()));
@@ -173,7 +173,7 @@ public:
 
 		uint32_t leastRecentlyUsedPage() {
 			if (stepToKey.size() == 0) {
-				return -1;
+				return 0;
 			}
 			return stepToKey.begin()->second;
 		}
@@ -207,14 +207,14 @@ public:
 	}
 
 private:
-	// transform from unixTime(double) to uint32_t, to retain ms precision.
 	Reference<IAsyncFile> m_f;
 	Future<Void> checksumWorker;
 	Future<Void> checksumLogger;
 	LRU lru;
 	void* pageBuffer;
 	uint64_t totalCheckedFail, totalCheckedSucceed;
-	uint32_t syncedTime;
+	// transform from unixTime(double) to uint64_t, to retain ms precision.
+	uint64_t syncedTime;
 	// to avoid concurrent operation, so that the continuous reader will skip a page if it is being written
 	std::unordered_set<uint32_t> writing;
 	// This is the most page checksum history blocks we will use across all files.
@@ -226,7 +226,7 @@ private:
 			// for each page, read and do checksum
 			// scan from the least recently used, thus it is safe to quit if data has not been synced
 			state uint32_t page = self->lru.leastRecentlyUsedPage();
-			while (self->writing.find(page) != self->writing.end() || page == -1) {
+			while (self->writing.find(page) != self->writing.end() || page == 0) {
 				// avoid concurrent ops
 				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
 				continue;
@@ -253,7 +253,7 @@ private:
 
 	// return true if there are still remaining valid synced pages to check, otherwise false
 	// this method removes the page entry from checksum history upon a successful check
-	bool verifyChecksum(int page, uint32_t checksum, uint8_t* start, bool sweep) {
+	bool verifyChecksum(uint32_t page, uint32_t checksum, uint8_t* start) {
 		if (!lru.exist(page)) {
 			// it has already been verified succesfully and removed by checksumWorker
 			return true;
@@ -265,7 +265,6 @@ private:
 				TraceEvent(SevError, "AsyncFileLostWriteDetected")
 				    .error(checksum_failed())
 				    .detail("Filename", getFilename())
-				    .detail("Sweep", sweep)
 				    .detail("PageNumber", page)
 				    .detail("Size", lru.size())
 				    .detail("Start", (long)start)
@@ -287,14 +286,11 @@ private:
 
 	// Update or check checksum(s) in history for any full pages covered by this operation
 	// return the updated pages when updateChecksum is true
-	std::vector<uint32_t> updateChecksumHistory(bool updateChecksum,
-	                                            int64_t offset,
-	                                            int len,
-	                                            uint8_t* buf,
-	                                            bool sweep = false) {
+	std::vector<uint32_t> updateChecksumHistory(bool updateChecksum, int64_t offset, int len, uint8_t* buf) {
 		std::vector<uint32_t> pages;
 		// Check or set each full block in the the range
-		int page = offset / checksumHistoryPageSize; // First page number
+		// page number starts at 1, as we use 0 to indicate invalid page
+		uint32_t page = offset / checksumHistoryPageSize + 1; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
 		uint8_t* start = buf; // Position in buffer to start checking from
 		// If offset is not page-aligned, move to next page and adjust start
@@ -302,8 +298,8 @@ private:
 			++page;
 			start += (checksumHistoryPageSize - slack);
 		}
-		int startPage = page;
-		int pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
+		uint32_t startPage = page;
+		uint32_t pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
 		while (page < pageEnd) {
 			uint32_t checksum = crc32c_append(0xab12fd93, start, checksumHistoryPageSize);
 #if VALGRIND
@@ -332,7 +328,7 @@ private:
 				history.checksum = checksum;
 				lru.update(page, history);
 			} else {
-				if (!verifyChecksum(page, checksum, start, sweep)) {
+				if (!verifyChecksum(page, checksum, start)) {
 					break;
 				}
 			}

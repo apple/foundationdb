@@ -89,7 +89,7 @@ public:
 
 	uint32_t randomPage() {
 		if (m.size() == 0) {
-			return -1;
+			return 0;
 		}
 		auto it = m.begin();
 		std::advance(it, deterministicRandom()->randomInt(0, (int)m.size()));
@@ -133,7 +133,7 @@ public:
 
 	uint32_t leastRecentlyUsedPage() {
 		if (m.size() == 0) {
-			return -1;
+			return 0;
 		}
 		return end->prev->page;
 	}
@@ -164,14 +164,14 @@ TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 		double r = deterministicRandom()->random01();
 		if (lru2.size() == 0 || r > 0.5) {
 			// to add/update
-			uint32_t page = deterministicRandom()->randomInt(0, limit);
+			uint32_t page = deterministicRandom()->randomInt(1, limit);
 			if (lru2.exist(page)) {
 				// the page already exist
 				compareWriteInfo(lru.find(page), lru2.find(page));
 			}
 			// change the content each time
 			AsyncFileWriteChecker::WriteInfo wi;
-			wi.checksum = deterministicRandom()->randomInt(0, INT_MAX);
+			wi.checksum = deterministicRandom()->randomInt(1, INT_MAX);
 			wi.timestamp = AsyncFileWriteChecker::transformTime(now());
 			lru.update(page, wi);
 			lru2.update(page, wi);
@@ -181,7 +181,7 @@ TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 			// to remove
 			uint32_t page = lru2.randomPage();
 
-			ASSERT(page != -1);
+			ASSERT(page != 0);
 			ASSERT(lru.exist(page));
 			ASSERT(lru2.exist(page));
 			compareWriteInfo(lru.find(page), lru2.find(page));
@@ -193,7 +193,7 @@ TEST_CASE("/fdbrpc/AsyncFileWriteChecker/LRU") {
 		} else {
 			// to truncate
 			uint32_t page = lru2.randomPage();
-			uint32_t page2 = lru2.randomPage(); // to ensure
+			uint32_t page2 = lru2.randomPage();
 			lru.truncate(page);
 			lru2.truncate(page);
 			if (page2 >= page) {
