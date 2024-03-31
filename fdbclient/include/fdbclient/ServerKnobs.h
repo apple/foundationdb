@@ -128,7 +128,7 @@ public:
 	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
 	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
 	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
-	double WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER; // take effects when pertual wiggle priority is larger
+	double WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER; // take effects when perpetual wiggle priority is larger
 	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
@@ -348,7 +348,7 @@ public:
 
 	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
-	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
+	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthiness again to
 	                                          // ensure it runs after machineTeamRemover
 
 	// Remove wrong storage engines

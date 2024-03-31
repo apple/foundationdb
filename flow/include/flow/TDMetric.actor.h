@@ -651,7 +651,7 @@ public:
 			self->header.update(oldHeader);
 
 			// Any blocks already in the metrics queue will need to be patched at the time that they are
-			// flushed to the DB (which isn't necessarity part of the current flush) so set the last time
+			// flushed to the DB (which isn't necessarily part of the current flush) so set the last time
 			// that requires a patch to the time of the last MetricData in the queue
 			self->lastTimeRequiringHeaderPatch = self->metrics.back().rollTime;
 		} else {

@@ -604,7 +604,7 @@ If a region failover occurs, clients will generally only see a latency spike of 
 Specifying datacenters
 ----------------------
 
-To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either ``--locality-dcid`` or ``--datacenter-id``. This datacenter identifier is case sensitive.
+To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either ``--locality-dcid`` or ``--datacenter-id``. This datacenter identifier is case-sensitive.
 
 Clients should also specify their datacenter with the database option ``datacenter-id``. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so reads will suffer from high tail latencies.
 

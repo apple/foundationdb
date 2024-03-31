@@ -439,7 +439,7 @@ private:
 					                      diskSectorLength - ((offset + writeOffset + pageOffset) % diskSectorLength));
 				}
 
-				// If saving durable, then perform the write correctly.  Otherwise, perform the write correcly with a
+				// If saving durable, then perform the write correctly.  Otherwise, perform the write correctly with a
 				// probability of 1/3. If corrupting the write, then this sector will be written correctly with a 1/4
 				// chance
 				if (saveDurable || pageKillMode == NO_CORRUPTION ||

@@ -33,7 +33,7 @@
 // want to get the actual average bytes moved rate by DD in the past DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL. We would have
 // a sense of how many bytes DD moved recently and it will help us get to know DD workload.
 // Comparison with Smoother: if you want to use a recency-based weighting(i.e. less important if sampled long time ago)
-// Smoother(which uses an exponential function for smoothing) woule be a good choice. On the other hand, if you want to
+// Smoother(which uses an exponential function for smoothing) would be a good choice. On the other hand, if you want to
 // know the average sample rates in the last <timeWindow>, MovingWindow might be better.
 
 template <class T>

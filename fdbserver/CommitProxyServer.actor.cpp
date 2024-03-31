@@ -578,7 +578,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 				*partBuffer = bigEndian32(part);
 			}
 
-			// Define the mutation type and and location
+			// Define the mutation type and location
 			backupMutation.param1 = wr.toValue();
 			ASSERT(backupMutation.param1.startsWith(
 			    logRangeMutation->first)); // We are writing into the configured destination
@@ -1833,7 +1833,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			CODE_PROBE(true, "using already encrypted mutation");
 			encryptedMutation = encryptedMutationOpt->get();
 			ASSERT(encryptedMutation.isEncrypted());
-			// During simulation check whether the encrypted mutation matches the decrpyted mutation
+			// During simulation check whether the encrypted mutation matches the decrypted mutation
 			if (g_network && g_network->isSimulated()) {
 				return writeMutationEncryptedMutation(self, domainId, mutation, encryptedMutationOpt, arena);
 			}
@@ -2511,7 +2511,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// Send replies to clients
 	// TODO: should be timer_monotonic(), but gets compared to request time, which uses g_network->timer().
 	double endTime = g_network->timer();
-	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
+	// Reset all to zero, used to track the correct index of each commitTransactionRef on each resolver
 
 	std::fill(self->nextTr.begin(), self->nextTr.end(), 0);
 	std::unordered_map<uint8_t, int16_t> idCountsForKey;

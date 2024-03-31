@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_DETERIMINISTIC_RANDOM_H
-#define FLOW_DETERIMINISTIC_RANDOM_H
+#ifndef FLOW_DETERMINISTIC_RANDOM_H
+#define FLOW_DETERMINISTIC_RANDOM_H
 #pragma once
 
 #include <cinttypes>

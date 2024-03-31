@@ -200,7 +200,7 @@ public:
 	// A team storage queue size is defined as the longest storage queue size among all SSes of the team
 	static int64_t calculateTeamStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
 		if (teams.size() == 0) {
-			return std::numeric_limits<int64_t>::max(); // disable this funcationality
+			return std::numeric_limits<int64_t>::max(); // disable this functionality
 		}
 		std::vector<int64_t> queueLengthList;
 		for (const auto& team : teams) {
@@ -1952,7 +1952,7 @@ public:
 				// Remove the machine team
 				bool foundRemovedMachineTeam = self->removeMachineTeam(mt);
 				// When we remove the last server team on a machine team in removeTeam(), we also remove the machine
-				// team This is needed for removeTeam() functoin. So here the removeMachineTeam() should not find the
+				// team This is needed for removeTeam() function. So here the removeMachineTeam() should not find the
 				// machine team
 				ASSERT(foundRemovedMachineTeam);
 				numMachineTeamRemoved++;
@@ -3686,7 +3686,7 @@ void DDTeamCollection::updateTeamEligibility() {
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
 
-			DisabledTraceEvent(SevDebug, "EligiblityTeamDebug")
+			DisabledTraceEvent(SevDebug, "EligibilityTeamDebug")
 			    .detail("TeamId", team->getTeamID())
 			    .detail("CPU", team->getAverageCPU())
 			    .detail("AvailableSpace", team->getMinAvailableSpace())
@@ -5677,14 +5677,14 @@ Reference<TCMachineTeamInfo> DDTeamCollection::checkAndCreateMachineTeam(Referen
 
 void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo) {
 	// Find machines that share teams with the removed machine
-	std::set<Standalone<StringRef>> machinesWithAjoiningTeams;
+	std::set<Standalone<StringRef>> machinesWithAdjoiningTeams;
 	for (auto& machineTeam : removedMachineInfo->machineTeams) {
-		machinesWithAjoiningTeams.insert(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end());
+		machinesWithAdjoiningTeams.insert(machineTeam->getMachineIDs().begin(), machineTeam->getMachineIDs().end());
 	}
-	machinesWithAjoiningTeams.erase(removedMachineInfo->machineID);
+	machinesWithAdjoiningTeams.erase(removedMachineInfo->machineID);
 	// For each machine in a machine team with the removed machine,
 	// erase shared machine teams from the list of teams.
-	for (auto it = machinesWithAjoiningTeams.begin(); it != machinesWithAjoiningTeams.end(); ++it) {
+	for (auto it = machinesWithAdjoiningTeams.begin(); it != machinesWithAdjoiningTeams.end(); ++it) {
 		auto& machineTeams = machine_info[*it]->machineTeams;
 		for (int t = 0; t < machineTeams.size(); t++) {
 			auto& machineTeam = machineTeams[t];
@@ -5711,7 +5711,7 @@ void DDTeamCollection::removeMachine(Reference<TCMachineInfo> removedMachineInfo
 	machine_info.erase(removedMachineInfo->machineID);
 	TraceEvent("MachineLocalityMapUpdate").detail("MachineUIDRemoved", removedMachineInfo->machineID.toString());
 
-	// We do not update macineLocalityMap when a machine is removed because we will do so when we use it in
+	// We do not update machineLocalityMap when a machine is removed because we will do so when we use it in
 	// addBestMachineTeams()
 	// rebuildMachineLocalityMap();
 }
@@ -5762,17 +5762,17 @@ void DDTeamCollection::removeServer(UID removedServer) {
 
 	// Step: Remove server team that relate to removedServer
 	// Find all servers with which the removedServer shares teams
-	std::set<UID> serversWithAjoiningTeams;
+	std::set<UID> serversWithAdjoiningTeams;
 	auto const& sharedTeams = removedServerInfo->getTeams();
 	for (int i = 0; i < sharedTeams.size(); ++i) {
 		auto& teamIds = sharedTeams[i]->getServerIDs();
-		serversWithAjoiningTeams.insert(teamIds.begin(), teamIds.end());
+		serversWithAdjoiningTeams.insert(teamIds.begin(), teamIds.end());
 	}
-	serversWithAjoiningTeams.erase(removedServer);
+	serversWithAdjoiningTeams.erase(removedServer);
 
 	// For each server in a team with the removedServer, erase shared teams from the list of teams in that other
 	// server
-	for (auto it = serversWithAjoiningTeams.begin(); it != serversWithAjoiningTeams.end(); ++it) {
+	for (auto it = serversWithAdjoiningTeams.begin(); it != serversWithAdjoiningTeams.end(); ++it) {
 		server_info[*it]->removeTeamsContainingServer(removedServer);
 	}
 
@@ -5833,7 +5833,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 		removeMachine(removedMachineInfo);
 	}
 
-	// If the machine uses removedServer's locality and the machine still has servers, the the machine's
+	// If the machine uses removedServer's locality and the machine still has servers, the machine's
 	// representative server will be updated when it is used in addBestMachineTeams()
 	// Note that since we do not rebuildMachineLocalityMap() here, the machineLocalityMap can be stale.
 	// This is ok as long as we do not arbitrarily validate if machine team satisfies replication policy.

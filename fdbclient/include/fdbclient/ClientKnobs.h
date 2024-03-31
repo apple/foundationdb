@@ -303,7 +303,7 @@ public:
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
 	// During this process the database will be marked as "bad state" in changeQuorumChecker while later it will be
-	// available again. Using a backoffed retry when it happens.
+	// available again. Using a backed-off retry when it happens.
 	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
 
@@ -321,7 +321,7 @@ public:
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
-	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the the EKP should throw
+	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the EKP should throw
 	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
 	// dropped. This Knob should ONLY be used in simulation for testing purposes
 	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;

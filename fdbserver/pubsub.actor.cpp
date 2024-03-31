@@ -95,7 +95,7 @@ Key keyForMessage(uint64_t message) {
 	return StringRef(format("m/%016llx", message));
 }
 
-Key keyForDisptchEntry(uint64_t message) {
+Key keyForDispatchEntry(uint64_t message) {
 	return StringRef(format("d/%016llx", message));
 }
 
@@ -270,7 +270,7 @@ ACTOR Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<Strin
 			}
 
 			tr.set(keyForMessage(messageId), StringRef());
-			tr.set(keyForDisptchEntry(messageId), StringRef());
+			tr.set(keyForDispatchEntry(messageId), StringRef());
 
 			wait(tr.commit());
 			break;
@@ -297,7 +297,7 @@ ACTOR Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<Strin
 
 			// Post the real message data; clear the "dispatching" entry
 			tr.set(keyForMessage(messageId), data);
-			tr.clear(keyForDisptchEntry(messageId));
+			tr.clear(keyForDispatchEntry(messageId));
 
 			wait(tr.commit());
 			break;
@@ -442,8 +442,8 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 
 			// Check the list of dispatching messages to make sure there are no older ones than ours
 			state MessageId earliestMessage = feedLatest.begin()->first;
-			RangeResult dispatching = wait(tr.getRange(firstGreaterOrEqual(keyForDisptchEntry(earliestMessage)),
-			                                           firstGreaterOrEqual(keyForDisptchEntry(UINT64_MAX)),
+			RangeResult dispatching = wait(tr.getRange(firstGreaterOrEqual(keyForDispatchEntry(earliestMessage)),
+			                                           firstGreaterOrEqual(keyForDispatchEntry(UINT64_MAX)),
 			                                           1));
 			// If there are messages "older" than ours, try this again
 			//  (with a new transaction and a flush of the "stale" feeds

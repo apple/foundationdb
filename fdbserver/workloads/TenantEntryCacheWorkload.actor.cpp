@@ -232,14 +232,14 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// trigger with a max wait of 5 mins; timed_out error is thrown if cache refresh isn't triggered.
 
 		state int64_t startTime = now();
-		state int64_t waitUntill = startTime + 300; // 5 mins max wait
+		state int64_t waitUntil = startTime + 300; // 5 mins max wait
 		loop {
 			// InitRefresh + multiple timer based invocations (at least 2 invocations of cache->refresh())
 			if (cache->numCacheRefreshes() >= 2) {
 				break;
 			}
 
-			if (now() > waitUntill) {
+			if (now() > waitUntil) {
 				throw timed_out();
 			}
 
@@ -328,13 +328,13 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		ASSERT(entry.present());
 
 		state int64_t startTime = now();
-		state int64_t waitUntill = startTime + 300; // 5 mins max wait
+		state int64_t waitUntil = startTime + 300; // 5 mins max wait
 		loop {
 			if (cache->numWatchRefreshes() >= 1) {
 				break;
 			}
 
-			if (now() > waitUntill) {
+			if (now() > waitUntil) {
 				throw timed_out();
 			}
 

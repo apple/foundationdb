@@ -3046,7 +3046,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		traceFileIdentifier = value.get().toString();
 		{
 			MutexHolder holder(lock);
-			// Forward the option unmodified only to the the local client and let it validate it.
+			// Forward the option unmodified only to the local client and let it validate it.
 			// While for external clients the trace file identifiers are determined in setupNetwork
 			localClient->api->setNetworkOption(option, value);
 		}

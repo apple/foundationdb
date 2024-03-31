@@ -841,7 +841,7 @@ private:
 		wait(self->recovering);
 
 		state Key nextKey = self->recoveredSnapshotKey;
-		state bool nextKeyAfter = false; // setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
+		state bool nextKeyAfter = false; // setting this to true is equivalent to setting nextKey = keyAfter(nextKey)
 		state uint64_t snapshotTotalWrittenBytes = 0;
 		state int lastDiff = 0;
 		state int snapItems = 0;

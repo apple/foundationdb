@@ -430,7 +430,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	int64_t manifestDumperSeqNo = 1;
 	bool enableManifestEncryption = false;
 	AsyncTrigger backupTrigger;
-	AsyncTrigger manifestCompletitionTrigger;
+	AsyncTrigger manifestCompletionTrigger;
 
 	Promise<Void> iAmReplaced;
 
@@ -1803,7 +1803,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	}
 
 	// redo key alignment on full set of split points
-	// FIXME: only need to align propsedSplitKey in the middle
+	// FIXME: only need to align proposedSplitKey in the middle
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
 
 	if (BM_DEBUG) {
@@ -3383,7 +3383,7 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			// but it might also contain blob workers that died while the new manager was being recruited
 			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db, true));
 
-			// We could get the affinity list transactionally with the blob workers, however it is simpilier from an API
+			// We could get the affinity list transactionally with the blob workers, however it is simpler from an API
 			// perspective to get the affinities after the blob worker list, which ensures we will have the affinity for
 			// every worker returned.
 			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db, true));
@@ -4697,7 +4697,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 
 	state std::vector<Future<Void>> deletions; // deletion work per file
 	state std::vector<Key> deletedFileKeys; // keys for deleted files
-	state std::vector<std::string> filesToDelete; // TODO: remove evenutally, just for debugging
+	state std::vector<std::string> filesToDelete; // TODO: remove eventually, just for debugging
 
 	// TODO: binary search these snapshot files for latestSnapshotVersion
 	for (int idx = files.snapshotFiles.size() - 1; idx >= 0; --idx) {
@@ -5688,8 +5688,8 @@ ACTOR Future<Void> tryFlushRange(Reference<BlobManagerData> bmData, KeyRange ran
 				throw; // terminate for unretryable error
 			}
 
-			// check if the range is blobified and then decide retry or skip.
-			// it may take long time to flush the whole key range and some ranges may have been unblobified or purged.
+			// check if the range is blobbified and then decide retry or skip.
+			// it may take long time to flush the whole key range and some ranges may have been unblobbified or purged.
 			// so we try to check that first when seeing non-fatal errors
 			bool knownRange = false;
 			for (auto& r : bmData->knownBlobRanges.intersectingRanges(range)) {
@@ -5809,7 +5809,7 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 	bmData->stats.manifestSizeInBytes += bytes;
 	bmData->stats.lastManifestDumpTs = now();
-	bmData->manifestCompletitionTrigger.trigger();
+	bmData->manifestCompletionTrigger.trigger();
 	return Void();
 }
 
@@ -5865,7 +5865,7 @@ ACTOR Future<Void> truncateMutationsLoop(Reference<BlobManagerData> bmData) {
 						TraceEvent("BlobManifestDumped").detail("Seq", bmData->manifestDumperSeqNo);
 						break;
 					}
-					wait(bmData->manifestCompletitionTrigger.onTrigger());
+					wait(bmData->manifestCompletionTrigger.onTrigger());
 				}
 				// Truncate mutations up to lastFlushVersion -
 				wait(truncateMutations(bmData, lastFlushVersion));

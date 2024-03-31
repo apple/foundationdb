@@ -61,7 +61,7 @@ static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_SYSTEM_DOM
 	ENCRYPT_HEADER_DOMAIN_ID
 };
 
-static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DETAULT_DOMAINS = {
+static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DEFAULT_DOMAINS = {
 	SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 	ENCRYPT_HEADER_DOMAIN_ID,
 	FDB_DEFAULT_ENCRYPT_DOMAIN_ID,
@@ -102,7 +102,7 @@ typedef enum {
 } EncryptAuthTokenAlgo;
 
 static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::numeric_limits<uint8_t>::max(),
-              "EncryptHeaerAuthTokenAlgo value overflow");
+              "EncryptHeaderAuthTokenAlgo value overflow");
 
 bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode);
 bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo);

@@ -147,7 +147,7 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
        |option-external-client-directory|
 
-    .. note:: |tls-options-burb|
+    .. note:: |tls-options-blurb|
 
     .. method :: FDB.options.set_tls_plugin(plugin_path_or_name) -> nil
 
@@ -452,7 +452,7 @@ Reading data
 
     Returns all keys ``k`` such that ``begin <= k < end`` and their associated values as an enumerable of :class:`KeyValue` objects. Note the exclusion of ``end`` from the range.
 
-    Like a |future-object|, the returned enumerable issues asynchronous read operations to fetch data in the range, and may block while enumerating its values if the read has not completed. Data will be fetched in one more more efficient batches (depending on the value of the ``:streaming_mode`` parameter).
+    Like a |future-object|, the returned enumerable issues asynchronous read operations to fetch data in the range, and may block while enumerating its values if the read has not completed. Data will be fetched in one or more efficient batches (depending on the value of the ``:streaming_mode`` parameter).
 
     Each of ``begin`` and ``end`` may be a key (:class:`String` or :class:`Key`) or a :class:`KeySelector`. Note that in the case of a :class:`KeySelector`, the exclusion of ``end`` from the range still applies.
 

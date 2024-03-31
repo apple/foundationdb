@@ -1245,7 +1245,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			result = self->validateResult(threadData, blob, 0, std::numeric_limits<uint32_t>::max(), 0, readVersion);
 			finalRowsValidated = blob.first.size();
 
-			// then if we are still good, do another check at a higher version (not checking data) to ensure availabiity
+			// then if we are still good, do another check at a higher version (not checking data) to ensure availability
 			// of empty versions
 			if (result) {
 				if (BGW_DEBUG) {

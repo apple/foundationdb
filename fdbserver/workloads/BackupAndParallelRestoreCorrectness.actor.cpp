@@ -384,7 +384,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                                  Key(),
 				                                  Key(),
 				                                  self->locked)));
-				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
+				TraceEvent(SevError, "BARW_RestoreAllowedOverwritingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_destination_not_empty) {

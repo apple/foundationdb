@@ -177,7 +177,7 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	};
 
 	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
-	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+	// check for disconnection since the latency between primary and satellite is across WAN and may not be very
 	// stable.
 	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
 	       transactionWorkerInList(degradationInfo.disconnectedServers,
@@ -2486,7 +2486,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 
 			// Recruit EncryptKeyProxy in the same datacenter as the ClusterController.
 			// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
-			// on the same process as the CluserController.
+			// on the same process as the ClusterController.
 			state std::map<Optional<Standalone<StringRef>>, int> id_used;
 			self->updateKnownIds(&id_used);
 			state WorkerFitnessInfo ekpWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
@@ -3559,7 +3559,7 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded
+	// Test that if both A complains B and B complains A, only one of the server will be chosen as degraded
 	// server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,

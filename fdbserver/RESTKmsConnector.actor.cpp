@@ -148,7 +148,7 @@ struct KmsUrlStore {
 		std::sort(kmsUrls.begin(), kmsUrls.end(), [](const KmsUrlCtx<Params>& l, const KmsUrlCtx<Params>& r) {
 			// Sort the available URLs based on following rules:
 			// 1. URL with higher unresponsiveness-penalty are least preferred
-			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-respones are
+			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-responses are
 			// less preferred
 			// 3. Lastly, URLs with more malformed response messages are less preferred
 
@@ -338,23 +338,23 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 	std::stringstream ss(buff.toString());
 	std::string url;
 	while (std::getline(ss, url, DISCOVER_URL_FILE_URL_SEP)) {
-		std::string trimedUrl = boost::trim_copy(url);
+		std::string trimmedUrl = boost::trim_copy(url);
 		// Remove the trailing '/'(s)
-		while (!trimedUrl.empty() && trimedUrl.ends_with('/')) {
-			trimedUrl.pop_back();
+		while (!trimmedUrl.empty() && trimmedUrl.ends_with('/')) {
+			trimmedUrl.pop_back();
 		}
-		if (trimedUrl.empty()) {
+		if (trimmedUrl.empty()) {
 			// Empty URL, ignore and continue
 			continue;
 		}
-		auto itr = urlMap.find(trimedUrl);
+		auto itr = urlMap.find(trimmedUrl);
 		if (itr != urlMap.end()) {
 			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
 				TraceEvent("RESTParseDiscoverKmsUrlsExistingUrl", ctx->uid).detail("UrlCtx", itr->second.toString());
 			}
 			ctx->kmsUrlStore.kmsUrls.emplace_back(itr->second);
 		} else {
-			auto urlCtx = KmsUrlCtx<KmsUrlPenaltyParams>(trimedUrl);
+			auto urlCtx = KmsUrlCtx<KmsUrlPenaltyParams>(trimmedUrl);
 			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
 				TraceEvent("RESTParseDiscoverKmsUrlsAddUrl", ctx->uid).detail("UrlCtx", urlCtx.toString());
 			}

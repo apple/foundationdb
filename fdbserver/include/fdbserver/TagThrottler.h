@@ -52,7 +52,7 @@ public:
 
 	// Based on the busiest read and write tags in the provided storage queue info, these methods
 	// update tag throttling limits. Unfortunately, the two effective interfaces of the two
-	// implementations of ITagThrottler (GlobalTagThrottler and TagThrottler) have diveraged over
+	// implementations of ITagThrottler (GlobalTagThrottler and TagThrottler) have diverged over
 	// time. As a result, exactly one of the below methods is a noop for each implementation.
 	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
 	virtual void updateThrottling(Map<UID, StorageQueueInfo> const&) = 0;

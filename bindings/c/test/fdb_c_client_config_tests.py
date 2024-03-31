@@ -452,7 +452,7 @@ class ClientConfigTests(unittest.TestCase):
         test.exec()
 
     def test_one_external_client_wrong_api_version(self):
-        # Multiple external clients, API version unsupported by one of othem
+        # Multiple external clients, API version unsupported by one of them
         test = ClientConfigTest(self)
         test.create_external_lib_dir(
             [CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION]

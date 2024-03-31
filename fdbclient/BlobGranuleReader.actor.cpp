@@ -161,8 +161,8 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 
 	// check empty chunks. not covered
 	{
-		Standalone<VectorRef<BlobGranuleChunkRef>> empyChunks;
-		ASSERT(isRangeFullyCovered(KeyRangeRef(), empyChunks) == false);
+		Standalone<VectorRef<BlobGranuleChunkRef>> emptyChunks;
+		ASSERT(isRangeFullyCovered(KeyRangeRef(), emptyChunks) == false);
 	}
 
 	// check '' to \xff

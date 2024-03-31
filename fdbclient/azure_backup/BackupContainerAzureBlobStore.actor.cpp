@@ -374,7 +374,7 @@ Future<Reference<IBackupFile>> BackupContainerAzureBlobStore::writeFile(const st
 }
 
 Future<Void> BackupContainerAzureBlobStore::writeEntireFile(const std::string& fileName,
-                                                            const std::string& fileConents) {
+                                                            const std::string& fileContents) {
 	return writeEntireFileFallback(fileName, fileContents);
 }
 

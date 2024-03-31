@@ -51,7 +51,7 @@ Features
 * Added support for asynchronous replication to a remote DC with processes in a single cluster. This improves on the asynchronous replication offered by fdbdr because servers can fetch data from the remote DC if all replicas have been lost in one DC.
 * Added support for synchronous replication of the transaction log to a remote DC. This remote DC does not need to contain any storage servers, meaning you need much fewer servers in this remote DC.
 * The TLS plugin is now statically linked into the client and server binaries and no longer requires a separate library. `(Issue #436) <https://github.com/apple/foundationdb/issues/436>`_
-* TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
+* TLS peer verification now supports verifying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
 * TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
 * TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
 * Added the ``fileconfigure`` command to fdbcli, which configures a database from a JSON document. [6.0.10] `(PR #713) <https://github.com/apple/foundationdb/pull/713>`_
@@ -105,7 +105,7 @@ Fixes
 * Sometimes data distribution calculated the size of a shard incorrectly. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
 * Changing the storage engine configuration would not effect which storage engine was used by the transaction logs. [6.0.15] `(PR #892) <https://github.com/apple/foundationdb/pull/892>`_
 * On exit, fdbmonitor will only kill its child processes instead of its process group when run without the daemonize option. [6.0.15] `(PR #826) <https://github.com/apple/foundationdb/pull/826>`_
-* HTTP client used by backup-to-blobstore now correctly treats response header field names as case insensitive. [6.0.15] `(PR #904) <https://github.com/apple/foundationdb/pull/904>`_
+* HTTP client used by backup-to-blobstore now correctly treats response header field names as case-insensitive. [6.0.15] `(PR #904) <https://github.com/apple/foundationdb/pull/904>`_
 * Blobstore REST client was not following the S3 API in several ways (bucket name, date, and response formats). [6.0.15] `(PR #914) <https://github.com/apple/foundationdb/pull/914>`_
 * Data distribution could queue shard movements for restoring replication at a low priority. [6.0.15] `(PR #907) <https://github.com/apple/foundationdb/pull/907>`_
 

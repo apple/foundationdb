@@ -166,7 +166,7 @@ endif()
 ################################################################################
 
 set(WITH_ROCKSDB ON CACHE BOOL "Build with experimental RocksDB support")
- # PORTABLE flag for RockdDB changed as of this PR (with v8.3.2 and after): https://github.com/facebook/rocksdb/pull/11419
+ # PORTABLE flag for RocksDB changed as of this PR (with v8.3.2 and after): https://github.com/facebook/rocksdb/pull/11419
  # https://github.com/facebook/rocksdb/blob/v8.6.7/CMakeLists.txt#L256
 set(PORTABLE_ROCKSDB 1 CACHE STRING "Minimum CPU arch to support (i.e. skylake, haswell, etc., or 0 = current CPU, 1 = baseline CPU)")
 set(ROCKSDB_TOOLS OFF CACHE BOOL "Compile RocksDB tools")

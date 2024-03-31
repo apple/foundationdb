@@ -234,7 +234,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		if (res1.size() != res2.size()) {
 			TraceEvent(SevError, "TestFailure")
 			    .detail("Reason", "Results' sizes are inconsistent")
-			    .detail("CorrestResultSize", res1.size())
+			    .detail("CorrectResultSize", res1.size())
 			    .detail("TestResultSize", res2.size());
 			return false;
 		}

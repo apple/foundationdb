@@ -54,7 +54,7 @@
  *  1. Subscriptions are "retroactive".  If a subscription is in place, the messages
  *    from that feed will start to appear in the listing of that inboxes messages
  *    and appear in historical lists as well.  This could lead to odd behaviour
- *    if paging through the contents of an inbox while a new subscrption was added
+ *    if paging through the contents of an inbox while a new subscription was added
  */
 
 typedef uint64_t Feed;

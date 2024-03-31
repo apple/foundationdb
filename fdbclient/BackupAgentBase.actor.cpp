@@ -754,7 +754,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
 	if (tenantMapChanging) {
 		// If tenant map is changing, we need to wait until it's committed before processing next mutations.
-		// Next muations need the updated tenant map for filtering.
+		// Next mutations need the updated tenant map for filtering.
 		wait(commitAndUnlock);
 	} else {
 		addActor.send(commitAndUnlock);
@@ -851,7 +851,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				newBeginVersion = group.groupKey + 1;
 
 				// At this point if the tenant map changed we would have already sent any normalKey mutations
-				// accumulated thus far, so all thats left to do is to send all the mutations in the the offending
+				// accumulated thus far, so all thats left to do is to send all the mutations in the offending
 				// transaction that changed the tenant map. This is necessary so that we don't batch these tenant map
 				// mutations with future normalKey mutations (which will result in the same problem discussed above).
 				if (tenantMapChanging || mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {

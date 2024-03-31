@@ -94,11 +94,11 @@ void throwOutOfMem(JNIEnv* jenv) {
 }
 
 static jthrowable getThrowable(JNIEnv* jenv, fdb_error_t e, const char* msg = nullptr) {
-	jclass excepClass = jenv->FindClass("com/apple/foundationdb/FDBException");
+	jclass exceptionClass = jenv->FindClass("com/apple/foundationdb/FDBException");
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
 
-	jmethodID excepCtor = jenv->GetMethodID(excepClass, "<init>", "(Ljava/lang/String;I)V");
+	jmethodID exceptionCtor = jenv->GetMethodID(exceptionClass, "<init>", "(Ljava/lang/String;I)V");
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
 
@@ -107,7 +107,7 @@ static jthrowable getThrowable(JNIEnv* jenv, fdb_error_t e, const char* msg = nu
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
 
-	jthrowable t = (jthrowable)jenv->NewObject(excepClass, excepCtor, m, e);
+	jthrowable t = (jthrowable)jenv->NewObject(exceptionClass, exceptionCtor, m, e);
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
 

@@ -111,7 +111,7 @@ public:
 		// If this priority currently has no waiters
 		if (q.empty()) {
 			// Add this priority's weight to the total for priorities with pending work.  This must be done
-			// so that currenctCapacity() below will assign capacaity to this priority.
+			// so that currentCapacity() below will assign capacity to this priority.
 			totalPendingWeights += p.weight;
 
 			// If there are slots available and the priority has capacity then don't make the caller wait
@@ -244,7 +244,7 @@ private:
 	typedef boost::intrusive::list<Priority, boost::intrusive::constant_time_size<false>> WaitingPrioritiesList;
 
 	// List of all priorities with 1 or more waiters.  This list exists so that the scheduling loop
-	// does not have to iterage over the priorities vector checking priorities without waiters.
+	// does not have to iterate over the priorities vector checking priorities without waiters.
 	WaitingPrioritiesList waitingPriorities;
 
 	Future<Void> fRunner;

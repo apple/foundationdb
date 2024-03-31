@@ -74,7 +74,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 
 	loop choose {
 		when(Future<Void> f = waitNext(addActor)) {
-			// Insert new Runner at the end of the instrusive list and get an iterator to it
+			// Insert new Runner at the end of the intrusive list and get an iterator to it
 			auto i = runners.insert(runners.end(), *new Runner());
 
 			// Start the handler for completions or errors from f, sending runner to complete stream

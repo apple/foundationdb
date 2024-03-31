@@ -29,7 +29,7 @@ public struct ExposeTypeConf<T> {
 
 /*****************************************************************************/
 /* Whenever you see a 'type cannot be used in a Swift generic context' error */
-/* you need to expose the the type in question via an expose... function.    */
+/* you need to expose the type in question via an expose... function.        */
 /*                                                                           */
 /* These functions function ensures that the value witness table for `T`     */
 /* to C++ is exposed in the generated C++ header.                            */

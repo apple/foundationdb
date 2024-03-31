@@ -174,7 +174,7 @@ public:
 	KeyRangeMap<Reference<CacheRangeInfo>> cachedRangeMap; // map of cached key-ranges
 	uint64_t cacheRangeChangeCounter; // Max( CacheRangeInfo->changecounter )
 
-	// TODO Add cache metrics, such as available memory/in-use memory etc to help dat adistributor assign cached ranges
+	// TODO Add cache metrics, such as available memory/in-use memory etc to help data distributor assign cached ranges
 	// StorageCacheMetrics metrics;
 
 	// newestAvailableVersion[k]
@@ -249,7 +249,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), debug_inApplyUpdate(false),
 	    debug_lastValidateTime(0), versionLag(0), behind(false), counters(this) {
 		version.initMetric("StorageCacheData.Version"_sr, counters.cc.getId());
-		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageCacheData.DesiredOldestVersion"_sr, counters.cc.getId());
 		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
@@ -1020,7 +1020,7 @@ void StorageCacheData::applyMutation(MutationRef const& m, Arena& arena, Storage
 			KeyRef nextKey = keyAfter(m.param1, arena);
 			if (end != nextKey) {
 				ASSERT(end > nextKey);
-				// TODO double check if it's okay to let go of the the insert version of the "right half"
+				// TODO double check if it's okay to let go of the insert version of the "right half"
 				// FIXME: This copy is technically an asymptotic problem, definitely a waste of memory (copy of keyAfter
 				// is a waste, but not asymptotic)
 				data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));
@@ -1274,7 +1274,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		// TODO: double check the following block of code!!
 		// We want to make sure that we can't query below lastAvailable, by waiting for the oldestVersion to become
-		// lastAvaialble
+		// lastAvailable
 		auto navr = data->newestAvailableVersion.intersectingRanges(keys);
 		Version lastAvailable = invalidVersion;
 		for (auto r = navr.begin(); r != navr.end(); ++r) {
@@ -1822,21 +1822,21 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		// Call the compaction routine that does the actual work,
 		//TraceEvent(SevDebug, "SCCompactCache", data->thisServerID).detail("DesiredVersion", desiredVersion);
-		// TODO It's a synchronous function call as of now. Should it asynch?
+		// TODO It's a synchronous function call as of now. Should it async?
 		data->mutableData().compact(desiredVersion);
 		Future<Void> finishedForgetting =
 		    data->mutableData().forgetVersionsBeforeAsync(desiredVersion, TaskPriority::CompactCache);
 		data->oldestVersion.set(desiredVersion);
 		wait(finishedForgetting);
 		// TODO how do we yield here? This may not be enough, because compact() does the heavy lifting
-		// of compating the VersionedMap. We should probably look into per version compaction and then
+		// of compacting the VersionedMap. We should probably look into per version compaction and then
 		// we can yield after compacting one version
 		wait(yield(TaskPriority::CompactCache));
 
 		// TODO what flowlock to acquire during compaction?
 		compactionInProgress.send(Void());
 		wait(delay(2.0)); // we want to wait at least some small amount of time before
-		// wait( delay(0, TaskPriority::CompactCache) ); //Setting compactionInProgess could cause the cache server to
+		// wait( delay(0, TaskPriority::CompactCache) ); //Setting compactionInProgress could cause the cache server to
 		// shut down, so delay to check for cancellation
 	}
 }
@@ -2099,7 +2099,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 				if (data->otherError.getFuture().isReady())
 					data->otherError.getFuture().get();
 
-				// we can get rid of versions beyond maxVerionsInMemory at any point. Update the
+				// we can get rid of versions beyond maxVersionsInMemory at any point. Update the
 				// desiredOldestVersion and that may invoke the compaction actor
 				Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 				Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;

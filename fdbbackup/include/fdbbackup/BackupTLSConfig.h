@@ -33,7 +33,7 @@ struct BackupTLSConfig {
 	// Returns if TLS setup is successful
 	bool setupTLS();
 
-	// Sets up blob crentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
+	// Sets up blob credentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
 	// Note this must be called after g_network is set up.
 	void setupBlobCredentials();
 };

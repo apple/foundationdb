@@ -105,7 +105,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
 		TraceEvent("DataLossRecovery").detail("Phase", "VerifiedDataDropped");
 
-		// Write will scceed.
+		// Write will succeed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
 
 		return Void();

@@ -292,7 +292,7 @@ XXH_PUBLIC_API XXH32_hash_t XXH32(const void* input, size_t length, XXH32_hash_t
 /*******   Streaming   *******/
 
 /*
- * Streaming functions generate the xxHash value from an incrememtal input.
+ * Streaming functions generate the xxHash value from an incremental input.
  * This method is slower than single-call functions, due to state management.
  * For small inputs, prefer `XXH32()` and `XXH64()`, which are better optimized.
  *
@@ -1038,8 +1038,8 @@ static xxh_u32 XXH_read32(const void* memPtr) {
 
 #endif /* XXH_FORCE_DIRECT_MEMORY_ACCESS */
 
-/* ***   Endianess   *** */
-typedef enum { XXH_bigEndian = 0, XXH_littleEndian = 1 } XXH_endianess;
+/* ***   Endianness   *** */
+typedef enum { XXH_bigEndian = 0, XXH_littleEndian = 1 } XXH_endianness;
 
 /*!
  * XXH_CPU_LITTLE_ENDIAN:
@@ -1184,7 +1184,7 @@ static xxh_u32 XXH32_round(xxh_u32 acc, xxh_u32 input) {
 	 * UGLY HACK:
 	 * This inline assembly hack forces acc into a normal register. This is the
 	 * only thing that prevents GCC and Clang from autovectorizing the XXH32
-	 * loop (pragmas and attributes don't work for some resason) without globally
+	 * loop (pragmas and attributes don't work for some reason) without globally
 	 * disabling SSE4.1.
 	 *
 	 * The reason we want to avoid vectorization is because despite working on
@@ -4578,7 +4578,7 @@ XXH_PUBLIC_API XXH128_hash_t XXH128(const void* input, size_t len, XXH64_hash_t 
 
 /*
  * All the functions are actually the same as for 64-bit streaming variant.
- * The only difference is the finalizatiom routine.
+ * The only difference is the finalization routine.
  */
 
 static void XXH3_128bits_reset_internal(XXH3_state_t* statePtr,

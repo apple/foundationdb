@@ -101,7 +101,7 @@ void validateEncryptHeaderAlgoHeaderVersion(const EncryptCipherMode cipherMode,
 		    .detail("AuthMode", authMode)
 		    .detail("AuthAlgo", authAlgo)
 		    .detail("AlgoHeaderVersion", version)
-		    .detail("MaxSsupportedVersion", maxSupportedVersion);
+		    .detail("MaxSupportedVersion", maxSupportedVersion);
 		throw not_implemented();
 	}
 }
@@ -310,18 +310,18 @@ void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCiphe
 
 	// Validate baseCipher KCVs
 	if (persistedTextKCV != kcvs.textKCV) {
-		TraceEvent(SevError, "EncryptionHeadeTextKCVMismatch")
+		TraceEvent(SevError, "EncryptionHeaderTextKCVMismatch")
 		    .detail("Persisted", persistedTextKCV)
 		    .detail("Expected", kcvs.textKCV);
 		throw encrypt_key_check_value_mismatch();
 	}
 	if (persistedHeaderKCV.present()) {
 		if (!kcvs.headerKCV.present()) {
-			TraceEvent(SevError, "EncryptionHeadeMissingHeaderKCV");
+			TraceEvent(SevError, "EncryptionHeaderMissingHeaderKCV");
 			throw encrypt_key_check_value_mismatch();
 		}
 		if (persistedHeaderKCV.get() != kcvs.headerKCV.get()) {
-			TraceEvent(SevError, "EncryptionHeadeTextKCVMismatch")
+			TraceEvent(SevError, "EncryptionHeaderTextKCVMismatch")
 			    .detail("Persisted", persistedTextKCV)
 			    .detail("Expected", kcvs.textKCV);
 			throw encrypt_key_check_value_mismatch();
@@ -1417,7 +1417,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeaderFlagsV1(const uint32_t hea
 	}
 }
 
-void DecryptBlobCipherAes256Ctr::vaidateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef& headerRef,
+void DecryptBlobCipherAes256Ctr::validateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef& headerRef,
                                                                 const BlobCipherEncryptHeaderFlagsV1& flags) {
 	const EncryptHeaderCipherKCVs kcvs = headerRef.getKCVs();
 	Sha256KCV::checkEqual(textCipherKey, kcvs.textKCV);
@@ -1440,7 +1440,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
 	validateEncryptHeaderFlagsV1(headerRef.flagsVersion(), flags);
-	vaidateEncryptHeaderCipherKCVs(headerRef, flags);
+	validateEncryptHeaderCipherKCVs(headerRef, flags);
 	validateAuthTokensV1(ciphertext, ciphertextLen, flags, headerRef);
 
 	*authTokenMode = (EncryptAuthTokenMode)flags.authTokenMode;
@@ -2059,7 +2059,7 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 			ASSERT_NE(std::memcmp(cipherKey->rawCipher(), baseCipher->key.get(), len), 0);
 		}
 	}
-	TraceEvent("TestLooksupDone").log();
+	TraceEvent("TestLookUpsDone").log();
 
 	// Ensure attempting to insert existing cipherKey (identical) more than once is treated as a NOP
 	try {

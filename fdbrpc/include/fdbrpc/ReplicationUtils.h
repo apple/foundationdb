@@ -40,7 +40,7 @@ extern double ratePolicy(Reference<LocalitySet>& localitySet,
 // given a localitySet, replication policy and number of selected tests, apply the
 // policy and return the rating
 // rating can be -1 there are no unique results failing while applying the replication
-// policy, otherwise largest mode from the items per unique set of locaility entry
+// policy, otherwise largest mode from the items per unique set of locality entry
 // are returned.
 
 extern bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,

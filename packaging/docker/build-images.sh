@@ -244,8 +244,8 @@ aws_region="us-west-2"
 aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
 build_date=$(date +"%Y-%m-%dT%H:%M:%S%z")
 build_output_directory="${script_dir}/../../"
-source_code_diretory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${build_output_directory}/CMakeCache.txt")
-commit_sha=$(cd "${source_code_diretory}" && git rev-parse --verify HEAD --short=10)
+source_code_directory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${build_output_directory}/CMakeCache.txt")
+commit_sha=$(cd "${source_code_directory}" && git rev-parse --verify HEAD --short=10)
 fdb_version=$(cat "${build_output_directory}/version.txt")
 fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' '6.3.18' "${fdb_version}" )
 fdb_website="https://github.com/apple/foundationdb/releases/download"

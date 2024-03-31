@@ -440,7 +440,7 @@ ACTOR Future<Void> validateForceFlushing(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			if (compact) {
-				// read at current read version version in case re-snapshot had to redo at a higher version
+				// read at current read version in case re-snapshot had to redo at a higher version
 				wait(store(readVersion, tr.getReadVersion()));
 			} else {
 				readVersion = flushVersion;

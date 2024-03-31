@@ -2690,13 +2690,13 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
 	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
 
-	int32_t maxAvaiabilityZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, true);
+	int32_t maxAvailabilityZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, true);
 	if (underMaintenance) {
-		maxAvaiabilityZoneFailures--;
+		maxAvailabilityZoneFailures--;
 	}
 
 	statusObj["max_zone_failures_without_losing_availability"] = std::max(
-	    std::min(maxAvaiabilityZoneFailures, std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
+	    std::min(maxAvailabilityZoneFailures, std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
 	return statusObj;
 }
 

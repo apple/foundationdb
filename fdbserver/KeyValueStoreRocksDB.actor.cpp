@@ -408,7 +408,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.num_entries = fileMetaData.num_entries;
 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.oldest_ancestor_time = fileMetaData.oldest_ancestor_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.name = fileMetaData.name;
@@ -443,7 +443,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		liveFileMetaData.num_entries = fileMetaData.num_entries;
 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.oldest_ancestor_time = fileMetaData.oldest_ancestor_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.name = fileMetaData.name;
@@ -1560,9 +1560,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				uint64_t deadlineMircos =
+				uint64_t deadlineMicros =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (readBeginTime - a.startTime)) * 1000000;
-				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 				readOptions.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			}
 
@@ -1649,9 +1649,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = sharedState->getReadOptions();
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				uint64_t deadlineMircos =
+				uint64_t deadlineMicros =
 				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (readBeginTime - a.startTime)) * 1000000;
-				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 				readOptions.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			}
 
@@ -1833,7 +1833,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()) {
-		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
+		// In simulation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
 		// performing the reads in background threads in simulation, the event loop thinks there is no work to do and
@@ -2117,7 +2117,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	// Checks and waits for few seconds if rocskdb is overloaded.
+	// Checks and waits for few seconds if rocksdb is overloaded.
 	ACTOR Future<Void> checkRocksdbState(RocksDBKeyValueStore* self) {
 		state uint64_t estPendCompactBytes;
 		state uint64_t numImmutableMemtables;
@@ -2355,7 +2355,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	// keysSet will store the written keys in the current transaction.
 	// previousCommitKeysSet will store the written keys that are currently in the rocksdb commit path.
 	// When one commit is in the rocksdb commit path, the other processing commit in the kvsstorerocksdb
-	// read iterators will not see the the writes set in previousCommitKeysSet. To avoid that, we will
+	// read iterators will not see the writes set in previousCommitKeysSet. To avoid that, we will
 	// maintain the previousCommitKeysSet until the rocksdb commit is processed and returned.
 	std::set<Key> keysSet;
 	std::set<Key> previousCommitKeysSet;

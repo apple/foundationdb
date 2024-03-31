@@ -534,7 +534,7 @@ struct JavaWorkload final : FDBWorkload {
 				jvm->shutdownWorkload(workload, name);
 				jvm->env->DeleteGlobalRef(workload);
 			} catch (JNIError& e) {
-				log.trace(error, "JNIShutDownUnsucessful", { { "Error", e.toString() }, { "Location", e.location() } });
+				log.trace(error, "JNIShutDownUnsuccessful", { { "Error", e.toString() }, { "Location", e.location() } });
 			}
 		}
 	}

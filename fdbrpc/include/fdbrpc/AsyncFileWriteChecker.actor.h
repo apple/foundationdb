@@ -33,7 +33,7 @@
 #include "flow/actorcompiler.h"
 static double millisecondsPerSecond = 1000;
 
-// this class does checksum for the wrapped IAsyncFile in read and writes opertions.
+// this class does checksum for the wrapped IAsyncFile in read and writes operations.
 // it maintains a dynamic data structure to store the recently written page and its checksum.
 // it has an actor to continuously read and verify checksums for the recently written page,
 // and also deletes the corresponding entry upon a successful to avoid using too much memory.
@@ -228,7 +228,7 @@ private:
 			state uint32_t page = self->lru.leastRecentlyUsedPage();
 			while (self->writing.find(page) != self->writing.end() || page == -1) {
 				// avoid concurrent ops
-				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
+				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHECKER_CHECKING_DELAY));
 				continue;
 			}
 			int64_t offset = page * checksumHistoryPageSize;
@@ -238,7 +238,7 @@ private:
 	}
 
 	ACTOR Future<Void> runChecksumLogger(AsyncFileWriteChecker* self) {
-		state double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
+		state double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHECKER_LOGGING_INTERVAL;
 		loop {
 			wait(delay(delayDuration));
 			// TODO: add more stats, such as total checked, current entries, budget
@@ -255,7 +255,7 @@ private:
 	// this method removes the page entry from checksum history upon a successful check
 	bool verifyChecksum(int page, uint32_t checksum, uint8_t* start, bool sweep) {
 		if (!lru.exist(page)) {
-			// it has already been verified succesfully and removed by checksumWorker
+			// it has already been verified successfully and removed by checksumWorker
 			return true;
 		}
 		WriteInfo history = lru.find(page);
@@ -293,7 +293,7 @@ private:
 	                                            uint8_t* buf,
 	                                            bool sweep = false) {
 		std::vector<uint32_t> pages;
-		// Check or set each full block in the the range
+		// Check or set each full block in the range
 		int page = offset / checksumHistoryPageSize; // First page number
 		int slack = offset % checksumHistoryPageSize; // Bytes after most recent page boundary
 		uint8_t* start = buf; // Position in buffer to start checking from

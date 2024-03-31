@@ -13,7 +13,7 @@ The storage used by tenants is estimated using the `getEstimatedRangeSizeBytes()
 `(size(key) + size(value)) / ((size(key) + 100) * 250)`.
 
 ### Tuple Layer
-The storage quotas are stored under `TenantMedataSpecification` with suffix `storageQuota/`, which translates to `\xff/tenant/storageQuota/`.
+The storage quotas are stored under `TenantMetadataSpecification` with suffix `storageQuota/`, which translates to `\xff/tenant/storageQuota/`.
 
 ### fdbcli
 The easiest way for an external client to interact with tag quotas is through `fdbcli`. To get the quota of a particular tenant group, run the following command:
