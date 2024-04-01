@@ -213,8 +213,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("AcsToValidate", acsMutationState.acs)
 		    .detail("Epoch", acsMutationState.epoch)
 		    .detail("Cleared", cleared);
-		// Currently, force to reconcile
-		// Zhe: need to do something?
+		throw please_reboot();
 	} else {
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsValidatorAcsMutationValidated", ssid)
