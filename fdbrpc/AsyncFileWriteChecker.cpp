@@ -71,6 +71,18 @@ public:
 		end->prev = start;
 	}
 
+	~LRU2() {
+		node* cur = start;
+		node* next;
+		while (cur != nullptr) {
+			next = cur->next;
+			delete cur;
+			cur = next;
+		}
+		start = nullptr;
+		end = nullptr;
+	}
+
 	void update(uint32_t page, AsyncFileWriteChecker::WriteInfo writeInfo) {
 		if (m.find(page) != m.end()) {
 			node* n = m[page];
