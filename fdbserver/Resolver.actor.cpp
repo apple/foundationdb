@@ -76,23 +76,24 @@ public:
 
 	// Adds state transactions between two versions to the reply message.
 	// "initialShardChanged" indicates if commitVersion has shard changes.
-	// Returns if shardChanged has ever happened for these versions.
+	// Returns if shardChanged or a state transaction has ever happened for these versions.
 	[[nodiscard]] bool applyStateTxnsToBatchReply(ResolveTransactionBatchReply* reply,
 	                                              Version firstUnseenVersion,
 	                                              Version commitVersion,
 	                                              bool initialShardChanged) {
-		bool shardChanged = initialShardChanged;
+		bool shardChangedOrStateTxn = initialShardChanged;
 		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = recentStateTransactions.lower_bound(commitVersion);
 		// Resolver only sends back prior state txns back, because the proxy
 		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
 		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
-			shardChanged = shardChanged || stateTransactionItr->value.first;
+			shardChangedOrStateTxn =
+			    shardChangedOrStateTxn || stateTransactionItr->value.first || stateTransactionItr->value.second.size();
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
 			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
 		}
-		return shardChanged;
+		return shardChangedOrStateTxn;
 	}
 
 	bool empty() const { return recentStateTransactionSizes.empty(); }
@@ -430,7 +431,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
 		stateTransactionsPair.first = toCommit && toCommit->isShardChanged();
-		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
+		bool shardChangedOrStateTxn = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
 		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->isShardChanged());
 
 		// Adds private mutation messages to the reply message.
@@ -482,7 +483,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChanged || reply.privateMutationCount) {
+				if (shardChangedOrStateTxn || req.txnStateTransactions.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}
