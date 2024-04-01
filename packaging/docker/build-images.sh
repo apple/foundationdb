@@ -251,10 +251,10 @@ fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' '6.3.18' "${fdb_version}" )
 fdb_website="https://github.com/apple/foundationdb/releases/download"
 image_list=(
     'base'
-    'go-build'
+    # 'go-build'
     'foundationdb-base'
     'foundationdb'
-    'foundationdb-kubernetes-monitor'
+    # 'foundationdb-kubernetes-monitor'
     'foundationdb-kubernetes-sidecar'
     'ycsb'
 )
@@ -293,7 +293,6 @@ else
     # create_fake_website_directory stripped_local
     # build_and_push_images Dockerfile false false
 fi
-
 
 echo "${blue}################################################################################${reset}"
 logg "COMPLETED ${0}"
