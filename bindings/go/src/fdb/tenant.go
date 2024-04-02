@@ -43,7 +43,7 @@ func (t Transaction) CreateTenant(name KeyConvertible) error {
 		return err
 	}
 
-	key := append(Key("\xFF\xFF/management/tenant/map/"), tenantName...)
+	key := append(Key("\xFF\xFF/management/tenant_map/"), tenantName...)
 
 	exist, err := t.checkTenantExist(key)
 	if err != nil {
@@ -73,7 +73,7 @@ func (t Transaction) DeleteTenant(name KeyConvertible) error {
 		return err
 	}
 
-	key := append(Key("\xFF\xFF/management/tenant/map/"), name.FDBKey()...)
+	key := append(Key("\xFF\xFF/management/tenant_map/"), name.FDBKey()...)
 
 	exist, err := t.checkTenantExist(key)
 	if err != nil {
@@ -103,7 +103,7 @@ func (t Transaction) ListTenants() ([]Key, error) {
 		return nil, err
 	}
 
-	kr, err := PrefixRange(Key("\xFF\xFF/management/tenant/map/"))
+	kr, err := PrefixRange(Key("\xFF\xFF/management/tenant_map/"))
 	if err != nil {
 		return nil, err
 	}
