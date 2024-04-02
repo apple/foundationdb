@@ -22,7 +22,7 @@ static void lru_test(benchmark::State& state) {
 			// [0.5, 1] update
 			if (exist.size() < 2 || r > 0.5) {
 				// to add/update
-				uint32_t page = deterministicRandom()->randomInt(0, limit);
+				uint32_t page = deterministicRandom()->randomInt(1, limit);
 				// change the content each time
 				auto wi = AsyncFileWriteChecker::WriteInfo();
 				wi.timestamp = i;

@@ -224,6 +224,8 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 
 rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	rocksdb::DBOptions options;
+	options.use_direct_reads = SERVER_KNOBS->ROCKSDB_USE_DIRECT_READS;
+	options.use_direct_io_for_flush_and_compaction = SERVER_KNOBS->ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
