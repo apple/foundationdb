@@ -283,7 +283,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_EXCLUDE_MIN_REPLICAS,                                 1 );
 	init( DD_VALIDATE_LOCALITY,                                 true ); if( randomize && BUGGIFY ) DD_VALIDATE_LOCALITY = false;
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
-	init( DD_ENABLE_VERBOSE_TRACING,                           false ); if( randomize && BUGGIFY ) DD_ENABLE_VERBOSE_TRACING = true;
+	init( DD_ENABLE_VERBOSE_TRACING,                            true ); if( randomize && BUGGIFY ) DD_ENABLE_VERBOSE_TRACING = false;
 	init( DD_SS_FAILURE_VERSIONLAG,                        250000000 );
 	init( DD_SS_ALLOWED_VERSIONLAG,                        200000000 ); if( randomize && BUGGIFY ) { DD_SS_FAILURE_VERSIONLAG = deterministicRandom()->randomInt(15000000, 500000000); DD_SS_ALLOWED_VERSIONLAG = 0.75 * DD_SS_FAILURE_VERSIONLAG; }
 	init( DD_SS_STUCK_TIME_LIMIT,                              300.0 ); if( randomize && BUGGIFY ) { DD_SS_STUCK_TIME_LIMIT = 200.0 + deterministicRandom()->random01() * 100.0; }
@@ -293,6 +293,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                      10 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 1000;
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
+	init( DD_REMOVE_MAINTENANCE_ON_FAILURE,                     true ); if( randomize && BUGGIFY ) DD_REMOVE_MAINTENANCE_ON_FAILURE = false;
 	init( ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION,           false ); if( randomize && BUGGIFY ) ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION = true;
 	init( TRACE_STORAGE_QUEUE_AWARE_GET_TEAM_FOR_MANUAL_SPLIT_ONLY, true ); if (isSimulated) TRACE_STORAGE_QUEUE_AWARE_GET_TEAM_FOR_MANUAL_SPLIT_ONLY = false;
 	init( DD_TARGET_STORAGE_QUEUE_SIZE, TARGET_BYTES_PER_STORAGE_SERVER*0.35 ); if( randomize && BUGGIFY ) DD_TARGET_STORAGE_QUEUE_SIZE = TARGET_BYTES_PER_STORAGE_SERVER*0.035;
@@ -824,6 +825,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 	init( CONSISTENCY_CHECK_ROCKSDB_ENGINE,                    false );
 	init( CONSISTENCY_CHECK_SQLITE_ENGINE,                     false );
+	init( TESTER_SHARED_RANDOM_MAX_PLUS_ONE,                10000000 );
+	init( CONSISTENCY_CHECK_ID_MIN, TESTER_SHARED_RANDOM_MAX_PLUS_ONE );
+	init( CONSISTENCY_CHECK_ID_MAX_PLUS_ONE, 10 * TESTER_SHARED_RANDOM_MAX_PLUS_ONE);
+	init( CONSISTENCY_CHECK_USE_PERSIST_DATA,                  false ); if (isSimulated) CONSISTENCY_CHECK_USE_PERSIST_DATA = deterministicRandom()->coinflip();
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );

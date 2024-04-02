@@ -3109,10 +3109,10 @@ void outOfMemory() {
 	    .detail("BackTraces", traceCounts.size());
 
 	for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
-		char buf[1024];
 		std::vector<void*>* frames = i->second.backTrace;
 		std::string backTraceStr;
 #if defined(_WIN32)
+		char buf[1024];
 		for (int j = 1; j < frames->size(); j++) {
 			_snprintf(buf, 1024, "%p ", frames->at(j));
 			backTraceStr += buf;
@@ -3247,6 +3247,13 @@ extern "C" void flushAndExit(int exitCode) {
 	// to the crashAndDie call below.
 	TerminateProcess(GetCurrentProcess(), exitCode);
 #else
+	// Send a signal to allow the Kernel to generate a coredump for this process.
+	// See: https://man7.org/linux/man-pages/man5/core.5.html
+	// The abort method will send a SIGABRT, which causes the kernel to collect a coredump.
+	// See: https://man7.org/linux/man-pages/man3/abort.3.html.
+	if (exitCode != FDB_EXIT_SUCCESS && FLOW_KNOBS->ABORT_ON_FAILURE)
+		abort();
+	// In the success case exit the process gracefully.
 	_exit(exitCode);
 #endif
 	// should never reach here, but you never know

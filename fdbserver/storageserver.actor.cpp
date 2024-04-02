@@ -4655,7 +4655,11 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 	return Optional<MutationRef>();
 }
 
-bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar) {
+bool convertAtomicOp(MutationRef& m,
+                     StorageServer::VersionedData const& data,
+                     UpdateEagerReadInfo* eager,
+                     Arena& ar,
+                     const UID& logId) {
 	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
 	if (m.type != MutationRef::ClearRange && m.type != MutationRef::SetValue) {
 		Optional<StringRef> oldVal;
@@ -4710,6 +4714,9 @@ bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, U
 				m.param2 = keyAfter(m.param1, ar);
 				return true;
 			}
+			return false;
+		default:
+			TraceEvent(SevWarnAlways, "InvalidMutationType", logId).detail("Mutation", m);
 			return false;
 		}
 		m.type = MutationRef::SetValue;
@@ -6583,7 +6590,7 @@ void StorageServer::addMutation(Version version,
 	    nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for change feeds
 	auto& mLog = addVersionToMutationLog(version);
 
-	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena())) {
+	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena(), this->thisServerID)) {
 		return;
 	}
 	if (expanded.type == MutationRef::ClearRange) {

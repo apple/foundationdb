@@ -265,6 +265,8 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	bool DD_REMOVE_MAINTENANCE_ON_FAILURE; // If set to true DD will remove the maintenance mode if another SS fails
+	                                       // outside of the maintenance zone.
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
@@ -773,6 +775,10 @@ public:
 	                                      // When both CONSISTENCY_CHECK_ROCKSDB_ENGINE and
 	                                      // CONSISTENCY_CHECK_SQLITE_ENGINE are set, consistency check only checks for
 	                                      // the rocksdb engine.
+	int64_t TESTER_SHARED_RANDOM_MAX_PLUS_ONE;
+	int64_t CONSISTENCY_CHECK_ID_MIN;
+	int64_t CONSISTENCY_CHECK_ID_MAX_PLUS_ONE;
+	bool CONSISTENCY_CHECK_USE_PERSIST_DATA;
 
 	// Test harness
 	double WORKER_POLL_DELAY;

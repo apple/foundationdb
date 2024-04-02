@@ -162,15 +162,13 @@ endif()
 ################################################################################
 
 set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
-set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
-set(ROCKSDB_SSE42 OFF CACHE BOOL "Compile RocksDB with SSE42 enabled")
-set(ROCKSDB_AVX ${USE_AVX} CACHE BOOL "Compile RocksDB with AVX enabled")
-set(ROCKSDB_AVX2 OFF CACHE BOOL "Compile RocksDB with AVX2 enabled")
+# PORTABLE flag for RockdDB changed as of this PR (with v8.3.2 and after): https://github.com/facebook/rocksdb/pull/11419
+# https://github.com/facebook/rocksdb/blob/v8.6.7/CMakeLists.txt#L256
+set(PORTABLE_ROCKSDB 1 CACHE STRING "Minimum CPU arch to support (i.e. skylake, haswell, etc., or 0 = current CPU, 1 = baseline CPU")
 set(ROCKSDB_TOOLS OFF CACHE BOOL "Compile RocksDB tools")
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
-# RocksDB is currently enabled by default for GCC but does not build with the latest
-# Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
+
+if (SSD_ROCKSDB_EXPERIMENTAL AND NOT WIN32)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)
@@ -185,14 +183,16 @@ endif()
 find_package(toml11 QUIET)
 if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
-  add_dependencies(toml11_target INTERFACE toml11::toml11)
+  target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
   include(ExternalProject)
-
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
     CMAKE_CACHE_ARGS
+      -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+      -DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}
+      -DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}
       -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/toml11
       -Dtoml11_BUILD_TEST:BOOL=OFF
     BUILD_ALWAYS ON)

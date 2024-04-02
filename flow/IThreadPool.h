@@ -77,6 +77,7 @@ public:
 		delete (ActionType*)this;
 	}
 	void cancel() override { delete (ActionType*)this; }
+	virtual ~TypedAction() {}
 };
 
 template <class T>

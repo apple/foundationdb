@@ -30,3 +30,7 @@ runSetup = true
 
     [[test.workload]]
     testName = 'AtomicSwitchover'
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 30.0

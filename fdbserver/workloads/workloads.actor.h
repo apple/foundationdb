@@ -51,6 +51,7 @@ struct WorkloadContext {
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
+	Optional<std::vector<KeyRange>> rangesToCheck; // for urgent consistency checker when persisting data is not allowed
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
