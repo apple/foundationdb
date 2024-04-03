@@ -4959,6 +4959,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
 				TraceEvent("ChosenMachine")
+				    .suppressFor(30.0)
 				    .detail("MachineInfo", tcMachineInfo->machineID)
 				    .detail("LeaseUsedMachinesSize", leastUsedMachines.size())
 				    .detail("ForcedAttributesSize", forcedAttributes.size());
