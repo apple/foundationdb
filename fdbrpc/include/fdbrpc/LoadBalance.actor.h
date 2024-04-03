@@ -377,14 +377,14 @@ struct RequestData : NonCopyable {
 		}
 	}
 
-	Future<Void> maybeDoReplicaComparison(RequestStream<Request, P> const* stream,
-	                                      Request& request,
+	Future<Void> maybeDoReplicaComparison(Request& request,
 	                                      QueueModel* model,
-	                                      Future<Reply> ssResponse,
 	                                      Reference<MultiInterface<Multi>> alternatives,
 	                                      RequestStream<Request, P> Interface::*channel) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
-			return replicaComparison(request, ssResponse, stream->getEndpoint().token.first(), alternatives, channel);
+			ASSERT(requestStream != nullptr);
+			return replicaComparison(
+			    request, response, requestStream->getEndpoint().token.first(), alternatives, channel);
 		}
 
 		return Void();
@@ -747,8 +747,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
-				wait(firstRequestData.maybeDoReplicaComparison(
-				    firstRequestData.requestStream, request, model, firstRequestData.response, alternatives, channel));
+				wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
 
 				ASSERT(firstRequestData.response.isReady());
 				return firstRequestData.response.get().get();
@@ -797,8 +796,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// Do consistency check, by comparing storage replicas, if requested.
 				state RequestData<Request, Interface, Multi, P>* requestData =
 				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
-				wait(requestData->maybeDoReplicaComparison(
-				    requestData->requestStream, request, model, requestData->response, alternatives, channel));
+				wait(requestData->maybeDoReplicaComparison(request, model, alternatives, channel));
 
 				ASSERT(requestData->response.isReady());
 				return requestData->response.get().get();
@@ -839,8 +837,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 							// Do consistency check, by comparing storage replicas, if requested.
-							wait(firstRequestData.maybeDoReplicaComparison(
-							    stream, request, model, firstRequestData.response, alternatives, channel));
+							wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
 							return result.get();
 						}
 
