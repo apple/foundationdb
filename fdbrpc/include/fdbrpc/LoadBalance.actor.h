@@ -837,7 +837,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 							// Do consistency check, by comparing storage replicas, if requested.
 							wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
-							
+
 							ASSERT(firstRequestData.response.isReady());
 							return firstRequestData.response.get().get();
 						}
