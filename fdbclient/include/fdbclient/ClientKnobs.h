@@ -336,7 +336,10 @@ public:
 	int SIM_KMS_VAULT_MAX_KEYS;
 
 	bool ENABLE_MUTATION_CHECKSUM;
+	// Enable to start accumulative checksum population and validation
 	bool ENABLE_ACCUMULATIVE_CHECKSUM;
+	// Enable to logging verbose trace events related to the accumulative checksum
+	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

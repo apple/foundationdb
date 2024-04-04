@@ -29,6 +29,7 @@
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -224,7 +225,6 @@ struct ProxyCommitData {
 	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
 	bool firstProxy;
-	uint16_t commitProxyIndex; // decided when the cluster controller recruits commit proxies
 	double lastCoalesceTime;
 	bool locked;
 	Optional<Value> metadataVersion;
@@ -270,6 +270,10 @@ struct ProxyCommitData {
 	Standalone<VectorRef<MutationRef>> idempotencyClears;
 
 	AsyncVar<bool> triggerCommit;
+
+	uint16_t commitProxyIndex; // decided when the cluster controller recruits commit proxies
+	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
+	LogEpoch epoch;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -337,7 +341,8 @@ struct ProxyCommitData {
 	                bool firstProxy,
 	                EncryptionAtRestMode encryptMode,
 	                bool provisional,
-	                uint16_t commitProxyIndex)
+	                uint16_t commitProxyIndex,
+	                LogEpoch epoch)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
@@ -349,7 +354,13 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex) {
+	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
+	    acsBuilder(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+	                       !encryptMode.isEncryptionEnabled()
+	                   ? std::make_shared<AccumulativeChecksumBuilder>(
+	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
+	                   : nullptr),
+	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };
