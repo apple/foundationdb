@@ -29,6 +29,4 @@ static const uint16_t resolverAccumulativeChecksumIndex = 2;
 
 uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex);
 
-bool validateAccumulativeChecksumIndexAtStorageServer(MutationRef m);
-
 #endif

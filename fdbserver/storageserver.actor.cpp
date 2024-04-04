@@ -11023,13 +11023,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
 						}
 					} else {
-						if (!msg.validateChecksum() || !validateAccumulativeChecksumIndexAtStorageServer(msg)) {
-							TraceEvent(SevError, "ValidateChecksumOrAcsIndexError", data->thisServerID)
-							    .detail("Mutation", msg)
-							    .detail("ResolverGeneratePrivateMutation",
-							            SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
-							ASSERT(false);
-						}
+						ASSERT(msg.validateChecksum());
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 

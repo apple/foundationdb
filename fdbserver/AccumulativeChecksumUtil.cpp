@@ -27,20 +27,6 @@ uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex) {
 	return commitProxyIndex * 10 + 1;
 }
 
-bool validateAccumulativeChecksumIndexAtStorageServer(MutationRef m) {
-	if (m.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-	    (!m.accumulativeChecksumIndex.present())) {
-		TraceEvent(SevError, "ACSIndexNotPresent").detail("Mutation", m);
-		return false;
-	} else if (m.checksum.present() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-	           m.accumulativeChecksumIndex.present() &&
-	           m.accumulativeChecksumIndex.get() == invalidAccumulativeChecksumIndex) {
-		TraceEvent(SevError, "ACSIndexNotSet").detail("Mutation", m);
-		return false;
-	}
-	return true;
-}
-
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	printf("testing MutationRef encoding/decoding\n");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
