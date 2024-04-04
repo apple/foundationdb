@@ -744,7 +744,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
 			// Only the first location is available.
-			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
+			wait(success(firstRequestData.response));
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
 				wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
@@ -774,8 +774,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			state bool secondRequestSuccessful = false;
 
 			loop choose {
-				when(ErrorOr<REPLY_TYPE(Request)> result =
-				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
+				when(wait(success(firstRequestData.response.isValid() ? firstRequestData.response : Never()))) {
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 						firstRequestSuccessful = true;
 						break;
@@ -783,7 +782,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 					firstRequestEndpoint = Optional<uint64_t>();
 				}
-				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
+				when(wait(success(secondRequestData.response))) {
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
 						secondRequestSuccessful = true;
 					}
@@ -826,7 +825,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 			loop {
 				choose {
-					when(state ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response)) {
+					when(wait(success(firstRequestData.response))) {
 						if (model) {
 							model->secondMultiplier =
 							    std::max(model->secondMultiplier - FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_DECAY, 1.0);
@@ -838,7 +837,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 							// Do consistency check, by comparing storage replicas, if requested.
 							wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
-							return result.get();
+							
+							ASSERT(firstRequestData.response.isReady());
+							return firstRequestData.response.get().get();
 						}
 
 						firstRequestEndpoint = Optional<uint64_t>();
