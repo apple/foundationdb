@@ -94,7 +94,6 @@ struct MutationRef {
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
 		Encrypted, /* Represents an encrypted mutation and cannot be used directly before decrypting */
-		AccumulativeChecksum, /* Used to propagate accumulative checksum from commit proxy to storage server */
 		MAX_ATOMIC_OP
 	};
 
@@ -172,11 +171,27 @@ struct MutationRef {
 	// If mutation checksum is enabled, we must set accumulative index before serialization
 	// Once accumulative index is set, it cannot change over time
 	void setAccumulativeChecksumIndex(uint16_t index) {
-		if (this->accumulativeChecksumIndex.present()) {
-			ASSERT(this->accumulativeChecksumIndex.get() == index);
-		} else {
-			this->accumulativeChecksumIndex = index;
+		if (!CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			return;
 		}
+		if (withAccumulativeChecksumIndex()) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
+			    .detail("Reason", "Type already has acsIndex flag when setting acsIndex")
+			    .detail("Mutation", toString());
+			this->corrupted = true;
+		}
+		if (this->accumulativeChecksumIndex.present() && this->accumulativeChecksumIndex.get() != index) {
+			TraceEvent(SevError, "MutationRefUnexpectedError")
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
+			    .detail("Reason", "AcsIndex mismatch existing one when setting a new acsIndex")
+			    .detail("NewAcsIndex", index)
+			    .detail("Mutation", toString());
+			this->corrupted = true;
+		}
+		this->accumulativeChecksumIndex = index;
 		return;
 	}
 
