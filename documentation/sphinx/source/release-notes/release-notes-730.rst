@@ -310,7 +310,7 @@ Release Notes
 
 7.3.31
 ======
-* Same as 7.3.30 release with AVX disabled.
+* Same as 7.3.30 release with AVX enabled.
 
 7.3.30
 ======
@@ -319,7 +319,7 @@ Release Notes
 
 7.3.29
 ======
-* Same as 7.3.28 release with AVX disabled.
+* Same as 7.3.28 release with AVX enabled.
 
 7.3.28
 ======
@@ -330,7 +330,7 @@ Release Notes
 
 7.3.27
 ======
-* Same as 7.3.26 release with AVX disabled.
+* Same as 7.3.26 release with AVX enabled.
 
 7.3.26
 ======
