@@ -7,6 +7,7 @@
 #include "flow/serialize.h"
 #include <rocksdb/c.h>
 #include <rocksdb/cache.h>
+#include <rocksdb/advanced_cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/listener.h>
@@ -502,6 +503,8 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
 	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
@@ -570,6 +573,30 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
 	options.compaction_pri = getCompactionPriority();
+
+	return options;
+}
+
+rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
+	auto options = getCFOptions();
+	// never slowdown ingest.
+	options.level0_file_num_compaction_trigger = (1 << 30);
+	options.level0_slowdown_writes_trigger = (1 << 30);
+	options.level0_stop_writes_trigger = (1 << 30);
+	options.soft_pending_compaction_bytes_limit = 0;
+	options.hard_pending_compaction_bytes_limit = 0;
+
+	// no auto compactions please. The application should issue a
+	// manual compaction after all data is loaded into L0.
+	options.disable_auto_compactions = true;
+	// A manual compaction run should pick all files in L0 in
+	// a single compaction run.
+	options.max_compaction_bytes = (static_cast<uint64_t>(1) << 60);
+
+	// It is better to have only 2 levels, otherwise a manual
+	// compaction would compact at every possible level, thereby
+	// increasing the total time needed for compactions.
+	options.num_levels = 2;
 
 	return options;
 }
@@ -1237,7 +1264,11 @@ public:
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
 
 			// Write special key range metadata.
-			writeBatch = std::make_unique<rocksdb::WriteBatch>();
+			writeBatch = std::make_unique<rocksdb::WriteBatch>(
+			    0, // reserved_bytes default:0
+			    0, // max_bytes default:0
+			    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+			    0 /* default_cf_ts_sz default:0 */);
 			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 			persistRangeMapping(specialKeys, true);
 			status = db->Write(options, writeBatch.get());
@@ -1249,7 +1280,11 @@ public:
 			    .detail("MetadataShardCF", metadataShard->cf->GetID());
 		}
 
-		writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		writeBatch = std::make_unique<rocksdb::WriteBatch>(
+		    0, // reserved_bytes default:0
+		    0, // max_bytes default:0
+		    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+		    0 /* default_cf_ts_sz default:0 */);
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
@@ -1324,7 +1359,7 @@ public:
 		return result;
 	}
 
-	PhysicalShard* addRange(KeyRange range, std::string id) {
+	PhysicalShard* addRange(KeyRange range, std::string id, bool active) {
 		TraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->logId).detail("Range", range).detail("ShardId", id);
 
 		// Newly added range should not overlap with any existing range.
@@ -1351,6 +1386,7 @@ public:
 			}
 		}
 
+		auto cfOptions = active ? getCFOptions() : getCFOptionsForInactiveShard();
 		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
@@ -1362,7 +1398,10 @@ public:
 
 		validate();
 
-		TraceEvent(SevInfo, "ShardedRocksDBRangeAdded", this->logId).detail("Range", range).detail("ShardId", id);
+		TraceEvent(SevInfo, "ShardedRocksDBRangeAdded", this->logId)
+		    .detail("Range", range)
+		    .detail("ShardId", id)
+		    .detail("Active", active);
 
 		return shard.get();
 	}
@@ -1454,6 +1493,37 @@ public:
 		TraceEvent(SevInfo, "ShardedRocksRemoveRangeEnd", this->logId).detail("Range", range);
 
 		return shardIds;
+	}
+
+	void markRangeAsActive(KeyRangeRef range) {
+		auto ranges = dataShardMap.intersectingRanges(range);
+
+		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+			if (!it.value()) {
+				continue;
+			}
+
+			auto beginSlice = toSlice(range.begin);
+			auto endSlice = toSlice(range.end);
+			db->SuggestCompactRange(it.value()->physicalShard->cf, &beginSlice, &endSlice);
+
+			std::unordered_map<std::string, std::string> options = {
+				{ "level0_file_num_compaction_trigger",
+				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER) },
+				{ "level0_slowdown_writes_trigger",
+				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER) },
+				{ "level0_stop_writes_trigger",
+				  std::to_string(SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER) },
+				{ "soft_pending_compaction_bytes_limit",
+				  std::to_string(SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT) },
+				{ "hard_pending_compaction_bytes_limit",
+				  std::to_string(SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT) },
+				{ "disable_auto_compactions", "false" },
+				{ "num_levels", "-1" }
+			};
+			db->SetOptions(it.value()->physicalShard->cf, options);
+			TraceEvent("ShardedRocksDBRangeActive", logId).detail("ShardId", it.value()->physicalShard->id);
+		}
 	}
 
 	std::vector<std::shared_ptr<PhysicalShard>> getPendingDeletionShards(double cleanUpDelay) {
@@ -1625,7 +1695,11 @@ public:
 
 	std::unique_ptr<rocksdb::WriteBatch> getWriteBatch() {
 		std::unique_ptr<rocksdb::WriteBatch> existingWriteBatch = std::move(writeBatch);
-		writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		writeBatch = std::make_unique<rocksdb::WriteBatch>(
+		    0, // reserved_bytes default:0
+		    0, // max_bytes default:0
+		    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+		    0 /* default_cf_ts_sz default:0 */);
 		return existingWriteBatch;
 	}
 
@@ -2123,6 +2197,10 @@ void RocksDBMetrics::logStats(rocksdb::DB* db, std::string manifestDirectory) {
 	std::string propValue = "";
 	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
 	TraceEvent(SevInfo, "DBWriteStallStats", debugID).detail("Stats", propValue);
+
+	if (rocksdb_block_cache) {
+		e.detail("CacheUsage", rocksdb_block_cache->GetUsage());
+	}
 }
 
 void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
@@ -2412,7 +2490,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 		for (const KeyRange& range : ranges) {
-			self->shardManager.addRange(range, shardId);
+			self->shardManager.addRange(range, shardId, true);
 		}
 		const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 		TraceEvent(sevDm, "ShardedRocksRestoreAddRange", self->id)
@@ -2979,7 +3057,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			rocksdb::Status status;
-			rocksdb::WriteBatch writeBatch;
+			rocksdb::WriteBatch writeBatch(
+			    0, // reserved_bytes default:0
+			    0, // max_bytes default:0
+			    SERVER_KNOBS->ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY, // protection_bytes_per_key
+			    0 /* default_cf_ts_sz default:0 */);
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
@@ -3595,8 +3677,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> addRange(KeyRangeRef range, std::string id) override {
-		auto shard = shardManager.addRange(range, id);
+	Future<Void> addRange(KeyRangeRef range, std::string id, bool active) override {
+		auto shard = shardManager.addRange(range, id, active);
 		if (shard->initialized()) {
 			return Void();
 		}
@@ -3605,6 +3687,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		writeThread->post(a);
 		return res;
 	}
+
+	void markRangeAsActive(KeyRangeRef range) override { shardManager.markRangeAsActive(range); }
 
 	void set(KeyValueRef kv, const Arena*) override {
 		shardManager.put(kv.key, kv.value);

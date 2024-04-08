@@ -1,26 +1,35 @@
-testTitle=Clogged
+[[knobs]]
+enable_accumulative_checksum=false
+
+[[test]]
+testTitle='Clogged'
 runSetup=false
 
-    testName=Cycle
+    [[test.workload]]
+    testName='Cycle'
     transactionsPerSecond=2500.0
     nodeCount=2500
     testDuration=10.0
     expectedRate=0
 
-    testName=RandomClogging
+    [[test.workload]]
+    testName='RandomClogging'
     testDuration=10.0
 
-    testName=Rollback
+    [[test.workload]]
+    testName='Rollback'
     meanDelay=10.0
     testDuration=10.0
 
-    testName=Attrition
+    [[test.workload]]
+    testName='Attrition'
     machinesToKill=10
     machinesToLeave=3
     reboot=true
     testDuration=10.0
 
-    testName=Attrition
+    [[test.workload]]
+    testName='Attrition'
     machinesToKill=10
     machinesToLeave=3
     reboot=true

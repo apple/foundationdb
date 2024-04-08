@@ -23,7 +23,7 @@ You can access machine-readable status in three ways ways:
 * From any client, read the key ``\xFF\xFF/status/json``. The value of this key is a JSON object serialized to a byte string with UTF-8 encoding. In Python, given an open database ``db``, the JSON object can be read and deserialized with::
 
     import json
-    status = json.loads(db['\xff\xff/status/json'])
+    status = json.loads(db[b'\xff\xff/status/json'])
 
 Guidance regarding versioning
 =============================

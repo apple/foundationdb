@@ -774,12 +774,6 @@ struct LogPushData : NonCopyable {
 		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
 	}
 
-	void getLocations(const std::vector<Tag>& vtags, std::set<uint16_t>& writtenTLogs) {
-		std::vector<int> msg_locations;
-		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
-		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
-	}
-
 	// store tlogs as represented by index
 	void saveLocations(std::set<uint16_t>& writtenTLogs) {
 		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
@@ -806,8 +800,8 @@ struct LogPushData : NonCopyable {
 	// MUST be called after getMessages() and recordEmptyMessage().
 	float getEmptyMessageRatio() const;
 
-	// Returns the total number of mutations.
-	uint32_t getMutationCount() const { return subsequence; }
+	// Returns the total number of mutations. Subsequence is initialized to 1, so subtract 1 to get count.
+	uint32_t getMutationCount() const { return subsequence - 1; }
 
 	// Sets mutations for all internal writers. "mutations" is the output from
 	// getAllMessages() and is used before writing any other mutations.

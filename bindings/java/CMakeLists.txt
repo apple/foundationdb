@@ -209,6 +209,17 @@ add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE} GENERATE_NATIVE_HEADERS fdb_java_native)
 add_dependencies(fdb-java fdb_java_options)
 
+create_javadoc(fdb
+               FILES ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${GENERATED_JAVA_DIR}/ApiVersion.java
+               VERSION ${FDB_VERSION}
+               )
+add_dependencies(fdb_javadoc fdb_java_options) 
+
+add_custom_target(CopyJavadoc
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/javadoc/fdb ${CMAKE_CURRENT_BINARY_DIR}/../../documentation/html/javadoc
+)
+add_dependencies(CopyJavadoc fdb_javadoc)
+
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
     "Path of a directory structure with libraries to include in fat jar (a lib directory)")

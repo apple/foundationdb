@@ -83,7 +83,7 @@ public:
 
 	// Shard management APIs.
 	// Adds key range to a physical shard.
-	virtual Future<Void> addRange(KeyRangeRef range, std::string id) { return Void(); }
+	virtual Future<Void> addRange(KeyRangeRef range, std::string id, bool active = true) { return Void(); }
 
 	// Removes a key range from KVS and returns a list of empty physical shards after the removal.
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
@@ -92,6 +92,9 @@ public:
 	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
 		return replaceRange_impl(this, range, data);
 	}
+
+	// Marks a key range as active and prepares it for future read.
+	virtual void markRangeAsActive(KeyRangeRef range) {}
 
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}

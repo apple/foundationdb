@@ -891,12 +891,14 @@ public:
 				bool anyUndesired = false;
 				bool anyWrongConfiguration = false;
 				bool anyWigglingServer = false;
+				const bool ignoreSSFailures = !badTeam && self->healthyZone.get().present() &&
+				                              (self->healthyZone.get().get() == ignoreSSFailuresZoneString);
 				int serversLeft = 0, serverUndesired = 0, serverWrongConf = 0, serverWiggling = 0;
 
 				for (const UID& uid : team->getServerIDs()) {
 					change.push_back(self->server_status.onChange(uid));
 					auto& status = self->server_status.get(uid);
-					if (!status.isFailed) {
+					if (!status.isFailed || ignoreSSFailures) {
 						serversLeft++;
 					}
 					if (status.isUndesired) {
@@ -918,8 +920,7 @@ public:
 				}
 
 				// Failed server should not trigger DD if SS failures are set to be ignored
-				if (!badTeam && self->healthyZone.get().present() &&
-				    (self->healthyZone.get().get() == ignoreSSFailuresZoneString)) {
+				if (ignoreSSFailures) {
 					ASSERT_WE_THINK(serversLeft == team->size());
 				}
 
@@ -1639,7 +1640,8 @@ public:
 			for (auto& server : self->server_info) {
 				// If this server isn't the right storage type and its wrong-type trigger has not yet been set
 				// then set it if we're in aggressive mode and log its presence either way.
-				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+				if (!(server.second->isCorrectStoreType(self->configuration.storageServerStoreType) ||
+				      server.second->isCorrectStoreType(self->configuration.perpetualStoreType)) &&
 				    !server.second->wrongStoreTypeToRemove.get()) {
 					// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 					// storageServerTracker. This race may cause the server to be removed before react to
@@ -1822,7 +1824,8 @@ public:
 							    .detail("ServerID", interf.id())
 							    .detail("Status", status->toString());
 							status->isFailed = false;
-						} else if (self->clearHealthyZoneFuture.isReady()) {
+						} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
+						           self->clearHealthyZoneFuture.isReady()) {
 							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
 							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 							self->healthyZone.set(Optional<Key>());
@@ -2536,7 +2539,8 @@ public:
 			// Check if perpetual storage wiggle is enabled and perpetualStoreType is set. If so, we use
 			// perpetualStoreType for all new SSes that match perpetualStorageWiggleLocality.
 			// Note that this only applies to regular storage servers, not TSS.
-			if (!recruitTss && self->configuration.storageMigrationType == StorageMigrationType::GRADUAL &&
+			if (!recruitTss && self->configuration.perpetualStorageWiggleSpeed == 1 &&
+			    self->configuration.storageMigrationType == StorageMigrationType::GRADUAL &&
 			    self->configuration.perpetualStoreType.isValid()) {
 				if (self->configuration.perpetualStorageWiggleLocality == "0") {
 					isr.storeType = self->configuration.perpetualStoreType;
@@ -3189,8 +3193,10 @@ public:
 		state StorageMetadataType data(
 		    StorageMetadataType::currentTime(),
 		    server->getStoreType(),
-		    !server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
-		                                      : self->configuration.storageServerStoreType));
+		    !(server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                       : self->configuration.storageServerStoreType) ||
+		      server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                       : self->configuration.perpetualStoreType)));
 
 		// read storage metadata
 		loop {
@@ -3226,7 +3232,8 @@ public:
 
 		// wrong store type handler
 		if (!isTss) {
-			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+			if (!(server->isCorrectStoreType(self->configuration.storageServerStoreType) ||
+			      server->isCorrectStoreType(self->configuration.perpetualStoreType)) &&
 			    self->wrongStoreTypeRemover.isReady()) {
 				self->wrongStoreTypeRemover = removeWrongStoreType(self);
 				self->addActor.send(self->wrongStoreTypeRemover);
@@ -4948,6 +4955,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				LocalityEntry process = tcMachineInfo->localityEntry;
 				forcedAttributes.push_back(process);
 				TraceEvent("ChosenMachine")
+				    .suppressFor(30.0)
 				    .detail("MachineInfo", tcMachineInfo->machineID)
 				    .detail("LeaseUsedMachinesSize", leastUsedMachines.size())
 				    .detail("ForcedAttributesSize", forcedAttributes.size());

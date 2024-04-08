@@ -446,9 +446,9 @@ class TransactionInfoLoader(object):
             self.num_transactions_discarded += 1
 
     def parse_key(self, k):
-        version_stamp_bytes = k[
-            self.version_stamp_start_idx : self.version_stamp_end_idx + 1
-        ]
+        # the last 2 bytes are subsequence number within a version, e.g., "\x00\x00", thus need to exclude it
+        version_stamp = struct.unpack(
+            ">Q", k[self.version_stamp_start_idx:self.version_stamp_end_idx - 1])[0]
         tr_id = k[self.tr_id_start_idx : self.tr_id_end_idx + 1]
         num_chunks = struct.unpack(
             ">i", k[self.num_chunks_start_idx : self.num_chunks_start_idx + 4]
@@ -456,7 +456,7 @@ class TransactionInfoLoader(object):
         chunk_num = struct.unpack(
             ">i", k[self.chunk_num_start_idx : self.chunk_num_start_idx + 4]
         )[0]
-        return version_stamp_bytes, tr_id, num_chunks, chunk_num
+        return version_stamp, tr_id, num_chunks, chunk_num
 
     def get_key_prefix_for_version_stamp(self, version_stamp):
         return (
@@ -543,9 +543,9 @@ class TransactionInfoLoader(object):
                     # logger.debug(k)
                     start_key = fdb.KeySelector.first_greater_than(k)
 
-                    _, tr_id, num_chunks, chunk_num = self.parse_key(k)
-
-                    # logger.debug("num_chunks=%d, chunk_num=%d" % (num_chunks,chunk_num))
+                    version_stamp, tr_id, num_chunks, chunk_num = self.parse_key(k)
+                    assert(version_stamp != 0)
+                    # logger.debug("num_chunks=%d, chunk_num=%d, version_stamp=%d" % (num_chunks,chunk_num, version_stamp))
 
                     if num_chunks == 1:
                         assert chunk_num == 1

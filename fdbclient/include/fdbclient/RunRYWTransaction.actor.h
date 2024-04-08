@@ -60,6 +60,28 @@ Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>())
 	}
 }
 
+// Debug version of runRYWTransaction. It logs the function name and the committed version of the transaction.
+// Note the function name is required, e.g., taskFunc->getName() for TaskFuncBase.
+ACTOR template <class Function>
+Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
+runRYWTransactionDebug(Database cx, StringRef name, Function func) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	loop {
+		try {
+			// func should be idempodent; otherwise, retry will get undefined result
+			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
+			    wait(func(tr));
+			wait(tr->commit());
+			TraceEvent("DebugRunRYWTransaction")
+			    .detail("Function", name)
+			    .detail("CommitVersion", tr->getCommittedVersion());
+			return result;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 // Runs a RYW transaction in a retry loop on the given Database.
 //
 // Takes a function func that accepts a Reference<ReadYourWritesTransaction> as a parameter and returns a Void

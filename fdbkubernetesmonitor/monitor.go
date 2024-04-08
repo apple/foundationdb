@@ -54,6 +54,9 @@ type Monitor struct {
 	// ConfigFile defines the path to the config file to load.
 	ConfigFile string
 
+	// CurrentContainerVersion defines the version of the container. This will be the same as the fdbserver version.
+	CurrentContainerVersion string
+
 	// CustomEnvironment defines the custom environment variables to use when
 	// interpreting the monitor configuration.
 	CustomEnvironment map[string]string
@@ -92,7 +95,7 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool) {
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string) {
 	podClient, err := CreatePodClient(ctx, logger)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
@@ -100,11 +103,12 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	}
 
 	monitor := &Monitor{
-		ConfigFile:        configFile,
-		PodClient:         podClient,
-		Logger:            logger,
-		CustomEnvironment: customEnvironment,
-		ProcessCount:      processCount,
+		ConfigFile:              configFile,
+		PodClient:               podClient,
+		Logger:                  logger,
+		CustomEnvironment:       customEnvironment,
+		ProcessCount:            processCount,
+		CurrentContainerVersion: currentContainerVersion,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
@@ -157,7 +161,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	if currentContainerVersion == configuration.Version {
+	if monitor.CurrentContainerVersion == configuration.Version {
 		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")

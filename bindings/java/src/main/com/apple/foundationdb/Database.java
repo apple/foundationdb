@@ -247,11 +247,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
-	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey, boolean wait)} on the default executor.
+	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey, Executor e)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
-	 * @param wait wait for blobbification to complete
 
 	 * @return if the recording of the range was successful
 	 */
@@ -264,7 +263,6 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
-	 * @param wait wait for blobbification to complete
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 
 	 * @return if the recording of the range was successful
@@ -357,7 +355,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
 
 	/**
-	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey)} on the default executor.
+	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version, Executor e)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
@@ -370,7 +368,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey, long version)} on the default executor.
+	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version, Executor e)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range

@@ -357,6 +357,8 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	bool DD_REMOVE_MAINTENANCE_ON_FAILURE; // If set to true DD will remove the maintenance mode if another SS fails
+	                                       // outside of the maintenance zone.
 	int DD_SHARD_TRACKING_LOG_SEVERITY;
 	bool ENFORCE_SHARD_COUNT_PER_TEAM; // Whether data movement selects dst team not exceeding
 	                                   // DESIRED_MAX_SHARDS_PER_TEAM.
@@ -477,7 +479,6 @@ public:
 	bool ROCKSDB_PARANOID_FILE_CHECKS;
 	double ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
-	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	int64_t ROCKSDB_WAL_TTL_SECONDS;
 	int64_t ROCKSDB_WAL_SIZE_LIMIT_MB;
 	bool ROCKSDB_LOG_LEVEL_DEBUG;
@@ -515,6 +516,8 @@ public:
 	int ROCKSDB_WAL_RECOVERY_MODE;
 	int ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	bool ROCKSDB_USE_DIRECT_READS;
+	bool ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
 	int ROCKSDB_MAX_OPEN_FILES;
 	bool ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS;
 	int ROCKSDB_CF_RANGE_DELETION_LIMIT;
@@ -531,6 +534,9 @@ public:
 	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
 	                                // checksum). The block-level checksum does not cover the corruption such as wrong
 	                                // sst file or file move/copy.
+	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
+	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
 	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
@@ -553,6 +559,7 @@ public:
 	int SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
 	int SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
 	int SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
+	bool SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;

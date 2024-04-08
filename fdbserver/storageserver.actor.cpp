@@ -70,6 +70,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -211,6 +212,24 @@ static const KeyRangeRef persistPendingCheckpointKeys =
 static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
+
+// Accumulative checksum related prefix
+static const KeyRangeRef persistAccumulativeChecksumKeys =
+    KeyRangeRef(PERSIST_PREFIX "AccumulativeChecksum/"_sr, PERSIST_PREFIX "AccumulativeChecksum0"_sr);
+
+inline Key encodePersistAccumulativeChecksumKey(LogEpoch epoch, uint16_t acsIndex) {
+	epoch = bigEndian64(epoch);
+	acsIndex = bigEndian16(acsIndex);
+	return persistAccumulativeChecksumKeys.begin.withSuffix(StringRef((uint8_t*)&epoch, 8))
+	    .withSuffix(StringRef((uint8_t*)&acsIndex, 2));
+}
+
+inline std::pair<LogEpoch, uint16_t> decodePersistAccumulativeChecksumKey(const Key& key) {
+	StringRef keyStr = key.removePrefix(persistAccumulativeChecksumKeys.begin);
+	LogEpoch epoch = *(const uint64_t*)(keyStr.substr(0, 8).begin());
+	uint16_t acsIndex = *(const uint16_t*)(keyStr.substr(8, 2).begin());
+	return std::make_pair(fromBigEndian64(epoch), fromBigEndian16(acsIndex));
+}
 
 // MoveInUpdates caches new updates of a move-in shard, before that shard is ready to accept writes.
 struct MoveInUpdates {
@@ -548,6 +567,8 @@ struct StorageServerDisk {
 	                                 int64_t& bytesLeft,
 	                                 UnlimitedCommitBytes unlimitedCommitBytes);
 	void makeVersionDurable(Version version);
+	void makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState);
+	void clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState);
 	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
 
@@ -557,9 +578,13 @@ struct StorageServerDisk {
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
 
-	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
+	Future<Void> addRange(KeyRangeRef range, std::string id) {
+		return storage->addRange(range, id, !SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE);
+	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	void markRangeAsActive(KeyRangeRef range) { storage->markRangeAsActive(range); }
 
 	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
 		return storage->replaceRange(range, data);
@@ -1612,6 +1637,8 @@ public:
 	// Tenant metadata to manage connection to blob store for fetchKeys()
 	BGTenantMap tenantData;
 
+	std::shared_ptr<AccumulativeChecksumValidator> acsValidator = nullptr;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
@@ -1674,7 +1701,10 @@ public:
 	    busiestWriteTagContext(ssi.id()), getEncryptCipherKeysMonitor(encryptionMonitor), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
-	    tenantData(db) {
+	    tenantData(db),
+	    acsValidator(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM
+	                     ? std::make_shared<AccumulativeChecksumValidator>()
+	                     : nullptr) {
 		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
@@ -8726,6 +8756,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
 		shard->fetchComplete.send(Void());
+		data->storage.markRangeAsActive(keys);
 		const double duration = now() - startTime;
 		TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
 		    .detail("TotalBytes", totalBytes)
@@ -10516,7 +10547,6 @@ public:
 			if (MUTATION_TRACKING_ENABLED) {
 				DEBUG_MUTATION("SSUpdateMutation", ver, m, data->thisServerID).detail("FromFetch", fromFetch);
 			}
-
 			splitMutation(data, data->shards, m, encryptedMutation, ver, fromFetch);
 		}
 
@@ -10906,6 +10936,22 @@ private:
 			    .detail("KeyCount", keyCount)
 			    .detail("ValSize", valSize)
 			    .detail("Seed", seed);
+		} else if (isAccumulativeChecksumMutation(m)) {
+			if (data->acsValidator != nullptr) {
+				ASSERT(m.checksum.present() && m.accumulativeChecksumIndex.present());
+				AccumulativeChecksumState acsMutationState = decodeAccumulativeChecksum(m.param2);
+				Optional<AccumulativeChecksumState> stateToPersist = data->acsValidator->processAccumulativeChecksum(
+				    acsMutationState, data->thisServerID, data->tag, data->version.get());
+				if (stateToPersist.present()) {
+					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+					data->addMutationToMutationLog(
+					    mLV,
+					    MutationRef(MutationRef::SetValue,
+					                encodePersistAccumulativeChecksumKey(stateToPersist.get().epoch,
+					                                                     stateToPersist.get().acsIndex),
+					                accumulativeChecksumValue(stateToPersist.get())));
+				}
+			}
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11194,7 +11240,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					cloneReader >> msg;
 					ASSERT(data->encryptionMode.present());
 					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-					       isBackupLogMutation(msg));
+					       isBackupLogMutation(msg) || isAccumulativeChecksumMutation(msg));
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							msg.updateEncryptCipherDetails(cipherDetails);
@@ -11206,10 +11252,21 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							decryptionTime += decryptionTimeV;
 						}
 					} else {
-						ASSERT(msg.validateChecksum());
+						if (!msg.validateChecksum()) {
+							TraceEvent(SevError, "ValidateChecksumError", data->thisServerID)
+							    .setMaxFieldLength(-1)
+							    .setMaxEventLength(-1)
+							    .detail("Mutation", msg);
+							ASSERT(false);
+						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
-
+					if (data->acsValidator != nullptr) {
+						data->acsValidator->incrementTotalMutations();
+						if (isAccumulativeChecksumMutation(msg)) {
+							data->acsValidator->incrementTotalAcsMutations();
+						}
+					}
 					if (!collectingCipherKeys) {
 						if (firstMutation && msg.param1.startsWith(systemKeys.end))
 							hasPrivateData = true;
@@ -11356,7 +11413,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 				ASSERT(data->encryptionMode.present());
 				ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-				       isBackupLogMutation(msg));
+				       isBackupLogMutation(msg) || isAccumulativeChecksumMutation(msg));
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
@@ -11365,6 +11422,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					msg = msg.decrypt(
 					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
 					decryptionTime += decryptionTimeV;
+				} else if (data->acsValidator != nullptr && msg.checksum.present() &&
+				           msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
+					// We have to check accumulative checksum when iterating through cloneCursor2,
+					// where ss removal by tag assignment takes effect immediately
+					data->acsValidator->addMutation(msg, data->thisServerID, data->tag, data->version.get());
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -11427,6 +11489,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 			}
+		}
+
+		if (data->acsValidator != nullptr) {
+			data->acsValidator->clearCache(data->thisServerID, data->tag, data->version.get());
 		}
 
 		if (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size() && ver != invalidVersion) {
@@ -12644,6 +12710,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<RangeResult> fMoveInShards = storage->readRange(persistMoveInShardsKeyRange());
 	state Future<RangeResult> fTenantMap = storage->readRange(persistTenantMapKeys);
 	state Future<RangeResult> fStorageShards = storage->readRange(persistStorageServerShardKeys);
+	state Future<RangeResult> fAccumulativeChecksum = storage->readRange(persistAccumulativeChecksumKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -12660,7 +12727,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	                             fCheckpoints,
 	                             fMoveInShards,
 	                             fTenantMap,
-	                             fStorageShards }));
+	                             fStorageShards,
+	                             fAccumulativeChecksum }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
@@ -12756,6 +12824,18 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 		data->newestAvailableVersion.insert(keys, nowAvailable ? latestVersion : invalidVersion);
 		wait(yield());
+	}
+
+	// Restore acs validator from persisted disk
+	if (data->acsValidator != nullptr) {
+		RangeResult accumulativeChecksums = fAccumulativeChecksum.get();
+		data->bytesRestored += accumulativeChecksums.logicalSize();
+		for (int acsLoc = 0; acsLoc < accumulativeChecksums.size(); acsLoc++) {
+			std::pair<LogEpoch, uint16_t> res = decodePersistAccumulativeChecksumKey(accumulativeChecksums[acsLoc].key);
+			AccumulativeChecksumState acsState = decodeAccumulativeChecksum(accumulativeChecksums[acsLoc].value);
+			ASSERT(res.first == acsState.epoch && res.second == acsState.acsIndex);
+			data->acsValidator->restore(acsState, data->thisServerID, data->tag, data->version.get());
+		}
 	}
 
 	state RangeResult assigned = fShardAssigned.get();
@@ -13202,6 +13282,13 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			    te.detail("TSSJointID",
 			              UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
 			                  self->thisServerID.second() ^ self->ssPairID.get().second()));
+		    }
+		    if (self->acsValidator != nullptr) {
+			    te.detail("ACSCheckedMutationsSinceLastPrint", self->acsValidator->getAndClearCheckedMutations());
+			    te.detail("ACSCheckedVersionsSinceLastPrint", self->acsValidator->getAndClearCheckedVersions());
+			    te.detail("TotalMutations", self->acsValidator->getAndClearTotalMutations());
+			    te.detail("TotalAcsMutations", self->acsValidator->getAndClearTotalAcsMutations());
+			    te.detail("TotalAddedMutations", self->acsValidator->getAndClearTotalAddedMutations());
 		    }
 	    }));
 
