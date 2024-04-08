@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include <foundationdb/ClientWorkload.h>
+#include <foundationdb/CppWorkload.h>
 #define FDB_USE_LATEST_BINDINGS_API_VERSION
 #include <foundationdb/fdb_c.h>
 
