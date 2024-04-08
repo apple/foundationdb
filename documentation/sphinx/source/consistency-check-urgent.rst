@@ -19,21 +19,21 @@ The ConsistencyCheck_DataInconsistent trace event differentiates between these t
 Key features
 ============
 The Consistency Checker Urgent tool is designed to ensure safe, fast, and comprehensive checking of data consistency across the entire key space 
-(i.e., " " ~ "\xff\xff"). It achieves this through the following features:
+(i.e., " " ~ "\\xff\\xff"). It achieves this through the following features:
 
 * End-to-end completeness check --- The checker continues until all ranges are marked as complete.
 * Scalability --- Adding more testers results in nearly linear speedup with the number of testers.
 * Progress monitoring --- A single trace event (i.e. ConsistencyCheckUrgent_GotShardsToCheck) indicates the remaining number of shards to check.
 * Independence from the existing cluster --- The tool does not store any data in the cluster being checked.
 * Fault tolerance --- Tester failures do not impact the checker process. Shard checking failures are automatically retried.
-* Workload throttling --- Each tester can handle one task at a time, with a maximum read rate of 50MB/s (though the actual value should be much smaller).
-* Custom input ranges --- Users can specify at most 4 custom ranges in knobs. By default, the knob is set to check the entire key space (i.e., " " ~ "\xff\xff").
+* Workload throttling --- Each tester can handle one task at a time, with a maximum read rate of 50MB/s (specified by kmob CONSISTENCY_CHECK_RATE_LIMIT_MAX, though the actual value should be much smaller).
+* Custom input ranges --- Users can specify at most 4 custom ranges in knobs. By default, the knob is set to check the entire key space (i.e., " " ~ "\\xff\\xff").
 
 How to use?
 ===========
 To run the ConsistencyCheckerUrgent, you need 1 checker and N testers. The process is as follows:
 
-* If you want to check consistency within specific ranges, set ranges via knobs: CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_* and CONSISTENCY_CHECK_URGENT_RANGE_END_*. The custom range's start and end points must be represented in hexadecimal ASCII format, strictly adhering to the "\\x" prefix. By default, the knob is set to " " ~ "\\xff\\xff" to check the entire key space (i.e., " " ~ "\xff\xff").
+* If you want to check consistency within specific ranges, set ranges via knobs: CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_* and CONSISTENCY_CHECK_URGENT_RANGE_END_*. The custom range's start and end points must be represented in hexadecimal ASCII format, strictly adhering to the "\\\\x" (including two escape chars) prefix. By default, the knob is set to " " ~ "\\\\xff\\\\xff" to check the entire key space (i.e., " " ~ "\\xff\\xff").
 * Start N testers (i.e. fdbserver --class test).
 * Start the checker (i.e. fdbserver -r consistencycheckurgent --num-testers={num-testers}), which initiates the consistency checking automatically.
 * Once the checking is complete, the checker exits automatically, leaving the testers alive but idle.
