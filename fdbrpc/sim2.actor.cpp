@@ -147,6 +147,8 @@ void flip_bit(StringRef data, const char* file, int line) {
 	if (data.size() == 0)
 		return;
 	ASSERT(g_network->isSimulated() && g_simulator->isBitFlipInjectionEnabled());
+	if (g_simulator->isBitFlipInjected(file, line))
+		return;
 
 	int index = deterministicRandom()->randomInt(0, data.size());
 	int bit = deterministicRandom()->randomInt(0, 8);
@@ -167,6 +169,11 @@ void flip_bit(StringRef data, const char* file, int line) {
 void ISimulator::addBitFlipInjectionStats(const char* file, int line) {
 	std::string fileLine = format("%s:%d", file, line);
 	bitFlipInjections[fileLine]++;
+}
+
+bool ISimulator::isBitFlipInjected(const char* file, int line) {
+	std::string fileLine = format("%s:%d", file, line);
+	return g_simulator->bitFlipInjections.count(fileLine) > 0;
 }
 
 void ISimulator::disableFor(const std::string& desc, double time) {

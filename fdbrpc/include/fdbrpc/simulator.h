@@ -444,8 +444,8 @@ public:
 	void enableBitFlipInjection() { allowBitFlipInjection = true; }
 	bool isBitFlipInjectionEnabled() { return allowBitFlipInjection && !speedUpSimulation; }
 	void disableBitFlipInjection() { allowBitFlipInjection = false; }
-	void maybeInjectBitFlip(char* data, int size);
 	void addBitFlipInjectionStats(const char* file, int line);
+	bool isBitFlipInjected(const char* file, int line);
 
 protected:
 	Mutex mutex;
