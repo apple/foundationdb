@@ -6,6 +6,9 @@ Consistency Checker Urgent
 | Reviewer: Jingyu Zhou
 | Audience: FDB developers, SREs and expert users.
 
+
+Overview
+========
 In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers. 
 The Consistency Checker Urgent tool can be used to validate the consistency of all replicas for each key-value pair. 
 If any data inconsistency is detected, the tool generates ConsistencyCheck_DataInconsistent trace events for the corresponding shard. 
@@ -17,7 +20,7 @@ There are two types of data inconsistencies:
 The ConsistencyCheck_DataInconsistent trace event differentiates between these two types of corruption.
 
 Key features
-============
+------------
 The Consistency Checker Urgent tool is designed to ensure safe, fast, and comprehensive checking of data consistency across the entire key space 
 (i.e., " " ~ "\\xff\\xff"). It achieves this through the following features:
 
@@ -30,7 +33,7 @@ The Consistency Checker Urgent tool is designed to ensure safe, fast, and compre
 * Custom input ranges --- Users can specify at most 4 custom ranges in knobs. By default, the knob is set to check the entire key space (i.e., " " ~ "\\xff\\xff").
 
 How to use?
-===========
+-----------
 To run the ConsistencyCheckerUrgent, you need 1 checker and N testers. The process is as follows:
 
 * If you want to check consistency within specific ranges, set ranges via knobs: CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_* and CONSISTENCY_CHECK_URGENT_RANGE_END_*. The custom range's start and end points must be represented in hexadecimal ASCII format, strictly adhering to the "\\\\x" (including two escape chars) prefix. By default, the knob is set to " " ~ "\\\\xff\\\\xff" to check the entire key space (i.e., " " ~ "\\xff\\xff").
@@ -43,7 +46,7 @@ Users should manually remove testers when they are no longer needed.
 This approach allows for re-running the one-shot checking by restarting the checker process.
 
 Compared to Consistency Checker
-===============================
+-------------------------------
 
 ConsistencyCheckerUrgent offers significant improvements over the existing consistency checker in several key areas:
 
@@ -65,7 +68,7 @@ The ConsistencyCheckerUrgent system conducts consistency checks in a distributed
 The agents perform consistency checking tasks, comparing every key in the assigned range across all source servers at a specific version. As agents complete tasks or encounter failures, the leader is informed and updates the progress of the checking process accordingly.
 
 Workflow
-========
+--------
 
 The checker operates in the following steps:
 
