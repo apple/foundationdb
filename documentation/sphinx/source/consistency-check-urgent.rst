@@ -6,8 +6,8 @@ Consistency Checker Urgent
 | Reviewer: Jingyu Zhou
 | Audience: FDB developers, SREs and expert users.
 
-In a FoundationDB (FDB) key-value cluster, every key-value pair is copied across multiple storage servers to ensure consistency. 
-The Consistency Checker Urgent tool is used to validate this guarantee. 
+In a FoundationDB (FDB) key-value cluster, every key-value pair is copied across multiple storage servers. 
+The Consistency Checker Urgent tool is used to validate the consistency of all replica for each key-value pair. 
 If any data inconsistency is detected, the tool generates ConsistencyCheck_DataInconsistent trace events for the corresponding shard. 
 There are two types of data inconsistencies: 
 
