@@ -31,11 +31,13 @@ import (
 	"runtime"
 )
 
+const tenantMapKey = "\xff\xff/management/tenant_map/"
+
 // CreateTenant creates a new tenant in the cluster. The tenant name cannot
 // start with the \xff byte.
 func (t Transaction) CreateTenant(name KeyConvertible) error {
 	tenantName := name.FDBKey()
-	if len(tenantName) > 0 && tenantName[0] == '\xFF' {
+	if len(tenantName) == 0 || tenantName[0] == '\xff' {
 		return errTenantNameInvalid
 	}
 
@@ -43,7 +45,7 @@ func (t Transaction) CreateTenant(name KeyConvertible) error {
 		return err
 	}
 
-	key := append(Key("\xFF\xFF/management/tenant_map/"), tenantName...)
+	key := append(Key(tenantMapKey), tenantName...)
 
 	exist, err := t.checkTenantExist(key)
 	if err != nil {
@@ -67,13 +69,17 @@ func (d Database) CreateTenant(name KeyConvertible) error {
 	return err
 }
 
-// DeleteTenant deletes an existing tenant in the cluster.
+// DeleteTenant deletes an existing tenant in the cluster. If the provided tenant name doesn't exist an error will be thrown.
 func (t Transaction) DeleteTenant(name KeyConvertible) error {
+	tenantName := name.FDBKey()
+	if len(tenantName) == 0 || tenantName[0] == '\xff' {
+		return errTenantNameInvalid
+	}
 	if err := t.Options().SetSpecialKeySpaceEnableWrites(); err != nil {
 		return err
 	}
 
-	key := append(Key("\xFF\xFF/management/tenant_map/"), name.FDBKey()...)
+	key := append(Key(tenantMapKey), name.FDBKey()...)
 
 	exist, err := t.checkTenantExist(key)
 	if err != nil {
@@ -88,8 +94,7 @@ func (t Transaction) DeleteTenant(name KeyConvertible) error {
 	return nil
 }
 
-// DeleteTenant creates a new tenant in the cluster. The tenant name cannot
-// start with the \xff byte.
+// DeleteTenant deletes an existing tenant in the cluster. If the provided tenant name doesn't exist an error will be thrown.
 func (d Database) DeleteTenant(name KeyConvertible) error {
 	_, err := d.Transact(func(t Transaction) (interface{}, error) {
 		return nil, t.DeleteTenant(name)
@@ -103,7 +108,7 @@ func (t Transaction) ListTenants() ([]Key, error) {
 		return nil, err
 	}
 
-	kr, err := PrefixRange(Key("\xFF\xFF/management/tenant_map/"))
+	kr, err := PrefixRange(Key(tenantMapKey))
 	if err != nil {
 		return nil, err
 	}
@@ -116,25 +121,27 @@ func (t Transaction) ListTenants() ([]Key, error) {
 	// trim tenant prefix
 	tenants := make([]Key, len(rawTenants))
 	for i, rt := range rawTenants {
-		tenants[i] = rt.Key[25:] // len of tenant prefix
+		tenants[i] = rt.Key[len(tenantMapKey):]
 	}
 
 	return tenants, nil
 }
 
-// CreateTenant creates a new tenant in the cluster. The tenant name cannot
-// start with the \xff byte.
+// ListTenants lists all existings tenants in the cluster.
 func (d Database) ListTenants() ([]Key, error) {
 	tenants, err := d.Transact(func(t Transaction) (interface{}, error) {
 		return t.ListTenants()
 	})
+	if err != nil {
+		return nil, err
+	}
 	return tenants.([]Key), err
 }
 
 func (t Transaction) checkTenantExist(tenantPath Key) (bool, error) {
 	buf, err := t.Get(tenantPath).Get()
 	if err != nil {
-		return true, err
+		return false, err
 	}
 
 	return buf != nil, nil

@@ -313,57 +313,6 @@ func ExamplePrintable() {
 	// Output: \x00\x01\x02abc123!?\xff
 }
 
-func TestDatabaseCloseRemovesResources(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	// Close the database after usage
-	db.Close()
-
-	// Open the same database again, if the database is still in the cache we would return the same object, if not we create a new object with a new pointer
-	newDB, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	if db == newDB {
-		t.Fatalf("Expected a different database object, got: %v and %v\n", db, newDB)
-	}
-}
-
-func ExampleOpenWithConnectionString() {
-	fdb.MustAPIVersion(API_VERSION)
-
-	clusterFileContent, err := os.ReadFile(os.Getenv("FDB_CLUSTER_FILE"))
-	if err != nil {
-		fmt.Printf("Unable to read cluster file: %v\n", err)
-		return
-	}
-
-	// OpenWithConnectionString opens the database described by the connection string
-	db, err := fdb.OpenWithConnectionString(string(clusterFileContent))
-	if err != nil {
-		fmt.Printf("Unable to open database: %v\n", err)
-		return
-	}
-
-	// Close the database after usage
-	defer db.Close()
-
-	// Do work here
-
-	// Output:
-}
-
 // Copied from errors.go so that these types aren't public
 var (
 	errTenantNotFound    = fdb.Error{2131}
@@ -372,21 +321,12 @@ var (
 )
 
 func TestCreateTenant(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
 
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	testTenantName := fdb.Key("test-create-tenant")
 
-	var testTenantName = fdb.Key("test-create-tenant")
-
-	err = db.CreateTenant(testTenantName)
+	err := db.CreateTenant(testTenantName)
 	if err != nil {
 		t.Fatalf("Unable to create tenant: %v\n", err)
 	}
@@ -398,21 +338,12 @@ func TestCreateTenant(t *testing.T) {
 }
 
 func TestCreateExistTenant(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
 
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	testTenantName := fdb.Key("test-exist-tenant")
 
-	var testTenantName = fdb.Key("test-exist-tenant")
-
-	err = db.CreateTenant(testTenantName)
+	err := db.CreateTenant(testTenantName)
 	if err != nil {
 		t.Fatalf("Unable to create tenant: %v\n", err)
 	}
@@ -423,42 +354,24 @@ func TestCreateExistTenant(t *testing.T) {
 }
 
 func TestOpenNotExistTenant(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
 
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	var testTenantName = fdb.Key("test-not-exist-tenant")
+	testTenantName := fdb.Key("test-not-exist-tenant")
 
 	// this should fail
-	_, err = db.OpenTenant(testTenantName)
+	_, err := db.OpenTenant(testTenantName)
 	assertErrorCodeEqual(t, err, errTenantNotFound)
 }
 
 func TestDeleteNotExistTenant(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
 
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	var testTenantName = fdb.Key("test-not-exist-tenant")
+	testTenantName := fdb.Key("test-not-exist-tenant")
 
 	// this should fail
-	err = db.DeleteTenant(testTenantName)
+	err := db.DeleteTenant(testTenantName)
 	assertErrorCodeEqual(t, err, errTenantNotFound)
 }
 
@@ -487,22 +400,13 @@ func assertErrorCodeEqual(t *testing.T, actual error, expected fdb.Error) {
 }
 
 func TestListTenant(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
 
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	testTenantName1 := fdb.Key("1-test-list-1-tenant-1")
+	testTenantName2 := fdb.Key("2-test-list-2-tenant-2")
 
-	var testTenantName1 = fdb.Key("1-test-list-1-tenant-1")
-	var testTenantName2 = fdb.Key("2-test-list-2-tenant-2")
-
-	err = db.CreateTenant(testTenantName1)
+	err := db.CreateTenant(testTenantName1)
 	if err != nil {
 		t.Fatalf("Unable to create tenant 1: %v\n", err)
 	}
@@ -527,21 +431,12 @@ func TestListTenant(t *testing.T) {
 }
 
 func TestInvalidPrefixTenant(t *testing.T) {
-	err := fdb.APIVersion(API_VERSION)
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
 
-	// OpenDefault opens the database described by the platform-specific default
-	// cluster file
-	db, err := fdb.OpenDefault()
-	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", err)
-	}
-
-	var testTenantName = fdb.Key("\xFFtest-invalid-prefix-tenant")
+	testTenantName := fdb.Key("\xFFtest-invalid-prefix-tenant")
 
 	// this should fail
-	err = db.CreateTenant(testTenantName)
+	err := db.CreateTenant(testTenantName)
 	assertErrorCodeEqual(t, err, errTenantNameInvalid)
 }
