@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
@@ -40,12 +41,14 @@ struct BitFlipWorkload : FailureInjectionWorkload {
 	double duration = 10.0;
 
 	BitFlipWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
-		enabled = !clientId && g_network->isSimulated();
+		enabled = !clientId && g_network->isSimulated() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+		          CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM;
 	}
 
 	BitFlipWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		// only do this on the "first" client in simulation
-		enabled = !clientId && g_network->isSimulated();
+		enabled = !clientId && g_network->isSimulated() && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
+		          CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM;
 		initialDelay = getOption(options, "initialDelay"_sr, 0.0);
 		duration = getOption(options, "testDuration"_sr, 20.0);
 	}
