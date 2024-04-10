@@ -166,6 +166,10 @@ void flip_bit(StringRef data, const char* file, int line) {
 	// ASSERT(false);
 }
 
+Severity getBitFlipSeverityType() {
+	return g_simulator && g_simulator->isBitFlipInjected() ? SevWarn : SevError;
+}
+
 void ISimulator::addBitFlipInjectionStats(const char* file, int line) {
 	std::string fileLine = format("%s:%d", file, line);
 	bitFlipInjections[fileLine]++;

@@ -28,6 +28,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbrpc/TenantInfo.h"
+#include "fdbrpc/simulator.h"
 #include "flow/ApiVersion.h"
 #include "flow/network.h"
 #include "fmt/format.h"
@@ -11213,11 +11214,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						}
 					} else {
 						if (!msg.validateChecksum() || !validateAccumulativeChecksumIndexAtStorageServer(msg)) {
-							TraceEvent(SevError, "ValidateChecksumOrAcsIndexError", data->thisServerID)
+							TraceEvent(getBitFlipSeverityType(), "ValidateChecksumOrAcsIndexError", data->thisServerID)
 							    .detail("Mutation", msg)
 							    .detail("ResolverGeneratePrivateMutation",
 							            SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
-							ASSERT(false);
+							// ASSERT(false);
+							throw please_reboot();
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
