@@ -584,6 +584,9 @@ extern const KeyRangeRef applyLogKeys;
 // Returns true if m is a blog (backup log) or alog (apply log) mutation
 bool isBackupLogMutation(const MutationRef& m);
 
+// Returns true if m is an acs mutation: a mutation carrying accumulative checksum value
+bool isAccumulativeChecksumMutation(const MutationRef& m);
+
 extern const KeyRef backupVersionKey;
 extern const ValueRef backupVersionValue;
 extern const int backupVersion;

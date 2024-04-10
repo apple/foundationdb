@@ -10726,6 +10726,8 @@ private:
 			    .detail("KeyCount", keyCount)
 			    .detail("ValSize", valSize)
 			    .detail("Seed", seed);
+		} else if (isAccumulativeChecksumMutation(m)) {
+			// skip
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11012,7 +11014,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					cloneReader >> msg;
 					ASSERT(data->encryptionMode.present());
 					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-					       isBackupLogMutation(msg));
+					       isBackupLogMutation(msg) || isAccumulativeChecksumMutation(msg));
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							msg.updateEncryptCipherDetails(cipherDetails);
@@ -11171,7 +11173,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 				ASSERT(data->encryptionMode.present());
 				ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-				       isBackupLogMutation(msg));
+				       isBackupLogMutation(msg) || isAccumulativeChecksumMutation(msg));
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
