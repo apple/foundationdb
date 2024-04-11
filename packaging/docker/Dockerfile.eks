@@ -67,7 +67,7 @@ RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-e
 
 WORKDIR /
 
-FROM golang:1.17.11-bullseye AS go-build
+FROM golang:1.22.2-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
