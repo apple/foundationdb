@@ -181,6 +181,7 @@ install(DIRECTORY "${script_dir}/clients/usr/lib/cmake"
 ################################################################################
 
 file(COPY "${PROJECT_SOURCE_DIR}/packaging/docker" DESTINATION "${PROJECT_BINARY_DIR}/packages/")
+file(COPY "${PROJECT_SOURCE_DIR}/fdbkubernetesmonitor" DESTINATION "${PROJECT_BINARY_DIR}/packages/docker/")
 
 ################################################################################
 # General CPack configuration
