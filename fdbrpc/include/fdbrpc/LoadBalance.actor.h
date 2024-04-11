@@ -43,6 +43,11 @@
 
 ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
+enum ComparisonType {
+	TSS_COMPARISON = 0,
+	REPLICA_COMPARISON = 1,
+};
+
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
 	bool released;
@@ -147,7 +152,7 @@ Future<Void> tssComparison(Req req,
 				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
 				        : SevError,
-				    TSS_mismatchTraceName(req));
+				    LB_mismatchTraceName(req, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
@@ -211,7 +216,7 @@ Future<Void> tssComparison(Req req,
 						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 						                            ? SevWarnAlways
 						                            : SevError,
-						                        TSS_mismatchTraceName(req));
+						                        LB_mismatchTraceName(req, TSS_COMPARISON));
 						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
 					}
 				} else {
@@ -240,6 +245,86 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
+ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
+Future<Void> replicaComparison(Req req,
+                               Future<ErrorOr<Resp>> fSource,
+                               uint64_t srcEndpointId,
+                               Reference<MultiInterface<Multi>> ssTeam,
+                               RequestStream<Req, P> Interface::*channel) {
+	state int srcErrorCode = error_code_success;
+	state ErrorOr<Resp> src;
+
+	if (ssTeam->size() <= 1) {
+		return Void();
+	}
+
+	wait(store(src, fSource));
+
+	if (src.isError()) {
+		srcErrorCode = src.getError().code();
+	} else {
+		state Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
+
+		if (srcLB.present() && srcLB.get().error.present()) {
+			srcErrorCode = srcLB.get().error.get().code();
+		} else if (!srcLB.present() || !srcLB.get().error.present()) {
+			// Verify that the other SS servers in the team have the same data.
+			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
+			restOfTeamFutures.reserve(ssTeam->size() - 1);
+			for (int i = 0; i < ssTeam->size(); i++) {
+				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
+				if (si->getEndpoint().token.first() !=
+				    srcEndpointId) { // don't re-request to SS we already have a response from
+					if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
+						resetReply(req);
+						restOfTeamFutures.push_back(
+						    timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT));
+					}
+				}
+			}
+
+			wait(waitForAllReady(restOfTeamFutures));
+
+			int numError = 0;
+			int numMismatch = 0;
+			int numFetchReplicaTimeout = 0;
+			for (Future<Optional<ErrorOr<Resp>>> f : restOfTeamFutures) {
+				if (!f.canGet()) {
+					numError++;
+				} else if (!f.get().present()) {
+					numFetchReplicaTimeout++;
+				} else if (f.get().get().isError()) {
+					numError++;
+				} else {
+					Optional<LoadBalancedReply> fLB = getLoadBalancedReply(&f.get().get().get());
+
+					ASSERT(srcLB.present() ==
+					       fLB.present()); // getLoadBalancedReply returned different responses for same templated type
+
+					if (fLB.present() && fLB.get().error.present()) {
+						numError++;
+					} else if (fLB.present() &&
+					           !TSS_doCompare(
+					               src.get(),
+					               f.get().get().get())) { // re-use TSS compare logic to compare the replicas
+						numMismatch++;
+						TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, TSS_COMPARISON));
+						mismatchEvent.detail("ReplicaFetchErrors", numError)
+						    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
+						// Re-use TSS trace mechanism to log replica mismatch information.
+						TSS_traceMismatch(mismatchEvent, req, src.get(), f.get().get().get());
+					}
+				}
+			}
+
+			if (numMismatch) {
+				throw storage_replica_comparison_error();
+			}
+		}
+	}
+	return Void();
+}
+
 FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
@@ -251,9 +336,15 @@ struct RequestData : NonCopyable {
 	Future<Reply> response;
 	Reference<ModelHolder> modelHolder;
 	TriedAllOptions triedAllOptions{ false };
+	RequestStream<Request, P> const* requestStream = nullptr;
 
 	bool requestStarted = false; // true once the request has been sent to an alternative
 	bool requestProcessed = false; // true once a response has been received and handled by checkAndProcessResult
+
+	bool compareReplicas = false;
+	Future<Void> comparisonResult;
+
+	RequestData(bool compareReplicas = false) : compareReplicas(compareReplicas) {}
 
 	// Whether or not the response future is valid
 	// This is true once setupRequest is called, even though at that point the response is Never().
@@ -286,6 +377,19 @@ struct RequestData : NonCopyable {
 		}
 	}
 
+	Future<Void> maybeDoReplicaComparison(Request& request,
+	                                      QueueModel* model,
+	                                      Reference<MultiInterface<Multi>> alternatives,
+	                                      RequestStream<Request, P> Interface::*channel) {
+		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
+			ASSERT(requestStream != nullptr);
+			return replicaComparison(
+			    request, response, requestStream->getEndpoint().token.first(), alternatives, channel);
+		}
+
+		return Void();
+	}
+
 	// Initializes the request state and starts it, possibly after a backoff delay
 	void startRequest(
 	    double backoff,
@@ -296,6 +400,7 @@ struct RequestData : NonCopyable {
 	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through for TSS check
 	    RequestStream<Request, P> Interface::*channel) {
 		modelHolder = Reference<ModelHolder>();
+		requestStream = stream;
 		requestStarted = false;
 
 		if (backoff > 0) {
@@ -401,7 +506,6 @@ struct RequestData : NonCopyable {
 	// processed so we can update the queue model.
 	void makeLaggingRequest() {
 		ASSERT(response.isValid());
-		ASSERT(!response.isReady());
 		ASSERT(modelHolder);
 		ASSERT(modelHolder->model);
 
@@ -447,10 +551,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr) {
+    QueueModel* model = nullptr,
+    bool compareReplicas = false) {
 
-	state RequestData<Request, Interface, Multi, P> firstRequestData;
-	state RequestData<Request, Interface, Multi, P> secondRequestData;
+	state RequestData<Request, Interface, Multi, P> firstRequestData(compareReplicas);
+	state RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
 
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Void> secondDelay = Never();
@@ -639,9 +744,13 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
 			// Only the first location is available.
-			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
+			wait(success(firstRequestData.response));
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-				return result.get();
+				// Do consistency check, if requested.
+				wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
+
+				ASSERT(firstRequestData.response.isReady());
+				return firstRequestData.response.get().get();
 			}
 
 			firstRequestEndpoint = Optional<uint64_t>();
@@ -661,22 +770,35 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 
+			state bool firstRequestSuccessful = false;
+			state bool secondRequestSuccessful = false;
+
 			loop choose {
-				when(ErrorOr<REPLY_TYPE(Request)> result =
-				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
+				when(wait(success(firstRequestData.response.isValid() ? firstRequestData.response : Never()))) {
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-						return result.get();
+						firstRequestSuccessful = true;
+						break;
 					}
 
 					firstRequestEndpoint = Optional<uint64_t>();
 				}
-				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
+				when(wait(success(secondRequestData.response))) {
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
-						return result.get();
+						secondRequestSuccessful = true;
 					}
 
 					break;
 				}
+			}
+
+			if (firstRequestSuccessful || secondRequestSuccessful) {
+				// Do consistency check, by comparing storage replicas, if requested.
+				state RequestData<Request, Interface, Multi, P>* requestData =
+				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
+				wait(requestData->maybeDoReplicaComparison(request, model, alternatives, channel));
+
+				ASSERT(requestData->response.isReady());
+				return requestData->response.get().get();
 			}
 
 			if (++numAttempts >= alternatives->size()) {
@@ -703,7 +825,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 			loop {
 				choose {
-					when(ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response)) {
+					when(wait(success(firstRequestData.response))) {
 						if (model) {
 							model->secondMultiplier =
 							    std::max(model->secondMultiplier - FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_DECAY, 1.0);
@@ -713,7 +835,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						}
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-							return result.get();
+							// Do consistency check, by comparing storage replicas, if requested.
+							wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
+
+							ASSERT(firstRequestData.response.isReady());
+							return firstRequestData.response.get().get();
 						}
 
 						firstRequestEndpoint = Optional<uint64_t>();

@@ -197,6 +197,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
 	init( BLOB_GRANULE_RESTORE_CHECK_INTERVAL,      10 );
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
+	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, true );
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );

@@ -114,8 +114,8 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 template <class Rep>
 bool TSS_doCompare(const Rep& src, const Rep& tss);
 
-template <class Req>
-const char* TSS_mismatchTraceName(const Req& req);
+template <class Req, class Type>
+const char* LB_mismatchTraceName(const Req& req, const Type& type);
 
 template <class Req, class Rep>
 void TSS_traceMismatch(TraceEvent& event, const Req& req, const Rep& src, const Rep& tss);
