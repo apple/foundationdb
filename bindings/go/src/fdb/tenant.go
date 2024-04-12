@@ -31,7 +31,7 @@ import (
 	"runtime"
 )
 
-const tenantMapKey = "\xff\xff/management/tenant_map/"
+const tenantMapKey = "\xff\xff/management/tenant/map/"
 
 // CreateTenant creates a new tenant in the cluster. The tenant name cannot
 // start with the \xff byte.
