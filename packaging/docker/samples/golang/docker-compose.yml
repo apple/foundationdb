@@ -57,7 +57,8 @@ services:
       context: app
       args:
         FDB_VERSION: ${FDB_VERSION}
-    network_mode: host
+    ports:
+      - 8080:8080/tcp
     environment:
       FDB_COORDINATOR: ${FDB_COORDINATOR}
       FDB_API_VERSION: ${FDB_API_VERSION}
