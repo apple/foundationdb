@@ -59,7 +59,7 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM golang:1.16.7-bullseye AS go-build
+FROM golang:1.22.2-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
@@ -158,8 +158,8 @@ RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539
     rm -rf /tmp/*
 WORKDIR /
 # Set Up Runtime Scripts and Directories
-ADD fdb.bash /var/fdb/scripts/
-RUN chmod a+x /var/fdb/scripts/fdb.bash
+ADD fdb.bash fdb_single.bash /var/fdb/scripts/
+RUN chmod a+x /var/fdb/scripts/fdb.bash /var/fdb/scripts/fdb_single.bash
 VOLUME /var/fdb/data
 ENV FDB_PORT 4500
 ENV FDB_CLUSTER_FILE /var/fdb/fdb.cluster

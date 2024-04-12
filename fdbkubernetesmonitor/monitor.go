@@ -21,9 +21,12 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -31,6 +34,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/utils/pointer"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
@@ -47,6 +53,9 @@ const errorBackoffSeconds = 60
 type Monitor struct {
 	// ConfigFile defines the path to the config file to load.
 	ConfigFile string
+
+	// CurrentContainerVersion defines the version of the container. This will be the same as the fdbserver version.
+	CurrentContainerVersion string
 
 	// CustomEnvironment defines the custom environment variables to use when
 	// interpreting the monitor configuration.
@@ -86,21 +95,50 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int) {
-	podClient, err := CreatePodClient(logger)
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string) {
+	podClient, err := CreatePodClient(ctx, logger)
 	if err != nil {
-		panic(err)
+		logger.Error(err, "could not create Pod client")
+		os.Exit(1)
 	}
 
 	monitor := &Monitor{
-		ConfigFile:        configFile,
-		PodClient:         podClient,
-		Logger:            logger,
-		CustomEnvironment: customEnvironment,
-		ProcessCount:      processCount,
+		ConfigFile:              configFile,
+		PodClient:               podClient,
+		Logger:                  logger,
+		CustomEnvironment:       customEnvironment,
+		ProcessCount:            processCount,
+		CurrentContainerVersion: currentContainerVersion,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
+
+	mux := http.NewServeMux()
+	// Enable pprof endpoints for debugging purposes.
+	if enableDebug {
+		mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+		mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		mux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+		mux.Handle("/debug/pprof/block", pprof.Handler("block"))
+		mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+
+	// Add Prometheus support
+	mux.Handle("/metrics", promhttp.Handler())
+	go func() {
+		err := http.ListenAndServe(listenAddr, mux)
+		if err != nil {
+			logger.Error(err, "could not start HTTP server")
+			os.Exit(1)
+		}
+	}()
+
 	monitor.Run()
 }
 
@@ -123,7 +161,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	if currentContainerVersion == configuration.Version {
+	if monitor.CurrentContainerVersion == configuration.Version {
 		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")
@@ -152,7 +190,7 @@ func checkOwnerExecutable(path string) error {
 		return err
 	}
 	if binaryStat.Mode()&0o100 == 0 {
-		return fmt.Errorf("Binary is not executable")
+		return fmt.Errorf("binary is not executable")
 	}
 	return nil
 }
@@ -289,12 +327,13 @@ func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
-	runProcesses := monitor.ActiveConfiguration.RunServers
-	if monitor.ProcessCount < processNumber || (runProcesses != nil && !*runProcesses) {
+	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
+	if monitor.ProcessCount < processNumber || !runProcesses {
 		logger.Info("Terminating run loop")
 		monitor.ProcessIDs[processNumber] = 0
 		return false
 	}
+
 	return true
 }
 
@@ -341,6 +380,9 @@ func (monitor *Monitor) Run() {
 	go func() {
 		latestSignal := <-signals
 		monitor.Logger.Info("Received system signal", "signal", latestSignal)
+
+		// Reset the ProcessCount to 0 to make sure the monitor doesn't try to restart the processes.
+		monitor.ProcessCount = 0
 		for processNumber, processID := range monitor.ProcessIDs {
 			if processID > 0 {
 				subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
@@ -357,6 +399,18 @@ func (monitor *Monitor) Run() {
 				}
 			}
 		}
+
+		annotations := monitor.PodClient.metadata.Annotations
+		if len(annotations) > 0 {
+			delayValue, ok := annotations[DelayShutdownAnnotation]
+			if ok {
+				delay, err := time.ParseDuration(delayValue)
+				if err == nil {
+					time.Sleep(delay)
+				}
+			}
+		}
+
 		done <- true
 	}()
 
@@ -370,12 +424,18 @@ func (monitor *Monitor) Run() {
 		panic(err)
 	}
 
-	defer watcher.Close()
+	defer func(watcher *fsnotify.Watcher) {
+		err := watcher.Close()
+		if err != nil {
+			monitor.Logger.Error(err, "could not close watcher")
+		}
+	}(watcher)
 	go func() { monitor.WatchConfiguration(watcher) }()
 
 	<-done
 }
 
+// WatchPodTimestamps watches the timestamp feed to reload the configuration.
 func (monitor *Monitor) WatchPodTimestamps() {
 	for timestamp := range monitor.PodClient.TimestampFeed {
 		if timestamp > monitor.LastConfigurationTime.Unix() {
