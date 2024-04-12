@@ -21,6 +21,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,8 +35,8 @@ import (
 	"syscall"
 	"time"
 
-	"k8s.io/utils/pointer"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/utils/pointer"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
@@ -52,6 +53,9 @@ const errorBackoffSeconds = 60
 type Monitor struct {
 	// ConfigFile defines the path to the config file to load.
 	ConfigFile string
+
+	// CurrentContainerVersion defines the version of the container. This will be the same as the fdbserver version.
+	CurrentContainerVersion string
 
 	// CustomEnvironment defines the custom environment variables to use when
 	// interpreting the monitor configuration.
@@ -91,18 +95,20 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool) {
-	podClient, err := CreatePodClient(logger)
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string) {
+	podClient, err := CreatePodClient(ctx, logger)
 	if err != nil {
-		panic(err)
+		logger.Error(err, "could not create Pod client")
+		os.Exit(1)
 	}
 
 	monitor := &Monitor{
-		ConfigFile:        configFile,
-		PodClient:         podClient,
-		Logger:            logger,
-		CustomEnvironment: customEnvironment,
-		ProcessCount:      processCount,
+		ConfigFile:              configFile,
+		PodClient:               podClient,
+		Logger:                  logger,
+		CustomEnvironment:       customEnvironment,
+		ProcessCount:            processCount,
+		CurrentContainerVersion: currentContainerVersion,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
@@ -155,7 +161,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	if currentContainerVersion == configuration.Version {
+	if monitor.CurrentContainerVersion == configuration.Version {
 		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")
@@ -184,7 +190,7 @@ func checkOwnerExecutable(path string) error {
 		return err
 	}
 	if binaryStat.Mode()&0o100 == 0 {
-		return fmt.Errorf("Binary is not executable")
+		return fmt.Errorf("binary is not executable")
 	}
 	return nil
 }
@@ -374,6 +380,9 @@ func (monitor *Monitor) Run() {
 	go func() {
 		latestSignal := <-signals
 		monitor.Logger.Info("Received system signal", "signal", latestSignal)
+
+		// Reset the ProcessCount to 0 to make sure the monitor doesn't try to restart the processes.
+		monitor.ProcessCount = 0
 		for processNumber, processID := range monitor.ProcessIDs {
 			if processID > 0 {
 				subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
@@ -390,6 +399,18 @@ func (monitor *Monitor) Run() {
 				}
 			}
 		}
+
+		annotations := monitor.PodClient.metadata.Annotations
+		if len(annotations) > 0 {
+			delayValue, ok := annotations[DelayShutdownAnnotation]
+			if ok {
+				delay, err := time.ParseDuration(delayValue)
+				if err == nil {
+					time.Sleep(delay)
+				}
+			}
+		}
+
 		done <- true
 	}()
 
