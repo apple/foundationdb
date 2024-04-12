@@ -11426,7 +11426,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				           msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
 					// We have to check accumulative checksum when iterating through cloneCursor2,
 					// where ss removal by tag assignment takes effect immediately
-					data->acsValidator->addMutation(msg, data->thisServerID, data->tag, data->version.get());
+					data->acsValidator->addMutation(
+					    msg, data->thisServerID, data->tag, data->version.get(), cloneCursor2->version().version);
 				}
 
 				Span span("SS:update"_loc, spanContext);

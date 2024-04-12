@@ -49,9 +49,9 @@ inline bool tagSupportAccumulativeChecksum(Tag tag) {
 }
 
 // Define how to aggregate ACS values of a vector of mutations from a starting ACS
-inline uint32_t aggregateAcs(uint32_t startAcs, Standalone<VectorRef<MutationRef>> mutations) {
+inline uint32_t aggregateAcs(uint32_t startAcs, Standalone<VectorRef<std::pair<Version, MutationRef>>> mutations) {
 	uint32_t newAcs = startAcs;
-	for (const auto& mutation : mutations) {
+	for (const auto& [version, mutation] : mutations) {
 		ASSERT(mutation.checksum.present());
 		newAcs = calculateAccumulativeChecksum(newAcs, mutation.checksum.get());
 	}
@@ -121,7 +121,7 @@ public:
 
 	// Called when SS pulls a non-ACS mutation
 	// Add the mutation to the mutation buffer
-	void addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion);
+	void addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion, Version mutationVersion);
 
 	// Called when SS receives an ACS mutation
 	// Consume the current mutation buffer to generate ACS
@@ -175,7 +175,7 @@ private:
 	// Any mutation is added to mutationBuffer at first. Those mutations
 	// will be consumed to generate ACS value until SS receives the first
 	// following ACS mutation.
-	Standalone<VectorRef<MutationRef>> mutationBuffer;
+	Standalone<VectorRef<std::pair<Version, MutationRef>>> mutationBuffer;
 	uint64_t checkedMutations = 0; // the number of mutations checked by ACS
 	uint64_t checkedVersions = 0; // the number of versions checked by ACS
 	uint64_t totalMutations = 0; // the number of mutations received by SS

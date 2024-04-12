@@ -121,32 +121,46 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersio
 	}
 }
 
-void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion) {
+void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
+                                                UID ssid,
+                                                Tag tag,
+                                                Version ssVersion,
+                                                Version mutationVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
-	Version atAcsVersion = 0;
 	if (!mutationBuffer.empty()) {
-		ASSERT(mutationBuffer[0].accumulativeChecksumIndex.present());
-		if (mutationBuffer[0].accumulativeChecksumIndex.get() != acsIndex) {
+		ASSERT(mutationBuffer[0].second.accumulativeChecksumIndex.present());
+		if (mutationBuffer[0].first != mutationVersion) {
+			TraceEvent(SevError, "AcsValidatorAcsMutationVersionMismatch", ssid)
+			    .detail("Context", "AddMutation")
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("MissingVersion", mutationBuffer[0].first)
+			    .detail("Mutation", mutation.toString())
+			    .detail("SSVersion", ssVersion)
+			    .detail("MutationVersion", mutationVersion);
+			throw please_reboot();
+		} else if (mutationBuffer[0].second.accumulativeChecksumIndex.get() != acsIndex) {
 			TraceEvent(SevError, "AcsValidatorMissingAcs", ssid)
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
-			    .detail("MissingAcsIndex", mutationBuffer[0].accumulativeChecksumIndex.get())
+			    .detail("MissingAcsIndex", mutationBuffer[0].second.accumulativeChecksumIndex.get())
 			    .detail("Mutation", mutation.toString())
-			    .detail("LastAcsVersion", atAcsVersion)
-			    .detail("SSVersion", ssVersion);
+			    .detail("SSVersion", ssVersion)
+			    .detail("MutationVersion", mutationVersion);
+			throw please_reboot();
 		}
 	}
-	mutationBuffer.push_back(mutationBuffer.arena(), mutation);
+	mutationBuffer.push_back(mutationBuffer.arena(), std::make_pair(mutationVersion, mutation));
 	totalAddedMutations++;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorAddMutation", ssid)
 		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("Mutation", mutation.toString())
-		    .detail("LastAcsVersion", atAcsVersion)
-		    .detail("SSVersion", ssVersion);
+		    .detail("SSVersion", ssVersion)
+		    .detail("MutationVersion", mutationVersion);
 	}
 }
 
@@ -214,6 +228,16 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("Epoch", acsMutationState.epoch)
 		    .detail("Cleared", cleared);
 		throw please_reboot();
+	} else if (newVersion != mutationBuffer.back().first) {
+		TraceEvent(SevError, "AcsValidatorAcsMutationVersionMismatch", ssid)
+		    .detail("Context", "ValidateAcs")
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("LastMutationVersion", mutationBuffer.back().first)
+		    .detail("LastMutation", mutationBuffer.back().second.toString())
+		    .detail("SSVersion", ssVersion)
+		    .detail("AcsState", acsMutationState.toString());
+		throw please_reboot();
 	} else {
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsValidatorAcsMutationValidated", ssid)
@@ -239,6 +263,15 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
                                             Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const uint16_t& acsIndex = acsState.acsIndex;
+	if (acsState.version > ssVersion) {
+		TraceEvent(SevError, "AcsValidatorAcsMutationVersionMismatch", ssid)
+		    .detail("Context", "Restore")
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("SSVersion", ssVersion)
+		    .detail("AcsState", acsState.toString());
+		throw please_reboot();
+	}
 	acsTable[acsIndex] = acsState;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorRestore", ssid)
