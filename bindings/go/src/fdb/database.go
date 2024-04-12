@@ -131,6 +131,22 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 	}
 }
 
+func transact(tr Transaction, f func(Transaction) (interface{}, error)) (interface{}, error) {
+	wrapped := func() (ret interface{}, e error) {
+		defer panicToError(&e)
+
+		ret, e = f(tr)
+
+		if e == nil {
+			e = tr.Commit().Get()
+		}
+
+		return
+	}
+
+	return retryable(wrapped, tr.OnError)
+}
+
 // Transact runs a caller-provided function inside a retry loop, providing it
 // with a newly created Transaction. After the function returns, the Transaction
 // will be committed automatically. Any error during execution of the function
@@ -160,6 +176,11 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 		return nil, e
 	}
 
+	return transact(tr, f)
+}
+
+
+func readTransact(tr Transaction, f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
 	wrapped := func() (ret interface{}, e error) {
 		defer panicToError(&e)
 
@@ -203,19 +224,7 @@ func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (in
 		return nil, e
 	}
 
-	wrapped := func() (ret interface{}, e error) {
-		defer panicToError(&e)
-
-		ret, e = f(tr)
-
-		if e == nil {
-			e = tr.Commit().Get()
-		}
-
-		return
-	}
-
-	return retryable(wrapped, tr.OnError)
+	return readTransact(tr, f)
 }
 
 // Options returns a DatabaseOptions instance suitable for setting options
