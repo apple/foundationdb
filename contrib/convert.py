@@ -1,16 +1,13 @@
 #!/usr/bin/env python
 
-# this script can convert version to an estimated timestamp for a cluster,
-# or convert a timestamp to an estimated version.
-
 import argparse
 import fdb
 import time
 from datetime import datetime
 
-fdb.api_version(630)
+fdb.api_version(730)
 
-db = fdb.open(cluster_file="/var/dynamic-conf/fdb.cluster")
+db = fdb.open(cluster_file="/data/v8/fdb/playstation_carnivalfdbserver/000000265/st.cluster")
 
 @fdb.transactional
 def find_version_for_timestamp(tr, timestamp, start):
@@ -50,41 +47,60 @@ def find_timestamp_for_version(tr, version):
     tr.options.set_read_system_keys()
     tr.options.set_read_lock_aware()
     timekeeper_prefix = b'\xff\x02/timeKeeper/map/'
+    timekeeper_prefix_end = b'\xff\x02/timeKeeper/map0'
     prefix_len = len(timekeeper_prefix)
-    max_ts = int(time.time()) # current time
-    min_ts = int(max_ts - 5e7) # retrive up to 578 days
+    ts_max = 0
+    ts_min = 0
     version_per_sec = 1e6
-    get_range_has_result = False
     exact_match = False
-    while min_ts < max_ts:
-        mid_ts = int((min_ts + max_ts + 1) / 2)
-        min_packed = fdb.tuple.pack((min_ts,))
-        mid_packed = fdb.tuple.pack((mid_ts,))
-        # print ("min {} mid {} max {}".format(min_ts, mid_ts, max_ts))
+    ts_final = 0
+    version_final = 0
+    start_key = fdb.KeySelector.first_greater_than(timekeeper_prefix)
+    end_key = fdb.KeySelector.last_less_than(timekeeper_prefix_end) # getRange is inclusive
+    # check if too small
+    for k, v in tr.snapshot.get_range(start_key, end_key, limit=1, reverse=False):
+        k = k[prefix_len:] # exclude the prefix
+        ts_cur = int(fdb.tuple.unpack(k)[0])
+        version_cur = int(fdb.tuple.unpack(v)[0])
+        if version_cur > version:
+            print ("Version is smaller than anything recorded, estimates might not be accurate. ")
+            return ts_cur + (version - version_cur) / version_per_sec
+        ts_max = ts_cur
+
+    # check if too large
+    for k, v in tr.snapshot.get_range(start_key, end_key, limit=1, reverse=True):
+        k = k[prefix_len:] # exclude the prefix
+        ts_cur = int(fdb.tuple.unpack(k)[0])
+        version_cur = int(fdb.tuple.unpack(v)[0])
+        if version_cur < version:
+            print ("Version is bigger than anything recorded, estimates might not be accurate. ")
+            return ts_cur + (version - version_cur) / version_per_sec
+        ts_min = ts_cur
+
+    while ts_min < ts_max:
+        ts_mid = int((ts_min + ts_max + 1) / 2)
+        min_packed = fdb.tuple.pack((ts_min,))
+        mid_packed = fdb.tuple.pack((ts_mid,))
+        # print ("min {} mid {} max {}".format(ts_min, ts_mid, ts_max))
         start_key = fdb.KeySelector.first_greater_or_equal(timekeeper_prefix + min_packed)
-        end_key = fdb.KeySelector.first_greater_than(timekeeper_prefix + mid_packed)
+        end_key = fdb.KeySelector.last_less_or_equal(timekeeper_prefix + mid_packed)
 
         for k, v in tr.snapshot.get_range(start_key, end_key, limit=1, reverse=True):
-            get_range_has_result = True
             k = k[prefix_len:] # exclude the prefix
-            k_unpacked = int(fdb.tuple.unpack(k)[0])
-            v_unpacked = int(fdb.tuple.unpack(v)[0])
-            if version < v_unpacked:
-                max_ts = k_unpacked - 1
-            elif version > v_unpacked:
-                min_ts = k_unpacked + 1
+            ts_cur = int(fdb.tuple.unpack(k)[0])
+            version_cur = int(fdb.tuple.unpack(v)[0])
+            if version < version_cur:
+                ts_max = ts_cur - 1
+            elif version > version_cur:
+                ts_min = ts_cur + 1
             else:
                 exact_match = True
-        if not get_range_has_result:
-            print ("Cannot find the exact timestamp, will give best estimates")
-            break
         if exact_match:
             print ("Saw the exact timestamp")
             break
-        get_range_has_result = False
 
     # try to give best estimates despite the corresponding time is out of range
-    return k_unpacked + (version - v_unpacked) / version_per_sec
+    return ts_cur + (version - version_cur) / version_per_sec
 
 def getVersion(args):
     print("Executing getVersion with startTime: {}, endTime: {}, mutationTime: {}".format(args.startTime, args.endTime, args.mutationTime))
@@ -108,7 +124,7 @@ def getTime(args):
     ts = int(find_timestamp_for_version(db, v))
 
     print("timestamp: " + str(ts))
-    print("GMT time:" + datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S'))
+    print("local time:" + datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S'))
 
 def main():
     parser = argparse.ArgumentParser(description="My Command Line Tool")
