@@ -335,6 +335,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );
 
 	init( ENABLE_MUTATION_CHECKSUM,                 false ); // if ( randomize && BUGGIFY )  ENABLE_MUTATION_CHECKSUM = true; Enable this after deserialiser is ported to 7.3.
+	init( ENABLE_ACCUMULATIVE_CHECKSUM,             false ); // if ( randomize && BUGGIFY )  ENABLE_ACCUMULATIVE_CHECKSUM = true; Enable this after deserialiser is ported to 7.3.
 	// clang-format on
 }
 
