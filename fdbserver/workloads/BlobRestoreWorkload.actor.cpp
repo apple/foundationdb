@@ -379,7 +379,7 @@ struct BlobRestoreWorkload : TestWorkload {
 				}
 				return Void();
 			} catch (Error& e) {
-				if (e.code() != error_code_tag_throttled) {
+				if (e.code() != error_code_tag_throttled && e.code() != error_code_grv_proxy_memory_limit_exceeded) {
 					fmt::print("Cannot flush blob ranges {}\n", e.what());
 					throw internal_error();
 				}
