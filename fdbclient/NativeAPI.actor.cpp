@@ -7280,15 +7280,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded && e.code() != error_code_proxy_tag_throttled)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-			if (e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
-				wait(delayJittered(5.0));
-			} else if (e.code() == error_code_grv_proxy_memory_limit_exceeded) {
-				// FIXME(xwang): the better way is to let this error broadcast to transaction.onError(e), otherwise the
-				// txn->cx counter doesn't make sense
-				wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
-			} else {
-				throw;
-			}
+			throw;
 		}
 	}
 }
