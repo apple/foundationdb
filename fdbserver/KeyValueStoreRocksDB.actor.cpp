@@ -1078,12 +1078,15 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "NumTimesReadIteratorsReused", 0 },
 	};
 
+	state std::string rocksdbMetricsTrackingKey = id.toString() + "/RocksDBMetrics";
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
 		if (sharedState->isClosing()) {
 			break;
 		}
 		TraceEvent e("RocksDBMetrics", id);
+		e.trackLatest(rocksdbMetricsTrackingKey);
+
 		uint64_t stat;
 		for (auto& [name, ticker, cum] : tickerStats) {
 			stat = statistics->getTickerCount(ticker);
