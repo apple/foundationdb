@@ -2637,7 +2637,8 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						dcPriority.push_back(self->clusterControllerDcId);
 						self->desiredDcIds.set(dcPriority);
 					} else {
-						TraceEvent(SevWarnAlways, "DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
+						TraceEvent(SevWarnAlways, "DegradedServerDetectedAndSuggestFailover")
+						    .detail("CCUpTime", ccUpTime);
 					}
 				}
 			}
