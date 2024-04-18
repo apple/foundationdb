@@ -251,8 +251,8 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const uint16_t& acsIndex = acsState.acsIndex;
 	if (acsState.version > ssVersion) {
-		TraceEvent(SevError, "AcsValidatorAcsMutationVersionMismatch", ssid)
-		    .detail("Context", "Restore")
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail("Reason", "Restored ACS version is larger than storage server version")
 		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("SSVersion", ssVersion)
