@@ -4069,7 +4069,8 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                req.commitProxyIndex);
 		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
+		Severity sev = e.code() == error_code_failed_to_progress ? SevWarnAlways : SevInfo;
+		TraceEvent(sev, "CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
