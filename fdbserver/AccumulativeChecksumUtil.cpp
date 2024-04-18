@@ -132,8 +132,8 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
 	if (!mutationBuffer.empty()) {
 		ASSERT(mutationBuffer[0].second.accumulativeChecksumIndex.present());
 		if (mutationBuffer[0].first != mutationVersion) {
-			TraceEvent(SevError, "AcsValidatorAcsMutationVersionMismatch", ssid)
-			    .detail("Context", "AddMutation")
+			TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+			    .detail("Reason", "Mutation version changed when AddMutation")
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
 			    .detail("MissingVersion", mutationBuffer[0].first)
@@ -142,7 +142,8 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
 			    .detail("MutationVersion", mutationVersion);
 			throw please_reboot();
 		} else if (mutationBuffer[0].second.accumulativeChecksumIndex.get() != acsIndex) {
-			TraceEvent(SevError, "AcsValidatorMissingAcs", ssid)
+			TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+			    .detail("Reason", "Mutation ACSIndex changed when AddMutation")
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
 			    .detail("MissingAcsIndex", mutationBuffer[0].second.accumulativeChecksumIndex.get())
@@ -170,53 +171,33 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
     Tag tag,
     Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	const LogEpoch& epoch = acsMutationState.epoch;
 	const uint16_t& acsIndex = acsMutationState.acsIndex;
 	auto it = acsTable.find(acsIndex);
+	bool newEpoch = false;
 	if (it == acsTable.end()) {
-		// Unexpected. Since we assign acs mutation in commit batch
-		// So, there must be acs entry set up when adding the mutations of the batch
-		acsTable[acsIndex] = acsMutationState;
-		mutationBuffer.clear();
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
-			    .detail("Reason", "No Entry")
-			    .detail("AcsTag", tag)
-			    .detail("AcsIndex", acsIndex)
-			    .detail("SSVersion", ssVersion)
-			    .detail("Epoch", epoch);
-		}
-		return acsMutationState;
+		newEpoch = true;
+	} else if (acsMutationState.epoch > it->second.epoch) {
+		acsTable.erase(it); // Clear the old acs state if new epoch comes
+		newEpoch = true;
 	}
-	if ((acsMutationState.version < it->second.version || acsMutationState.epoch < it->second.epoch)) {
-		mutationBuffer.clear();
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
-			    .detail("Reason", "Acs Mutation Too Old")
-			    .detail("AcsTag", tag)
-			    .detail("AcsIndex", acsIndex)
-			    .detail("SSVersion", ssVersion)
-			    .detail("AcsMutation", acsMutationState.toString())
-			    .detail("Epoch", epoch);
-		}
-		return Optional<AccumulativeChecksumState>();
+	// Calculate acs value by mutation buffer and compare it with acs value in acs mutation
+	if (mutationBuffer.size() == 0) {
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail("Reason", "Mutation buffer is empty when processAccumulativeChecksum")
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("SSVersion", ssVersion);
+		throw please_reboot();
 	}
-	// Clear the old acs state if new epoch comes
-	bool cleared = false;
-	if (acsMutationState.epoch > it->second.epoch) {
-		acsTable.erase(it);
-		cleared = true;
-	}
-	// Apply mutations in cache to acs
-	ASSERT(mutationBuffer.size() >= 1);
-	uint32_t oldAcs = !cleared ? it->second.acs : initialAccumulativeChecksum;
-	Version oldVersion = !cleared ? it->second.version : 0;
+	uint32_t oldAcs = newEpoch ? initialAccumulativeChecksum : it->second.acs;
+	Version oldVersion = newEpoch ? 0 : it->second.version; // used for logging only, simply set it 0 if newEpoch
 	uint32_t newAcs = aggregateAcs(oldAcs, mutationBuffer);
 	checkedMutations = checkedMutations + mutationBuffer.size();
 	checkedVersions = checkedVersions + 1;
 	Version newVersion = acsMutationState.version;
 	if (newAcs != acsMutationState.acs) {
-		TraceEvent(SevError, "AcsValidatorAcsMutationMismatch", ssid)
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail("Reason", "ACS value mismatch when processAccumulativeChecksum")
 		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("SSVersion", ssVersion)
@@ -226,11 +207,13 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("ToVersion", newVersion)
 		    .detail("AcsToValidate", acsMutationState.acs)
 		    .detail("Epoch", acsMutationState.epoch)
-		    .detail("Cleared", cleared);
+		    .detail("NewEpoch", newEpoch);
 		throw please_reboot();
 	} else if (newVersion != mutationBuffer.back().first) {
-		TraceEvent(SevError, "AcsValidatorAcsMutationVersionMismatch", ssid)
-		    .detail("Context", "ValidateAcs")
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail(
+		        "Reason",
+		        "ACS mutation version is different from mutation version in buffer when processAccumulativeChecksum")
 		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("LastMutationVersion", mutationBuffer.back().first)
@@ -249,10 +232,14 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 			    .detail("ToAcs", newAcs)
 			    .detail("ToVersion", newVersion)
 			    .detail("Epoch", acsMutationState.epoch)
-			    .detail("Cleared", cleared);
+			    .detail("NewEpoch", newEpoch);
 		}
 	}
-	it->second = acsMutationState;
+	if (newEpoch) {
+		acsTable[acsIndex] = acsMutationState;
+	} else {
+		it->second = acsMutationState;
+	}
 	mutationBuffer.clear();
 	return acsMutationState;
 }
