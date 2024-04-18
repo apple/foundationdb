@@ -173,12 +173,12 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const uint16_t& acsIndex = acsMutationState.acsIndex;
 	auto it = acsTable.find(acsIndex);
-	bool newEpoch = false;
+	bool existInTable = true;
 	if (it == acsTable.end()) {
-		newEpoch = true;
+		existInTable = false;
 	} else if (acsMutationState.epoch > it->second.epoch) {
 		acsTable.erase(it); // Clear the old acs state if new epoch comes
-		newEpoch = true;
+		existInTable = false;
 	}
 	// Calculate acs value by mutation buffer and compare it with acs value in acs mutation
 	if (mutationBuffer.size() == 0) {
@@ -189,8 +189,8 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("SSVersion", ssVersion);
 		throw please_reboot();
 	}
-	uint32_t oldAcs = newEpoch ? initialAccumulativeChecksum : it->second.acs;
-	Version oldVersion = newEpoch ? 0 : it->second.version; // used for logging only, simply set it 0 if newEpoch
+	uint32_t oldAcs = !existInTable ? initialAccumulativeChecksum : it->second.acs;
+	Version oldVersion = !existInTable ? 0 : it->second.version; // used for logging only, simply set it 0 if newEpoch
 	uint32_t newAcs = aggregateAcs(oldAcs, mutationBuffer);
 	checkedMutations = checkedMutations + mutationBuffer.size();
 	checkedVersions = checkedVersions + 1;
@@ -207,7 +207,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("ToVersion", newVersion)
 		    .detail("AcsToValidate", acsMutationState.acs)
 		    .detail("Epoch", acsMutationState.epoch)
-		    .detail("NewEpoch", newEpoch);
+		    .detail("ExistInTable", existInTable);
 		throw please_reboot();
 	} else if (newVersion != mutationBuffer.back().first) {
 		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
@@ -232,13 +232,13 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 			    .detail("ToAcs", newAcs)
 			    .detail("ToVersion", newVersion)
 			    .detail("Epoch", acsMutationState.epoch)
-			    .detail("NewEpoch", newEpoch);
+			    .detail("ExistInTable", existInTable);
 		}
 	}
-	if (newEpoch) {
-		acsTable[acsIndex] = acsMutationState;
-	} else {
+	if (existInTable) {
 		it->second = acsMutationState;
+	} else {
+		acsTable[acsIndex] = acsMutationState;
 	}
 	mutationBuffer.clear();
 	return acsMutationState;
