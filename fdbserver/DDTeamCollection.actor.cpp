@@ -732,8 +732,6 @@ public:
 		    .detail("Primary", self->primary)
 		    .detail("StorageTeamSize", self->configuration.storageTeamSize);
 
-		// If there are too few machines to even build teams or there are too few represented datacenters, can't build
-		// any team.
 		if (uniqueMachines >= self->configuration.storageTeamSize) {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * serverCount;
 			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * serverCount;
@@ -832,6 +830,8 @@ public:
 				    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 			}
 		} else {
+			// If there are too few machines to even build teams or there are too few represented datacenters, can't
+			// build any team.
 			self->lastBuildTeamsFailed = true;
 			TraceEvent(SevWarnAlways, "BuildTeamsNotEnoughUniqueMachines", self->distributorId)
 			    .detail("Primary", self->primary)
@@ -2007,7 +2007,8 @@ public:
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
 			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
 
-			if (totalSTCount > desiredServerTeams && foundSTInfo.first.isValid()) {
+			if (totalSTCount > desiredServerTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_TEAM_PERCENTAGE_THRESHOLD) &&
+			    foundSTInfo.first.isValid()) {
 				ASSERT(foundSTInfo.first.isValid());
 				Reference<TCTeamInfo> st = foundSTInfo.first;
 				int maxNumProcessTeams = foundSTInfo.second;
@@ -2029,8 +2030,9 @@ public:
 				    .detail("ServerTeamToRemove", st->getServerIDsStr())
 				    .detail("ServerTeamID", st->getTeamID())
 				    .detail("NumProcessTeamsOnTheServerTeam", maxNumProcessTeams)
-				    .detail("CurrentServerTeams", self->teams.size())
-				    .detail("DesiredServerTeams", desiredServerTeams);
+				    .detail("CurrentServerTeams", totalSTCount)
+				    .detail("DesiredServerTeams", desiredServerTeams)
+				    .detail("Primary", self->primary);
 
 				numServerTeamRemoved++;
 			} else {
@@ -2039,7 +2041,8 @@ public:
 					TraceEvent("ServerTeamRemoverDone", self->distributorId)
 					    .detail("CurrentServerTeams", self->teams.size())
 					    .detail("DesiredServerTeams", desiredServerTeams)
-					    .detail("NumServerTeamRemoved", numServerTeamRemoved);
+					    .detail("NumServerTeamRemoved", numServerTeamRemoved)
+					    .detail("Primary", self->primary);
 					self->traceTeamCollectionInfo();
 					numServerTeamRemoved = 0; // Reset the counter to avoid keep printing the message
 				}
