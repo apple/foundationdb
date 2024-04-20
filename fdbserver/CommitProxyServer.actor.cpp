@@ -1963,8 +1963,9 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		MutationRef acsMutation;
 		acsMutation.type = MutationRef::SetValue;
 		acsMutation.param1 = accumulativeChecksumKey; // private mutation
-		acsMutation.param2 = accumulativeChecksumValue(
+		Value acsValue = accumulativeChecksumValue(
 		    AccumulativeChecksumState(acsIndex, acsState.acs, self->commitVersion, self->pProxyCommitData->epoch));
+		acsMutation.param2 = acsValue;
 		acsMutation.setAccumulativeChecksumIndex(acsIndex);
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsBuilderIssueAccumulativeChecksumMutation", self->pProxyCommitData->dbgid)
