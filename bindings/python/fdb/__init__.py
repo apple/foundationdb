@@ -25,7 +25,10 @@ https://apple.github.io/foundationdb/api-python.html"""
 
 import fdb.apiversion
 
+__version__ = fdb.apiversion.FDB_VERSION
+
 LATEST_API_VERSION = fdb.apiversion.LATEST_API_VERSION
+
 
 
 def open(*args, **kwargs):
