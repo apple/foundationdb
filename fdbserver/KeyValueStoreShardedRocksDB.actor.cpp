@@ -658,6 +658,7 @@ rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
 	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+	options.async_io = SERVER_KNOBS->SHARDED_ROCKSDB_READ_ASYNC_IO;
 	return options;
 }
 
@@ -1137,11 +1138,12 @@ public:
 				mode = rocksdb::RateLimiter::Mode::kWritesOnly;
 			}
 
-			auto rateLimiter = rocksdb::NewGenericRateLimiter((int64_t)5 << 30, // 5GB
-			                                                  100 * 1000, // refill_period_us
-			                                                  10, // fairness
-			                                                  mode,
-			                                                  SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
+			auto rateLimiter =
+			    rocksdb::NewGenericRateLimiter(SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,
+			                                   100 * 1000, // refill_period_us
+			                                   10, // fairness
+			                                   mode,
+			                                   SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
 			dbOptions.rate_limiter = std::shared_ptr<rocksdb::RateLimiter>(rateLimiter);
 		}
 		std::vector<std::string> columnFamilies;
@@ -1734,9 +1736,6 @@ public:
 	}
 
 	void closeAllShards() {
-		if (dbOptions.rate_limiter != nullptr) {
-			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
-		}
 		columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
@@ -1749,9 +1748,6 @@ public:
 	}
 
 	void destroyAllShards() {
-		if (dbOptions.rate_limiter != nullptr) {
-			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
-		}
 		auto metadataShard = getMetaDataShard();
 		KeyRange metadataRange = prefixRange(shardMappingPrefix);
 		rocksdb::WriteOptions options;
