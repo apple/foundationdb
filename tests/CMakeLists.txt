@@ -562,7 +562,7 @@ if(WITH_PYTHON)
     string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
     string(APPEND authz_venv_cmd "&& pip install --upgrade pip ")
     string(APPEND authz_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
-    string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) ")
+	string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && {Python3_EXECUTABLE} -m pip install .) ")
     string(APPEND authz_venv_cmd "&& touch ${authz_venv_stamp_file} ")
     string(APPEND authz_venv_cmd "|| echo 'venv already set up'")
     add_test(

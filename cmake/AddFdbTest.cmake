@@ -569,7 +569,7 @@ string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
 string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
 string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
-string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && pip3 install .) ")
+string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && ${Python3_EXECUTABLE} -m pip install .) ")
 add_test(
   NAME test_venv_setup
   COMMAND bash -c ${test_venv_cmd}
