@@ -27,7 +27,7 @@ import sys
 
 functions = {}
 
-func_re = re.compile("^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
+func_re = re.compile(r"^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
 
 with open(source, "r") as srcfile:
     for line in srcfile:
