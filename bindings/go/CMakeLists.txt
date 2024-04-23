@@ -102,8 +102,8 @@ function(build_go_package)
   endif()
   add_custom_command(OUTPUT ${outfile}
     COMMAND ${CMAKE_COMMAND} -E env ${go_env}
-            ${GO_EXECUTABLE} get -d ${GO_IMPORT_PATH}/${BGP_PATH} &&
-            ${CMAKE_COMMAND} -E env ${go_env}
+            ${GO_EXECUTABLE} get -d ${GO_IMPORT_PATH}/${BGP_PATH}
+    COMMAND ${CMAKE_COMMAND} -E env ${go_env}
             ${GO_EXECUTABLE} install ${GO_IMPORT_PATH}/${BGP_PATH}
     DEPENDS ${fdb_options_file}
     COMMENT "Building ${BGP_NAME}")
