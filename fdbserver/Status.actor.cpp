@@ -614,6 +614,24 @@ struct RolesInfo {
 				}
 			}
 
+			TraceEventFields const& rocksdbMetrics = metrics.at("RocksDBMetrics");
+			if (rocksdbMetrics.size()) {
+				JsonBuilderObject rocksdbMetricsObj;
+				rocksdbMetricsObj.setKeyRawNumber("block_cache_hits", rocksdbMetrics.getValue("BlockCacheHits"));
+				rocksdbMetricsObj.setKeyRawNumber("block_cache_misses", rocksdbMetrics.getValue("BlockCacheMisses"));
+				rocksdbMetricsObj.setKeyRawNumber("pending_compaction_bytes",
+				                                  rocksdbMetrics.getValue("EstPendCompactBytes"));
+				rocksdbMetricsObj.setKeyRawNumber("memtable_bytes", rocksdbMetrics.getValue("AllMemtablesBytes"));
+				rocksdbMetricsObj.setKeyRawNumber("sst_reader_bytes",
+				                                  rocksdbMetrics.getValue("EstimateSstReaderBytes"));
+				rocksdbMetricsObj.setKeyRawNumber("block_cache_usage", rocksdbMetrics.getValue("BlockCacheUsage"));
+				rocksdbMetricsObj.setKey("block_cache_limit", SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+				rocksdbMetricsObj.setKeyRawNumber("throttled_commits", rocksdbMetrics.getValue("CommitDelayed"));
+				rocksdbMetricsObj.setKeyRawNumber("write_stall_microseconds", rocksdbMetrics.getValue("StallMicros"));
+
+				obj["rocksdb_metrics"] = std::move(rocksdbMetricsObj);
+			}
+
 		} catch (AttributeNotFoundError& e) {
 			TraceEvent(SevWarnAlways, "StorageServerStatusJson").detail("MissingAttribute", e.getMissingAttribute());
 		}
@@ -1975,11 +1993,8 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 
 namespace {
 
-const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics",
-	                                                        "ReadLatencyMetrics",
-	                                                        "ReadLatencyBands",
-	                                                        "BusiestReadTag",
-	                                                        "BusiestWriteTag" };
+const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands",
+	                                                        "BusiestReadTag", "BusiestWriteTag",    "RocksDBMetrics" };
 
 } // namespace
 

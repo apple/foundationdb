@@ -162,6 +162,17 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "unknown"
                      ]}
                   },
+                  "rocksdb_metrics":{
+                     "block_cache_hits":12341234,
+                     "block_cache_misses":12341234,
+                     "pending_compaction_bytes":12341234,
+                     "memtable_bytes":12341234,
+                     "sst_reader_bytes":12341234,
+                     "block_cache_usage":12341234,
+                     "block_cache_limit":12341234,
+                     "throttled_commits":12341234,
+                     "write_stall_microseconds":12341234
+                  },
                   "data_version":12341234,
                   "durable_version":12341234,
                   "data_lag": {
