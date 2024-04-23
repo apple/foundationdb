@@ -20,7 +20,9 @@ set(SRCS
   src/fdb/database.go
   src/fdb/directory/directorySubspace.go
   src/fdb/fdb_test.go
-  src/fdb/snapshot.go)
+  src/fdb/snapshot.go
+
+  go.mod)
 
 set(GOPATH ${CMAKE_CURRENT_BINARY_DIR})
 set(GO_PACKAGE_ROOT github.com/apple/foundationdb/bindings/go)
