@@ -1025,8 +1025,6 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 				}
 			}
 
-			CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
-
 			wait(waitForAll(deleteFutures));
 			wait(tr.commit());
 
@@ -1144,31 +1142,6 @@ void throwIfError(const std::vector<Future<ErrorOr<T>>>& futures, std::string er
 			throw future.get().getError();
 		}
 	}
-}
-
-struct TesterConsistencyScanState {
-	bool enabled = false;
-	bool enableAfter = false;
-	bool waitForComplete = false;
-};
-
-ACTOR Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanState* csState) {
-	if (!csState->enabled) {
-		return Void();
-	}
-
-	// mark it as done so later so this does not repeat
-	csState->enabled = false;
-
-	if (csState->enableAfter || csState->waitForComplete) {
-		printf("Enabling consistency scan after test ...\n");
-		wait(enableConsistencyScanInSim(cx));
-		printf("Enabled consistency scan after test.\n");
-	}
-
-	wait(disableConsistencyScanInSim(cx, csState->waitForComplete));
-
-	return Void();
 }
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
@@ -1808,7 +1781,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		globalProgressMap.insert(allKeys, false);
 	}
 
-	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(0, 10000000);
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	state int retryTimes = 0;
 	state int round = 0;
 
@@ -1904,7 +1877,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		wait(delay(10.0)); // Backoff 10 seconds for the next round
 
 		// Decide and enforce the consistencyCheckerId for the next round
-		consistencyCheckerId = deterministicRandom()->randomInt64(0, 10000000);
+		consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	}
 }
 
@@ -1917,8 +1890,7 @@ ACTOR Future<bool> runTest(Database cx,
                            std::vector<TesterInterface> testers,
                            TestSpec spec,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                           Optional<TenantName> defaultTenant,
-                           TesterConsistencyScanState* consistencyScanState) {
+                           Optional<TenantName> defaultTenant) {
 	state DistributedTestResults testResults;
 	state double savedDisableDuration = 0;
 
@@ -1938,9 +1910,9 @@ ACTOR Future<bool> runTest(Database cx,
 			g_simulator->connectionFailuresDisableDuration = savedDisableDuration;
 		}
 	} catch (Error& e) {
+		auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
+		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		if (e.code() == error_code_timed_out) {
-			auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
-			ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)
 			    .detail("Reason", "Test timed out")
@@ -1965,10 +1937,6 @@ ACTOR Future<bool> runTest(Database cx,
 
 			wait(delay(1.0));
 		}
-
-		// Disable consistency scan before checkConsistency because otherwise it will prevent quiet database from
-		// quiescing
-		wait(checkConsistencyScanAfterTest(cx, consistencyScanState));
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
@@ -2546,15 +2514,6 @@ void encryptionAtRestPlaintextMarkerCheck() {
 				    .detail("Filename", itr->path().string())
 				    .detail("NumLines", count);
 				scanned++;
-				if (itr->path().string().find("storage") != std::string::npos) {
-					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned storage file scanned");
-				} else if (itr->path().string().find("fdbblob") != std::string::npos) {
-					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned BlobGranule file scanned");
-				} else if (itr->path().string().find("logqueue") != std::string::npos) {
-					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned TLog file scanned");
-				} else if (itr->path().string().find("backup") != std::string::npos) {
-					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned KVBackup file scanned");
-				}
 			} else {
 				TraceEvent(SevError, "FileOpenError").detail("Filename", itr->path().string());
 			}
@@ -2617,8 +2576,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state bool enableDD = false;
-	state TesterConsistencyScanState consistencyScanState;
-
 	if (tests.empty())
 		useDB = true;
 	for (auto iter = tests.begin(); iter != tests.end(); ++iter) {
@@ -2654,11 +2611,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx = openDBOnServer(dbInfo);
 		cx->defaultTenant = defaultTenant;
 	}
-
-	consistencyScanState.enabled = g_network->isSimulated() && deterministicRandom()->coinflip();
-	consistencyScanState.waitForComplete =
-	    consistencyScanState.enabled && waitForQuiescenceEnd && deterministicRandom()->coinflip();
-	consistencyScanState.enableAfter = consistencyScanState.waitForComplete && deterministicRandom()->random01() < 0.1;
 
 	disableConnectionFailures("Tester");
 
@@ -2737,7 +2689,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
 
 		// Randomly inject custom shard configuration
-		// TODO:  Move this to a workload representing non-failure behaviors which can be randomly added to any test
+		// TOOO:  Move this to a workload representing non-failure behaviors which can be randomly added to any test
 		// run.
 		if (deterministicRandom()->random01() < 0.25) {
 			wait(customShardConfigWorkload(cx));
@@ -2765,7 +2717,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		TraceEvent("TesterStartingPreTestChecks")
 		    .detail("DatabasePingDelay", databasePingDelay)
 		    .detail("StartDelay", startDelay);
-
 		try {
 			wait(quietDatabase(cx, dbInfo, "Start") ||
 			     (databasePingDelay == 0.0
@@ -2781,13 +2732,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			(void)cVer;
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
-		}
-
-		// TODO: Move this to a BehaviorInjection workload once that concept exists.
-		if (consistencyScanState.enabled && !consistencyScanState.enableAfter) {
-			printf("Enabling consistency scan ...\n");
-			wait(enableConsistencyScanInSim(cx));
-			printf("Enabled consistency scan.\n");
 		}
 	}
 
@@ -2805,7 +2749,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (; idx < tests.size(); idx++) {
 		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
-		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant, &consistencyScanState)));
+		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant)));
 		knobProtectiveGroup.reset(nullptr);
 		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
@@ -2817,16 +2761,10 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	if (tests.empty() || useDB) {
 		if (waitForQuiescenceEnd) {
 			printf("Waiting for DD to end...\n");
-			TraceEvent("QuietDatabaseEndStart");
 			try {
-				TraceEvent("QuietDatabaseEndWait");
-				Future<Void> waitConsistencyScanEnd = checkConsistencyScanAfterTest(cx, &consistencyScanState);
-				Future<Void> waitQuietDatabaseEnd =
-				    quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
-				    (databasePingDelay == 0.0 ? Never()
-				                              : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd"));
-
-				wait(waitConsistencyScanEnd && waitQuietDatabaseEnd);
+				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
+				     (databasePingDelay == 0.0 ? Never()
+				                               : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd")));
 			} catch (Error& e) {
 				TraceEvent("QuietDatabaseEndExternalError").error(e);
 				throw;
