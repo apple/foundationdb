@@ -420,8 +420,13 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 		// we want to set PRIORITY_PERPETUAL_STORAGE_WIGGLE to a reasonably large value
 		// to make this parallelism take effect
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
-	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
+	else if (relocation.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD)
+		return WORK_FULL_UTILIZATION / SERVER_KNOBS->MERGE_RELOCATION_PARALLELISM_PER_TEAM;
+	else { // for now we assume that any message at a lower priority can best be assumed to have a full team left for
+		   // work
+
 		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+	}
 }
 
 int getDestWorkFactor() {

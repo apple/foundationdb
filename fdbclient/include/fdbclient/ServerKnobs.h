@@ -131,6 +131,7 @@ public:
 	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	double MERGE_RELOCATION_PARALLELISM_PER_TEAM;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
