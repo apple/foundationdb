@@ -113,7 +113,9 @@ public:
 	const T get(KeyRef name, T defaultVal) {
 		try {
 			auto configValue = get(name);
+			std::cout << "Get " << name.toString() << " is Valid=" << (configValue.isValid() ? "True" : "False") << std::endl;
 			if (configValue.isValid()) {
+				std::cout << "Get " << name.toString() << " hasValue=" << (configValue->value.has_value() ? "True" : "False") << std::endl;
 				if (configValue->value.has_value()) {
 					return std::any_cast<T>(configValue->value);
 				}

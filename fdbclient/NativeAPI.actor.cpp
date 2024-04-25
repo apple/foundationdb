@@ -8964,11 +8964,20 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
+		double sampleRate =
+			cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+		std::cout << "Reading raw sample rate" << sampleRate << " isInf=" << (std::isinf(sampleRate) ? "True" : "False") << std::endl;
 		double clientSamplingProbability =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		// 	std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
+		// std::cout << "Using clientSamplingProbability=" << clientSamplingProbability << std::endl;
+		// std::cout << "((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY)="
+		//           << ((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY)
+		//           << std::endl;
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
+			std::cout << "Enabling TrLogInfo" << std::endl;
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}

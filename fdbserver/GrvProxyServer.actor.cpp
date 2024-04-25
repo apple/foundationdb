@@ -262,6 +262,7 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// The value doesn't matter too much, as long as the key is set.
 				tr->set(migratedKey.contents(), "1"_sr);
+				TraceEvent(SevInfo, "SampleRateFoundDuringMigration").detail("Found", sampleRate.present() ? "True" : "False");
 				if (sampleRate.present()) {
 					const double sampleRateDbl =
 					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
