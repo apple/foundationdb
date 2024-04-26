@@ -1781,7 +1781,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		globalProgressMap.insert(allKeys, false);
 	}
 
-	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(0, 10000000);
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	state int retryTimes = 0;
 	state int round = 0;
 
@@ -1877,7 +1877,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		wait(delay(10.0)); // Backoff 10 seconds for the next round
 
 		// Decide and enforce the consistencyCheckerId for the next round
-		consistencyCheckerId = deterministicRandom()->randomInt64(0, 10000000);
+		consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	}
 }
 
