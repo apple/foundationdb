@@ -1,0 +1,16 @@
+[configuration]
+config = 'triple'
+generateFearless = true
+allowDefaultTenant = false
+machineCount = 18
+
+[[knobs]]
+shard_encode_location_metadata = true
+
+
+[[test]]
+testTitle = 'BulkLoadingWorkload'
+useDB = true
+
+    [[test.workload]]
+    testName = 'BulkLoadingWorkload'
