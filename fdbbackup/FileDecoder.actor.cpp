@@ -283,6 +283,7 @@ std::string decode_hex_string(std::string line, bool& err) {
 				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
 				if (*pEnd) {
 					std::cerr << "Invalid hex string at: " << i << "\n";
+					err = true;
 					return ret;
 				}
 				line[i + 4] = save;
