@@ -2955,19 +2955,19 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 							self->excludedDegradedServers = self->degradationInfo.degradedServers;
 							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
 							                                     self->degradationInfo.disconnectedServers.end());
-							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
+							TraceEvent(SevWarnAlways, "DegradedServerDetectedAndTriggerRecovery")
 							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
 							self->db.forceMasterFailure.trigger();
 						}
 					} else {
 						self->excludedDegradedServers.clear();
-						TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
+						TraceEvent(SevWarnAlways, "DegradedServerDetectedAndSuggestRecovery").log();
 					}
 				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
 					double ccUpTime = now() - machineStartTime();
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
 					    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
-						TraceEvent("DegradedServerDetectedAndTriggerFailover").log();
+						TraceEvent(SevWarnAlways, "DegradedServerDetectedAndTriggerFailover").log();
 						std::vector<Optional<Key>> dcPriority;
 						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
 						                      ? self->db.config.regions[1].dcId
@@ -2979,7 +2979,8 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						dcPriority.push_back(self->clusterControllerDcId);
 						self->desiredDcIds.set(dcPriority);
 					} else {
-						TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
+						TraceEvent(SevWarnAlways, "DegradedServerDetectedAndSuggestFailover")
+						    .detail("CCUpTime", ccUpTime);
 					}
 				}
 			}
