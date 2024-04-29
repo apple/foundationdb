@@ -1915,10 +1915,10 @@ ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional
                                                      bool repeatRun) {
 	loop {
 		wait(runConsistencyCheckerUrgentCore(cc, cx, testers, minTestersExpected));
-		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME)); // wait for 10 minutes
 		if (!repeatRun) {
 			break;
 		}
+		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME)); // wait for 10 minutes
 	}
 	return Void();
 }
