@@ -1,0 +1,23 @@
+{
+  "name": "FoundationDB remote dev env",
+  "image": "foundationdb/devel:centos7-latest",
+  "features": {},
+  "settings": {
+    "cmake.configureArgs": [
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ]
+  },
+  "runArgs": [
+    "--privileged",
+    "--cap-add=SYS_PTRACE",
+    "--security-opt",
+    "seccomp=unconfined"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "llvm-vs-code-extensions.vscode-clangd",
+      ]
+    }
+  }
+}
