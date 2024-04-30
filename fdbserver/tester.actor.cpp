@@ -1847,7 +1847,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 						if (!whenFailedToGetTesterStart.present()) {
 							whenFailedToGetTesterStart = now();
 						} else if (now() - whenFailedToGetTesterStart.get() > 3600 * 24) { // 1 day
-							TraceEvent(SevError, "TesterRecruitmentTimeout").log();
+							TraceEvent(SevError, "TesterRecruitmentTimeout");
 						}
 					}
 					throw e;
@@ -1931,7 +1931,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional
 		if (!repeatRun) {
 			break;
 		}
-		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME)); // wait for 10 minutes
+		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME));
 	}
 	return Void();
 }
