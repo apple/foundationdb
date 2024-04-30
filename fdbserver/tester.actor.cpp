@@ -1594,7 +1594,7 @@ ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optiona
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevWarn, "TesterRecruitmentTimeout").log();
+				TraceEvent(SevWarnAlways, "TesterRecruitmentTimeout");
 				throw timed_out();
 			}
 		}
