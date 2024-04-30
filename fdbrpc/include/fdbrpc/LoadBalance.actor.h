@@ -43,10 +43,9 @@
 
 ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture);
 
-enum ComparisonType {
-	TSS_COMPARISON = 0,
-	REPLICA_COMPARISON = 1,
-};
+enum ComparisonType { TSS_COMPARISON, REPLICA_COMPARISON };
+
+enum RequiredReplicas { BEST_EFFORT = -2, ALL_REPLICAS = -1 };
 
 struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	QueueModel* model;
@@ -250,7 +249,8 @@ Future<Void> replicaComparison(Req req,
                                Future<ErrorOr<Resp>> fSource,
                                uint64_t srcEndpointId,
                                Reference<MultiInterface<Multi>> ssTeam,
-                               RequestStream<Req, P> Interface::*channel) {
+                               RequestStream<Req, P> Interface::*channel,
+                               int requiredReplicas) {
 	state int srcErrorCode = error_code_success;
 	state ErrorOr<Resp> src;
 
@@ -262,11 +262,19 @@ Future<Void> replicaComparison(Req req,
 
 	if (src.isError()) {
 		srcErrorCode = src.getError().code();
+		ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
+		if (requiredReplicas == ALL_REPLICAS) {
+			throw src.getError();
+		}
 	} else {
 		state Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
 
 		if (srcLB.present() && srcLB.get().error.present()) {
 			srcErrorCode = srcLB.get().error.get().code();
+			ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
+			if (requiredReplicas == ALL_REPLICAS) {
+				throw srcLB.get().error.get();
+			}
 		} else if (!srcLB.present() || !srcLB.get().error.present()) {
 			// Verify that the other SS servers in the team have the same data.
 			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
@@ -277,8 +285,13 @@ Future<Void> replicaComparison(Req req,
 				    srcEndpointId) { // don't re-request to SS we already have a response from
 					if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
 						resetReply(req);
-						restOfTeamFutures.push_back(
-						    timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT));
+						restOfTeamFutures.push_back((
+						    requiredReplicas == BEST_EFFORT
+						        ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
+						        : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
+					} else if (requiredReplicas == ALL_REPLICAS) {
+						TraceEvent(SevError, "UnreachableStorageServer").detail("SSID", ssTeam->getInterface(i).id());
+						throw unreachable_storage_replica();
 					}
 				}
 			}
@@ -288,13 +301,18 @@ Future<Void> replicaComparison(Req req,
 			int numError = 0;
 			int numMismatch = 0;
 			int numFetchReplicaTimeout = 0;
+			int replicaErrorCode = error_code_success;
 			for (Future<Optional<ErrorOr<Resp>>> f : restOfTeamFutures) {
-				if (!f.canGet()) {
+				ASSERT(f.isReady());
+				if (f.isError()) {
 					numError++;
+					replicaErrorCode = f.getError().code();
 				} else if (!f.get().present()) {
 					numFetchReplicaTimeout++;
+					replicaErrorCode = error_code_timed_out;
 				} else if (f.get().get().isError()) {
 					numError++;
+					replicaErrorCode = f.get().get().getError().code();
 				} else {
 					Optional<LoadBalancedReply> fLB = getLoadBalancedReply(&f.get().get().get());
 
@@ -303,12 +321,13 @@ Future<Void> replicaComparison(Req req,
 
 					if (fLB.present() && fLB.get().error.present()) {
 						numError++;
+						replicaErrorCode = fLB.get().error.get().code();
 					} else if (fLB.present() &&
 					           !TSS_doCompare(
 					               src.get(),
 					               f.get().get().get())) { // re-use TSS compare logic to compare the replicas
 						numMismatch++;
-						TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, TSS_COMPARISON));
+						TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, REPLICA_COMPARISON));
 						mismatchEvent.detail("ReplicaFetchErrors", numError)
 						    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
 						// Re-use TSS trace mechanism to log replica mismatch information.
@@ -319,6 +338,11 @@ Future<Void> replicaComparison(Req req,
 
 			if (numMismatch) {
 				throw storage_replica_comparison_error();
+			} else if ((numError || numFetchReplicaTimeout) && (requiredReplicas == ALL_REPLICAS)) {
+				const char* type = numError ? "ReplicaComparisonReadError" : "ReplicaComparisonTimeoutError";
+				TraceEvent(SevError, type).detail("SSError", replicaErrorCode);
+
+				throw Error(replicaErrorCode);
 			}
 		}
 	}
@@ -380,11 +404,18 @@ struct RequestData : NonCopyable {
 	Future<Void> maybeDoReplicaComparison(Request& request,
 	                                      QueueModel* model,
 	                                      Reference<MultiInterface<Multi>> alternatives,
-	                                      RequestStream<Request, P> Interface::*channel) {
+	                                      RequestStream<Request, P> Interface::*channel,
+	                                      int requiredReplicas) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			ASSERT(requestStream != nullptr);
-			return replicaComparison(
-			    request, response, requestStream->getEndpoint().token.first(), alternatives, channel);
+			int requiredReplicaCount =
+			    compareReplicas ? requiredReplicas : FLOW_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+			return replicaComparison(request,
+			                         response,
+			                         requestStream->getEndpoint().token.first(),
+			                         alternatives,
+			                         channel,
+			                         requiredReplicaCount);
 		}
 
 		return Void();
@@ -552,7 +583,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr,
-    bool compareReplicas = false) {
+    bool compareReplicas = false,
+    int requiredReplicas = 0) {
 
 	state RequestData<Request, Interface, Multi, P> firstRequestData(compareReplicas);
 	state RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
@@ -747,7 +779,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			wait(success(firstRequestData.response));
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
-				wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
+				wait(
+				    firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
 
 				ASSERT(firstRequestData.response.isReady());
 				return firstRequestData.response.get().get();
@@ -792,10 +825,10 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 
 			if (firstRequestSuccessful || secondRequestSuccessful) {
-				// Do consistency check, by comparing storage replicas, if requested.
+				// Do consistency check, by comparing results from storage replicas, if requested.
 				state RequestData<Request, Interface, Multi, P>* requestData =
 				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
-				wait(requestData->maybeDoReplicaComparison(request, model, alternatives, channel));
+				wait(requestData->maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
 
 				ASSERT(requestData->response.isReady());
 				return requestData->response.get().get();
@@ -835,8 +868,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						}
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
-							// Do consistency check, by comparing storage replicas, if requested.
-							wait(firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel));
+							// Do consistency check, by comparing results from storage replicas, if requested.
+							wait(firstRequestData.maybeDoReplicaComparison(
+							    request, model, alternatives, channel, requiredReplicas));
 
 							ASSERT(firstRequestData.response.isReady());
 							return firstRequestData.response.get().get();

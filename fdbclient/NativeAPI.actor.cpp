@@ -132,9 +132,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr,
-    bool compareReplicas = false) {
+    bool compareReplicas = false,
+    int requiredReplicas = 0) {
 	if (alternatives->hasCaches) {
-		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas);
+		return loadBalance(
+		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 	}
 	return fmap(
 	    [ctx](auto const& res) {
@@ -143,7 +145,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		    }
 		    return res;
 	    },
-	    loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas));
+	    loadBalance(
+	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
 }
 } // namespace
 
@@ -3701,7 +3704,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					                     TaskPriority::DefaultPromiseEndpoint,
 					                     AtMostOnce::False,
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
-					                     trState->options.enableReplicaConsistencyCheck))) {
+					                     trState->options.enableReplicaConsistencyCheck,
+					                     trState->options.requiredReplicas))) {
 						reply = _reply;
 					}
 				}
@@ -3842,7 +3846,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Use
 					                     TaskPriority::DefaultPromiseEndpoint,
 					                     AtMostOnce::False,
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
-					                     trState->options.enableReplicaConsistencyCheck))) {
+					                     trState->options.enableReplicaConsistencyCheck,
+					                     trState->options.requiredReplicas))) {
 						reply = _reply;
 					}
 				}
@@ -4369,7 +4374,8 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 						         TaskPriority::DefaultPromiseEndpoint,
 						         AtMostOnce::False,
 						         trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
-						         trState->options.enableReplicaConsistencyCheck))) {
+						         trState->options.enableReplicaConsistencyCheck,
+						         trState->options.requiredReplicas))) {
 							rep = _rep;
 						}
 					}
@@ -4774,7 +4780,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					                     TaskPriority::DefaultPromiseEndpoint,
 					                     AtMostOnce::False,
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
-					                     trState->options.enableReplicaConsistencyCheck));
+					                     trState->options.enableReplicaConsistencyCheck,
+					                     trState->options.requiredReplicas));
 					rep = _rep;
 					++trState->cx->transactionPhysicalReadsCompleted;
 				} catch (Error&) {
@@ -6208,6 +6215,7 @@ void TransactionOptions::clear() {
 	rawAccess = false;
 	bypassStorageQuota = false;
 	enableReplicaConsistencyCheck = false;
+	requiredReplicas = 0;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -7295,6 +7303,10 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		validateOptionValueNotPresent(value);
 		trState->options.enableReplicaConsistencyCheck = true;
 		break;
+
+	case FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS:
+		validateOptionValuePresent(value);
+		trState->options.requiredReplicas = extractIntOption(value, -2, std::numeric_limits<int64_t>::max());
 
 	default:
 		break;
