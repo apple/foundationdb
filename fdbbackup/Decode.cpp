@@ -1,5 +1,5 @@
 /*
- * FileConverter.actor.cpp
+ * Decode.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
