@@ -2872,15 +2872,13 @@ ACTOR static Future<Optional<std::string>> BulkLoadingTaskCommitActor(ReadYourWr
 		readEndKey = updateRanges[i].end;
 		while (readBeginKey < readEndKey) {
 			KeyRange rangeToRead = Standalone(KeyRangeRef(readBeginKey, readEndKey));
-			RangeResult result =
-			    wait(krmGetRanges(&(ryw->getTransaction()), bulkLoadPrefix, rangeToRead.withPrefix(bulkLoadPrefix)));
+			RangeResult result = wait(krmGetRanges(&(ryw->getTransaction()), bulkLoadPrefix, rangeToRead));
 			for (int j = 0; j < result.size() - 1; j++) {
 				if (!result[j].value.empty()) {
 					KeyRange existRange = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState existBulkLoadTask = decodeBulkLoadState(result[i].value);
 					ASSERT(existBulkLoadTask.isValid());
-					ASSERT(existBulkLoadTask.range ==
-					       existRange.removePrefix(bulkLoadPrefix)); // check existing ones, unsafe, may remove
+					ASSERT(existBulkLoadTask.range == existRange);
 					TraceEvent(SevWarnAlways, "BulkLoadTaskCommitError")
 					    .detail("Reason", "New range conflicts to existing ones");
 					throw bulkload_add_task_input_error();
@@ -2943,10 +2941,10 @@ ACTOR static Future<Optional<std::string>> BulkLoadingCancelCommitActor(ReadYour
 		throw bulkload_check_status_input_error();
 	}
 
+	// Get all cancelled range in the current transaction
 	state KeyRange cancelRange =
 	    Standalone(KeyRangeRef("cancel/"_sr, "cancel0"_sr))
 	        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin);
-
 	state std::vector<KeyRange> cancelRanges;
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(cancelRange);
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
@@ -2958,11 +2956,37 @@ ACTOR static Future<Optional<std::string>> BulkLoadingCancelCommitActor(ReadYour
 	}
 	cancelRanges = coalesceRangeList(cancelRanges);
 
-	// Update to global
+	// Get all ranges to cancel intersecting the global task map
 	state int i = 0;
+	state Key readBeginKey;
+	state Key readEndKey;
+	state std::vector<KeyRange> rangesToRemove;
 	for (; i < cancelRanges.size(); i++) {
-		wait(krmSetRange(&(ryw->getTransaction()), bulkLoadPrefix, cancelRanges[i], Value()));
-		TraceEvent("BulkLoadCancelCommitEach").detail("Range", cancelRanges[i].toString()).detail("KR", kr.toString());
+		readBeginKey = cancelRanges[i].begin;
+		readEndKey = cancelRanges[i].end;
+		while (readBeginKey < readEndKey) {
+			KeyRange rangeToRead = Standalone(KeyRangeRef(readBeginKey, readEndKey));
+			RangeResult result = wait(krmGetRanges(&(ryw->getTransaction()), bulkLoadPrefix, rangeToRead));
+			for (int j = 0; j < result.size() - 1; j++) {
+				if (!result[j].value.empty()) {
+					KeyRange existRange = Standalone(KeyRangeRef(result[j].key, result[j + 1].key));
+					BulkLoadState existBulkLoadTask = decodeBulkLoadState(result[j].value);
+					ASSERT(existBulkLoadTask.isValid());
+					rangesToRemove.push_back(existBulkLoadTask.range);
+				}
+			}
+			readBeginKey = result.back().key;
+		}
+	}
+	rangesToRemove = coalesceRangeList(rangesToRemove);
+
+	// Remove task from the global task map
+	i = 0;
+	for (; i < rangesToRemove.size(); i++) {
+		wait(krmSetRange(&(ryw->getTransaction()), bulkLoadPrefix, rangesToRemove[i], Value()));
+		TraceEvent("BulkLoadCancelCommitEach")
+		    .detail("Range", rangesToRemove[i].toString())
+		    .detail("KR", kr.toString());
 	}
 
 	return Optional<std::string>();

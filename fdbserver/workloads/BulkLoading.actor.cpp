@@ -109,7 +109,26 @@ struct BulkLoading : TestWorkload {
 		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("2"_sr, "3"_sr)), "2");
 		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("3"_sr, "4"_sr)), "3");
 		wait(tr.commit());
-		TraceEvent("BulkLoadWorkloadTransactionCommitted");
+		TraceEvent("BulkLoadWorkloadTransactionCommitted")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("CommitVersion", tr.getCommittedVersion());
+
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("1"_sr, "2"_sr)), "11");
+		try {
+			wait(tr.commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			TraceEvent("BulkLoadWorkloadAddTaskFailed").errorUnsuppressed(e);
+			ASSERT(e.code() == error_code_bulkload_add_task_input_error);
+		}
+		TraceEvent("BulkLoadWorkloadTransactionCommitted")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("CommitVersion", tr.getCommittedVersion());
 
 		tr.reset();
 		TraceEvent("BulkLoadWorkloadTransactionReset");
@@ -120,19 +139,53 @@ struct BulkLoading : TestWorkload {
 		state KeyRange range3 =
 		    Standalone(KeyRangeRef("\xff\xff/bulk_loading/status/"_sr, "\xff\xff/bulk_loading/status/\xff"_sr));
 		RangeResult res3 = wait(tr.getRange(range3, GetRangeLimits()));
-		TraceEvent("BulkLoadWorkloadReadRange").detail("Range", range3).detail("Res", self->parseReadRangeResult(res3));
+		TraceEvent("BulkLoadWorkloadReadRange")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("Range", range3)
+		    .detail("Res", self->parseReadRangeResult(res3));
 
 		state KeyRange range4 =
 		    Standalone(KeyRangeRef("\xff\xff/bulk_loading/status/2"_sr, "\xff\xff/bulk_loading/status/3"_sr));
 		RangeResult res4 = wait(tr.getRange(range4, GetRangeLimits()));
-		TraceEvent("BulkLoadWorkloadReadRange").detail("Range", range4).detail("Res", self->parseReadRangeResult(res4));
+		TraceEvent("BulkLoadWorkloadReadRange")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("Range", range4)
+		    .detail("Res", self->parseReadRangeResult(res4));
 
 		state KeyRange range5 =
 		    Standalone(KeyRangeRef("\xff\xff/bulk_loading/status/11"_sr, "\xff\xff/bulk_loading/status/12"_sr));
 		RangeResult res5 = wait(tr.getRange(range5, GetRangeLimits()));
-		TraceEvent("BulkLoadWorkloadReadRange").detail("Range", range5).detail("Res", self->parseReadRangeResult(res5));
+		TraceEvent("BulkLoadWorkloadReadRange")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("Range", range5)
+		    .detail("Res", self->parseReadRangeResult(res5));
 
-		// TODO: test cancellation, do we want to cancel all intersecting tasks?
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+		state KeyRange range6 =
+		    Standalone(KeyRangeRef("\xff\xff/bulk_loading/cancel/11"_sr, "\xff\xff/bulk_loading/cancel/2"_sr));
+		tr.clear(range6);
+		wait(tr.commit());
+		TraceEvent("BulkLoadWorkloadClearRange")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("CommitVersion", tr.getCommittedVersion())
+		    .detail("Range", range6);
+
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		RangeResult res7 = wait(tr.getRange(range3, GetRangeLimits()));
+		TraceEvent("BulkLoadWorkloadReadRange")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("Range", range3)
+		    .detail("Res", self->parseReadRangeResult(res7));
+
 		return Void();
 	}
 };
