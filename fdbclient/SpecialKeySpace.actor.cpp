@@ -2878,7 +2878,6 @@ ACTOR static Future<Optional<std::string>> BulkLoadingTaskCommitActor(ReadYourWr
 					KeyRange existRange = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState existBulkLoadTask = decodeBulkLoadState(result[i].value);
 					ASSERT(existBulkLoadTask.isValid());
-					ASSERT(existBulkLoadTask.range == existRange);
 					TraceEvent(SevWarnAlways, "BulkLoadTaskCommitError")
 					    .detail("Reason", "New range conflicts to existing ones");
 					throw bulkload_add_task_input_error();

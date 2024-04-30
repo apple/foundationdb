@@ -118,7 +118,7 @@ struct BulkLoading : TestWorkload {
 		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("1"_sr, "2"_sr)), "11");
+		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("11"_sr, "2"_sr)), "4");
 		try {
 			wait(tr.commit());
 			ASSERT(false);
@@ -126,9 +126,6 @@ struct BulkLoading : TestWorkload {
 			TraceEvent("BulkLoadWorkloadAddTaskFailed").errorUnsuppressed(e);
 			ASSERT(e.code() == error_code_bulkload_add_task_input_error);
 		}
-		TraceEvent("BulkLoadWorkloadTransactionCommitted")
-		    .detail("AtVersion", tr.getReadVersion().get())
-		    .detail("CommitVersion", tr.getCommittedVersion());
 
 		tr.reset();
 		TraceEvent("BulkLoadWorkloadTransactionReset");
@@ -185,6 +182,28 @@ struct BulkLoading : TestWorkload {
 		    .detail("AtVersion", tr.getReadVersion().get())
 		    .detail("Range", range3)
 		    .detail("Res", self->parseReadRangeResult(res7));
+
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("11"_sr, "2"_sr)), "5");
+		wait(tr.commit());
+		TraceEvent("BulkLoadWorkloadTransactionCommitted")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("CommitVersion", tr.getCommittedVersion());
+
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		RangeResult res8 = wait(tr.getRange(range3, GetRangeLimits()));
+		TraceEvent("BulkLoadWorkloadReadRange")
+		    .detail("AtVersion", tr.getReadVersion().get())
+		    .detail("Range", range3)
+		    .detail("Res", self->parseReadRangeResult(res8));
 
 		return Void();
 	}
