@@ -37,26 +37,18 @@ import (
 )
 
 var (
-	inputDir                string
-	fdbserverPath           string
-	versionFilePath         string
-	sharedBinaryDir         string
-	monitorConfFile         string
-	logPath                 string
-	executionModeString     string
-	outputDir               string
-	mainContainerVersion    string
-	currentContainerVersion string
-	additionalEnvFile       string
-	binaryOutputDirectory   string
-	listenAddress           string
-	copyPrimaryLibrary      string
-	requiredCopyFiles       []string
-	copyFiles               []string
-	copyBinaries            []string
-	copyLibraries           []string
-	processCount            int
-	enablePprof             bool
+	fdbserverPath        string
+	versionFilePath      string
+	sharedBinaryDir      string
+	monitorConfFile      string
+	logPath              string
+	executionModeString  string
+	outputDir            string
+	mainContainerVersion string
+	additionalEnvFile    string
+	listenAddress        string
+	processCount         int
+	enablePprof          bool
 )
 
 type executionMode string
