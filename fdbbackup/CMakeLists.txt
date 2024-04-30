@@ -14,7 +14,7 @@ target_include_directories(fdbconvert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/inclu
 target_link_libraries(fdbconvert PRIVATE fdbclient)
 
 set(FDBDECODE_SRCS
-  Decode.cpp
+	Decode.cpp
 	BackupTLSConfig.cpp
 	FileDecoder.actor.cpp)
 add_flow_target(EXECUTABLE NAME fdbdecode SRCS ${FDBDECODE_SRCS})
