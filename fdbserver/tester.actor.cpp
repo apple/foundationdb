@@ -1594,7 +1594,7 @@ ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optiona
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
+				TraceEvent(SevWarnAlways, "TesterRecruitmentTimeout");
 				throw timed_out();
 			}
 		}
@@ -1792,6 +1792,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	state std::vector<TesterInterface> ts; // used to store testers interface
 	state std::vector<KeyRange> rangesToCheck; // get from globalProgressMap
 	state std::vector<KeyRange> shardsToCheck; // get from keyServer metadata
+	state Optional<double> whenFailedToGetTesterStart;
 
 	// Initialize globalProgressMap
 	Optional<std::vector<KeyRange>> rangesToCheck_ = loadRangesToCheckFromKnob();
@@ -1838,7 +1839,19 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			// Step 2: Get testers
 			ts.clear();
 			if (!testers.present()) { // In real clusters
-				wait(store(ts, getTesters(cc, minTestersExpected)));
+				try {
+					wait(store(ts, getTesters(cc, minTestersExpected)));
+					whenFailedToGetTesterStart.reset();
+				} catch (Error& e) {
+					if (e.code() == error_code_timed_out) {
+						if (!whenFailedToGetTesterStart.present()) {
+							whenFailedToGetTesterStart = now();
+						} else if (now() - whenFailedToGetTesterStart.get() > 3600 * 24) { // 1 day
+							TraceEvent(SevError, "TesterRecruitmentTimeout");
+						}
+					}
+					throw e;
+				}
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					throw operation_failed(); // Introduce random failure
 				}
@@ -1908,9 +1921,24 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	}
 }
 
+ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
+                                                     Database cx,
+                                                     Optional<std::vector<TesterInterface>> testers,
+                                                     int minTestersExpected,
+                                                     bool repeatRun) {
+	loop {
+		wait(runConsistencyCheckerUrgentCore(cc, cx, testers, minTestersExpected));
+		if (!repeatRun) {
+			break;
+		}
+		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME));
+	}
+	return Void();
+}
+
 Future<Void> checkConsistencyUrgentSim(Database cx, std::vector<TesterInterface> testers) {
-	return runConsistencyCheckerUrgentCore(
-	    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(), cx, testers, 1);
+	return runConsistencyCheckerUrgentHolder(
+	    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(), cx, testers, 1, /*repeatRun=*/false);
 }
 
 ACTOR Future<bool> runTest(Database cx,
@@ -3018,9 +3046,10 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 		state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
 		cx = openDBOnServer(dbInfo);
-		tests = reportErrors(
-		    runConsistencyCheckerUrgentCore(cc, cx, Optional<std::vector<TesterInterface>>(), minTestersExpected),
-		    "runConsistencyCheckerUrgentCore");
+		tests =
+		    reportErrors(runConsistencyCheckerUrgentHolder(
+		                     cc, cx, Optional<std::vector<TesterInterface>>(), minTestersExpected, /*repeatRun=*/true),
+		                 "runConsistencyCheckerUrgentHolder");
 	} else if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);
