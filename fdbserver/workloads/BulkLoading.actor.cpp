@@ -124,7 +124,7 @@ struct BulkLoading : TestWorkload {
 			ASSERT(false);
 		} catch (Error& e) {
 			TraceEvent("BulkLoadWorkloadAddTaskFailed").errorUnsuppressed(e);
-			ASSERT(e.code() == error_code_bulkload_add_task_input_error);
+			ASSERT(e.code() == error_code_bulkload_task_conflict);
 		}
 
 		tr.reset();
@@ -189,6 +189,15 @@ struct BulkLoading : TestWorkload {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("11"_sr, "2"_sr)), "5");
+
+		try {
+			RangeResult res8 = wait(tr.getRange(range3, GetRangeLimits()));
+			ASSERT(false);
+		} catch (Error& e) {
+			TraceEvent("BulkLoadWorkloadReadRangeError").errorUnsuppressed(e);
+			ASSERT(e.code() == error_code_bulkload_check_status_input_error);
+		}
+
 		wait(tr.commit());
 		TraceEvent("BulkLoadWorkloadTransactionCommitted")
 		    .detail("AtVersion", tr.getReadVersion().get())
@@ -199,11 +208,11 @@ struct BulkLoading : TestWorkload {
 		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		RangeResult res8 = wait(tr.getRange(range3, GetRangeLimits()));
+		RangeResult res9 = wait(tr.getRange(range3, GetRangeLimits()));
 		TraceEvent("BulkLoadWorkloadReadRange")
 		    .detail("AtVersion", tr.getReadVersion().get())
 		    .detail("Range", range3)
-		    .detail("Res", self->parseReadRangeResult(res8));
+		    .detail("Res", self->parseReadRangeResult(res9));
 
 		return Void();
 	}

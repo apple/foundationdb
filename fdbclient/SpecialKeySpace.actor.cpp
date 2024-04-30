@@ -2834,7 +2834,7 @@ ACTOR static Future<Optional<std::string>> BulkLoadingTaskCommitActor(ReadYourWr
 	if (existingBulkLoadUpdate(ryw, Standalone(KeyRangeRef("cancel/"_sr, "cancel0"_sr)))) {
 		TraceEvent(SevWarn, "BulkLoadTaskCommitError")
 		    .detail("Reason", "Exist bulk loading cancel in the same transaction");
-		throw bulkload_check_status_input_error();
+		throw bulkload_add_task_input_error();
 	}
 
 	state KeyRange taskRange =
@@ -2880,7 +2880,7 @@ ACTOR static Future<Optional<std::string>> BulkLoadingTaskCommitActor(ReadYourWr
 					ASSERT(existBulkLoadTask.isValid());
 					TraceEvent(SevWarnAlways, "BulkLoadTaskCommitError")
 					    .detail("Reason", "New range conflicts to existing ones");
-					throw bulkload_add_task_input_error();
+					throw bulkload_task_conflict();
 				}
 			}
 			readBeginKey = result.back().key;
@@ -2937,7 +2937,7 @@ ACTOR static Future<Optional<std::string>> BulkLoadingCancelCommitActor(ReadYour
 	if (existingBulkLoadUpdate(ryw, Standalone(KeyRangeRef("task/"_sr, "task0"_sr)))) {
 		TraceEvent(SevWarn, "BulkLoadTaskCommitError")
 		    .detail("Reason", "Exist bulk loading cancel in the same transaction");
-		throw bulkload_check_status_input_error();
+		throw bulkload_cancel_task_input_error();
 	}
 
 	// Get all cancelled range in the current transaction

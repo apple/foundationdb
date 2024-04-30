@@ -110,6 +110,7 @@ ERROR( consistency_check_urgent_task_failed, 1085, "Consistency check urgent tas
 ERROR( bulkload_add_task_input_error, 1086, "Bulk loading add task input is error" )
 ERROR( bulkload_cancel_task_input_error, 1087, "Bulk loading cancel task input is error" )
 ERROR( bulkload_check_status_input_error, 1088, "Bulk loading check task status input is error" )
+ERROR( bulkload_task_conflict, 1089, "Input bulk loading task is conflicting with existing task" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
