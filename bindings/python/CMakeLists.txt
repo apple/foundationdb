@@ -1,4 +1,5 @@
 set(SRCS
+
   fdb/__init__.py
   fdb/directory_impl.py
   fdb/impl.py
@@ -7,9 +8,16 @@ set(SRCS
   fdb/subspace_impl.py
   fdb/tenant_management.py
   fdb/tuple.py
-  README.rst
-  MANIFEST.in)
 
+  fdb/apiversion.py.cmake
+
+  README.rst
+  MANIFEST.in
+
+  pyproject.toml
+)
+
+# FIXME Windows Python support at fdb/fdb_c.dll.pth
 if(APPLE)
   list(APPEND SRCS fdb/libfdb_c.dylib.pth)
 else()
@@ -49,16 +57,13 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdb/apiversion.py.cmake ${apiversion_
 add_dependencies(python_binding fdb_python_options)
 
 set(out_files "${out_files};${options_file};${apiversion_file}")
-# TODO[mpilman]: it is not clear whether we want to have rpms for python
-#install(FILES ${out_files} DESTINATION ${FDB_PYTHON_INSTALL_DIR} COMPONENT python)
 
-# Create sdist
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/setup.py.cmake ${CMAKE_CURRENT_BINARY_DIR}/setup.py)
+# Create Python package in tar.gz format
 configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE COPYONLY)
 find_program(pycodestyle pycodestyle)
 if (pycodestyle)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style
-    COMMAND ${pycodestyle} bindings/python --config=${CMAKE_CURRENT_SOURCE_DIR}/setup.cfg &&
+    COMMAND ${pycodestyle} bindings/python --config=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg &&
             ${CMAKE_COMMAND} -E ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS ${out_files}
@@ -72,24 +77,26 @@ if(NOT FDB_RELEASE)
 else()
   set(not_fdb_release_string "")
 endif()
+
+
 set(setup_file_name foundationdb-${FDB_VERSION}.tar.gz)
 set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}.tar.gz)
 add_custom_command(OUTPUT ${package_file}
-  COMMAND $<TARGET_FILE:Python3::Interpreter> setup.py sdist --formats=gztar &&
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m ensurepip
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m pip install --upgrade build
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build &&
           ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  COMMENT "Create Python sdist package")
+  COMMENT "Create Python package")
 add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
 
 if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
-
   add_fdbclient_test(
     NAME python_unit_tests
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit_tests.py
             --cluster-file @CLUSTER_FILE@ --verbose
     DISABLE_LOG_DUMP
   )
-
 endif() # NOT OPEN_FOR_IDE AND NOT USE_SANITIZER

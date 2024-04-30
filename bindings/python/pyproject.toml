@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foundationdb"
+dynamic = ["version"]
+authors = [{name = "FoundationDB Team", email="fdb-dist@apple.com"}]
+description = "Python bindings for the FoundationDB Database"
+readme = "README.rst"
+keywords = ["database", "key-value store", "acid"]
+urls = {Homepage = "https://www.foundationdb.org", Repository = "https://github.com/apple/foundationdb"}
+requires-python = ">=3.8"
+classifiers = [
+	'Development Status :: 5 - Production/Stable',
+	'Intended Audience :: Developers',
+	'License :: OSI Approved :: Apache Software License',
+	'Operating System :: MacOS :: MacOS X',
+	'Operating System :: Microsoft :: Windows',
+	'Operating System :: POSIX :: Linux',
+	'Programming Language :: Python :: 3.8',
+	'Programming Language :: Python :: Implementation :: CPython',
+	'Topic :: Database',
+	'Topic :: Database :: Front-Ends'
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "fdb.__version__"}
+
+[tool.setuptools.packages.find]
+# It is necessary to restrict the py-modules since in the CMake build directory 
+# there is a CMakeFiles subdirectory which will be misidentified by pip as a
+# module.
+include = ["fdb"]

@@ -54,10 +54,12 @@ class PortProvider:
                 )
                 pass
 
+    @staticmethod
     def is_port_in_use(port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(("localhost", port)) == 0
 
+    @staticmethod
     def _get_free_port_internal():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("0.0.0.0", 0))
@@ -655,7 +657,7 @@ knob_min_trace_severity=5
 
         # Step 2: change coordinators
         start_time = time.time()
-        new_coordinators = set(random.sample(new_servers, len(self.coordinators)))
+        new_coordinators = set(random.sample(list(new_servers), len(self.coordinators)))
         print("New coordinators: {}".format(new_coordinators))
         self.coordinators = new_coordinators.copy()
         self.update_coordinators()

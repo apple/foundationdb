@@ -716,6 +716,11 @@ func (o TransactionOptions) SetAuthorizationToken(param string) error {
 	return o.setOpt(2000, []byte(param))
 }
 
+// Enables replica consistency check, which compares the results returned by all storage server replicas for a given read request, in client-side load balancer.
+func (o TransactionOptions) SetEnableReplicaConsistencyCheck() error {
+	return o.setOpt(4000, nil)
+}
+
 type StreamingMode int
 
 const (
