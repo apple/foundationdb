@@ -336,8 +336,8 @@ description is not currently required but encouraged.
             description="Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction." />
     <Option name="auto_throttle_tag" code="801" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual or automatic targeted throttling. At most 5 tags can be set on a transaction." />
-    <Option name="span_parent" code="900" paramType="Bytes" paramDescription="A byte string of length 16 used to associate the span of this transaction with a parent"
-            description="Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes"/>
+    <Option name="span_parent" code="900" paramType="Bytes" paramDescription="A serialized binary byte string of length 33 used to associate the span of this transaction with a parent"
+            description="Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with a 33 bytes serialized binary format which consists of: 8 bytes protocol version, e.g. ``0x0FDB00B073000000LL`` in little-endian format, 16 bytes trace id, 8 bytes span id, 1 byte set to 1 if sampling is enabled"/>
     <Option name="expensive_clear_cost_estimation_enable" code="1000"
                 description="Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this." />
     <Option name="bypass_unreadable" code="1100"
