@@ -574,6 +574,8 @@ struct RequestData : NonCopyable {
 // list of servers.
 // When model is set, load balance among alternatives in the same DC aims to balance request queue length on these
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
+// If compareReplicas is set, does a consistency check by fetching and comparing results from storage
+// replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,
