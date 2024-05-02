@@ -18,6 +18,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`anti-features`: What a system *isn't* is sometimes as important as what it is. FoundationDB explicitly excludes some features either because they are at odds with the overall system design, or because they are better implemented as :doc:`layers <layer-concept>`.
 
+* :doc:`experimental-features` describes experimental features of FoundationDB, available for testing.
+
 * :doc:`engineering` summarizes the unique tools and capabilities behind FoundationDB.
 
 * :doc:`fault-tolerance`: FoundationDB provides fault tolerance by intelligently replicating data across a distributed cluster of machines. Our architecture is designed to minimize service interruption and data loss in the event of machine failures.
@@ -46,6 +48,7 @@ These documents explain the engineering design of FoundationDB, with detailed in
    features
    layer-concept
    anti-features
+   experimental-features
    transaction-processing
    fault-tolerance
    flow
