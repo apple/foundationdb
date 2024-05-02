@@ -464,7 +464,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BLOOM_WHOLE_KEY_FILTERING,                   false );
 	init( ROCKSDB_MAX_AUTO_READAHEAD_SIZE,                     65536 );
 	// If rocksdb block cache size is 0, the default 8MB is used.
-	int64_t blockCacheSize = isSimulated ? 16 * 1024 : 5LL * 1024 * 1024 * 1024 /* 5GB */;
+	int64_t blockCacheSize = isSimulated ? 16 * 1024 : 4LL * 1024 * 1024 * 1024 /* 4GB */;
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize ); /* Datablocks cache + Index&filter blocks cache */
 	init( ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO,                     0.5 ); /* Share of high priority Index&filter blocks in cache */
 	init( ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS,                true );
