@@ -306,6 +306,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TSS_LARGE_TRACE_SIZE,                              50000 );
 	init( LOAD_BALANCE_FETCH_REPLICA_TIMEOUT,                  5.0 );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS,         false );
+	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,                  -2 ); // Do consistency check based on all available storage replicas
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
