@@ -256,6 +256,12 @@ ACTOR Future<Void> waitForVersion(LogRouterData* self, Version ver) {
 	// The only time the log router should allow a gap in versions larger than MAX_READ_TRANSACTION_LIFE_VERSIONS is
 	// when processing epoch end. Since one set of log routers is created per generation of transaction logs, the gap
 	// caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
+	TraceEvent("LogRouterWaitForVersion", self->dbgid)
+	    .detail("WaitForVersion", ver)
+	    .detail("StartVersion", self->startVersion)
+	    .detail("Version", self->version.get())
+	    .detail("MinPopped", self->minPopped.get())
+	    .detail("FoundEpochEnd", self->foundEpochEnd);
 	state double startTime = now();
 	if (self->version.get() < self->startVersion) {
 		// Log router needs to wait for remote tLogs to process data, whose version is less than self->startVersion,
