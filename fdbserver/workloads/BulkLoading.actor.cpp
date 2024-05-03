@@ -104,6 +104,28 @@ struct BulkLoading : TestWorkload {
 		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("1"_sr, "2"_sr)), "1");
+		try {
+			wait(tr.commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_bulkload_is_off_when_commit_task);
+		}
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.set("\xff\xff/bulk_loading/mode"_sr, BinaryWriter::toValue("1"_sr, Unversioned()));
+		wait(tr.commit());
+		TraceEvent("BulkLoadWorkloadEnableBulkLoad");
+		tr.reset();
+		TraceEvent("BulkLoadWorkloadTransactionReset");
+
+		tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		ASSERT(!tr.getReadVersion().isReady());
 		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("1"_sr, "2"_sr)), "1");
 		self->addBulkLoadTask(&tr, Standalone(KeyRangeRef("2"_sr, "3"_sr)), "2");

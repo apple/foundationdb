@@ -1626,6 +1626,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    std::make_unique<BulkLoadCancelImpl>(
 		        KeyRangeRef("cancel/"_sr, "cancel0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin)));
+		registerSpecialKeysImpl(SpecialKeySpace::MODULE::BULKLOADING,
+		                        SpecialKeySpace::IMPLTYPE::READWRITE,
+		                        std::make_unique<BulkLoadModeImpl>(singleKeyRange("mode"_sr).withPrefix(
+		                            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin)));
 	}
 
 	if (apiVersion.version() >= 700) {

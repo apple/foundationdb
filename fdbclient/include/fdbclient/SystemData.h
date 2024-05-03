@@ -519,7 +519,7 @@ extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
 
-extern const KeyRef bulkLoadTriggerKey;
+extern const KeyRef bulkLoadModeKey;
 extern const KeyRef bulkLoadPrefix;
 const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
 BulkLoadState decodeBulkLoadState(const ValueRef& value);

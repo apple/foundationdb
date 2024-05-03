@@ -2837,6 +2837,18 @@ ACTOR static Future<Optional<std::string>> BulkLoadingTaskCommitActor(ReadYourWr
 		throw bulkload_add_task_input_error();
 	}
 
+	// Check bulk loading mode
+	Optional<Value> mode = wait(ryw->getTransaction().get(bulkLoadModeKey));
+	if (!mode.present()) {
+		throw bulkload_is_off_when_commit_task();
+	}
+	int bulkLoadMode = BinaryReader::fromStringRef<int>(mode.get(), Unversioned());
+	if (bulkLoadMode == 0) {
+		throw bulkload_is_off_when_commit_task();
+	} else if (bulkLoadMode != 1) {
+		throw bulkload_mode_not_found();
+	}
+
 	state KeyRange taskRange =
 	    Standalone(KeyRangeRef("task/"_sr, "task0"_sr))
 	        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin);
@@ -2940,6 +2952,18 @@ ACTOR static Future<Optional<std::string>> BulkLoadingCancelCommitActor(ReadYour
 		throw bulkload_cancel_task_input_error();
 	}
 
+	// Check bulk loading mode
+	Optional<Value> mode = wait(ryw->getTransaction().get(bulkLoadModeKey));
+	if (!mode.present()) {
+		throw bulkload_is_off_when_commit_task();
+	}
+	int bulkLoadMode = BinaryReader::fromStringRef<int>(mode.get(), Unversioned());
+	if (bulkLoadMode == 0) {
+		throw bulkload_is_off_when_commit_task();
+	} else if (bulkLoadMode != 1) {
+		throw bulkload_mode_not_found();
+	}
+
 	// Get all cancelled range in the current transaction
 	state KeyRange cancelRange =
 	    Standalone(KeyRangeRef("cancel/"_sr, "cancel0"_sr))
@@ -2993,6 +3017,49 @@ ACTOR static Future<Optional<std::string>> BulkLoadingCancelCommitActor(ReadYour
 
 Future<Optional<std::string>> BulkLoadCancelImpl::commit(ReadYourWritesTransaction* ryw) {
 	return BulkLoadingCancelCommitActor(ryw, getKeyRange());
+}
+
+BulkLoadModeImpl::BulkLoadModeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> BulkLoadModeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	throw not_implemented();
+}
+
+void BulkLoadModeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	throw not_implemented();
+}
+
+void BulkLoadModeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	throw not_implemented();
+}
+
+void BulkLoadModeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	Key modeKey = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin.withSuffix("mode"_sr);
+	ryw->getSpecialKeySpaceWriteMap().insert(modeKey, std::make_pair(true, value));
+	TraceEvent("BulkLoadSetMode").detail("Value", value.toString());
+}
+
+Future<Optional<std::string>> BulkLoadModeImpl::commit(ReadYourWritesTransaction* ryw) {
+	KeyRangeRef kr = getKeyRange();
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value().first)
+			continue;
+		if (iter->value().second.present()) {
+			ASSERT(iter->range() == kr);
+			int mode = BinaryReader::fromStringRef<int>(iter->value().second.get(), Unversioned());
+			if (mode == 0 || mode == 1) {
+				ryw->getTransaction().set(bulkLoadModeKey, BinaryWriter::toValue(mode, Unversioned()));
+				TraceEvent("BulkLoadSetModeCommit").detail("Value", mode);
+			} else {
+				throw bulkload_mode_not_found();
+			}
+		}
+	}
+	TraceEvent("BulkLoadSetModeCommitDone").detail("KR", kr.toString());
+	return Optional<std::string>();
 }
 
 // Clears the special management api keys excludeLocality and failedLocality.

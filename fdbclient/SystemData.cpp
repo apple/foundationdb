@@ -1216,7 +1216,7 @@ const KeyRef dataDistributionModeKey = "\xff/dataDistributionMode"_sr;
 const UID dataDistributionModeLock = UID(6345, 3425);
 
 // Bulk loading keys
-const KeyRef bulkLoadTriggerKey = "\xff/bulkLoadTrigger"_sr;
+const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
 const KeyRef bulkLoadPrefix = "\xff/bulkLoad/"_sr;
 
 const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {

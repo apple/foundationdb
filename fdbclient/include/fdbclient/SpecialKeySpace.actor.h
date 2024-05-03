@@ -595,6 +595,18 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
+class BulkLoadModeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit BulkLoadModeImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
 class WorkerInterfacesSpecialKeyImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr);
