@@ -46,12 +46,12 @@ public:
 	virtual void checkProgress() = 0;
 };
 
-// Workoad interface
+// Workload interface
 class IWorkload {
 public:
 	virtual ~IWorkload() {}
 
-	// Intialize the workload
+	// Initialize the workload
 	virtual void init(WorkloadManager* manager) = 0;
 
 	// Start executing the workload
@@ -73,7 +73,7 @@ public:
 
 // Workload configuration
 struct WorkloadConfig {
-	// Workoad name
+	// Workload name
 	std::string name;
 
 	// Client ID assigned to the workload (a number from 0 to numClients-1)
@@ -125,7 +125,10 @@ protected:
 	                     bool failOnError = true);
 
 	// Execute a non-transactional database operation within the workload
-	void execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
+	void execOperation(TOpStartFct startFct,
+	                   TTaskFct cont,
+	                   std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                   bool failOnError = true);
 
 	// Log an error message, increase error counter
 	void error(const std::string& msg);
@@ -133,7 +136,7 @@ protected:
 	// Log an info message
 	void info(const std::string& msg);
 
-	// Confirm a successfull progress check
+	// Confirm a successful progress check
 	void confirmProgress();
 
 private:
@@ -163,8 +166,14 @@ protected:
 	// Total number of clients
 	int numClients;
 
-	// The maximum number of errors before stoppoing the workload
+	// The maximum number of errors before stopping the workload
 	int maxErrors;
+
+	// The timeout (in ms) automatically set for all transactions to a random value
+	// in the range [minTxTimeoutMs, maxTxTimeoutMs]
+	// If maxTxTimeoutMs <= 0, no timeout is set
+	int minTxTimeoutMs;
+	int maxTxTimeoutMs;
 
 	// Workload identifier, consisting of workload name and client ID
 	std::string workloadId;
@@ -178,12 +187,12 @@ protected:
 	// Number of started transactions
 	std::atomic<int> numTxStarted;
 
-	// Workload is in progress (intialized, but not completed)
+	// Workload is in progress (initialized, but not completed)
 	std::atomic<bool> inProgress;
 };
 
 // Workload manager
-// Keeps track of active workoads, stops the scheduler after all workloads complete
+// Keeps track of active workloads, stops the scheduler after all workloads complete
 class WorkloadManager {
 public:
 	WorkloadManager(ITransactionExecutor* txExecutor, IScheduler* scheduler)
@@ -205,7 +214,7 @@ public:
 		return numWorkloadsFailed > 0;
 	}
 
-	// Schedule statistics to be printed in regular timeintervals
+	// Schedule statistics to be printed in regular time intervals
 	void schedulePrintStatistics(int timeIntervalMs);
 
 private:
@@ -213,7 +222,7 @@ private:
 
 	// Info about a running workload
 	struct WorkloadInfo {
-		// Reference to the workoad for ownership
+		// Reference to the workload for ownership
 		std::shared_ptr<IWorkload> ref;
 		// Continuation to be executed after completing the workload
 		TTaskFct cont;

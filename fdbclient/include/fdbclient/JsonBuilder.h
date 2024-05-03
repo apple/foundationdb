@@ -14,8 +14,10 @@ typedef JsonBuilder JsonString;
 template <typename T>
 class JsonBuilderObjectSetter;
 
-// Class for building JSON string values.
-// Default value is null, as in the JSON type
+// Class for building JSON strings linearly.
+// JSON data structure is only appendable.  No key deduplication is done in JSON Objects, and the output is not readable
+// other than obtaining a complete JSON string of what has been written to the builder. Default value is null, as in the
+// JSON type
 class JsonBuilder {
 protected:
 	enum EType { NULLVALUE, OBJECT, ARRAY };

@@ -1,54 +1,89 @@
 issues:
+  exclude-files:
+    - "zz_generated.*\\.go$"
   # don't skip warning about doc comments
   # don't exclude the default set of lint
   exclude-use-default: false
+  exclude:
+    - "ST1000: at least one file in a package should have a package comment"
   exclude-rules:
-  # exclude deprecation warning otherwise we get an error for our own deprecations
-  - linters: [staticcheck]
-    text: "SA1019:"
-  - linters: [ govet ]
-    text: 'declaration of "(err|ctx)" shadows declaration at'
+    - path: _test\.go
+      linters:
+        - revive
+      text: "dot-imports: should not use dot imports"
+    # exclude deprecation warning otherwise we get an error for our own deprecations
+    - linters:
+        - staticcheck
+      text: "SA1019:"
+    - linters:
+        - govet
+      text: 'declaration of "(err|ctx)" shadows declaration at'
+    - linters:
+        - revive
+      text: "package-comments: should have a package comment"
 
 linters:
   disable-all: true
-  # TODO(johscheuer): activate linters again and fix issues
   enable:
-    - deadcode
-    #- dupl
+    - asciicheck
+    - bodyclose
+    - depguard
+    - dogsled
     - errcheck
-    #- goconst
-    #- gocyclo
+    - errorlint
+    - exportloopref
+    #    - goconst
+    #    - gocritic
+    #    - gocyclo
     - gofmt
-    - goimports
-    - revive
-    #- gosec
+    #- goimports
+    - goprintffuncname
+    #    - gosec
     - gosimple
     - govet
+    - importas
     - ineffassign
-    #- interfacer
-    #- lll
-    #- maligned
     - misspell
     - nakedret
+    - nilerr
+    #    - nolintlint
     - prealloc
-    - exportloopref
+    - revive
+    - rowserrcheck
     - staticcheck
-    - structcheck
+    - stylecheck
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
+    - whitespace
 
 linters-settings:
   errcheck:
-    # path to a file containing a list of functions to exclude from checking
-    # see https://github.com/kisielk/errcheck#excluding-functions for details
-    exclude: errcheck_excludes.txt
+    exclude-functions:
+      - (io.Closer).Close
+      - (*os.File).Close
   govet:
     enable:
       - shadow
+  depguard:
+    rules:
+      main:
+        allow:
+          - $gostd
+          - github.com/apple/foundationdb
+          - sigs.k8s.io/controller-runtime
+          - k8s.io/apimachinery
+          - k8s.io/client-go
+          - k8s.io/api
+          - k8s.io/utils
+          - github.com/onsi/gomega
+          - github.com/onsi/ginkgo
+          - github.com/spf13/pflag
+          - github.com/prometheus
+          - github.com/go-logr
+          - github.com/fsnotify/fsnotify
+
 run:
-  deadline: 5m
-  skip-files:
-    - ".*_generated.*.go$"
+  timeout: 10m
+  allow-parallel-runners: true

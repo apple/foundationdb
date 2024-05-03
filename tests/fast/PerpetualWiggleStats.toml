@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'PerpetualWiggleStats'
+useDB = true
+
+[[test.workload]]
+testName = 'PerpetualWiggleStatsWorkload'

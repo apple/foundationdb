@@ -59,7 +59,7 @@ Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type, 
 
 Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type,
                                                                      Database const& cx,
-                                                                     TenantName const& tenant) {
+                                                                     Reference<Tenant> const& tenant) {
 	Reference<ISingleThreadTransaction> result;
 	if (type == Type::RYW) {
 		result = makeReference<ReadYourWritesTransaction>();

@@ -22,7 +22,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -197,6 +197,7 @@ bool checkTxInfoEntryFormat(BinaryReader& reader) {
 }
 
 struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "ClientTransactionProfileCorrectness";
 	double samplingProbability;
 	int64_t trInfoSizeLimit;
 
@@ -212,8 +213,6 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		    .detail("SamplingProbability", samplingProbability)
 		    .detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
-
-	std::string description() const override { return "ClientTransactionProfileCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
@@ -292,6 +291,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Tuple rate = Tuple::makeTuple(sampleProbability);
 			Tuple size = Tuple::makeTuple(sizeLimit);
@@ -368,5 +368,4 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory(
-    "ClientTransactionProfileCorrectness");
+WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory;

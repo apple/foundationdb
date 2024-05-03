@@ -54,10 +54,10 @@ struct RestoreFileFR;
 // Restore.actor.h and implementation in RestoreCommon.actor.cpp, so that we can use in both the existing restore and
 // the new fast restore subsystems. We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
 // non-functional changes in RestoreConfig
-class RestoreConfigFR : public KeyBackedConfig, public ReferenceCounted<RestoreConfigFR> {
+class RestoreConfigFR : public KeyBackedTaskConfig, public ReferenceCounted<RestoreConfigFR> {
 public:
-	RestoreConfigFR(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfigFR(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
+	RestoreConfigFR(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	RestoreConfigFR(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum();
 

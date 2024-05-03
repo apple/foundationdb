@@ -22,15 +22,16 @@
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -86,7 +87,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc,
     Version version,
     RestoreAsset asset,
-    Optional<Database> cx);
+    Database cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
@@ -98,7 +99,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database 
 		state int sendLoadParams = 0;
 		state int lastLoadReqs = 0;
 		loop {
-			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
+			TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
 			    .detail("LoadingQueue", self->loadingQueue.size())
 			    .detail("SendingLoadParamQueue", self->sendLoadParamQueue.size())
@@ -223,7 +224,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database 
 			updateProcessStats(self);
 
 			if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
-				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
+				TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
 				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
@@ -303,7 +304,9 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
-				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
+				when(wait(error)) {
+					TraceEvent("FastRestoreLoaderActorCollectionError", self->id());
+				}
 			}
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
@@ -325,7 +328,7 @@ static inline bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, KeyR
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
 		minVersion = std::min(minVersion, r->value());
 	}
-	ASSERT(minVersion != MAX_VERSION); // pRangeVersions is initialized as entired keyspace, ranges cannot be empty
+	ASSERT(minVersion != MAX_VERSION); // pRangeVersions is initialized as entire keyspace, ranges cannot be empty
 	return minVersion >= v;
 }
 
@@ -370,13 +373,12 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 
 ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database cx, Arena* arena) {
 	ASSERT(mutation.isEncrypted());
+
 	Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-	state const BlobCipherEncryptHeader* header = mutation.encryptionHeader();
 	std::unordered_set<BlobCipherDetails> cipherDetails;
-	cipherDetails.insert(header->cipherHeaderDetails);
-	cipherDetails.insert(header->cipherTextDetails);
-	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-	    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
+	mutation.updateEncryptCipherDetails(cipherDetails);
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult = wait(
+	    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
 	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);
 }
 
@@ -405,10 +407,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len);
 
-	// Ensure data blocks in the same file are processed in order
-	wait(processedFileOffset->whenAtLeast(asset.offset));
-	ASSERT(processedFileOffset->get() == asset.offset);
-
 	state Arena tempArena;
 	state StringRefReader reader(buf, restore_corrupted_data());
 	try {
@@ -426,12 +424,14 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			state LogMessageVersion msgVersion;
 			msgVersion.version = reader.consumeNetworkUInt64();
 			msgVersion.sub = reader.consumeNetworkUInt32();
-			int msgSize = reader.consumeNetworkInt32();
-			const uint8_t* message = reader.consume(msgSize);
+			state int msgSize = reader.consumeNetworkInt32();
+			state const uint8_t* message = reader.consume(msgSize);
 
 			// Skip mutations out of the version range
-			if (!asset.isInVersionRange(msgVersion.version))
+			if (!asset.isInVersionRange(msgVersion.version)) {
+				wait(yield()); // avoid potential stack overflows
 				continue;
+			}
 
 			state VersionedMutationsMap::iterator it;
 			bool inserted;
@@ -452,6 +452,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
 				cc->oldLogMutations += 1;
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 
@@ -459,6 +460,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			if (mutation.param1 >= asset.range.end ||
 			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 
@@ -509,7 +511,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 		    .detail("BlockLen", asset.len);
 		throw;
 	}
-	processedFileOffset->set(asset.offset + asset.len);
 	return Void();
 }
 
@@ -526,8 +527,19 @@ ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
 	state int readFileRetries = 0;
 	loop {
 		try {
+			// Ensure data blocks in the same file are processed in order
+			wait(processedFileOffset->whenAtLeast(asset.offset));
+			ASSERT(processedFileOffset->get() == asset.offset);
+
 			wait(_parsePartitionedLogFileOnLoader(
 			    pRangeVersions, processedFileOffset, kvOpsIter, samplesIter, cc, bc, asset, cx));
+			processedFileOffset->set(asset.offset + asset.len);
+
+			TraceEvent("FastRestoreLoaderDecodingLogFileDone")
+			    .detail("BatchIndex", asset.batchIndex)
+			    .detail("Filename", asset.filename)
+			    .detail("Offset", asset.offset)
+			    .detail("Length", asset.len);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
@@ -1029,7 +1041,7 @@ void splitMutation(const KeyRangeMap<UID>& krMap,
                    VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena,
                    VectorRef<UID>& nodeIDs) {
-	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m);
+	TraceEvent(SevVerbose, "FastRestoreSplitMutation").detail("Mutation", m);
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	auto r = krMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
@@ -1238,7 +1250,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc,
     Version version,
     RestoreAsset asset,
-    Optional<Database> cx) {
+    Database cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
@@ -1302,7 +1314,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	int rangeStart = 1;
 	int rangeEnd = blockData.size() - 1; // The rangeStart and rangeEnd is [,)
 
-	// Slide start from begining, stop if something in range is found
+	// Slide start from beginning, stop if something in range is found
 	// Move rangeStart and rangeEnd until they is within restoreRange
 	while (rangeStart < rangeEnd && !asset.range.contains(blockData[rangeStart].key)) {
 		++rangeStart;

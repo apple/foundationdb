@@ -1143,7 +1143,7 @@ art_leaf* art_tree::insert_fat_node(art_node* n,
 		// Let's grab the minimum BEFORE we create the fat node and insert the new leaf :)
 		art_leaf* lm = min_of_n == nullptr ? minimum(n) : min_of_n;
 		art_node* nkv = n;
-		// change the type before deferencing the leaf
+		// change the type before dereferencing the leaf
 		nkv->type = static_cast<ART_NODE_TYPE>(n->type + 4);
 		art_leaf* l_new = make_leaf(k, value);
 		ART_FAT_NODE_LEAF(nkv) = l_new;

@@ -28,6 +28,8 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
+#include "flow/ObjectSerializerTraits.h"
+#include "fdbserver/Knobs.h"
 
 class LogSet;
 struct OldLogData;
@@ -94,16 +96,23 @@ struct OldTLogCoreData {
 	int32_t logRouterTags;
 	int32_t txsTags;
 	Version epochBegin, epochEnd;
+	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), epoch(0) {}
+	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator==(const OldTLogCoreData& rhs) const {
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
-		       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities &&
-		       epoch == rhs.epoch;
+		if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
+			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && recoverAt == rhs.recoverAt &&
+			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+		} else {
+			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
+			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+		}
 	}
 
 	template <class Archive>
@@ -130,6 +139,9 @@ struct OldTLogCoreData {
 		if (ar.protocolVersion().hasBackupWorker()) {
 			serializer(ar, epoch, epochBegin);
 		}
+		if (ar.protocolVersion().hasGcTxnGenerations()) {
+			serializer(ar, recoverAt);
+		}
 	}
 };
 
@@ -143,11 +155,13 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
+	EncryptionAtRestMode encryptionAtRestMode; // cluster encryption data at-rest mode
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
 	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
+	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion),
+	    encryptionAtRestMode(EncryptionAtRestMode()) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
@@ -169,7 +183,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities;
+		       pseudoLocalities == r.pseudoLocalities && encryptionAtRestMode == r.encryptionAtRestMode;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
@@ -187,6 +201,9 @@ struct DBCoreState {
 			}
 			if (ar.protocolVersion().hasSWVersionTracking()) {
 				serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
+			}
+			if (ar.protocolVersion().hasEncryptionAtRest()) {
+				serializer(ar, encryptionAtRestMode);
 			}
 		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

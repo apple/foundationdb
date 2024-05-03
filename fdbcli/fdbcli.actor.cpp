@@ -26,8 +26,9 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/IKnobCollection.h"
@@ -244,8 +245,8 @@ private:
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup<T>() {}
-		OptionGroup<T>(OptionGroup<T>& base)
+		OptionGroup() {}
+		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
 		// Enable or disable an option. Returns true if option value changed
@@ -405,6 +406,28 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 			case ';':
 				line.erase(i, 1);
 				break;
+			// Handle \uNNNN utf-8 characters from JSON strings but only as a single byte
+			// Return an error for a sequence out of range for a single byte
+			case 'u': {
+				if (i + 6 > line.length()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 6];
+				line[i + 6] = 0;
+				unsigned long val = strtoul(line.data() + i + 2, &pEnd, 16);
+				ent = char(val);
+				if (*pEnd || val > std::numeric_limits<unsigned char>::max()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				line[i + 6] = save;
+				line.replace(i, 6, 1, ent);
+				break;
+			}
 			case 'x':
 				if (i + 4 > line.length()) {
 					err = true;
@@ -456,7 +479,7 @@ static void printProgramUsage(const char* name) {
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
+	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
 	       "  --log-group LOG_GROUP\n"
@@ -499,11 +522,14 @@ void initHelp() {
 	                "transaction, and are automatically committed for you. By explicitly beginning a transaction, "
 	                "successive operations are all performed as part of a single transaction.\n\nTo commit the "
 	                "transaction, use the commit command. To discard the transaction, use the reset command.");
-	helpMap["commit"] = CommandHelp("commit",
+	helpMap["commit"] = CommandHelp("commit [description]",
 	                                "commit the current transaction",
 	                                "Any sets or clears executed after the start of the current transaction will be "
 	                                "committed to the database. On success, the committed version number is displayed. "
-	                                "If commit fails, the error is displayed and the transaction must be retried.");
+	                                "If commit fails, the error is displayed and the transaction must be retried. The "
+	                                "command optionally allows for a description in case the transaction targets the "
+	                                "configuration database. If no description is provided in the command, a prompt "
+	                                "will be shown asking for a relevant description of the configuration change");
 	helpMap["clear"] = CommandHelp(
 	    "clear <KEY>",
 	    "clear a key from the database",
@@ -538,9 +564,11 @@ void initHelp() {
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
 	helpMap["quota"] = CommandHelp("quota",
-	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
-	                               "[reserved_throughput|total_throughput] <value>]",
-	                               "Get or modify the throughput quota for the specified tag.");
+	                               "quota [get <tag> [reserved_throughput|total_throughput|storage] | "
+	                               "set <tag> [reserved_throughput|total_throughput|storage] <value> | "
+	                               "clear <tag>]",
+	                               "Get, modify, or clear the reserved/total throughput quota (in bytes/s) or "
+	                               "storage quota (in bytes) for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -552,6 +580,18 @@ void initHelp() {
 	helpMap["set"] = CommandHelp("set <KEY> <VALUE>",
 	                             "set a value for a given key",
 	                             "If KEY is not already present in the database, it will be created." ESCAPINGKV);
+
+	helpMap["setknob"] = CommandHelp("setknob <KEY> <VALUE> [CONFIG_CLASS]",
+	                                 "updates a knob to specified value",
+	                                 "setknob will prompt for a description of the changes" ESCAPINGKV);
+
+	helpMap["getknob"] = CommandHelp(
+	    "getknob <KEY> [CONFIG_CLASS]", "gets the value of the specified knob", "CONFIG_CLASS is optional." ESCAPINGK);
+
+	helpMap["clearknob"] = CommandHelp("clearknob <KEY> [CONFIG_CLASS]",
+	                                   "clears the value of the specified knob in the configuration database",
+	                                   "CONFIG_CLASS is optional." ESCAPINGK);
+
 	helpMap["option"] = CommandHelp(
 	    "option <STATE> <OPTION> <ARG>",
 	    "enables or disables an option",
@@ -674,7 +714,9 @@ ACTOR template <class T>
 Future<T> makeInterruptable(Future<T> f) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) { return t; }
+		when(T t = wait(f)) {
+			return t;
+		}
 		when(wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
@@ -884,6 +926,7 @@ struct CLIOptions {
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
 	std::string tlsPassword;
+	bool tlsDisablePlainTextConnection = false;
 	uint64_t memLimit = 8uLL << 30;
 
 	std::vector<std::pair<std::string, std::string>> knobs;
@@ -1003,6 +1046,9 @@ struct CLIOptions {
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			tlsVerifyPeers = args.OptionArg();
 			break;
+		case TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION:
+			tlsDisablePlainTextConnection = true;
+			break;
 
 		case OPT_HELP:
 			printProgramUsage(program_name.c_str());
@@ -1050,12 +1096,17 @@ Future<T> stopNetworkAfter(Future<T> what) {
 	}
 }
 
+enum TransType { Db = 0, Config, None };
+
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnectionFile> ccf) {
 	state LineNoise& linenoise = *plinenoise;
 	state bool intrans = false;
+	state TransType transtype = TransType::None;
+	state bool isCommitDesc = false;
 
 	state Database localDb;
 	state Reference<IDatabase> db;
+	state Reference<IDatabase> configDb;
 	state Reference<ITenant> tenant;
 	state Optional<TenantName> tenantName;
 	state Optional<TenantMapEntry> tenantEntry;
@@ -1064,11 +1115,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	state const Reference<ITenant> managementTenant;
 
 	state Reference<ITransaction> tr;
+	state Reference<ITransaction> config_tr;
 	state Transaction trx;
 
 	state bool writeMode = false;
 
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
+	state std::map<std::string, StorageServerInterface> storage_interface;
 
 	state FdbOptions globalOptions;
 	state FdbOptions activeOptions;
@@ -1085,6 +1138,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
 		}
 		db = API->createDatabase(opt.clusterFile.c_str());
+		configDb = API->createDatabase(opt.clusterFile.c_str());
+		configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
@@ -1143,7 +1198,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	}
 
 	state bool is_error = false;
-
 	state Future<Void> warn;
 	loop {
 		if (warn.isValid())
@@ -1249,9 +1303,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							       "To include a literal quotation mark in a token, precede it with a backslash\n"
 							       "(\\\"hello\\ world\\\").\n"
 							       "\n"
-							       "To express a binary value, encode each byte as a two-digit hex byte, preceded\n"
-							       "by \\x (e.g. \\x20 for a space character, or \\x0a\\x00\\x00\\x00 for a\n"
-							       "32-bit, little-endian representation of the integer 10).\n"
+							       "To express a binary value, encode each byte as either\n"
+							       "   a) a two-digit hex byte preceded by \\x\n"
+							       "   b) a four-digit hex byte in the range of 0x0000-0x00FF preceded by \\u\n"
+							       "(e.g. \\x20 or \\u0020 for a space character, or \\x0a\\x00\\x00\\x00 or\n"
+							       "\\u000a\\u0000\\u0000\\u0000 for a 32-bit, little-endian representation of\n"
+							       "the integer 10.  Any byte can use either syntax, so \\u000a\\x00\\x00\\x00\n"
+							       "is also a valid representation of a little-endian value of 10).\n"
 							       "\n"
 							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
 							       "and spaces encoded as two-digit hex bytes.\n\n");
@@ -1442,23 +1500,49 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					} else {
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
-						getTransaction(db, tenant, tr, options, false);
 						intrans = true;
+						transtype = TransType::None;
+						getTransaction(db, tenant, tr, options, false);
 						printf("Transaction started\n");
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "commit")) {
-					if (tokens.size() != 1) {
+					if (tokens.size() > 2) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
 						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						wait(commitTransaction(tr));
+						if (isCommitDesc && tokens.size() == 1) {
+							// prompt for description and add to txn
+							state Optional<std::string> raw;
+							warn.cancel();
+							while (!raw.present() || raw.get().empty()) {
+								fprintf(stdout,
+								        "Please set a description for the change. Description must be non-empty.\n");
+								state Optional<std::string> rawline =
+								    wait(makeInterruptable(linenoise.read("description: ")));
+								raw = rawline;
+							}
+							std::string line = raw.get();
+							config_tr->set("\xff\xff/description"_sr, line);
+						}
+						warn =
+						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
+						if (transtype == TransType::Db) {
+							wait(commitTransaction(tr));
+						} else {
+							if (tokens.size() > 1) {
+								config_tr->set("\xff\xff/description"_sr, tokens[1]);
+							}
+							wait(commitTransaction(config_tr));
+						}
+						isCommitDesc = false;
 						intrans = false;
+						transtype = TransType::None;
 						options = &globalOptions;
 					}
 
@@ -1481,10 +1565,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						fprintf(stderr, "ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						tr->reset();
-						activeOptions = FdbOptions(globalOptions);
-						options = &activeOptions;
-						options->apply(tr);
+						if (transtype == TransType::Config) {
+							config_tr->reset();
+						} else {
+							tr->reset();
+							activeOptions = FdbOptions(globalOptions);
+							options = &activeOptions;
+							options->apply(tr);
+						}
+						isCommitDesc = false;
+						transtype = TransType::None;
 						printf("Transaction reset\n");
 					}
 					continue;
@@ -1510,6 +1600,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Db;
+							} else if (transtype == TransType::Config) {
+								fprintf(stderr, "ERROR: Cannot perform get in configuration transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
 						state ThreadFuture<Optional<Value>> valueF =
 						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
 						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
@@ -1519,6 +1618,29 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getlocation")) {
+					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getall")) {
+					Version _v = wait(makeInterruptable(
+					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
+					bool _result = wait(makeInterruptable(getallCommandActor(localDb, tokens, _v)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "checkall")) {
+					bool _result = wait(makeInterruptable(checkallCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
@@ -1561,6 +1683,34 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					bool _result = wait(makeInterruptable(suspendCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "audit_storage")) {
+					UID auditId = wait(makeInterruptable(auditStorageCommandActor(ccf, tokens)));
+					if (!auditId.isValid()) {
+						is_error = true;
+					} else {
+						printf("%s audit: %s\n",
+						       tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
+						       auditId.toString().c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "get_audit_status")) {
+					bool _result = wait(makeInterruptable(getAuditStatusCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "location_metadata")) {
+					bool _result = wait(makeInterruptable(locationMetadataCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 
@@ -1618,7 +1768,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					} else {
 						state int limit;
 						bool valid = true;
-
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Db;
+							} else if (transtype == TransType::Config) {
+								fprintf(
+								    stderr,
+								    "ERROR: Cannot perform getrange or getrangekeys in configuration transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
 						if (tokens.size() == 4) {
 							// INT_MAX is 10 digits; rather than
 							// worrying about overflow we'll just cap
@@ -1707,11 +1867,156 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Db;
+							} else if (transtype == TransType::Config) {
+								fprintf(stderr, "ERROR: Cannot perform set in configuration transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
 						getTransaction(db, tenant, tr, options, intrans);
 						tr->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
 							wait(commitTransaction(tr));
+						}
+					}
+					continue;
+				}
+
+				state Optional<std::string> raw_desc;
+				if (tokencmp(tokens[0], "setknob")) {
+					if (tokens.size() > 4 || tokens.size() < 3) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Config;
+							} else if (transtype == TransType::Db) {
+								fprintf(stderr, "ERROR: Cannot perform setknob in database transaction\n");
+								is_error = true;
+								isCommitDesc = false;
+								continue;
+							}
+						}
+						Tuple t;
+						if (tokens.size() == 4) {
+							t.append(tokens[3]);
+						} else {
+							t.appendNull();
+						}
+						t.append(tokens[1]);
+						getTransaction(configDb, tenant, config_tr, options, intrans);
+
+						config_tr->set(t.pack(), tokens[2]);
+						if (!intrans) {
+							// prompt for description and add to txn
+							raw_desc.reset();
+							warn.cancel();
+							while (!raw_desc.present() || raw_desc.get().empty()) {
+								fprintf(stdout,
+								        "Please set a description for the change. Description must be non-empty\n");
+								Optional<std::string> rawline_knob =
+								    wait(makeInterruptable(linenoise.read("description: ")));
+								raw_desc = rawline_knob;
+							}
+							std::string line = raw_desc.get();
+							config_tr->set("\xff\xff/description"_sr, line);
+							warn = checkStatus(
+							    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
+							wait(commitTransaction(config_tr));
+						} else {
+							isCommitDesc = true;
+						}
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getknob")) {
+					if (tokens.size() > 3 || tokens.size() < 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Config;
+							} else if (transtype == TransType::Db) {
+								fprintf(stderr, "ERROR: Cannot perform getknob in database transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
+						Tuple t;
+						if (tokens.size() == 2) {
+							t.appendNull();
+						} else {
+							t.append(tokens[2]);
+						}
+						t.append(tokens[1]);
+						state ThreadFuture<Optional<Value>> valueF_knob =
+						    getTransaction(configDb, tenant, config_tr, options, intrans)->get(t.pack());
+						Optional<Standalone<StringRef>> v =
+						    wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
+						std::string knob_class = printable(tokens[1]);
+						if (tokens.size() == 3) {
+							std::string config_class = (" in configuration class " + printable(tokens[2]));
+							knob_class += config_class;
+						}
+						if (v.present())
+							printf("`%s' is `%s'\n",
+							       knob_class.c_str(),
+							       Tuple::tupleToString(Tuple::unpack(v.get())).c_str());
+						else
+							printf("`%s' is not found\n", knob_class.c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "clearknob")) {
+					if (tokens.size() > 3 || tokens.size() < 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Config;
+							} else if (transtype == TransType::Db) {
+								fprintf(stderr, "ERROR: Cannot perform clearknob in database transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
+						Tuple t;
+						if (tokens.size() == 2) {
+							t.appendNull();
+						} else {
+							t.append(tokens[2]);
+						}
+						t.append(tokens[1]);
+						getTransaction(configDb, tenant, config_tr, options, intrans);
+
+						config_tr->clear(t.pack());
+						if (!intrans) {
+							// prompt for description and add to txn
+							raw_desc.reset();
+							warn.cancel();
+							while (!raw_desc.present() || raw_desc.get().empty()) {
+								fprintf(stdout,
+								        "Please set a description for the change. Description must be non-empty\n");
+								Optional<std::string> rawline_knob =
+								    wait(makeInterruptable(linenoise.read("description: ")));
+								raw_desc = rawline_knob;
+							}
+							std::string line = raw_desc.get();
+							config_tr->set("\xff\xff/description"_sr, line);
+							warn = checkStatus(
+							    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
+							wait(commitTransaction(config_tr));
+						} else {
+							isCommitDesc = true;
 						}
 					}
 					continue;
@@ -1728,6 +2033,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Db;
+							} else if (transtype == TransType::Config) {
+								fprintf(stderr, "ERROR: Cannot perform clear in configuration transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
 						getTransaction(db, tenant, tr, options, intrans);
 						tr->clear(tokens[1]);
 
@@ -1749,6 +2063,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
+						if (intrans) {
+							if (transtype == TransType::None) {
+								transtype = TransType::Db;
+							} else if (transtype == TransType::Config) {
+								fprintf(stderr, "ERROR: Cannot perform clearrange in configuration transaction\n");
+								is_error = true;
+								continue;
+							}
+						}
 						getTransaction(db, tenant, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
@@ -1923,12 +2246,35 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "idempotencyids")) {
+					bool _result = wait(makeInterruptable(idempotencyIdsCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "hotrange")) {
+					bool _result =
+					    wait(makeInterruptable(hotRangeCommandActor(localDb, db, tokens, &storage_interface)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "rangeconfig")) {
+					bool _result = wait(makeInterruptable(rangeConfigCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 				is_error = true;
 			}
 
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("IsError", is_error);
-
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
 				throw;
@@ -2144,6 +2490,15 @@ int main(int argc, char** argv) {
 		}
 	}
 
+	if (opt.tlsDisablePlainTextConnection) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_DISABLE_PLAINTEXT_CONNECTION);
+		} catch (Error& e) {
+			fprintf(stderr, "ERROR: cannot disable non-TLS connections (%s)\n", e.what());
+			return 1;
+		}
+	}
+
 	try {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 	} catch (Error& e) {
@@ -2158,6 +2513,7 @@ int main(int argc, char** argv) {
 		printf("\tCertificate Path: %s\n", tlsConfig.getCertificatePathSync().c_str());
 		printf("\tKey Path: %s\n", tlsConfig.getKeyPathSync().c_str());
 		printf("\tCA Path: %s\n", tlsConfig.getCAPathSync().c_str());
+		printf("\tPlaintext Connection Disable: %s\n", tlsConfig.getDisablePlainTextConnection() ? "true" : "false");
 		try {
 			LoadedTLSConfig loaded = tlsConfig.loadSync();
 			printf("\tPassword: %s\n", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");

@@ -80,8 +80,9 @@ public:
 	Future<Void> done() { return reader; }
 
 private:
-	Version beginVersion, endVersion, currentBeginVersion;
-	unsigned pipelineDepth;
+	[[maybe_unused]] Version beginVersion;
+	Version endVersion, currentBeginVersion;
+	[[maybe_unused]] unsigned pipelineDepth;
 	Future<Void> reader;
 };
 

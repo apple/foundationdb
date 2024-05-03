@@ -186,12 +186,28 @@ struct vector_like_traits<std::array<T, N>> : std::true_type {
 	}
 };
 
+// std::map and std::set have overloads of insert that take a hint parameter.
+// If you start with an empty set, insert sorted data, and use end() as the hint, then inserting n items is O(n) instead
+// of the O(n log n) you would get if you used std::inserter.
+template <class Container>
+struct InsertHintIterator {
+	Container* set;
+	void operator=(const typename Container::value_type& t) { set->insert(set->end(), t); }
+	InsertHintIterator<Container>& operator*() { return *this; }
+	void operator++() {}
+};
+
+template <class Container>
+auto insert_hint_iterator(Container& set) {
+	return InsertHintIterator<Container>{ &set };
+}
+
 template <class Key, class T, class Compare, class Allocator>
 struct vector_like_traits<std::map<Key, T, Compare, Allocator>> : std::true_type {
 	using Vec = std::map<Key, T, Compare, Allocator>;
 	using value_type = std::pair<Key, T>;
 	using iterator = typename Vec::const_iterator;
-	using insert_iterator = std::insert_iterator<Vec>;
+	using insert_iterator = InsertHintIterator<Vec>;
 
 	template <class Context>
 	static size_t num_entries(const Vec& v, Context&) {
@@ -204,7 +220,7 @@ struct vector_like_traits<std::map<Key, T, Compare, Allocator>> : std::true_type
 	template <class Context>
 	static insert_iterator insert(Vec& v, size_t s, Context&) {
 		v.clear();
-		return std::inserter(v, v.end());
+		return insert_hint_iterator(v);
 	}
 
 	template <class Context>
@@ -273,7 +289,7 @@ struct vector_like_traits<std::set<Key, Compare, Allocator>> : std::true_type {
 	using Vec = std::set<Key, Compare, Allocator>;
 	using value_type = Key;
 	using iterator = typename Vec::const_iterator;
-	using insert_iterator = std::insert_iterator<Vec>;
+	using insert_iterator = InsertHintIterator<Vec>;
 
 	template <class Context>
 	static size_t num_entries(const Vec& v, Context&) {
@@ -286,7 +302,7 @@ struct vector_like_traits<std::set<Key, Compare, Allocator>> : std::true_type {
 	template <class Context>
 	static insert_iterator insert(Vec& v, size_t size, Context&) {
 		v.clear();
-		return std::inserter(v, v.end());
+		return insert_hint_iterator(v);
 	}
 
 	template <class Context>
@@ -373,7 +389,7 @@ template <class T>
 constexpr bool is_vector_like = vector_like_traits<T>::value;
 
 template <class T>
-constexpr bool is_vector_of_union_like = is_vector_like<T>&& is_union_like<typename vector_like_traits<T>::value_type>;
+constexpr bool is_vector_of_union_like = is_vector_like<T> && is_union_like<typename vector_like_traits<T>::value_type>;
 
 template <class T>
 constexpr bool is_struct_like = struct_like_traits<T>::value;
@@ -470,8 +486,8 @@ template <class T>
 constexpr int fb_size = is_struct_like<T> ? struct_size(typename struct_like_traits<T>::types{}) : fb_scalar_size<T>;
 
 template <class T>
-constexpr int fb_align = is_struct_like<T> ? align_helper(typename struct_like_traits<T>::types{})
-                                           : AlignToPowerOfTwo(fb_scalar_size<T>);
+constexpr int fb_align =
+    is_struct_like<T> ? align_helper(typename struct_like_traits<T>::types{}) : AlignToPowerOfTwo(fb_scalar_size<T>);
 
 template <class T>
 struct _SizeOf {

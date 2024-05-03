@@ -1,9 +1,10 @@
 [configuration]
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'TenantEntryCacheTest'
+clearAfterTest = false
 
     [[test.workload]]
     testName = 'TenantEntryCache'

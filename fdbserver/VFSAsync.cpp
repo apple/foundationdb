@@ -26,6 +26,7 @@
 #include "flow/IAsyncFile.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 
 #include <assert.h>
@@ -168,7 +169,7 @@ static int asyncReadZeroCopy(sqlite3_file* pFile, void** data, int iAmt, sqlite_
 }
 static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlite_int64 iOfst) {
 	// printf("-asyncReleaseRef %p +%lld %d <= %p\n", pFile, iOfst, iAmt, data);
-	delete[](char*) data;
+	delete[] (char*)data;
 	return SQLITE_OK;
 }
 #endif
@@ -299,7 +300,7 @@ struct SharedMemoryInfo { // for a file
 	}
 	void cleanup() {
 		for (int i = 0; i < regions.size(); i++)
-			delete[](uint8_t*) regions[i];
+			delete[] (uint8_t*)regions[i];
 		table.erase(filename);
 	}
 

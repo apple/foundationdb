@@ -72,8 +72,7 @@ class TagThrottlerImpl {
 						}
 						self->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 						if (!committed)
-							tr.set(tagThrottleAutoEnabledKey,
-							       LiteralStringRef(self->autoThrottlingEnabled ? "1" : "0"));
+							tr.set(tagThrottleAutoEnabledKey, self->autoThrottlingEnabled ? "1"_sr : "0"_sr);
 					}
 
 					RkTagThrottleCollection updatedTagThrottles;

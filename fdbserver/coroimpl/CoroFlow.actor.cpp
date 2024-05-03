@@ -22,11 +22,13 @@
 #include "flow/ActorCollection.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include <boost/coroutine2/all.hpp>
 #include <boost/coroutine2/coroutine.hpp>
 #include <functional>
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 using coro_t = boost::coroutines2::coroutine<Future<Void>>;
@@ -57,8 +59,11 @@ struct Coroutine /*: IThreadlike*/ {
 	Coroutine() = default;
 	~Coroutine() { *alive = false; }
 
+	static constexpr auto kStackSize = 32 * (1 << 10);
+
 	void start() {
-		coro.reset(new coro_t::pull_type([this](coro_t::push_type& sink) { entry(sink); }));
+		coro.reset(new coro_t::pull_type(boost::coroutines2::fixedsize_stack(kStackSize),
+		                                 [this](coro_t::push_type& sink) { entry(sink); }));
 		switcher(this);
 	}
 

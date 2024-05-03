@@ -46,8 +46,8 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/KeyBackedTypes.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include <algorithm>
 #include <cinttypes>
 #include <time.h>
@@ -272,18 +272,27 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
+			Optional<std::string> blobstoreProxy;
+
+			// If no proxy is passed down to the openContainer method, try to fallback to the
+			// fileBackupAgentProxy which is a global variable and will be set for the backup_agent.
+			if (proxy.present()) {
+				blobstoreProxy = proxy.get();
+			} else if (fileBackupAgentProxy.present()) {
+				blobstoreProxy = fileBackupAgentProxy.get();
+			}
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
 			S3BlobStoreEndpoint::ParametersT backupParams;
 			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, proxy, &resource, &lastOpenError, &backupParams);
+			    S3BlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
 
 			if (resource.empty())
 				throw backup_invalid_url();
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName, true);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -376,7 +385,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL, 
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {});
+			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {}, true);
 
 			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;

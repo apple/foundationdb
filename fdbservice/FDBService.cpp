@@ -343,8 +343,8 @@ protected:
 		confFile = _confpath;
 		LogEvent(EVENTLOG_INFORMATION_TYPE, format("Using config file %s", confFile.c_str()));
 
-		// Aquire the mutex for this service. There will be one mutex per config file.
-		// If the user installes the executable as more than one service (not likely)
+		// Acquire the mutex for this service. There will be one mutex per config file.
+		// If the user installs the executable as more than one service (not likely)
 		//  we allow that both can operate so long as they are pointed at different
 		//  config files.
 
@@ -361,7 +361,7 @@ protected:
 		    format( "Global\\" SERVICE_NAME ".%s", escaped.c_str() ).c_str() );  // object name
 
 		if (hMutex == nullptr)
-		    errorExit( format( "Could not create/aquire global mutex (%s)", escaped.c_str() ).c_str() );
+		    errorExit( format( "Could not create/acquire global mutex (%s)", escaped.c_str() ).c_str() );
 		else
 		    // In this case ownership on creation flag is ignored. (see MSDN docs)
 		    if ( GetLastError() == ERROR_ALREADY_EXISTS )
@@ -472,7 +472,7 @@ protected:
 						    EVENTLOG_INFORMATION_TYPE);
 					} else {
 						// The load was a success but we may still have an error-caused reload scheduled.
-						//  Cancel any outstanding timers to avoid an uneeded reload of the file.
+						//  Cancel any outstanding timers to avoid an unneeded reload of the file.
 						CancelWaitableTimer(fileErrorReloadHandle);
 					}
 

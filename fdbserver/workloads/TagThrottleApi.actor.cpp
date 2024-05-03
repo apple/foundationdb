@@ -30,14 +30,12 @@ struct TagThrottleApiWorkload : TestWorkload {
 	bool autoThrottleEnabled;
 	double testDuration;
 
-	constexpr static const char* NAME = "TagThrottleApi";
+	constexpr static auto NAME = "TagThrottleApi";
 
 	TagThrottleApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		autoThrottleEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 	}
-
-	std::string description() const override { return TagThrottleApiWorkload::NAME; }
 
 	Future<Void> setup(Database const& cx) override {
 		DatabaseContext::debugUseTags = true;
@@ -45,7 +43,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (this->clientId != 0)
+		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING || this->clientId != 0)
 			return Void();
 		return timeout(runThrottleApi(this, cx), testDuration, Void());
 	}
@@ -271,4 +269,4 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<TagThrottleApiWorkload> TagThrottleApiWorkloadFactory(TagThrottleApiWorkload::NAME);
+WorkloadFactory<TagThrottleApiWorkload> TagThrottleApiWorkloadFactory;

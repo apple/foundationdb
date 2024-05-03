@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-// This file delcares common struct and functions shared by restore roles, i.e.,
+// This file declares common struct and functions shared by restore roles, i.e.,
 // RestoreController, RestoreLoader, RestoreApplier
 
 #pragma once
@@ -69,7 +69,7 @@ class RoleVersionBatchState {
 public:
 	static const int INVALID = -1;
 
-	virtual int get() { return vbState; }
+	virtual int get() const { return vbState; }
 
 	virtual void operator=(int newState) { vbState = newState; }
 
@@ -109,7 +109,7 @@ public:
 
 	virtual void initVersionBatch(int batchIndex) = 0;
 	virtual void resetPerRestoreRequest() = 0;
-	virtual int getVersionBatchState(int batchIndex) = 0;
+	virtual int getVersionBatchState(int batchIndex) const = 0;
 	virtual void setVersionBatchState(int batchIndex, int vbState) = 0;
 
 	void clearInterfaces() {
@@ -117,7 +117,7 @@ public:
 		appliersInterf.clear();
 	}
 
-	virtual std::string describeNode() = 0;
+	virtual std::string describeNode() const = 0;
 };
 
 void updateProcessStats(Reference<RestoreRoleData> self);

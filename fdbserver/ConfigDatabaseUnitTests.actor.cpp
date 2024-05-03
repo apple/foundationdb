@@ -344,7 +344,7 @@ class TransactionEnvironment {
 		state Key configKey = encodeConfigKey(configClass, knobName);
 		state Optional<Value> value = wait(tr->get(configKey));
 		if (expected.present()) {
-			ASSERT_EQ(BinaryReader::fromStringRef<int64_t>(value.get(), Unversioned()), expected.get());
+			ASSERT_EQ(Tuple::unpack(value.get()).getInt(0), expected.get());
 		} else {
 			ASSERT(!value.present());
 		}
@@ -673,7 +673,9 @@ Future<Void> testIgnore(UnitTestParameters params) {
 	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 1 }));
 	choose {
 		when(wait(delay(5))) {}
-		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) { ASSERT(false); }
+		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) {
+			ASSERT(false);
+		}
 	}
 	return Void();
 }

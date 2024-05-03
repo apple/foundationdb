@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
@@ -28,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MemoryLifetime : KVWorkload {
+	static constexpr auto NAME = "MemoryLifetime";
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
@@ -37,8 +37,6 @@ struct MemoryLifetime : KVWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 		valueString = std::string(maxValueBytes, '.');
 	}
-
-	std::string description() const override { return "MemoryLifetime"; }
 
 	Value randomValue() const {
 		return StringRef((uint8_t*)valueString.c_str(),
@@ -170,4 +168,4 @@ struct MemoryLifetime : KVWorkload {
 	}
 };
 
-WorkloadFactory<MemoryLifetime> MemoryLifetimeWorkloadFactory("MemoryLifetime");
+WorkloadFactory<MemoryLifetime> MemoryLifetimeWorkloadFactory;

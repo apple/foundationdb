@@ -3,8 +3,6 @@ blobGranulesEnabled = true
 allowDefaultTenant = false
 injectTargetedSSRestart = true
 injectSSDelay = true
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
 
 [[test]]
 testTitle = 'BlobGranuleVerifyBalance'
@@ -54,3 +52,7 @@ testTitle = 'BlobGranuleVerifyBalance'
     maxDelay = 100
     kill1Timeout = 30
     kill2Timeout = 6000
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 120.0

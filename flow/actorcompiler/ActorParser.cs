@@ -18,10 +18,9 @@
  * limitations under the License.
  */
 
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace actorcompiler
@@ -242,12 +241,14 @@ namespace actorcompiler
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
         public bool generateProbes;
+        public Dictionary<(ulong, ulong), string> uidObjects { get; private set; }
 
         public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes)
         {
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
             this.generateProbes = generateProbes;
+            this.uidObjects = new Dictionary<(ulong, ulong), string>();
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
@@ -338,17 +339,19 @@ namespace actorcompiler
                 {
                     throw new Exception("Internal error: Invalid source line (0)");
                 }
-                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "TEST_CASE")
+                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "SWIFT_ACTOR" || tokens[i].Value == "TEST_CASE")
                 {
-                    int end;
-                    var actor = ParseActor(i, out end);
+                    var actor = ParseActor(i, out int end);
                     if (classContextStack.Count > 0)
                     {
                         actor.enclosingClass = String.Join("::", classContextStack.Reverse().Select(t => t.name));
                     }
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes).Write(actorWriter);
+                    var actorCompiler = new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes);
+                    actorCompiler.Write(actorWriter);
+                    actorCompiler.uidObjects.ToList().ForEach(x => this.uidObjects.TryAdd(x.Key, x.Value));
+
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
                     bool hasLineNumber = false;
@@ -483,6 +486,12 @@ namespace actorcompiler
                     initializer = 
                         range(paren.Position + 1, tokens.End)
                             .TakeWhile(t => t.ParenDepth > paren.ParenDepth);
+                } else {
+                    Token brace = AngleBracketParser.NotInsideAngleBrackets(tokens).FirstOrDefault(t => t.Value == "{");
+                    if (brace != null) {
+                        // type name{initializer};
+                        throw new Error(brace.SourceLine, "Uniform initialization syntax is not currently supported for state variables (use '(' instead of '}}' ?)");
+                    }
                 }
             }
             name = beforeInitializer.Last(NonWhitespace);
@@ -830,12 +839,19 @@ namespace actorcompiler
 
         Statement ParseIfStatement(TokenRange toks)
         {
-            var expr = toks.Consume("if")
-                           .First(NonWhitespace)
+            toks = toks.Consume("if");
+            toks = toks.SkipWhile(Whitespace);
+            bool constexpr = toks.First().Value == "constexpr";
+            if(constexpr) {
+               toks = toks.Consume("constexpr").SkipWhile(Whitespace);
+            }
+
+            var expr = toks.First(NonWhitespace)
                            .Assert("Expected (", t => t.Value == "(")
                            .GetMatchingRangeIn(toks);
             return new IfStatement {
                 expression = str(NormalizeWhitespace(expr)),
+                constexpr = constexpr,
                 ifBody = ParseCompoundStatement(range(expr.End+1, toks.End))
                 // elseBody will be filled in later if necessary by ParseElseStatement
             };
@@ -1032,7 +1048,7 @@ namespace actorcompiler
             actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
             if (actor.isForwardDeclaration) {
                 heading = toSemicolon;
-                if (head_token.Value == "ACTOR") {
+                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR") {
                     ParseActorHeading(actor, heading);
                 } else {
                     head_token.Assert("ACTOR expected!", t => false);
@@ -1042,7 +1058,7 @@ namespace actorcompiler
                 var body = range(heading.End+1, tokens.Length)
                     .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-                if (head_token.Value == "ACTOR")
+                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR")
                 {
                     ParseActorHeading(actor, heading);
                 }

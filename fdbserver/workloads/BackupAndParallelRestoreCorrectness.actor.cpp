@@ -23,7 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -33,6 +33,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupAndParallelRestoreCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
@@ -136,8 +137,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "BackupAndParallelRestoreCorrectness"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -190,7 +189,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	                                   Key tag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   double stopDifferentialDelay,
-	                                   Promise<Void> submittted) {
+	                                   Promise<Void> submitted) {
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 
@@ -216,7 +215,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		state Future<Void> status = statusLoop(cx, tag.toString());
-
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
@@ -225,7 +223,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               false,
+			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -234,7 +232,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				throw;
 		}
 
-		submittted.send(Void());
+		submitted.send(Void());
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
@@ -485,7 +483,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       false,
+					                                       true,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False);
 				} catch (Error& e) {
@@ -771,7 +769,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));
 
-			// Decrement the backup agent requets
+			// Decrement the backup agent requests
 			if (self->agentRequest) {
 				BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests--;
 			}
@@ -791,5 +789,4 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 int BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests = 0;
 
-WorkloadFactory<BackupAndParallelRestoreCorrectnessWorkload> BackupAndParallelRestoreCorrectnessWorkloadFactory(
-    "BackupAndParallelRestoreCorrectness");
+WorkloadFactory<BackupAndParallelRestoreCorrectnessWorkload> BackupAndParallelRestoreCorrectnessWorkloadFactory;

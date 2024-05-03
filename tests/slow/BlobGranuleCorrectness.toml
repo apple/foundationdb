@@ -1,16 +1,14 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = ['optional', 'required']
 injectTargetedSSRestart = true
 injectSSDelay = true
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
-enable_encryption = true
+enable_rest_kms_communication = true
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'
@@ -40,4 +38,8 @@ testTitle = 'BlobGranuleCorrectness'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
     testDuration = 120.0

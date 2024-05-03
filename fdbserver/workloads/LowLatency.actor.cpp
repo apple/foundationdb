@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -28,6 +27,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
+	static constexpr auto NAME = "LowLatency";
+
 	double testDuration;
 	double maxGRVLatency;
 	double maxCommitLatency;
@@ -47,7 +48,7 @@ struct LowLatencyWorkload : TestWorkload {
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
 
-	std::string description() const override { return "LowLatency"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
@@ -120,4 +121,4 @@ struct LowLatencyWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<LowLatencyWorkload> LowLatencyWorkloadFactory("LowLatency");
+WorkloadFactory<LowLatencyWorkload> LowLatencyWorkloadFactory;

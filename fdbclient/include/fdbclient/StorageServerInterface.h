@@ -22,6 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
@@ -102,7 +103,7 @@ struct StorageServerInterface {
 	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
-	RequestStream<struct WaitMetricsRequest> waitMetrics;
+	PublicRequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -120,8 +121,10 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
-
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
+	RequestStream<struct AuditStorageRequest> auditStorage;
+	RequestStream<struct GetHotShardsRequest> getHotShards;
+	RequestStream<struct GetStorageCheckSumRequest> getCheckSum;
 
 private:
 	bool acceptingRequests;
@@ -160,7 +163,8 @@ public:
 				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
-				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
+				waitMetrics =
+				    PublicRequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
 				splitMetrics = RequestStream<struct SplitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(5));
 				getStorageMetrics =
 				    RequestStream<struct GetStorageMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(6));
@@ -194,6 +198,12 @@ public:
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
 				updateCommitCostRequest =
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
+				auditStorage =
+				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
+				getHotShards =
+				    RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
+				getCheckSum =
+				    RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -245,6 +255,9 @@ public:
 		streams.push_back(fetchCheckpoint.getReceiver());
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
+		streams.push_back(auditStorage.getReceiver());
+		streams.push_back(getHotShards.getReceiver());
+		streams.push_back(getCheckSum.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -253,6 +266,14 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 	Tag tag;
 	StorageServerInterface interf;
 	StorageInfo() : tag(invalidTag) {}
+};
+
+struct StorageServerMetaInfo : public StorageServerInterface {
+	Optional<StorageMetadataType> metadata;
+
+	StorageServerMetaInfo(const StorageServerInterface& interface,
+	                      Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
+	  : StorageServerInterface(interface), metadata(metadata) {}
 };
 
 struct ServerCacheInfo {
@@ -448,7 +469,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	int matchIndex;
 	Optional<TagSet> tags;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
@@ -475,7 +495,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
-		           matchIndex,
 		           arena);
 	}
 };
@@ -629,42 +648,52 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
-	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
-	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
+	int64_t bytesWrittenPerKSecond = 0; // bytes write to SQ
+
+	// FIXME: currently, iosPerKSecond is not used in DataDistribution calculations.
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
+	int64_t opsReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL << 60;
 
+	// the read load model coming from both read ops and read bytes
+	int64_t readLoadKSecond() const;
+
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
-		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
+		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
-		bytesPerKSecond += rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
+		opsReadPerKSecond += rhs.opsReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
-		bytesPerKSecond -= rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
+		opsReadPerKSecond -= rhs.opsReadPerKSecond;
 	}
 	template <class F>
 	void operator*=(F f) {
 		bytes *= f;
-		bytesPerKSecond *= f;
+		bytesWrittenPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
+		opsReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
+	bool allZero() const {
+		return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond && !opsReadPerKSecond;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
+		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond, opsReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -692,16 +721,18 @@ struct StorageMetrics {
 	}
 
 	bool operator==(StorageMetrics const& rhs) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
-		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
+		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond == rhs.opsReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
+		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld, OpReadPerKSec: %lld",
 		              bytes,
-		              bytesPerKSecond,
+		              bytesWrittenPerKSecond,
 		              iosPerKSecond,
-		              bytesReadPerKSecond);
+		              bytesReadPerKSecond,
+		              opsReadPerKSecond);
 	}
 };
 
@@ -710,17 +741,27 @@ struct WaitMetricsRequest {
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
 	Arena arena;
+	// Setting the tenantInfo makes the request tenant-aware.
+	TenantInfo tenantInfo;
+	// Set `minVersion` to a version where the tenant info was read. Not needed for non-tenant-aware request.
+	Version minVersion = 0;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
 
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	WaitMetricsRequest() {}
-	WaitMetricsRequest(KeyRangeRef const& keys, StorageMetrics const& min, StorageMetrics const& max)
-	  : keys(arena, keys), min(min), max(max) {}
+	WaitMetricsRequest(TenantInfo tenantInfo,
+	                   Version minVersion,
+	                   KeyRangeRef const& keys,
+	                   StorageMetrics const& min,
+	                   StorageMetrics const& max)
+	  : tenantInfo(tenantInfo), minVersion(minVersion), keys(arena, keys), min(min), max(max) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, arena);
+		serializer(ar, keys, min, max, reply, tenantInfo, minVersion, arena);
 	}
 };
 
@@ -728,10 +769,11 @@ struct SplitMetricsReply {
 	constexpr static FileIdentifier file_identifier = 11530792;
 	Standalone<VectorRef<KeyRef>> splits;
 	StorageMetrics used;
+	bool more = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, splits, used);
+		serializer(ar, splits, used, more);
 	}
 };
 
@@ -771,20 +813,30 @@ struct ReadHotRangeWithMetrics {
 	// The density for key range [A,C) is 30 * 100 / 200 = 15
 	double density;
 	// How many bytes of data was sent in a period of time because of read requests.
-	double readBandwidth;
+	double readBandwidthSec;
+
+	int64_t bytes; // storage bytes
+	double readOpsSec; // an interpolated value over sampling interval
 
 	ReadHotRangeWithMetrics() = default;
 	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
-	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
+	  : keys(keys), density(density), readBandwidthSec(readBandwidth) {}
+
+	ReadHotRangeWithMetrics(KeyRangeRef const& keys, int64_t bytes, double readBandwidth, double readOpsKSec)
+	  : keys(keys), density(readBandwidth / std::max((int64_t)1, bytes)), readBandwidthSec(readBandwidth), bytes(bytes),
+	    readOpsSec(readOpsKSec) {}
 
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
-	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthSec(rhs.readBandwidthSec), bytes(rhs.bytes),
+	    readOpsSec(rhs.readOpsSec) {}
 
-	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+	int expectedSize() const {
+		return keys.expectedSize() + sizeof(density) + sizeof(readBandwidthSec) + sizeof(bytes) + sizeof(readOpsSec);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, density, readBandwidth);
+		serializer(ar, keys, density, readBandwidthSec, bytes, readOpsSec);
 	}
 };
 
@@ -799,23 +851,29 @@ struct ReadHotSubRangeReply {
 };
 struct ReadHotSubRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10259266;
+	enum SplitType : uint8_t { BYTES, READ_BYTES, READ_OPS };
+
 	Arena arena;
 	KeyRangeRef keys;
 	ReplyPromise<ReadHotSubRangeReply> reply;
 
+	uint8_t type = SplitType::BYTES;
+	int chunkCount = 1;
+
 	ReadHotSubRangeRequest() {}
-	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
+	  : keys(arena, keys), type(type), chunkCount(chunkCount) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply, arena);
+		serializer(ar, keys, reply, type, chunkCount, arena);
 	}
 };
 
 struct SplitRangeReply {
 	constexpr static FileIdentifier file_identifier = 11813134;
 	// If the given range can be divided, contains the split points.
-	// If the given range cannot be divided(for exmaple its total size is smaller than the chunk size), this would be
+	// If the given range cannot be divided(for example its total size is smaller than the chunk size), this would be
 	// empty
 	Standalone<VectorRef<KeyRef>> splitPoints;
 
@@ -878,16 +936,28 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
-	UID debugUID; // This is only used for debugging and tracing, but being able to link a client + server side stream
-	              // is so useful for testing, and this is such small overhead compared to streaming large amounts of
-	              // change feed data, it is left in the interface
+	UID id; // This must be globally unique among ChangeFeedStreamRequest instances
+	Optional<ReadOptions> options;
+	bool encrypted = false;
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, debugUID, arena);
+		serializer(ar,
+		           rangeID,
+		           begin,
+		           end,
+		           range,
+		           reply,
+		           spanContext,
+		           replyBufferSize,
+		           canReadPopped,
+		           id,
+		           options,
+		           encrypted,
+		           arena);
 	}
 };
 
@@ -914,18 +984,21 @@ struct ChangeFeedPopRequest {
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version version; // The FDB version at which the checkpoint is created.
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
-	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	Optional<UID> actionId;
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
-	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
-	  : version(version), range(range), format(format) {}
+	GetCheckpointRequest(std::vector<KeyRange> ranges,
+	                     Version version,
+	                     CheckpointFormat format,
+	                     const Optional<UID>& actionId)
+	  : version(version), ranges(ranges), format(format), actionId(actionId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, checkpointID, reply);
+		serializer(ar, version, ranges, format, actionId, reply);
 	}
 };
 
@@ -1089,15 +1162,16 @@ struct GetStorageMetricsReply {
 	StorageMetrics load; // sum of key-value metrics (logical bytes)
 	StorageMetrics available; // physical bytes
 	StorageMetrics capacity; // physical bytes
-	double bytesInputRate;
-	int64_t versionLag;
-	double lastUpdate;
+	double bytesInputRate = 0;
+	int64_t versionLag = 0;
+	double lastUpdate = 0;
+	int64_t bytesDurable = 0, bytesInput = 0;
 
-	GetStorageMetricsReply() : bytesInputRate(0) {}
+	GetStorageMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate);
+		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate, bytesDurable, bytesInput);
 	}
 };
 
@@ -1111,34 +1185,38 @@ struct GetStorageMetricsRequest {
 	}
 };
 
+// Tracks the busyness of tags on individual storage servers.
+struct BusyTagInfo {
+	constexpr static FileIdentifier file_identifier = 4528694;
+	TransactionTag tag;
+	double rate{ 0.0 };
+	double fractionalBusyness{ 0.0 };
+
+	BusyTagInfo() = default;
+	BusyTagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
+	  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+
+	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tag, rate, fractionalBusyness);
+	}
+};
+
 struct StorageQueuingMetricsReply {
-	struct TagInfo {
-		constexpr static FileIdentifier file_identifier = 4528694;
-		TransactionTag tag;
-		double rate{ 0.0 };
-		double fractionalBusyness{ 0.0 };
-
-		TagInfo() = default;
-		TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
-		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
-
-		template <class Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, tag, rate, fractionalBusyness);
-		}
-	};
-
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
-	int64_t bytesDurable, bytesInput;
+	int64_t bytesDurable{ 0 }, bytesInput{ 0 };
 	StorageBytes storageBytes;
 	Version version; // current storage server version
 	Version durableVersion; // latest version durable on storage server
-	double cpuUsage;
-	double diskUsage;
+	double cpuUsage{ 0.0 };
+	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<TagInfo> busiestTags;
+	std::vector<BusyTagInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1167,5 +1245,93 @@ struct StorageQueuingMetricsRequest {
 		serializer(ar, reply);
 	}
 };
+
+struct GetHotShardsReply {
+	constexpr static FileIdentifier file_identifier = 3828140;
+	std::vector<KeyRange> hotShards;
+
+	GetHotShardsReply() {}
+	explicit GetHotShardsReply(std::vector<KeyRange> hotShards) : hotShards(hotShards) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, hotShards);
+	}
+};
+
+struct GetHotShardsRequest {
+	constexpr static FileIdentifier file_identifier = 3828141;
+	ReplyPromise<GetHotShardsReply> reply;
+
+	GetHotShardsRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+enum class CheckSumMethod : uint8_t {
+	Invalid = 0,
+};
+
+struct CheckSumMetaData {
+	constexpr static FileIdentifier file_identifier = 3828142;
+	KeyRange range;
+	Version version;
+	StringRef checkSumValue;
+
+	CheckSumMetaData() {}
+	CheckSumMetaData(KeyRange range, Version version, StringRef checkSumValue)
+	  : range(range), version(version), checkSumValue(checkSumValue) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, version, checkSumValue);
+	}
+};
+
+struct GetStorageCheckSumReply {
+	constexpr static FileIdentifier file_identifier = 3828143;
+	std::vector<CheckSumMetaData> checkSums;
+	uint8_t checkSumMethod;
+
+	GetStorageCheckSumReply() {}
+	GetStorageCheckSumReply(const std::vector<CheckSumMetaData>& checkSums, CheckSumMethod checkSumMethod)
+	  : checkSums(checkSums), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkSums, checkSumMethod);
+	}
+};
+
+struct GetStorageCheckSumRequest {
+	constexpr static FileIdentifier file_identifier = 3828144;
+	std::vector<std::pair<KeyRange, Optional<Version>>> ranges;
+	Optional<UID> actionId;
+	uint8_t checkSumMethod;
+	ReplyPromise<GetStorageCheckSumReply> reply;
+
+	GetStorageCheckSumRequest() {}
+	GetStorageCheckSumRequest(const std::vector<std::pair<KeyRange, Optional<Version>>>& ranges,
+	                          Optional<UID> actionId,
+	                          CheckSumMethod checkSumMethod)
+	  : ranges(ranges), actionId(actionId), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ranges, actionId, checkSumMethod, reply);
+	}
+};
+
+// Memory size for storing mutation in the mutation log and the versioned map.
+inline int mvccStorageBytes(int mutationBytes) {
+	// Why * 2:
+	// - 1 insertion into version map costs 2 nodes in avg;
+	// - The mutation will be stored in both mutation log and versioned map;
+	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
+	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
+}
 
 #endif

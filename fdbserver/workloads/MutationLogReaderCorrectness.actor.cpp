@@ -32,6 +32,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MutationLogReaderCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "MutationLogReaderCorrectness";
+
 	bool enabled;
 	int records;
 	Version versionRange;
@@ -58,15 +60,13 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 		beginVersion = deterministicRandom()->randomInt64(
 		    0, std::numeric_limits<int32_t>::max()); // intentionally not max of int64
-		records = deterministicRandom()->randomInt(0, 1e6);
+		records = deterministicRandom()->randomInt(0, 500e3);
 		versionRange = deterministicRandom()->randomInt64(records, std::numeric_limits<Version>::max());
 		versionIncrement = versionRange / (records + 1);
 
 		// The version immediately after the last actual record version
 		endVersion = recordVersion(records - 1) + 1;
 	}
-
-	std::string description() const override { return "MutationLogReaderCorrectness"; }
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
@@ -158,5 +158,4 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<MutationLogReaderCorrectnessWorkload> MutationLogReaderCorrectnessWorkloadFactory(
-    "MutationLogReaderCorrectness");
+WorkloadFactory<MutationLogReaderCorrectnessWorkload> MutationLogReaderCorrectnessWorkloadFactory;

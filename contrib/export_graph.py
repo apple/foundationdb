@@ -26,11 +26,13 @@ import ddsketch_calc as dd
 
 # setup cmdline args
 parser = argparse.ArgumentParser(description="Graphs DDSketch distribution")
-parser.add_argument('-t', '--txn', help='Transaction type (ex: g8ui)', required=True, type=str)
-parser.add_argument('--file', help='Path to ddsketch json', required=True, type=str)
-parser.add_argument('--title', help='Title for the graph', required=False, type=str)
-parser.add_argument('--savefig', help='Will save the plot to a file if set', type=str)
-parser.add_argument('--op', help='Which OP to plot (casing matters)', type=str)
+parser.add_argument(
+    "-t", "--txn", help="Transaction type (ex: g8ui)", required=True, type=str
+)
+parser.add_argument("--file", help="Path to ddsketch json", required=True, type=str)
+parser.add_argument("--title", help="Title for the graph", required=False, type=str)
+parser.add_argument("--savefig", help="Will save the plot to a file if set", type=str)
+parser.add_argument("--op", help="Which OP to plot (casing matters)", type=str)
 args = parser.parse_args()
 
 
@@ -45,13 +47,13 @@ sketch = dd.DDSketch(error)
 
 # trim the tails of the distribution
 ls = [i for i, e in enumerate(buckets) if e != 0]
-actual_data = buckets[ls[0]:ls[-1]+1]
-indices = range(ls[0], ls[-1]+1)
+actual_data = buckets[ls[0] : ls[-1] + 1]
+indices = range(ls[0], ls[-1] + 1)
 actual_indices = [sketch.getValue(i) for i in indices]
 
 # configure the x-axis to make more sense
 fig, ax = plt.subplots()
-ax.ticklabel_format(useOffset=False, style='plain')
+ax.ticklabel_format(useOffset=False, style="plain")
 plt.plot(actual_indices, actual_data)
 plt.xlabel("Latency (in us)")
 plt.ylabel("Frequency count")
@@ -62,6 +64,6 @@ if args.title is not None:
 plt.title(plt_title)
 plt.xlim([actual_indices[0], actual_indices[-1]])
 if args.savefig is not None:
-    plt.savefig(args.savefig, format='png')
-else:   
+    plt.savefig(args.savefig, format="png")
+else:
     plt.show()

@@ -49,6 +49,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+class ClusterControllerData;
+
 typedef enum {
 	CLUSTER_RECOVERY_STATE_EVENT_NAME,
 	CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,
@@ -131,8 +133,16 @@ private:
 		}
 
 		try {
-			wait(self->cstate.setExclusive(
-			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withDBCoreState()))));
+			// Use RECORD_RECOVER_AT_IN_CSTATE to make sure that when turning on recording recover at in CSTATE, we will
+			// never go back to a version < 7.3. We can remove the branch writing withEncryptionAtRest in 7.4 once
+			// RECORD_RECOVER_AT_IN_CSTATE is turned on everywhere.
+			if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
+				wait(self->cstate.setExclusive(
+				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withGcTxnGenerations()))));
+			} else {
+				wait(self->cstate.setExclusive(
+				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
+			}
 		} catch (Error& e) {
 			CODE_PROBE(true, "Master displaced during writeMasterState");
 			throw;
@@ -196,6 +206,8 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	std::map<Optional<Value>, int8_t> dcId_locality;
 	std::vector<Tag> allTags;
 
+	RecruitFromConfigurationReply primaryRecruitment;
+
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
 		for (auto it : dcId_locality) {
@@ -247,6 +259,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	Future<Void> logger;
 
+	Reference<EventCacheHolder> metaclusterEventHolder;
 	Reference<EventCacheHolder> swVersionCheckedEventHolder;
 	Reference<EventCacheHolder> recoveredConfigEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryStateEventHolder;
@@ -271,12 +284,13 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    masterInterface(masterInterface), masterLifetime(masterLifetimeToken), clusterController(clusterController),
 	    cstate(coordinators, addActor, dbgid), dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
-	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
+	    cc("ClusterRecoveryData", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    metaclusterEventHolder(makeReference<EventCacheHolder>("MetaclusterMetadata")),
 	    swVersionCheckedEventHolder(makeReference<EventCacheHolder>("SWVersionCompatibilityChecked")),
 	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
 		clusterRecoveryStateEventHolder = makeReference<EventCacheHolder>(
@@ -287,11 +301,10 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME));
 		clusterRecoveryAvailableEventHolder = makeReference<EventCacheHolder>(
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME));
-		logger = traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
-		                       dbgid,
-		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-		                       &cc,
-		                       getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
+		logger = cc.traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
+		                          dbgid,
+		                          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                          getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
 		if (forceRecovery && !controllerData->clusterControllerDcId.present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;

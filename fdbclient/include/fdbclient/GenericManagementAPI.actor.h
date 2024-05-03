@@ -27,7 +27,7 @@
 
 /* This file defines "management" interfaces that have been templated to support both IClientAPI
 and Native version of databases, transactions, etc., and includes functions for performing cluster
-managment tasks. It isn't exposed to C clients or anywhere outside our code base and doesn't need
+management tasks. It isn't exposed to C clients or anywhere outside our code base and doesn't need
 to be versioned. It doesn't do anything you can't do with the standard API and some knowledge of
 the contents of the system key space.
 */
@@ -39,9 +39,10 @@ the contents of the system key space.
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
@@ -66,12 +67,11 @@ enum class ConfigurationResult {
 	LOCKED_NOT_NEW,
 	SUCCESS_WARN_PPW_GRADUAL,
 	SUCCESS,
-	SUCCESS_WARN_ROCKSDB_EXPERIMENTAL,
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
-	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_IS_REGISTERED,
-	ENCRYPTION_AT_REST_MODE_ALREADY_SET
+	ENCRYPTION_AT_REST_MODE_ALREADY_SET,
+	INVALID_STORAGE_TYPE
 };
 
 enum class CoordinatorsResult {
@@ -131,6 +131,11 @@ ConfigurationResult buildConfiguration(
 bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
+
+bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
+                                       std::map<std::string, std::string> newConfig,
+                                       bool creating);
+bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration);
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
@@ -275,6 +280,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
+		if (!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), m, creating)) {
+			return ConfigurationResult::INVALID_CONFIGURATION;
+		}
 	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
 		// Encryption data at-rest mode can be set only at the time of database creation
 		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
@@ -283,10 +291,12 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state Future<Void> tooLong = delay(60);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 	state bool oldReplicationUsesDcId = false;
+	// the caller need to reset the perpetual wiggle stats if pw=0 in case the reset txn on DD side is cancelled
+	// due to DD can die at the same time
+	state bool resetPPWStats = false;
 	state bool warnPPWGradual = false;
-	state bool warnChangeStorageNoMigrate = false;
-	state bool warnRocksDBIsExperimental = false;
 	state bool warnShardedRocksDBIsExperimental = false;
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -315,7 +325,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					for (auto kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
-					if (!newConfig.isValid()) {
+					if (!newConfig.isValid() || !isEncryptionAtRestModeConfigValid(oldConfig, m, creating) ||
+					    !isTenantModeModeConfigValid(oldConfig, newConfig)) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 
@@ -468,6 +479,10 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						}
 					}
 
+					if (!newConfig.storageServerStoreType.isValid() || !newConfig.tLogDataStoreType.isValid()) {
+						return ConfigurationResult::INVALID_STORAGE_TYPE;
+					}
+
 					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
 						return ConfigurationResult::STORAGE_MIGRATION_DISABLED;
@@ -475,17 +490,15 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					           newConfig.perpetualStorageWiggleSpeed == 0) {
 						warnPPWGradual = true;
 					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
-					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-						warnRocksDBIsExperimental = true;
-					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 						warnShardedRocksDBIsExperimental = true;
 					}
 
 					if (newConfig.tenantMode != oldConfig.tenantMode) {
 						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-						    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+						    wait(metacluster::metadata::metaclusterRegistration().get(tr));
 						if (metaclusterRegistration.present()) {
+							CODE_PROBE(true, "Attempt to change tenant mode in a metacluster", probe::decoration::rare);
 							return ConfigurationResult::DATABASE_IS_REGISTERED;
 						}
 					}
@@ -512,6 +525,19 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr->set(StringRef(i->first), StringRef(i->second));
+				if (i->first == perpetualStorageWiggleKey) {
+					if (i->second == "0") {
+						resetPPWStats = true;
+					} else if (i->first == "1") {
+						resetPPWStats = false; // the latter setting will override the former setting
+					}
+				}
+			}
+
+			if (!creating && resetPPWStats) {
+				state StorageWiggleData wiggleData;
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
 			}
 
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
@@ -537,9 +563,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						if (v != m[initIdKey.toString()])
 							return ConfigurationResult::DATABASE_ALREADY_CREATED;
 						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
-						         std::to_string(KeyValueStoreType::SSD_ROCKSDB_V1))
-							return ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL;
-						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
 						         std::to_string(KeyValueStoreType::SSD_SHARDED_ROCKSDB))
 							return ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
 						else
@@ -555,8 +578,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	if (warnPPWGradual) {
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
-	} else if (warnRocksDBIsExperimental) {
-		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
 	} else if (warnShardedRocksDBIsExperimental) {
 		return ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
 	} else {

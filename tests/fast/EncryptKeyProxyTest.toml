@@ -1,8 +1,6 @@
 [configuration]
 testClass = "Encryption"
-
-[[knobs]]
-enable_encryption = true
+encryptModes = ['domain_aware', 'cluster_aware']
 
 [[test]]
 testTitle = 'EncryptKeyProxy'

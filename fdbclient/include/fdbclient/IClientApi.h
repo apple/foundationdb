@@ -68,7 +68,6 @@ public:
 	                                                       const KeySelectorRef& end,
 	                                                       const StringRef& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
@@ -120,6 +119,8 @@ public:
 	// later if they are not really needed.
 	virtual ThreadFuture<VersionVector> getVersionVector() = 0;
 	virtual ThreadFuture<SpanContext> getSpanContext() = 0;
+	virtual ThreadFuture<double> getTagThrottledDuration() = 0;
+	virtual ThreadFuture<int64_t> getTotalCost() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
@@ -139,6 +140,14 @@ public:
 	virtual bool isValid() { return true; }
 
 	virtual Optional<TenantName> getTenant() = 0;
+
+	virtual void debugTrace(BaseTraceEvent&& event) = 0;
+	virtual void debugPrint(std::string const& message) = 0;
+
+	template <class... Args>
+	void debugFmtPrint(std::string const& message, Args&&... args) {
+		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
+	};
 };
 
 class ITenant {
@@ -147,8 +156,18 @@ public:
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 
+	virtual ThreadFuture<int64_t> getId() = 0;
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
+
+	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                              int rangeLimit) = 0;
+
+	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+	virtual ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -185,21 +204,26 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
-	// purge blob granules api. purgeBlobGranules is asynchronus, calling waitPurgeGranulesComplete after guarantees
+	// purge blob granules api. purgeBlobGranules is asynchronous, calling waitPurgeGranulesComplete after guarantees
 	// completion.
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
 
 	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+	virtual ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
 	virtual void setSharedState(DatabaseSharedState* p) = 0;
+
+	// Return a JSON string containing database client-side status information
+	virtual ThreadFuture<Standalone<StringRef>> getClientStatus() = 0;
 
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;

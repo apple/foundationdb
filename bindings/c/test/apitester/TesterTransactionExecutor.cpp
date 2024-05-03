@@ -77,10 +77,12 @@ public:
 	                       int retryLimit,
 	                       std::string bgBasePath,
 	                       std::optional<fdb::BytesRef> tenantName,
-	                       bool transactional)
+	                       bool transactional,
+	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
 	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
-	    transactional(transactional) {
+	    transactional(transactional), restartOnTimeout(restartOnTimeout),
+	    selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		if (databaseCreateErrorInjected) {
@@ -89,13 +91,15 @@ public:
 			fdbDb = executor->selectDatabase();
 		}
 
+		if (tenantName) {
+			fdbTenant = fdbDb.openTenant(*tenantName);
+			fdbDbOps = std::make_shared<fdb::Tenant>(fdbTenant);
+		} else {
+			fdbDbOps = std::make_shared<fdb::Database>(fdbDb);
+		}
+
 		if (transactional) {
-			if (tenantName) {
-				fdb::Tenant tenant = fdbDb.openTenant(*tenantName);
-				fdbTx = tenant.createTransaction();
-			} else {
-				fdbTx = fdbDb.createTransaction();
-			}
+			fdbTx = fdbDbOps->createTransaction();
 		}
 	}
 
@@ -106,6 +110,10 @@ public:
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
 	fdb::Database db() override { return fdbDb.atomic_load(); }
+
+	fdb::Tenant tenant() override { return fdbTenant.atomic_load(); }
+
+	std::shared_ptr<fdb::IDatabaseOps> dbOps() override { return std::atomic_load(&fdbDbOps); }
 
 	fdb::Transaction tx() override { return fdbTx.atomic_load(); }
 
@@ -157,6 +165,15 @@ public:
 		contAfterDone(fdb::Error::success());
 	}
 
+	void makeSelfConflicting() override {
+		ASSERT(transactional);
+		if (restartOnTimeout) {
+			auto transaction = tx();
+			transaction.addReadConflictRange(selfConflictingKey, selfConflictingKey + fdb::Key(1, '\x00'));
+			transaction.addWriteConflictRange(selfConflictingKey, selfConflictingKey + fdb::Key(1, '\x00'));
+		}
+	}
+
 	std::string getBGBasePath() override { return bgBasePath; }
 
 	virtual void onError(fdb::Error err) override {
@@ -177,27 +194,17 @@ public:
 
 		ASSERT(!onErrorFuture);
 
-		if (databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) {
+		if ((databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) ||
+		    (restartOnTimeout && err.code() == error_code_transaction_timed_out)) {
 			// Failed to create a database because of failure injection
 			// Restart by recreating the transaction in a valid database
-			auto thisRef = std::static_pointer_cast<TransactionContextBase>(shared_from_this());
-			scheduler->schedule([thisRef]() {
-				fdb::Database db = thisRef->executor->selectDatabase();
-				thisRef->fdbDb.atomic_store(db);
-				if (thisRef->transactional) {
-					if (thisRef->tenantName) {
-						fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
-						thisRef->fdbTx.atomic_store(tenant.createTransaction());
-					} else {
-						thisRef->fdbTx.atomic_store(db.createTransaction());
-					}
-				}
-				thisRef->restartTransaction();
-			});
+			recreateAndRestartTransaction();
 		} else if (transactional) {
 			onErrorArg = err;
 			onErrorFuture = tx().onError(err);
 			handleOnErrorFuture();
+		} else if (err.retryable()) {
+			restartTransaction();
 		} else {
 			transactionFailed(err);
 		}
@@ -246,7 +253,11 @@ protected:
 		fdb::Error err = onErrorFuture.error();
 		onErrorFuture = {};
 		if (err) {
-			transactionFailed(err);
+			if (restartOnTimeout && err.code() == error_code_transaction_timed_out) {
+				recreateAndRestartTransaction();
+			} else {
+				transactionFailed(err);
+			}
 		} else {
 			restartTransaction();
 		}
@@ -260,6 +271,27 @@ protected:
 		commitCalled = false;
 		lock.unlock();
 		startFct(shared_from_this());
+	}
+
+	void recreateAndRestartTransaction() {
+		auto thisRef = std::static_pointer_cast<TransactionContextBase>(shared_from_this());
+		scheduler->schedule([thisRef]() {
+			fdb::Database db = thisRef->executor->selectDatabase();
+			thisRef->fdbDb.atomic_store(db);
+			if (thisRef->tenantName) {
+				fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
+				thisRef->fdbTenant.atomic_store(tenant);
+				std::atomic_store(&thisRef->fdbDbOps,
+				                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Tenant>(tenant)));
+			} else {
+				std::atomic_store(&thisRef->fdbDbOps,
+				                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Database>(db)));
+			}
+			if (thisRef->transactional) {
+				thisRef->fdbTx.atomic_store(thisRef->fdbDbOps->createTransaction());
+			}
+			thisRef->restartTransaction();
+		});
 	}
 
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
@@ -288,12 +320,20 @@ protected:
 	}
 
 	// Pointer to the transaction executor interface
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	ITransactionExecutor* const executor;
 
 	// FDB database
 	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Database fdbDb;
+
+	// FDB tenant
+	// Provides a thread safe interface by itself (no need for mutex)
+	fdb::Tenant fdbTenant;
+
+	// FDB IDatabaseOps to hide database/tenant accordingly.
+	// Provides a shared pointer to database functions based on if db or tenant.
+	std::shared_ptr<fdb::IDatabaseOps> fdbDbOps;
 
 	// FDB transaction
 	// Provides a thread safe interface by itself (no need for mutex)
@@ -304,21 +344,21 @@ protected:
 	TOpStartFct startFct;
 
 	// Mutex protecting access to shared mutable state
-	// Only the state that is accessible unter IN_PROGRESS state
+	// Only the state that is accessible under IN_PROGRESS state
 	// must be protected by mutex
 	std::mutex mutex;
 
 	// Continuation to be called after completion of the transaction
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	const TOpContFct contAfterDone;
 
 	// Reference to the scheduler
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	// Cannot be accessed in DONE state, workloads can be completed and the scheduler deleted
 	IScheduler* const scheduler;
 
 	// Retry limit
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	const int retryLimit;
 
 	// Transaction execution state
@@ -346,18 +386,24 @@ protected:
 	std::vector<fdb::Error> retriedErrors;
 
 	// blob granule base path
-	// Set in contructor, stays immutable
+	// Set in constructor, stays immutable
 	const std::string bgBasePath;
 
 	// Indicates if the database error was injected
 	// Accessed on initialization and in ON_ERROR state only (no need for mutex)
 	bool databaseCreateErrorInjected;
 
+	// Restart the transaction automatically on timeout errors
+	const bool restartOnTimeout;
+
 	// The tenant that we will run this transaction in
 	const std::optional<fdb::BytesRef> tenantName;
 
 	// Specifies whether the operation is transactional
 	const bool transactional;
+
+	// A randomly generated key for making transaction self-conflicting
+	const fdb::Key selfConflictingKey;
 };
 
 /**
@@ -372,9 +418,17 @@ public:
 	                           int retryLimit,
 	                           std::string bgBasePath,
 	                           std::optional<fdb::BytesRef> tenantName,
-	                           bool transactional)
-	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName, transactional) {
-	}
+	                           bool transactional,
+	                           bool restartOnTimeout)
+	  : TransactionContextBase(executor,
+	                           startFct,
+	                           cont,
+	                           scheduler,
+	                           retryLimit,
+	                           bgBasePath,
+	                           tenantName,
+	                           transactional,
+	                           restartOnTimeout) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -450,9 +504,17 @@ public:
 	                        int retryLimit,
 	                        std::string bgBasePath,
 	                        std::optional<fdb::BytesRef> tenantName,
-	                        bool transactional)
-	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName, transactional) {
-	}
+	                        bool transactional,
+	                        bool restartOnTimeout)
+	  : TransactionContextBase(executor,
+	                           startFct,
+	                           cont,
+	                           scheduler,
+	                           retryLimit,
+	                           bgBasePath,
+	                           tenantName,
+	                           transactional,
+	                           restartOnTimeout) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -464,7 +526,7 @@ protected:
 		lock.unlock();
 		try {
 			f.then([this](fdb::Future f) { futureReadyCallback(f, this); });
-		} catch (std::runtime_error& err) {
+		} catch (std::exception& err) {
 			lock.lock();
 			callbackMap.erase(f);
 			lock.unlock();
@@ -476,7 +538,7 @@ protected:
 		try {
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onFutureReady(f);
-		} catch (std::runtime_error& err) {
+		} catch (std::exception& err) {
 			fmt::print("Unexpected exception in callback {}\n", err.what());
 			abort();
 		} catch (...) {
@@ -538,7 +600,7 @@ protected:
 		try {
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onErrorReady(f);
-		} catch (std::runtime_error& err) {
+		} catch (std::exception& err) {
 			fmt::print("Unexpected exception in callback {}\n", err.what());
 			abort();
 		} catch (...) {
@@ -667,15 +729,30 @@ public:
 	void execute(TOpStartFct startFct,
 	             TOpContFct cont,
 	             std::optional<fdb::BytesRef> tenantName,
-	             bool transactional) override {
+	             bool transactional,
+	             bool restartOnTimeout) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
-				ctx = std::make_shared<BlockingTransactionContext>(
-				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName, true);
+				ctx = std::make_shared<BlockingTransactionContext>(this,
+				                                                   startFct,
+				                                                   cont,
+				                                                   scheduler,
+				                                                   options.transactionRetryLimit,
+				                                                   bgBasePath,
+				                                                   tenantName,
+				                                                   transactional,
+				                                                   restartOnTimeout);
 			} else {
-				ctx = std::make_shared<AsyncTransactionContext>(
-				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName, true);
+				ctx = std::make_shared<AsyncTransactionContext>(this,
+				                                                startFct,
+				                                                cont,
+				                                                scheduler,
+				                                                options.transactionRetryLimit,
+				                                                bgBasePath,
+				                                                tenantName,
+				                                                transactional,
+				                                                restartOnTimeout);
 			}
 			startFct(ctx);
 		} catch (...) {

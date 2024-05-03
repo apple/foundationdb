@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -27,14 +26,13 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
+	static constexpr auto NAME = "WatchesSameKeyCorrectness";
 	int numWatches;
 	std::vector<Future<Void>> cases;
 
 	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		numWatches = getOption(options, "numWatches"_sr, 3);
 	}
-
-	std::string description() const override { return "WatchesSameKeyCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		cases.push_back(case1(cx, "foo1"_sr, this));
@@ -154,9 +152,10 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * */
 		state ReadYourWritesTransaction tr(cx);
 		state ReadYourWritesTransaction tr2(cx);
+		state Value val;
 		loop {
 			try {
-				state Value val = deterministicRandom()->randomUniqueID().toString();
+				val = deterministicRandom()->randomUniqueID().toString();
 				tr2.set(key, val);
 				state Future<Void> watch1 = tr2.watch(key);
 				wait(tr2.commit());
@@ -185,7 +184,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		loop {
 			try {
 				// watch1 and watch2 are set on the same k/v pair
-				state Value val = deterministicRandom()->randomUniqueID().toString();
+				state Value val(deterministicRandom()->randomUniqueID().toString());
 				tr2.set(key, val);
 				state Future<Void> watch1 = tr2.watch(key);
 				wait(tr2.commit());
@@ -197,7 +196,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				wait(setKeyRandomValue(
 				    cx,
 				    key,
-				    Optional<Value>())); // since ABA has occured we need to trigger the watches with a new value
+				    Optional<Value>())); // since ABA has occurred we need to trigger the watches with a new value
 				wait(watch1);
 				wait(watch2);
 				return Void();
@@ -240,4 +239,4 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory("WatchesSameKeyCorrectness");
+WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory;

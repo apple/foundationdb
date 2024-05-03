@@ -25,7 +25,7 @@
 
 // This workload tests the basic contract of the high contention allocator
 struct HighContentionPrefixAllocatorWorkload : TestWorkload {
-	static constexpr const char* NAME = "HighContentionPrefixAllocator";
+	static constexpr auto NAME = "HighContentionPrefixAllocator";
 
 	Subspace allocatorSubspace;
 	HighContentionPrefixAllocator allocator;
@@ -38,12 +38,10 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), allocatorSubspace("test_subspace"_sr), allocator(allocatorSubspace) {
-		numRounds = getOption(options, "numRounds"_sr, 500);
+		numRounds = getOption(options, "numRounds"_sr, 100);
 		maxTransactionsPerRound = getOption(options, "maxTransactionsPerRound"_sr, 20);
 		maxAllocationsPerTransaction = getOption(options, "maxAllocationsPerTransaction"_sr, 20);
 	}
-
-	std::string description() const override { return HighContentionPrefixAllocatorWorkload::NAME; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -156,5 +154,4 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
-WorkloadFactory<HighContentionPrefixAllocatorWorkload> HighContentionPrefixAllocatorWorkload(
-    HighContentionPrefixAllocatorWorkload::NAME);
+WorkloadFactory<HighContentionPrefixAllocatorWorkload> HighContentionPrefixAllocatorWorkload;

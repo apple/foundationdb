@@ -80,7 +80,7 @@ struct ThrottlingWorkload : KVWorkload {
 	TokenBucket tokenBucket;
 	bool correctSpecialKeys = true;
 
-	static constexpr const char* NAME = "Throttling";
+	static constexpr auto NAME = "Throttling";
 
 	ThrottlingWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), transactionsCommitted(0) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
@@ -193,7 +193,6 @@ struct ThrottlingWorkload : KVWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return ThrottlingWorkload::NAME; }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return correctSpecialKeys; }
 
@@ -202,4 +201,4 @@ struct ThrottlingWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<ThrottlingWorkload> ThrottlingWorkloadFactory(ThrottlingWorkload::NAME);
+WorkloadFactory<ThrottlingWorkload> ThrottlingWorkloadFactory;

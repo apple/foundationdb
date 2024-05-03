@@ -30,6 +30,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include
 
 ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
+ACTOR Future<Void> runMetrics();
 
 #include "flow/unactorcompiler.h"
 #endif

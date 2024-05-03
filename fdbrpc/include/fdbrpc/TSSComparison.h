@@ -25,8 +25,8 @@
 #ifndef FDBRPC_TSS_COMPARISON_H
 #define FDBRPC_TSS_COMPARISON_H
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Stats.h"
+#include <unordered_map>
 
 // refcounted + noncopyable because both DatabaseContext and individual endpoints share ownership
 struct DetailedTSSMismatch {
@@ -48,15 +48,15 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	Counter mismatches;
 
 	// We could probably just ignore getKey as it's seldom used?
-	ContinuousSample<double> SSgetValueLatency;
-	ContinuousSample<double> SSgetKeyLatency;
-	ContinuousSample<double> SSgetKeyValuesLatency;
-	ContinuousSample<double> SSgetMappedKeyValuesLatency;
+	DDSketch<double> SSgetValueLatency;
+	DDSketch<double> SSgetKeyLatency;
+	DDSketch<double> SSgetKeyValuesLatency;
+	DDSketch<double> SSgetMappedKeyValuesLatency;
 
-	ContinuousSample<double> TSSgetValueLatency;
-	ContinuousSample<double> TSSgetKeyLatency;
-	ContinuousSample<double> TSSgetKeyValuesLatency;
-	ContinuousSample<double> TSSgetMappedKeyValuesLatency;
+	DDSketch<double> TSSgetValueLatency;
+	DDSketch<double> TSSgetKeyLatency;
+	DDSketch<double> TSSgetKeyValuesLatency;
+	DDSketch<double> TSSgetMappedKeyValuesLatency;
 
 	std::unordered_map<int, uint64_t> ssErrorsByCode;
 	std::unordered_map<int, uint64_t> tssErrorsByCode;
@@ -106,16 +106,16 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	TSSMetrics()
 	  : cc("TSSClientMetrics"), requests("Requests", cc), streamComparisons("StreamComparisons", cc),
 	    ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc), tssTimeouts("TSSTimeouts", cc),
-	    mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000), SSgetKeyValuesLatency(1000),
-	    SSgetMappedKeyValuesLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000),
-	    TSSgetKeyValuesLatency(1000), TSSgetMappedKeyValuesLatency(1000) {}
+	    mismatches("Mismatches", cc), SSgetValueLatency(), SSgetKeyLatency(), SSgetKeyValuesLatency(),
+	    SSgetMappedKeyValuesLatency(), TSSgetValueLatency(), TSSgetKeyLatency(), TSSgetKeyValuesLatency(),
+	    TSSgetMappedKeyValuesLatency() {}
 };
 
 template <class Rep>
 bool TSS_doCompare(const Rep& src, const Rep& tss);
 
-template <class Req>
-const char* TSS_mismatchTraceName(const Req& req);
+template <class Req, class Type>
+const char* LB_mismatchTraceName(const Req& req, const Type& type);
 
 template <class Req, class Rep>
 void TSS_traceMismatch(TraceEvent& event, const Req& req, const Rep& src, const Rep& tss);

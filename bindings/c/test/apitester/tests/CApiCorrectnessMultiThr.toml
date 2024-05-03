@@ -11,23 +11,23 @@ maxClientThreads = 8
 minClients = 2
 maxClients = 8
 
-    [[test.workload]]
-    name = 'ApiCorrectness'
-    minKeyLength = 1
-    maxKeyLength = 64
-    minValueLength = 1
-    maxValueLength = 1000
-    maxKeysPerTransaction = 50
-    initialSize = 100
-    numRandomOperations = 100
-    readExistingKeysRatio = 0.9
+[[test.workload]]
+name = 'ApiCorrectness'
+minKeyLength = 1
+maxKeyLength = 64
+minValueLength = 1
+maxValueLength = 1000
+maxKeysPerTransaction = 50
+initialSize = 100
+numRandomOperations = 100
+readExistingKeysRatio = 0.9
 
-    [[test.workload]]
-    name = 'AtomicOpsCorrectness'
-    initialSize = 0
-    numRandomOperations = 100
+[[test.workload]]
+name = 'AtomicOpsCorrectness'
+initialSize = 0
+numRandomOperations = 100
 
-    [[test.workload]]
-    name = 'WatchAndWait'
-    initialSize = 0
-    numRandomOperations = 10
+[[test.workload]]
+name = 'WatchAndWait'
+initialSize = 0
+numRandomOperations = 10

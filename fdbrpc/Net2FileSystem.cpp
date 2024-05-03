@@ -22,9 +22,15 @@
 
 // Define boost::asio::io_service
 #include <algorithm>
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include <boost/asio.hpp>
 
 #define FILESYSTEM_IMPL 1
@@ -37,7 +43,7 @@
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
-#include "fdbrpc/AsyncFileWriteChecker.h"
+#include "fdbrpc/AsyncFileWriteChecker.actor.h"
 
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {

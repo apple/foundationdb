@@ -102,7 +102,8 @@ bool processIntOption(const std::string& optionName, const std::string& value, i
 		return false;
 	}
 	if (res < minValue || res > maxValue) {
-		fmt::print(stderr, "Value for {} must be between {} and {}", optionName, minValue, maxValue);
+		fmt::print(
+		    stderr, "Value for {} must be between {} and {}. Input value {}", optionName, minValue, maxValue, res);
 		return false;
 	}
 	return true;
@@ -233,7 +234,7 @@ int main(int argc, char** argv) {
 		applyNetworkOptions(options);
 		fdb::network::setup();
 
-		std::thread network_thread{ &fdb::network::run };
+		std::thread network_thread{ [] { fdb_check(fdb::network::run(), "FDB network thread failed"); } };
 
 		// Try calling some basic functionality that is available
 		// in all recent API versions

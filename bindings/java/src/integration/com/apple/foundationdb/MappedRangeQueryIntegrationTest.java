@@ -41,8 +41,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(RequiresDatabase.class)
 class MappedRangeQueryIntegrationTest {
-	public static final int API_VERSION = 720;
-	private static final FDB fdb = FDB.selectAPIVersion(API_VERSION);
+	private static final FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }
 
@@ -54,7 +53,7 @@ class MappedRangeQueryIntegrationTest {
 		 */
 		try (Database db = openFDB()) {
 			db.run(tr -> {
-				tr.clear(Range.startsWith(new byte[] { (byte)0x00 }));
+				tr.clear(new byte[0], new byte[] { (byte) 0xff });
 				return null;
 			});
 		}
@@ -111,7 +110,7 @@ class MappedRangeQueryIntegrationTest {
 	boolean validate = true;
 	@Test
 	void comparePerformance() {
-		FDB fdb = FDB.selectAPIVersion(API_VERSION);
+		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 		try (Database db = openFDB()) {
 			insertRecordsWithIndexes(numRecords, db);
 			instrument(rangeQueryAndThenRangeQueries, "rangeQueryAndThenRangeQueries", db);
@@ -193,12 +192,12 @@ class MappedRangeQueryIntegrationTest {
 
 	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
-			List<MappedKeyValue> kvs = tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                             KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                                             ReadTransaction.ROW_LIMIT_UNLIMITED,
-			                                             FDBTransaction.MATCH_INDEX_ALL, false, StreamingMode.WANT_ALL)
-			                               .asList()
-			                               .get();
+			List<MappedKeyValue> kvs =
+			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			        .asList()
+			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
 
 			if (validate) {
@@ -209,11 +208,6 @@ class MappedRangeQueryIntegrationTest {
 					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
 					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
 					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					if (id == begin || id == end - 1) {
-						Assertions.assertTrue(mappedKeyValue.getBoundaryAndExist());
-					} else {
-						Assertions.assertFalse(mappedKeyValue.getBoundaryAndExist());
-					}
 					byte[] prefix = recordKeyPrefix(id);
 					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
 					prefix[prefix.length - 1] = (byte)0x01;

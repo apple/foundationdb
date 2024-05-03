@@ -18,24 +18,28 @@
  * limitations under the License.
  */
 
-#pragma once
-
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include <utility>
-
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
 #include "fdbserver/ClusterController.actor.g.h"
 #elif !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
+#pragma once
+
+#include <utility>
 
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/MetaclusterRegistration.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
+
+#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -50,6 +54,7 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Future<Void> haltBlobManager;
+	Future<Void> haltBlobMigrator;
 	Future<Void> haltEncryptKeyProxy;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
@@ -119,6 +124,8 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
+struct ClusterRecoveryData;
+
 class ClusterControllerData {
 public:
 	struct DBInfo {
@@ -140,8 +147,12 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
+		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
+		metacluster::MetaclusterMetrics metaclusterMetrics;
+		Reference<ClusterRecoveryData> recoveryData;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -153,7 +164,7 @@ public:
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled) {
+		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
 			clientCounter = countClients(this);
 		}
 
@@ -181,13 +192,20 @@ public:
 			serverInfo->set(newInfo);
 		}
 
+		void setBlobMigrator(const BlobMigratorInterface& interf) {
+			auto newInfo = serverInfo->get();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.blobMigrator = interf;
+			serverInfo->set(newInfo);
+		}
+
 		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
 			auto newInfo = serverInfo->get();
 			auto newClientInfo = clientInfo->get();
 			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.encryptKeyProxy = interf;
 			newInfo.client.encryptKeyProxy = interf;
 			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
@@ -214,8 +232,9 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			} else if (t == ProcessClass::BlobManagerClass) {
 				newInfo.blobManager = Optional<BlobManagerInterface>();
+			} else if (t == ProcessClass::BlobMigratorClass) {
+				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
@@ -301,21 +320,23 @@ public:
 		}
 	};
 
-	bool workerAvailable(WorkerInfo const& worker, bool checkStable) {
+	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
 		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
 		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
 		        (!checkStable || worker.reboots < 2));
 	}
 
-	bool isLongLivedStateless(Optional<Key> const& processId) {
+	bool isLongLivedStateless(Optional<Key> const& processId) const {
 		return (db.serverInfo->get().distributor.present() &&
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobManager.present() &&
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().encryptKeyProxy.present() &&
-		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().blobMigrator.present() &&
+		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
+		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
 		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}
@@ -326,7 +347,22 @@ public:
 		std::set<Optional<Standalone<StringRef>>> includeDCs(req.includeDCs.begin(), req.includeDCs.end());
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 
-		for (auto& it : id_worker)
+		for (auto& it : id_worker) {
+			TraceEvent(SevVerbose, "RecruitStorageTry")
+			    .detail("Worker", it.second.details.interf.address())
+			    .detail("WorkerAvailable", workerAvailable(it.second, false))
+			    .detail("RecoverDiskFiles", it.second.details.recoveredDiskFiles)
+			    .detail("NotExcludedMachine", !excludedMachines.count(it.second.details.interf.locality.zoneId()))
+			    .detail("IncludeDC",
+			            (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())))
+			    .detail("NotExcludedAddress", !addressExcluded(excludedAddresses, it.second.details.interf.address()))
+			    .detail("NotExcludedAddress2",
+			            (!it.second.details.interf.secondaryAddress().present() ||
+			             !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())))
+			    .detail("MachineFitnessMatch",
+			            it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <=
+			                ProcessClass::UnsetFit)
+			    .detail("MachineFitness", it.second.details.processClass.machineClassFitness(ProcessClass::Storage));
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
 			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
@@ -336,6 +372,7 @@ public:
 			    it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::UnsetFit) {
 				return it.second.details;
 			}
+		}
 
 		if (req.criticalRecruitment) {
 			ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
@@ -365,7 +402,7 @@ public:
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 		for (auto& it : id_worker) {
 			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the approriate fitness
+			// not be one of the excluded addrs from req and have the appropiate fitness
 			if (workerAvailable(it.second, false) &&
 			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
@@ -392,7 +429,7 @@ public:
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
@@ -629,7 +666,7 @@ public:
 				    SevInfo, id, "complex", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+			if (conf.isExcludedServer(worker_details.interf.addresses(), worker_details.interf.locality)) {
 				logWorkerUnavailable(SevInfo,
 				                     id,
 				                     "complex",
@@ -879,7 +916,7 @@ public:
 				    SevInfo, id, "simple", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+			if (conf.isExcludedServer(worker_details.interf.addresses(), worker_details.interf.locality)) {
 				logWorkerUnavailable(SevInfo,
 				                     id,
 				                     "simple",
@@ -901,7 +938,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -1031,7 +1068,7 @@ public:
 				    SevInfo, id, "deprecated", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+			if (conf.isExcludedServer(worker_details.interf.addresses(), worker_details.interf.locality)) {
 				logWorkerUnavailable(SevInfo,
 				                     id,
 				                     "deprecated",
@@ -1053,7 +1090,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "deprecated", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -1474,7 +1511,7 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
+			if (conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) ||
 			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
@@ -1521,7 +1558,7 @@ public:
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
 			if (workerAvailable(it.second, checkStable) &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
 			    (!minWorker.present() ||
@@ -1658,7 +1695,7 @@ public:
 		std::set<Optional<Standalone<StringRef>>> result;
 		for (auto& it : id_worker)
 			if (workerAvailable(it.second, checkStable) &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()))
 				result.insert(it.second.details.interf.locality.dcId());
 		return result;
@@ -2162,27 +2199,29 @@ public:
 
 	void compareWorkers(const DatabaseConfiguration& conf,
 	                    const std::vector<WorkerInterface>& first,
-	                    std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
+	                    const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
 	                    const std::vector<WorkerInterface>& second,
-	                    std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
+	                    const std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
 	                    ProcessClass::ClusterRole role,
 	                    std::string description) {
 		std::vector<WorkerDetails> firstDetails;
-		for (auto& it : first) {
-			auto w = id_worker.find(it.locality.processId());
+		for (auto& worker : first) {
+			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
-			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
-			firstDetails.push_back(w->second.details);
+			auto const& [_, workerInfo] = *w;
+			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses(), workerInfo.details.interf.locality));
+			firstDetails.push_back(workerInfo.details);
 			//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness firstFitness(firstDetails, role, firstUsed);
 
 		std::vector<WorkerDetails> secondDetails;
-		for (auto& it : second) {
-			auto w = id_worker.find(it.locality.processId());
+		for (auto& worker : second) {
+			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
-			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
-			secondDetails.push_back(w->second.details);
+			auto const& [_, workerInfo] = *w;
+			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses(), workerInfo.details.interf.locality));
+			secondDetails.push_back(workerInfo.details);
 			//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
@@ -2528,7 +2567,7 @@ public:
 		// still need master for recovery.
 		ProcessClass::Fitness oldMasterFit =
 		    masterWorker->second.details.processClass.machineClassFitness(ProcessClass::Master);
-		if (db.config.isExcludedServer(dbi.master.addresses())) {
+		if (db.config.isExcludedServer(dbi.master.addresses(), dbi.master.locality)) {
 			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
 		}
 
@@ -2539,7 +2578,7 @@ public:
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(
 		    clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, {}, true);
 		auto newMasterFit = mworker.worker.processClass.machineClassFitness(ProcessClass::Master);
-		if (db.config.isExcludedServer(mworker.worker.interf.addresses())) {
+		if (db.config.isExcludedServer(mworker.worker.interf.addresses(), mworker.worker.interf.locality)) {
 			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
 		}
 
@@ -2950,26 +2989,39 @@ public:
 		for (int i = 0; i < req.disconnectedPeers.size(); ++i) {
 			disconnectedPeersString += (i == 0 ? "" : " ") + req.disconnectedPeers[i].toString();
 		}
+		std::string recoveredPeersString;
+		for (int i = 0; i < req.recoveredPeers.size(); ++i) {
+			recoveredPeersString += (i == 0 ? "" : " ") + req.recoveredPeers[i].toString();
+		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
 		    .detail("DegradedPeers", degradedPeersString)
-		    .detail("DisconnectedPeers", disconnectedPeersString);
+		    .detail("DisconnectedPeers", disconnectedPeersString)
+		    .detail("RecoveredPeers", recoveredPeersString);
 
 		double currentTime = now();
 
 		// Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
 		// `workerHealth`.
 		if (workerHealth.find(req.address) == workerHealth.end()) {
+			if (req.degradedPeers.empty() && req.disconnectedPeers.empty()) {
+				// This request doesn't report any new degradation. Although there may contain recovered peer, since
+				// `workerHealth` doesn't record any information on this address, those recovered peers have already
+				// been considered recovered.
+				return;
+			}
+
 			workerHealth[req.address] = {};
 			for (const auto& degradedPeer : req.degradedPeers) {
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
-			// TODO(zhewu): add disconnected peers in worker health.
 			for (const auto& degradedPeer : req.disconnectedPeers) {
-				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+				workerHealth[req.address].disconnectedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
+			// We can return directly here since we just created the health info for this address and there shouldn't be
+			// any recovered peers.
 			return;
 		}
 
@@ -2977,23 +3029,34 @@ public:
 
 		auto& health = workerHealth[req.address];
 
-		auto updateDegradedPeer = [&health, currentTime](const NetworkAddress& degradedPeer) {
-			auto it = health.degradedPeers.find(degradedPeer);
-			if (it == health.degradedPeers.end()) {
-				health.degradedPeers[degradedPeer] = { currentTime, currentTime };
-				return;
-			}
-			it->second.lastRefreshTime = currentTime;
-		};
+		// Remove any recovered peers.
+		for (const auto& peer : req.recoveredPeers) {
+			TraceEvent("ClusterControllerReceivedPeerRecovering")
+			    .suppressFor(10.0)
+			    .detail("Worker", req.address)
+			    .detail("Peer", peer);
+			health.degradedPeers.erase(peer);
+			health.disconnectedPeers.erase(peer);
+		}
 
 		// Update the worker's degradedPeers.
 		for (const auto& peer : req.degradedPeers) {
-			updateDegradedPeer(peer);
+			auto it = health.degradedPeers.find(peer);
+			if (it == health.degradedPeers.end()) {
+				health.degradedPeers[peer] = { currentTime, currentTime };
+				continue;
+			}
+			it->second.lastRefreshTime = currentTime;
 		}
 
-		// TODO(zhewu): add disconnected peers in worker health.
+		// Update the worker's disconnectedPeers.
 		for (const auto& peer : req.disconnectedPeers) {
-			updateDegradedPeer(peer);
+			auto it = health.disconnectedPeers.find(peer);
+			if (it == health.disconnectedPeers.end()) {
+				health.disconnectedPeers[peer] = { currentTime, currentTime };
+				continue;
+			}
+			it->second.lastRefreshTime = currentTime;
 		}
 	}
 
@@ -3009,10 +3072,18 @@ public:
 					++it;
 				}
 			}
+			for (auto it = health.disconnectedPeers.begin(); it != health.disconnectedPeers.end();) {
+				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
+					health.disconnectedPeers.erase(it++);
+				} else {
+					++it;
+				}
+			}
 		}
 
 		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
-			if (it->second.degradedPeers.empty()) {
+			if (it->second.degradedPeers.empty() && it->second.disconnectedPeers.empty()) {
 				TraceEvent("WorkerAllPeerHealthRecovered").detail("Worker", it->first);
 				workerHealth.erase(it++);
 			} else {
@@ -3025,6 +3096,8 @@ public:
 		std::unordered_set<NetworkAddress>
 		    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
 		                     // list are not excluded unless they are added to `excludedDegradedServers`.
+		std::unordered_set<NetworkAddress>
+		    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
@@ -3035,6 +3108,7 @@ public:
 
 		// Build a map keyed by measured degraded peer. This map gives the info that who complains a particular server.
 		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradedLinkDst2Src;
+		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> disconnectedLinkDst2Src;
 		double currentTime = now();
 		for (const auto& [server, health] : workerHealth) {
 			for (const auto& [degradedPeer, times] : health.degradedPeers) {
@@ -3044,14 +3118,32 @@ public:
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);
 			}
+			for (const auto& [disconnectedPeer, times] : health.disconnectedPeers) {
+				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
+					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				disconnectedLinkDst2Src[disconnectedPeer].insert(server);
+			}
 		}
+
+		auto deterministicDecendingOrder = [](const std::pair<int, NetworkAddress>& a,
+		                                      const std::pair<int, NetworkAddress>& b) -> bool {
+			return a.first > b.first || (a.first == b.first && a.second < b.second);
+		};
 
 		// Sort degraded peers based on the number of workers complaining about it.
 		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
 		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
-		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDecendingOrder);
+
+		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
+		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
+			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
+		}
+		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), deterministicDecendingOrder);
 
 		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
 		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded
@@ -3081,9 +3173,25 @@ public:
 			}
 		}
 
+		DegradationInfo currentDegradationInfo;
+		for (const auto& [complainerCount, badServer] : count2DisconnectedPeer) {
+			for (const auto& complainer : disconnectedLinkDst2Src[badServer]) {
+				if (currentDegradationInfo.disconnectedServers.find(complainer) ==
+				    currentDegradationInfo.disconnectedServers.end()) {
+					currentDegradationInfo.disconnectedServers.insert(badServer);
+					break;
+				}
+			}
+
+			if (SERVER_KNOBS->CC_ENABLE_ENTIRE_SATELLITE_MONITORING &&
+			    addressInDbAndPrimarySatelliteDc(badServer, db.serverInfo) &&
+			    complainerCount >= SERVER_KNOBS->CC_SATELLITE_DEGRADATION_MIN_COMPLAINER) {
+				++satelliteBadServerCount;
+			}
+		}
+
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
-		DegradationInfo currentDegradationInfo;
 		for (const auto& badServer : currentDegradedServers) {
 			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
@@ -3100,61 +3208,11 @@ public:
 	}
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
-	bool transactionSystemContainsDegradedServers() {
-		const ServerDBInfo dbi = db.serverInfo->get();
-		for (const auto& excludedServer : degradationInfo.degradedServers) {
-			if (dbi.master.addresses().contains(excludedServer)) {
-				return true;
-			}
-
-			for (auto& logSet : dbi.logSystemConfig.tLogs) {
-				if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
-					continue;
-				}
-				for (const auto& tlog : logSet.tLogs) {
-					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
-						return true;
-					}
-				}
-			}
-
-			for (auto& proxy : dbi.client.grvProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-
-			for (auto& proxy : dbi.client.commitProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-
-			for (auto& resolver : dbi.resolvers) {
-				if (resolver.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-		}
-
-		return false;
-	}
+	bool transactionSystemContainsDegradedServers();
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
-	bool remoteTransactionSystemContainsDegradedServers() {
-		if (db.config.usableRegions <= 1) {
-			return false;
-		}
-
-		for (const auto& excludedServer : degradationInfo.degradedServers) {
-			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
+	bool remoteTransactionSystemContainsDegradedServers();
 
 	// Returns true if remote DC is healthy and can failover to.
 	bool remoteDCIsHealthy() {
@@ -3185,11 +3243,8 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
-		if (degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
-			return false;
-		}
-
-		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
+		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
@@ -3224,8 +3279,9 @@ public:
 			return true;
 		}
 
-		if (degradationInfo.degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
-		    degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+		int degradedServerSize = degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size();
+		if (degradedServerSize < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
+		    degradedServerSize > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
 			return false;
 		}
 
@@ -3246,7 +3302,7 @@ public:
 		return recentHealthTriggeredRecoveryTime.size();
 	}
 
-	bool isExcludedDegradedServer(const NetworkAddressList& a) {
+	bool isExcludedDegradedServer(const NetworkAddressList& a) const {
 		for (const auto& server : excludedDegradedServers) {
 			if (a.contains(server))
 				return true;
@@ -3270,6 +3326,7 @@ public:
 	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	UID id;
+	Reference<AsyncVar<Optional<UID>>> clusterId;
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -3281,12 +3338,18 @@ public:
 	AsyncTrigger updateDBInfo;
 	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
+	std::vector<StorageServerMetaInfo> storageStatusInfos;
 
 	DBInfo db;
 	Database cx;
 	double startTime;
 	Future<Void> goodRecruitmentTime;
 	Future<Void> goodRemoteRecruitmentTime;
+	// Lag between primary and remote log servers.
+	Version dcLogServerVersionDifference;
+	// Lag between primary and remote storage servers.
+	Version dcStorageServerVersionDifference;
+	// Max of "dcLogServerVersionDifference" and "dcStorageServerVersionDifference".
 	Version datacenterVersionDifference;
 	PromiseStream<Future<Void>> addActor;
 	bool versionDifferenceUpdated;
@@ -3304,6 +3367,8 @@ public:
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitBlobManager;
 	Optional<UID> recruitingBlobManagerID;
+	AsyncVar<bool> recruitBlobMigrator;
+	Optional<UID> recruitingBlobMigratorID;
 	AsyncVar<bool> recruitEncryptKeyProxy;
 	Optional<UID> recruitingEncryptKeyProxyID;
 	AsyncVar<bool> recruitConsistencyScan;
@@ -3316,6 +3381,7 @@ public:
 			double lastRefreshTime = 0;
 		};
 		std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
+		std::unordered_map<NetworkAddress, DegradedTimes> disconnectedPeers;
 
 		// TODO(zhewu): Include disk and CPU signals.
 	};
@@ -3324,6 +3390,12 @@ public:
 	std::unordered_set<NetworkAddress>
 	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
 	std::queue<double> recentHealthTriggeredRecoveryTime;
+
+	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
+	// encryption status.
+	Promise<EncryptionAtRestMode> encryptionAtRestMode;
 
 	CounterCollection clusterControllerMetrics;
 
@@ -3338,14 +3410,17 @@ public:
 
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
-	                      ServerCoordinators const& coordinators)
+	                      ServerCoordinators const& coordinators,
+	                      Reference<AsyncVar<Optional<UID>>> clusterId)
 	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
-	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
+	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
+	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
+	    dcLogServerVersionDifference(0), dcStorageServerVersionDifference(0), datacenterVersionDifference(0),
 	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitEncryptKeyProxy(false),
-	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitBlobMigrator(false),
+	    recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
+	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
@@ -3359,7 +3434,6 @@ public:
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
-		serverInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		db.serverInfo->set(serverInfo);
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 

@@ -153,4 +153,30 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 	}
 }
 
+ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
+                                              std::map<std::string, StorageServerInterface>* interfaces) {
+	state Reference<ITransaction> tr = db->createTransaction();
+	loop {
+		interfaces->clear();
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			state ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			wait(success(safeThreadFutureToFuture(serverListF)));
+			ASSERT(!serverListF.get().more);
+			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
+			RangeResult serverList = serverListF.get();
+			// decode server interfaces
+			for (int i = 0; i < serverList.size(); i++) {
+				auto ssi = decodeServerListValue(serverList[i].value);
+				(*interfaces)[ssi.address().toString()] = ssi;
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 } // namespace fdb_cli

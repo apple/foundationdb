@@ -34,6 +34,8 @@
  */
 
 struct SidebandSingleWorkload : TestWorkload {
+	static constexpr auto NAME = "SidebandSingle";
+
 	double testDuration, operationsPerSecond;
 	// Pair represents <Key, commitVersion>
 	PromiseStream<std::pair<uint64_t, Version>> interf;
@@ -48,7 +50,6 @@ struct SidebandSingleWorkload : TestWorkload {
 		operationsPerSecond = getOption(options, "operationsPerSecond"_sr, 50.0);
 	}
 
-	std::string description() const override { return "SidebandSingleWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
@@ -191,4 +192,4 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SidebandSingleWorkload> SidebandSingleWorkloadFactory("SidebandSingle");
+WorkloadFactory<SidebandSingleWorkload> SidebandSingleWorkloadFactory;

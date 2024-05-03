@@ -45,6 +45,8 @@ enum {
 };
 enum { OP_COUNT, OP_RANGE };
 struct MakoWorkload : TestWorkload {
+	static constexpr auto NAME = "Mako";
+
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes, csSize,
 	    csCount, csPartitionSize, csStepSizeInPartition;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency,
@@ -61,7 +63,7 @@ struct MakoWorkload : TestWorkload {
 	// used for periodically tracing
 	std::vector<PerfMetric> periodicMetrics;
 	// store latency of each operation with sampling
-	std::vector<ContinuousSample<double>> opLatencies;
+	std::vector<DDSketch<double>> opLatencies;
 	// key used to store checkSum for given key range
 	std::vector<Key> csKeys;
 	// key prefix of for all generated keys
@@ -139,8 +141,8 @@ struct MakoWorkload : TestWorkload {
 		//  parse the sequence and extract operations to be executed
 		parseOperationsSpec();
 		for (int i = 0; i < MAX_OP; ++i) {
-			// initilize per-operation latency record
-			opLatencies.push_back(ContinuousSample<double>(rowCount / sampleSize));
+			// initialize per-operation latency record
+			opLatencies.push_back(DDSketch<double>());
 			// initialize per-operation counter
 			opCounters.push_back(PerfIntCounter(opNames[i]));
 		}
@@ -163,12 +165,6 @@ struct MakoWorkload : TestWorkload {
 				csKeys.emplace_back(format((keyPrefix + "_crc32c_%u_%u").c_str(), i, rowCount));
 			}
 		}
-	}
-
-	std::string description() const override {
-		// Mako is a simple workload to measure the performance of FDB.
-		// The primary purpose of this benchmark is to generate consistent performance results
-		return "Mako";
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -662,7 +658,7 @@ struct MakoWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR template <class T>
-	static Future<Void> logLatency(Future<T> f, ContinuousSample<double>* opLatencies) {
+	static Future<Void> logLatency(Future<T> f, DDSketch<double>* opLatencies) {
 		state double opBegin = timer();
 		wait(success(f));
 		opLatencies->addSample(timer() - opBegin);
@@ -885,4 +881,4 @@ struct MakoWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MakoWorkload> MakoloadFactory("Mako");
+WorkloadFactory<MakoWorkload> MakoloadFactory;

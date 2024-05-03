@@ -26,7 +26,6 @@ const StringRef LocalityData::keyZoneId = "zoneid"_sr;
 const StringRef LocalityData::keyDcId = "dcid"_sr;
 const StringRef LocalityData::keyMachineId = "machineid"_sr;
 const StringRef LocalityData::keyDataHallId = "data_hall"_sr;
-const StringRef LocalityData::ExcludeLocalityKeyMachineIdPrefix = "locality_machineid:"_sr;
 const StringRef LocalityData::ExcludeLocalityPrefix = "locality_"_sr;
 
 ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
@@ -280,6 +279,17 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		switch (_class) {
 		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::BestFit;
+		default:
+			return ProcessClass::NeverAssign;
+		}
+	case ProcessClass::BlobMigrator:
+		switch (_class) {
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::BlobWorkerClass:
+			return ProcessClass::OkayFit;
 		default:
 			return ProcessClass::NeverAssign;
 		}

@@ -27,10 +27,9 @@
 
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {
+	static constexpr auto NAME = "SlowTaskWorkload";
 
 	SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
-
-	std::string description() const override { return "SlowTaskWorkload"; }
 
 	Future<Void> start(Database const& cx) override {
 		setupRunLoopProfiler();
@@ -44,7 +43,7 @@ struct SlowTaskWorkload : TestWorkload {
 	ACTOR static Future<Void> go() {
 		wait(delay(1));
 		int64_t phc = dl_iterate_phdr_calls;
-		int64_t startProfilesDeferred = getNumProfilesDeferred();
+		int64_t startProfilesDisabled = getNumProfilesDisabled();
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
 		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
@@ -58,10 +57,10 @@ struct SlowTaskWorkload : TestWorkload {
 		}
 		fmt::print(stderr,
 		           "Slow task complete: {0} exceptions; {1} calls to dl_iterate_phdr, {2}"
-		           " profiles deferred, {3} profiles overflowed, {4} profiles captured\n",
+		           " profiles disabled, {3} profiles overflowed, {4} profiles captured\n",
 		           exc,
 		           dl_iterate_phdr_calls - phc,
-		           getNumProfilesDeferred() - startProfilesDeferred,
+		           getNumProfilesDisabled() - startProfilesDisabled,
 		           getNumProfilesOverflowed() - startProfilesOverflowed,
 		           getNumProfilesCaptured() - startProfilesCaptured);
 
@@ -79,4 +78,4 @@ struct SlowTaskWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SlowTaskWorkload> SlowTaskWorkloadFactory("SlowTaskWorkload");
+WorkloadFactory<SlowTaskWorkload> SlowTaskWorkloadFactory;

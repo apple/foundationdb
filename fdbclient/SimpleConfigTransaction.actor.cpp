@@ -296,6 +296,14 @@ Version SimpleConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
 }
 
+double SimpleConfigTransaction::getTagThrottledDuration() const {
+	return 0.0;
+}
+
+int64_t SimpleConfigTransaction::getTotalCost() const {
+	return 0;
+}
+
 int64_t SimpleConfigTransaction::getApproximateSize() const {
 	return impl->getApproximateSize();
 }

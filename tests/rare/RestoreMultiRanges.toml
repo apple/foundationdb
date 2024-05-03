@@ -1,0 +1,11 @@
+[configuration]
+tenantModes = ['disabled']
+
+[[test]]
+testTitle = 'RestoreMultiRanges'
+clearAfterTest = true
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'RestoreMultiRanges'
+

@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FileSystemWorkload : TestWorkload {
+	static constexpr auto NAME = "FileSystem";
 	int actorCount, writeActorCount, fileCount, pathMinChars, pathCharRange, serverCount, userIDCount;
 	double testDuration, transactionsPerSecond, deletedFilesRatio;
 	bool discardEdgeMeasurements, performingWrites, loggingQueries;
@@ -32,8 +33,8 @@ struct FileSystemWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter queries, writes;
-	ContinuousSample<double> latencies;
-	ContinuousSample<double> writeLatencies;
+	DDSketch<double> latencies;
+	DDSketch<double> writeLatencies;
 
 	class FileSystemOp {
 	public:
@@ -43,7 +44,7 @@ struct FileSystemWorkload : TestWorkload {
 	};
 
 	FileSystemWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(2500), writeLatencies(1000) {
+	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(), writeLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		double allowedLatency = getOption(options, "allowedLatency"_sr, 0.250);
@@ -60,8 +61,6 @@ struct FileSystemWorkload : TestWorkload {
 		writeActorCount = getOption(options, "writeActorCount"_sr, 4);
 		loggingQueries = getOption(options, "loggingQueries"_sr, false);
 	}
-
-	std::string description() const override { return "ReadWrite"; }
 
 	Future<Void> setup(Database const& cx) override { return nodeSetup(cx, this); }
 
@@ -301,14 +300,14 @@ struct FileSystemWorkload : TestWorkload {
 		state Key keyEnd(base + "0");
 		state KeySelectorRef begin = firstGreaterThan(keyBegin);
 		state KeySelectorRef end = firstGreaterOrEqual(keyEnd);
-		state int transfered = 1000;
+		state int transferred = 1000;
 		state int transferSize = 1000;
 		state uint64_t deletedFiles = 0;
-		while (transfered == transferSize) {
+		while (transferred == transferSize) {
 			RangeResult val = wait(tr->getRange(begin, end, transferSize));
-			transfered = val.size();
-			deletedFiles += transfered;
-			begin = begin + transfered;
+			transferred = val.size();
+			deletedFiles += transferred;
+			begin = begin + transferred;
 		}
 		if (self->loggingQueries) {
 			TraceEvent("DeletionQueryResults")
@@ -334,4 +333,4 @@ struct FileSystemWorkload : TestWorkload {
 	};
 };
 
-WorkloadFactory<FileSystemWorkload> FileSystemWorkloadFactory("FileSystem");
+WorkloadFactory<FileSystemWorkload> FileSystemWorkloadFactory;

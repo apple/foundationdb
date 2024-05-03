@@ -21,35 +21,31 @@
 import math
 import sys
 import os
-
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
-
 import util
 
-FDB_API_VERSION = 720
+sys.path[:0] = [
+    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+]
+
+from fdb import LATEST_API_VERSION
+
+FDB_API_VERSION = LATEST_API_VERSION
 
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'simple': {
-            'format': '%(message)s'
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"simple": {"format": "%(message)s"}},
+    "handlers": {
+        "console": {
+            "level": "NOTSET",
+            "class": "logging.StreamHandler",
+            "stream": sys.stdout,
+            "formatter": "simple",
         }
     },
-    'handlers': {
-        'console': {
-            'level': 'NOTSET',
-            'class': 'logging.StreamHandler',
-            'stream': sys.stdout,
-            'formatter': 'simple'
-        }
+    "loggers": {
+        "foundationdb.bindingtester": {"level": "INFO", "handlers": ["console"]}
     },
-    'loggers': {
-        'foundationdb.bindingtester': {
-            'level': 'INFO',
-            'handlers': ['console']
-        }
-    }
 }
 
 
@@ -60,7 +56,7 @@ class Result:
         self.values = values
 
     def key(self, specification):
-        return self.key_tuple[specification.key_start_index:]
+        return self.key_tuple[specification.key_start_index :]
 
     @staticmethod
     def elements_equal(el1, el2):
@@ -80,7 +76,7 @@ class Result:
         if len(t1) != len(t2):
             return False
 
-        return all([Result.elements_equal(x,y) for x,y in zip(t1, t2)])        
+        return all([Result.elements_equal(x, y) for x, y in zip(t1, t2)])
 
     def matches_key(self, rhs, specification):
         if not isinstance(rhs, Result):
@@ -115,4 +111,4 @@ class Result:
         else:
             value_str = repr(self.values)
 
-        return '%s = %s' % (repr(self.subspace_tuple + self.key_tuple), value_str)
+        return "%s = %s" % (repr(self.subspace_tuple + self.key_tuple), value_str)

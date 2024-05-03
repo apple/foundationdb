@@ -28,7 +28,7 @@
 namespace mako {
 
 /* return the last key to be inserted */
-/* devide val equally among threads */
+/* divide val equally among threads */
 int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t) {
 	int interval = val / total_p / total_t;
 	int remaining = val - (interval * total_p * total_t);

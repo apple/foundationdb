@@ -91,7 +91,7 @@ struct AlternativeInfo {
 	bool operator==(double const& r) const { return cumulativeProbability == r; }
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(BalanceOnRequests);
+FDB_BOOLEAN_PARAM(BalanceOnRequests);
 
 template <class T>
 class ModelInterface : public ReferenceCounted<ModelInterface<T>> {

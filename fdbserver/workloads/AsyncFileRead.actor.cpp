@@ -144,6 +144,7 @@ struct IOLog {
 };
 
 struct AsyncFileReadWorkload : public AsyncFileWorkload {
+	constexpr static auto NAME = "AsyncFileRead";
 	// Buffers used to store what is being read or written
 	std::vector<Reference<AsyncFileBuffer>> readBuffers;
 
@@ -184,8 +185,6 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 	}
 
 	~AsyncFileReadWorkload() override {}
-
-	std::string description() const override { return "AsyncFileRead"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -329,4 +328,4 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 	}
 };
 
-WorkloadFactory<AsyncFileReadWorkload> AsyncFileReadWorkloadFactory("AsyncFileRead");
+WorkloadFactory<AsyncFileReadWorkload> AsyncFileReadWorkloadFactory;

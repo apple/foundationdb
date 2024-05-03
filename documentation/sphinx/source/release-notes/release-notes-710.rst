@@ -2,6 +2,240 @@
 Release Notes
 #############
 
+7.1.57
+======
+* Same as 7.1.56 release with AVX enabled.
+
+7.1.56
+======
+* Released with AVX disabled.
+* Added a knob DD_REMOVE_MAINTENANCE_ON_FAILURE to remove the maintenance mode if a failure outside of the maintenance zone happens. `(PR #11207) <https://github.com/apple/foundationdb/pull/11207>`_
+* Fixed start failure of single-threaded consistency checker. `(PR #11205) <https://github.com/apple/foundationdb/pull/11205>`_
+* Fixed false alarms of Sev40 TestFailure in consistency checker urgent mode. `(PR #11203) <https://github.com/apple/foundationdb/pull/11203>`_
+* Added a knob ABORT_ON_FAILURE to generate core dumps for failures. `(PR #11191) <https://github.com/apple/foundationdb/pull/11191>`_
+* Upgraded to RocksDB 8.10.0. `(PR #11176) <https://github.com/apple/foundationdb/pull/11176>`_
+* Fixed find toml in release-7.1 to avoid macos pr failures. `(PR #11190) <https://github.com/apple/foundationdb/pull/11190>`_
+
+7.1.55
+======
+* Same as 7.1.54 release with AVX enabled.
+
+7.1.54
+======
+* Released with AVX disabled.
+* Upgraded RocksDB to 8.6.7. `(PR #11160) <https://github.com/apple/foundationdb/pull/11160>`_
+* Enabled data distribution verbose logging by default. `(PR #11158) <https://github.com/apple/foundationdb/pull/11158>`_
+* Added logging for invalid mutations on storage servers. `(PR #11097) <https://github.com/apple/foundationdb/pull/11097>`_
+* Enhanced AsyncFileWriteChecker history.timestamp to have better millisecond precision. `(PR #11155) <https://github.com/apple/foundationdb/pull/11155>`_
+* Fixed checkall debug command to output all inconsistent keys. `(PR #11153) <https://github.com/apple/foundationdb/pull/11153>`_, `(PR #11146) <https://github.com/apple/foundationdb/pull/11146>`_, `(PR #11141) <https://github.com/apple/foundationdb/pull/11141>`_, and `(PR #11138) <https://github.com/apple/foundationdb/pull/11138>`_
+* Fixed unreachable processes in status json due to stale tester interfaces at cluster controller. `(PR #11149) <https://github.com/apple/foundationdb/pull/11149>`_
+
+7.1.53
+======
+* Same as 7.1.52 release with AVX enabled.
+
+7.1.52
+======
+* Released with AVX disabled.
+* Fixed testers from being overloaded by consistency checkers. `(PR #11127) <https://github.com/apple/foundationdb/pull/11127>`_
+
+7.1.51
+======
+* Same as 7.1.50 release with AVX enabled.
+
+7.1.50
+======
+* Released with AVX disabled.
+* Added urgent consistency checker mode that uses multiple tester processes. `(PR #11103) <https://github.com/apple/foundationdb/pull/11103>`_
+* Fixed checkall debug command when shard to check is large. `(PR #11105) <https://github.com/apple/foundationdb/pull/11105>`_
+
+7.1.49
+======
+* Same as 7.1.48 release with AVX enabled.
+
+7.1.48
+======
+* Released with AVX disabled.
+* Added consistency checker urgent mode. `(PR #11102) <https://github.com/apple/foundationdb/pull/11102>`_
+* Increased the number of keys that "fdbcli checkall" command can fetch per GetKeyValueRequest call. `(PR #11098) <https://github.com/apple/foundationdb/pull/11098>`_
+
+7.1.47
+======
+* Same as 7.1.46 release with AVX enabled.
+
+7.1.46
+======
+* Released with AVX disabled.
+* Added range-customizable consistency checker and fixed retriable errors during the check. `(PR #11100) <https://github.com/apple/foundationdb/pull/11100>`_ and `(PR #11096) <https://github.com/apple/foundationdb/pull/11096>`_
+* Added key ranges as filters for fdbdecode. `(PR #11099) <https://github.com/apple/foundationdb/pull/11099>`_
+
+7.1.45
+======
+* Same as 7.1.44 release with AVX enabled.
+
+7.1.44
+======
+* Released with AVX disabled.
+* Added distributed consistency checker. `(PR #11088) <https://github.com/apple/foundationdb/pull/11088>`_
+* Fixed the exclusions of localities that are not matching any process. `(PR #11034) <https://github.com/apple/foundationdb/pull/11034>`_
+
+7.1.43
+======
+* Same as 7.1.42 release with AVX enabled.
+
+7.1.42
+======
+* Released with AVX disabled.
+* Added redistribute fdbcli command to manually split shards. `(PR #10909) <https://github.com/apple/foundationdb/pull/10909>`_, `(PR #10936) <https://github.com/apple/foundationdb/pull/10936>`_, `(PR #10942) <https://github.com/apple/foundationdb/pull/10942>`_, `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_, and `(PR #10958) <https://github.com/apple/foundationdb/pull/10958>`_
+* Fixed a MacOS linking issue for go bindings. `(PR #10924) <https://github.com/apple/foundationdb/pull/10924>`_
+* Added knobs to control backup retry delays for blob stores. `(PR #10947) <https://github.com/apple/foundationdb/pull/10947>`_
+* Fixed two use-after-free bugs for backup agents. `(PR #10951) <https://github.com/apple/foundationdb/pull/10951>`_
+* Added automatic range split for hot storage queue. `(PR #10932) <https://github.com/apple/foundationdb/pull/10932>`_
+* Fixed multiple bugs related to locality based exclusions. `(PR #10976) <https://github.com/apple/foundationdb/pull/10976>`_, `(PR #11008) <https://github.com/apple/foundationdb/pull/11008>`_, and `(PR #11025) <https://github.com/apple/foundationdb/pull/11025>`_
+* Fixed compaction rate limiter for RocksDB storage engine. `(PR #10988) <https://github.com/apple/foundationdb/pull/10988>`_
+* Added a perpetual wiggle option to have multiple storage servers in rebalance state during wiggling. `(PR #10995) <https://github.com/apple/foundationdb/pull/10995>`_
+* Fixed exclude status of machines in status json when not all processes are excluded. `(PR #10996) <https://github.com/apple/foundationdb/pull/10996>`_ and `(PR #11006) <https://github.com/apple/foundationdb/pull/11006>`_
+
+7.1.41
+======
+* Same as 7.1.40 release with AVX enabled.
+
+7.1.40
+======
+* Released with AVX disabled.
+* Removed storageWiggleID from storage metadata if the storage server is not wiggling. `(PR #10913) <https://github.com/apple/foundationdb/pull/10913>`_
+* Augmented storage team selection to be aware of storage queue sizes. `(PR #10905) <https://github.com/apple/foundationdb/pull/10905>`_
+* Fixed the proxy setting for backup agents. `(PR #10903) <https://github.com/apple/foundationdb/pull/10903>`_
+* Added an option to set perpetual_storage_wiggle_engine to none. `(PR #10881) <https://github.com/apple/foundationdb/pull/10881>`_
+
+7.1.39
+======
+* Same as 7.1.38 release with AVX enabled.
+
+7.1.38
+======
+* Released with AVX disabled.
+* Added locality check on reading perpetualStorageWiggleIDPrefix key when DD restarts. `(PR #10864) <https://github.com/apple/foundationdb/pull/10864>`_
+* Added perpetual wiggle wait based on data balance of the cluster. `(PR #10865) <https://github.com/apple/foundationdb/pull/10865>`_
+* Added rocksdb options to delete old rocksdb logs. `(PR #10872) <https://github.com/apple/foundationdb/pull/10872>`_
+* Added knob to guard the gray failure rejection during TLog recovery. `(PR #10852) <https://github.com/apple/foundationdb/pull/10852>`_
+* Added knob RESOLVE_PREFER_IPV4_ADDR to prefer IPv4 addresses. `(PR #10826) <https://github.com/apple/foundationdb/pull/10826>`_
+* Added perpetual_storage_wiggle_engine config to support storage migration with perpetual wiggle. `(PR #10790) <https://github.com/apple/foundationdb/pull/10790>`_
+* Fixed the return code for perpetual wiggle configure command. `(PR #10795) <https://github.com/apple/foundationdb/pull/10795>`_
+* Fixed a compatibility issue of s3 backup. `(PR #10774) <https://github.com/apple/foundationdb/pull/10774>`_
+* Added proxy to backup agent via global variable. `(PR #10875) <https://github.com/apple/foundationdb/pull/10875>`_
+
+7.1.37
+======
+* Same as 7.1.36 release with AVX enabled.
+
+7.1.36
+======
+* Released with AVX disabled.
+* Added consistency check for rocksdb only `(PR #10751) <https://github.com/apple/foundationdb/pull/10751>`_
+* Fixed grv queue stats when requests are dropped `(PR #10753) <https://github.com/apple/foundationdb/pull/10753>`_
+
+7.1.35
+======
+* Same as 7.1.34 release with AVX enabled.
+
+7.1.34
+======
+* Released with AVX disabled.
+* Fixed a high GRV latency issue when many storage servers are recruited.  `(PR #10688) <https://github.com/apple/foundationdb/pull/10688>`_
+* Fixed a single key deletion bug when ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled. `(PR #10672) <https://github.com/apple/foundationdb/pull/10672>`_ and `(PR #10676) <https://github.com/apple/foundationdb/pull/10676>`_
+* Added degraded and disconnected peer recovery to gray failure detection. `(PR #10565) <https://github.com/apple/foundationdb/pull/10565>`_
+* Fixed RocksDB engine to avoid read timeout checks for eager reads and system keys. `(PR #10500) <https://github.com/apple/foundationdb/pull/10500>`_
+* Fixed backup to work with s3 compatible service.  `(PR #10369) <https://github.com/apple/foundationdb/pull/10369>`_
+* Fixed data loss during multiple range restores. `(PR #10424) <https://github.com/apple/foundationdb/pull/10424>`_
+* Updated RocksDB to version 8.1.1. `(PR #10268) <https://github.com/apple/foundationdb/pull/10268>`_
+
+7.1.33
+======
+* Same as 7.1.32 release with AVX enabled.
+
+7.1.32
+======
+* Released with AVX disabled.
+* Increased MAX_STORAGE_COMMIT_TIME to reduce storage server IO timeout errors. `(PR #10116) <https://github.com/apple/foundationdb/pull/10116>`_
+* Fixed a CPU spinning issue on DR destination clusters. `(PR #10114) <https://github.com/apple/foundationdb/pull/10114>`_
+* Fixed a inconsistent read issue when using RocksDB engine. `(PR #10060) <https://github.com/apple/foundationdb/pull/10060>`_
+* Fixed a storage server failure issue and added client backoff when commit proxy is overloaded for key location requests. `(PR #10007) <https://github.com/apple/foundationdb/pull/10007>`_
+* Added gray failure detection of disconnected remote log routers. `(PR #9933) <https://github.com/apple/foundationdb/pull/9933>`_
+
+7.1.31
+======
+* Same as 7.1.30 release with AVX enabled.
+
+7.1.30
+======
+* Released with AVX disabled.
+* Fixed storage server finishedQueries metric when using getMappedRange. `(PR #9785) <https://github.com/apple/foundationdb/pull/9785>`_
+* Fixed unnecessary transaction system recovery when excluding the servers that are already excluded/failed. `(PR #9809) <https://github.com/apple/foundationdb/pull/9809>`_ and `(PR #9878) <https://github.com/apple/foundationdb/pull/9878>`_
+* Fixed the exclusion of stateless processes by skipping the free capacity check. `(PR #9789) <https://github.com/apple/foundationdb/pull/9789>`_ and `(PR #9769) <https://github.com/apple/foundationdb/pull/9769>`_
+* Fixed an issue where the new worker cannot get ServerDBInfo update. `(PR #9778) <https://github.com/apple/foundationdb/pull/9778>`_
+* Added RocksDB bloom filter knobs. `(PR #9770) <https://github.com/apple/foundationdb/pull/9770>`_
+* Upgraded RocksDB to version 7.10.2. `(PR #9829) <https://github.com/apple/foundationdb/pull/9829>`_
+* Fixed an issue where ExclusionSafetyCheckRequest could be blocked forever. `(PR #9871) <https://github.com/apple/foundationdb/pull/9871>`_
+* Fixed fdbserver not able to join the cluster if the majority of coordinators in its connection string have failed. `(PR #9883) <https://github.com/apple/foundationdb/pull/9883>`_
+
+7.1.29
+======
+* Same as 7.1.28 release with AVX enabled.
+
+7.1.28
+======
+* Released with AVX disabled.
+* Changed log router to detect slow peeks and to automatically switch DC for peeking. `(PR #9640) <https://github.com/apple/foundationdb/pull/9640>`_
+* Added multiple prefix filter support for fdbdecode. `(PR #9483) <https://github.com/apple/foundationdb/pull/9483>`_, `(PR #9489) <https://github.com/apple/foundationdb/pull/9489>`_, `(PR #9511) <https://github.com/apple/foundationdb/pull/9511>`_, and `(PR #9560) <https://github.com/apple/foundationdb/pull/9560>`_
+* Enhanced fdbbackup query command to estimate data processing from a specific snapshot to a target version. `(PR #9506) <https://github.com/apple/foundationdb/pull/9506>`_
+* Improved PTree insertion and erase performance for storage servers. `(PR #9508) <https://github.com/apple/foundationdb/pull/9508>`_
+* Added exclude to fdbcli's configure command to prevent faulty TLogs from affecting recovery. `(PR #9404) <https://github.com/apple/foundationdb/pull/9404>`_
+* Fixed getMappedRange metrics. `(PR #9331) <https://github.com/apple/foundationdb/pull/9331>`_
+
+7.1.27
+======
+* Same as 7.1.26 release with AVX enabled.
+
+7.1.26
+======
+* Released with AVX disabled.
+* Added detection of disconnection to satellite TLog in gray failure detection. `(PR #9107) <https://github.com/apple/foundationdb/pull/9107>`_
+* Fixed (non)empty peeks stats in TLogMetrics. `(PR #9074) <https://github.com/apple/foundationdb/pull/9074>`_
+* Fixed a data distribution bug where exclusions can become stuck because DD cannot build new teams. `(PR #9035) <https://github.com/apple/foundationdb/pull/9035>`_
+* Added FoundationDB version to ProcessMetrics. `(PR #9037) <https://github.com/apple/foundationdb/pull/9037>`_
+* Removed RocksDB read iterator destruction from the commit path. `(PR #8971) <https://github.com/apple/foundationdb/pull/8971>`_
+* Added determinstic degraded server selection in gray failure detection. `(PR #9001) <https://github.com/apple/foundationdb/pull/9001>`_
+* Fixed an interger overflow bug that causes fetching backup files to fail. `(PR #8996) <https://github.com/apple/foundationdb/pull/8996>`_
+* Fixed a log router race condition that blocks remote tlogs forever. `(PR #8966) <https://github.com/apple/foundationdb/pull/8966>`_
+* Fixed a backup worker assertion failure. `(PR #8887) <https://github.com/apple/foundationdb/pull/8887>`_
+* Upgraded RocksDB to 7.7.3 version. `(PR #8880) <https://github.com/apple/foundationdb/pull/8880>`_
+* Added byte limit for index prefetch. `(PR #8802) <https://github.com/apple/foundationdb/pull/8802>`_
+* Added storage server read range bytes metrics. `(PR #8724) <https://github.com/apple/foundationdb/pull/8724>`_
+* Added counters for single key clear requests. `(PR #8792) <https://github.com/apple/foundationdb/pull/8792>`_
+* Added more RocksDB knobs. `(PR #8713) <https://github.com/apple/foundationdb/pull/8713>`_, `(PR #8862) <https://github.com/apple/foundationdb/pull/8862>`_, and `(PR #9165) <https://github.com/apple/foundationdb/pull/9165>`_
+* Added a new network option "retain_client_library_copies" to keep the client library copies. `(PR #8740) <https://github.com/apple/foundationdb/pull/8740>`_
+* Fixed a transaction_too_old error on storage servers when version vector is enabled. `(PR #8710) <https://github.com/apple/foundationdb/pull/8710>`_
+
+7.1.25
+======
+* Same as 7.1.24 release with AVX enabled.
+
+7.1.24
+======
+* Released with AVX disabled.
+* Fixed a transaction log data corruption bug. `(PR #8525) <https://github.com/apple/foundationdb/pull/8525>`_, `(PR #8562) <https://github.com/apple/foundationdb/pull/8562>`_, and `(PR #8647) <https://github.com/apple/foundationdb/pull/8647>`_
+* Fixed a rare data race in transaction logs when PEEK_BATCHING_EMPTY_MSG is enabled. `(PR #8660) <https://github.com/apple/foundationdb/pull/8660>`_
+* Fixed a heap-use-after-free bug in cluster controller.  `(PR #8683) <https://github.com/apple/foundationdb/pull/8683>`_
+* Changed consistency check to report all corruptions. `(PR #8571) <https://github.com/apple/foundationdb/pull/8571>`_
+* Fixed a rare storage server crashing bug after recovery. `(PR #8468) <https://github.com/apple/foundationdb/pull/8468>`_
+* Added client knob UNLINKONLOAD_FDBCLIB to control deletion of external client libraries. `(PR #8434) <https://github.com/apple/foundationdb/pull/8434>`_
+* Updated the default peer latency degradation percentile to 0.5. `(PR #8370) <https://github.com/apple/foundationdb/pull/8370>`_
+* Made exclusion less pessimistic when warning about low space usage. `(PR #8347) <https://github.com/apple/foundationdb/pull/8347>`_ 
+* Added storage server readrange and update latency metrics. `(PR #8353) <https://github.com/apple/foundationdb/pull/8353>`_
+* Increased the default PEER_DEGRADATION_CONNECTION_FAILURE_COUNT value to 5s. `(PR #8336) <https://github.com/apple/foundationdb/pull/8336>`_
+* Increased RocksDB block cache size. `(PR #8274) <https://github.com/apple/foundationdb/pull/8274>`_
+
 7.1.23
 ======
 * Same as 7.1.22 release with AVX enabled.

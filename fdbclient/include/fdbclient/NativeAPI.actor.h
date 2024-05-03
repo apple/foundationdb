@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "flow/IRandom.h"
-#include "fdbclient/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
@@ -29,7 +27,9 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
@@ -38,6 +38,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Tracing.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
@@ -46,7 +47,7 @@
 	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
-FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
+FDB_BOOLEAN_PARAM(UseProvisionalProxies);
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -71,6 +72,7 @@ struct NetworkOptions {
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
 	std::string tracePartialFileSuffix;
+	bool traceInitializeOnSetup;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -161,6 +163,9 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
+	bool bypassStorageQuota : 1;
+	bool enableReplicaConsistencyCheck : 1;
+	int requiredReplicas;
 
 	TransactionPriority priority;
 
@@ -227,6 +232,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Promise<Void> onChangeTrigger;
 	Promise<Void> onSetWatchTrigger;
 	Future<Void> watchFuture;
+	Optional<ReadOptions> readOptions;
 
 	Watch() : valuePresent(false), setPresent(false), watchFuture(Never()) {}
 	Watch(Key key) : key(key), valuePresent(false), setPresent(false), watchFuture(Never()) {}
@@ -236,11 +242,40 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
+class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
+public:
+	Tenant(Database cx, TenantName name);
+	explicit Tenant(int64_t id);
+	Tenant(Future<int64_t> id, Optional<TenantName> name);
+
+	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
+
+	Future<Void> ready() const { return success(idFuture); }
+	int64_t id() const;
+	Future<int64_t> getIdFuture() const;
+	KeyRef prefix() const;
+	std::string description() const;
+
+	Optional<TenantName> name;
+
+private:
+	mutable int64_t bigEndianId = -1;
+	Future<int64_t> idFuture;
+};
+
+template <>
+struct Traceable<Tenant> : std::true_type {
+	static std::string toString(const Tenant& tenant) { return printable(tenant.description()); }
+};
+
+FDB_BOOLEAN_PARAM(AllowInvalidTenantID);
+FDB_BOOLEAN_PARAM(ResolveDefaultTenant);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
-	Optional<Standalone<StringRef>> authToken;
+	Future<Version> readVersionFuture;
+	Promise<Optional<Value>> metadataVersion;
+	Optional<WipedString> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 	Optional<ReadOptions> readOptions;
@@ -249,9 +284,14 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
+	// Measured by summing the bytes accessed by each read and write operation
+	// after rounding up to the nearest page size and applying a write penalty
+	int64_t totalCost = 0;
+
+	double proxyTagThrottledDuration = 0.0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
-	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
+	// when a dummy, internal transaction gets committed. The sole purpose of commitDummyTransaction() is to
 	// resolve the state of earlier transaction that returned commit_unknown_result or request_maybe_delivered.
 	// Therefore, the dummy transaction can simply reuse one conflict range of the earlier commit, if it already has
 	// been prefixed.
@@ -268,45 +308,56 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
+	bool automaticIdempotency = false;
+
+	Future<Void> startFuture;
+
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanContext spanContext)
 	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
-	                 Optional<TenantName> tenant,
+	                 Optional<Reference<Tenant>> tenant,
 	                 TaskPriority taskID,
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidId = AllowInvalidTenantID::False);
 
-	Optional<TenantName> const& tenant();
-	bool hasTenant() const;
-
-	int64_t tenantId() const { return tenantId_; }
-	void trySetTenantId(int64_t tenantId) {
-		if (tenantId_ == TenantInfo::INVALID_TENANT) {
-			tenantId_ = tenantId;
-		}
+	Version readVersion() {
+		ASSERT(readVersionFuture.isValid() && readVersionFuture.isReady());
+		return readVersionFuture.get();
 	}
 
-	Future<Void> handleUnknownTenant();
+	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidTenantId = AllowInvalidTenantID::False);
+
+	Optional<Reference<Tenant>> const& tenant();
+	bool hasTenant(ResolveDefaultTenant ResolveDefaultTenant = ResolveDefaultTenant::True);
+	int64_t tenantId() const { return tenant_.present() ? tenant_.get()->id() : TenantInfo::INVALID_TENANT; }
+
+	void addClearCost();
+
+	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
+	Future<Version> getReadVersion(uint32_t flags);
 
 private:
-	Optional<TenantName> tenant_;
-	int64_t tenantId_ = TenantInfo::INVALID_TENANT;
+	Optional<Reference<Tenant>> tenant_;
 	bool tenantSet;
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
+	explicit Transaction(Database const& cx, Optional<Reference<Tenant>> const& tenant = Optional<Reference<Tenant>>());
 	~Transaction();
 
 	void setVersion(Version v);
-	Future<Version> getReadVersion() { return getReadVersion(0); }
+	Future<Version> getReadVersion() {
+		if (!trState->readVersionFuture.isValid()) {
+			trState->readVersionFuture = trState->getReadVersion(0);
+		}
+		return trState->readVersionFuture;
+	}
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
@@ -349,7 +400,6 @@ public:
 	                                                       const KeySelector& end,
 	                                                       const Key& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
 
@@ -359,7 +409,6 @@ private:
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
 	                                           GetRangeLimits limits,
-	                                           int matchIndex,
 	                                           Snapshot snapshot,
 	                                           Reverse reverse);
 
@@ -445,6 +494,10 @@ public:
 	// May be called only after commit() returns success
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
+	int64_t getTotalCost() const { return trState->totalCost; }
+
+	double getTagThrottledDuration() const;
+
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
@@ -482,6 +535,7 @@ public:
 	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 
+	Transaction& getTransaction() { return *this; }
 	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
@@ -493,7 +547,7 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
-	Optional<TenantName> getTenant() { return trState->tenant(); }
+	Optional<Reference<Tenant>> getTenant() { return trState->tenant(); }
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
@@ -505,8 +559,6 @@ public:
 	using FutureT = Future<Type>;
 
 private:
-	Future<Version> getReadVersion(uint32_t flags);
-
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
 	Future<RangeResult> getRangeInternal(const KeySelector& begin,
 	                                     const KeySelector& end,
@@ -519,8 +571,6 @@ private:
 
 	double backoff;
 	CommitTransactionRequest tr;
-	Future<Version> readVersion;
-	Promise<Optional<Value>> metadataVersion;
 	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
@@ -542,35 +592,56 @@ int64_t extractIntOption(Optional<StringRef> value,
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
-// each and every shards overlapping with `range`. Each checkpoint will be created at a random
-// storage server for each shard.
+// each and every shards overlapping with `ranges`.
 // All checkpoint(s) will be created at the transaction's commit version.
-Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Transaction* tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> dataMoveId = Optional<UID>());
 
 // Same as above.
-Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> dataMoveId = Optional<UID>());
 
-// Gets checkpoint metadata for `keys` at the specific version, with the particular format.
-// One CheckpointMetaData will be returned for each distinctive shard.
-// The collective keyrange of the returned checkpoint(s) is a super-set of `keys`.
-// checkpoint_not_found() error will be returned if the specific checkpoint(s) cannot be found.
-ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    KeyRange keys,
-                                                                    Version version,
-                                                                    CheckpointFormat format,
-                                                                    double timeout = 5.0);
+// Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
+// Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
+// checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
+ACTOR Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+    Database cx,
+    std::vector<KeyRange> ranges,
+    Version version,
+    CheckpointFormat format,
+    Optional<UID> dataMoveId = Optional<UID>(),
+    double timeout = 5.0);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
-// Round up to the nearest page size
+// Measured in bytes, rounded up to the nearest page size. Multiply by fungibility ratio
+// because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return (bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1;
+	if (bytes == 0) {
+		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	} else {
+		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
+		       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
+	}
+}
+
+// Measured in bytes, rounded up to the nearest page size.
+inline uint64_t getReadOperationCost(uint64_t bytes) {
+	if (bytes == 0) {
+		return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	} else {
+		return ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	}
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
-// will be 1. Otherwise, the value will be 0.
-// Returns the FDB version at which the transaction was committed.
+// will be 1. Otherwise, the value will be 0. The caller should take care of the reset of StorageWiggleMetrics if
+// necessary. Returns the FDB version at which the transaction was committed.
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
@@ -585,15 +656,45 @@ int64_t getMaxKeySize(KeyRef const& key);
 int64_t getMaxReadKeySize(KeyRef const& key);
 
 // Returns the maximum legal size of a key that can be written. If using raw access, writes to normal keys will
-// be allowed to be slighly larger to accommodate the prefix.
+// be allowed to be slightly larger to accommodate the prefix.
 int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
 
 // Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
 int64_t getMaxClearKeySize(KeyRef const& key);
 
+struct KeyRangeLocationInfo;
+// Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
+// serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
+ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      Version version,
+                                                                      KeyRange keys,
+                                                                      std::vector<KeyRangeLocationInfo> locations,
+                                                                      StorageMetrics min,
+                                                                      StorageMetrics max,
+                                                                      StorageMetrics permittedError);
+
+// Return the suggested split points from storage server.The locations tell which interface should
+// serve the request. `limit` is the current estimated storage metrics of `keys`.The returned points, if present,
+// guarantee the metrics of split result is within limit.
+ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> locations,
+    KeyRange keys,
+    StorageMetrics limit,
+    StorageMetrics estimated,
+    Optional<int> minSplitBytes);
+
 namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
 }
+ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                           TenantInfo tenant,
+                                                           Key key,
+                                                           SpanContext spanContext,
+                                                           Optional<UID> debugID,
+                                                           UseProvisionalProxies useProvisionalProxies,
+                                                           Reverse isBackward,
+                                                           Version version);
+
 #include "flow/unactorcompiler.h"
 #endif

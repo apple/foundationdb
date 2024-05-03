@@ -63,10 +63,10 @@ Key keyForInboxCacheByFeed(uint64_t inbox, uint64_t feed) {
 Key keyForFeed(uint64_t feed) {
 	return StringRef(format("f/%016llx", feed));
 }
-Key keyForFeedSubcriber(uint64_t feed, uint64_t inbox) {
+Key keyForFeedSubscriber(uint64_t feed, uint64_t inbox) {
 	return StringRef(format("f/%016llx/subs/%016llx", feed, inbox));
 }
-Key keyForFeedSubcriberCount(uint64_t feed) {
+Key keyForFeedSubscriberCount(uint64_t feed) {
 	return StringRef(format("f/%016llx/subscCnt", feed));
 }
 Key keyForFeedMessage(uint64_t feed, uint64_t message) {
@@ -114,7 +114,7 @@ ACTOR Future<uint64_t> _createFeed(Database cx, Standalone<StringRef> metadata) 
 				val = v;
 			}
 			tr.set(keyForFeed(id), metadata);
-			tr.set(keyForFeedSubcriberCount(id), uInt64ToValue(0));
+			tr.set(keyForFeedSubscriberCount(id), uInt64ToValue(0));
 			tr.set(keyForFeedMessageCount(id), uInt64ToValue(0));
 			wait(tr.commit());
 			break;
@@ -181,11 +181,11 @@ ACTOR Future<bool> _createSubscription(Database cx, uint64_t feed, uint64_t inbo
 			tr.set(keyForInboxSubscription(inbox, feed), StringRef());
 			tr.set(keyForInboxSubscriptionCount(inbox), uInt64ToValue(subscriptionCount + 1));
 
-			// Update the subcribers of the feed
-			Optional<Value> subcriberCountVal = wait(tr.get(keyForFeedSubcriberCount(feed)));
-			uint64_t subcriberCount = valueToUInt64(subcriberCountVal.get()); // throws if count not present
-			tr.set(keyForFeedSubcriber(feed, inbox), StringRef());
-			tr.set(keyForFeedSubcriberCount(inbox), uInt64ToValue(subcriberCount + 1));
+			// Update the subscribers of the feed
+			Optional<Value> subscriberCountVal = wait(tr.get(keyForFeedSubscriberCount(feed)));
+			uint64_t subscriberCount = valueToUInt64(subscriberCountVal.get()); // throws if count not present
+			tr.set(keyForFeedSubscriber(feed, inbox), StringRef());
+			tr.set(keyForFeedSubscriberCount(inbox), uInt64ToValue(subscriberCount + 1));
 
 			// Add inbox as watcher of feed.
 			tr.set(keyForFeedWatcher(feed, inbox), StringRef());

@@ -25,12 +25,9 @@
 #include "flow/MkCert.h"
 #include "flow/PKey.h"
 #include "flow/UnitTest.h"
-#include "fdbrpc/Base64UrlEncode.h"
-#include "fdbrpc/Base64UrlDecode.h"
+#include "fdbrpc/Base64Encode.h"
+#include "fdbrpc/Base64Decode.h"
 #include "fdbrpc/JsonWebKeySet.h"
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>
@@ -135,7 +132,7 @@ bool getJwkBigNumMember(Arena& arena,
 	} else {
 		data = b64Member.get();
 	}
-	auto decoded = base64url::decode(arena, data);
+	auto decoded = base64::url::decode(arena, data);
 	if (!decoded.present()) {
 		JWK_PARSE_ERROR("Base64URL decoding for parameter failed")
 		    .detail("Algorithm", algorithm)
@@ -170,7 +167,7 @@ StringRef bigNumToBase64Url(Arena& arena, const BIGNUM* bn) {
 	auto len = BN_num_bytes(bn);
 	auto buf = new (arena) uint8_t[len];
 	::BN_bn2bin(bn, buf);
-	return base64url::encode(arena, StringRef(buf, len));
+	return base64::url::encode(arena, StringRef(buf, len));
 }
 
 Optional<PublicOrPrivateKey> parseEcP256Key(StringRef b64x, StringRef b64y, Optional<StringRef> b64d, int keyIndex) {

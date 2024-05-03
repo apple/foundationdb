@@ -22,17 +22,16 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
-#include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/config.h"
 
 // ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be
 // processed by tools/alloc_instrumentation.py
-//#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
+// #define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
 
-//#define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
-// The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1" and
-// vc++ rejects "true".
+// #define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
+//  The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1"
+//  and vc++ rejects "true".
 #define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
 
 #if VALGRIND
@@ -77,7 +76,7 @@ extern std::map<const char*, AllocInstrInfo> allocInstr;
 
 // extern std::map<uint32_t, uint64_t> stackAllocations;
 
-// maps from an address to the hash of the backtrace and the size of the alloction
+// maps from an address to the hash of the backtrace and the size of the allocation
 extern std::unordered_map<int64_t, std::pair<uint32_t, size_t>> memSample;
 
 struct BackTraceAccount {
@@ -177,6 +176,52 @@ void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
+// Allow temporary overriding of default allocators used by arena to let memory survive deallocation and test
+// correctness of memory policy (e.g. zeroing out sensitive contents after use)
+namespace keepalive_allocator {
+
+namespace detail {
+extern bool g_active;
+} // namespace detail
+
+inline bool isActive() noexcept {
+	return detail::g_active;
+}
+
+// While this scope is active, default allocate() and free() function is overridden for Arena and PacketBuffer to test
+// correct post-use memory policy: e.g. secure deletion of sensitive contents. Any (de)allocation of ArenaBlock and
+// PacketBuffer is tracked while this scope is active. To ensure correct state management, at most one instance of this
+// object may exist at any given time. Any tracked allocation during this scope must be freed BEFORE the scope
+// destructs. Any trackable (ArenaBlock, PacketBuffer) allocation before the scope must be freed AFTER the scope
+// destructs.
+class ActiveScope {
+public:
+	ActiveScope();
+	~ActiveScope();
+};
+
+void* allocate(size_t);
+void invalidate(void*);
+
+void trackWipedArea(const uint8_t* begin, int size);
+std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet();
+
+} // namespace keepalive_allocator
+
+force_inline uint8_t* allocateAndMaybeKeepalive(size_t size) {
+	if (keepalive_allocator::isActive()) [[unlikely]]
+		return static_cast<uint8_t*>(keepalive_allocator::allocate(size));
+	else
+		return new uint8_t[size];
+}
+
+force_inline void freeOrMaybeKeepalive(void* ptr) {
+	if (keepalive_allocator::isActive()) [[unlikely]]
+		keepalive_allocator::invalidate(ptr);
+	else
+		delete[] static_cast<uint8_t*>(ptr);
+}
+
 inline constexpr int nextFastAllocatedSize(int x) {
 	assert(x > 0 && x <= 16384);
 	if (x <= 16)
@@ -265,7 +310,7 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<128>::release(ptr);
 	if (size <= 256)
 		return FastAllocator<256>::release(ptr);
-	delete[](uint8_t*) ptr;
+	delete[] (uint8_t*)ptr;
 }
 
 // Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of

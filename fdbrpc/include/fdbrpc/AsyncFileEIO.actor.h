@@ -45,6 +45,8 @@
 class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
 public:
+	virtual StringRef getClassName() override { return "AsyncFileDetachable"_sr; }
+
 	static void init() {
 		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
 		if (eio_init(&eio_want_poll, nullptr)) {
@@ -116,7 +118,7 @@ public:
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
 		if (mustBeDurable) {
-			CODE_PROBE(true, "deleteFile and fsync parent dir");
+			CODE_PROBE(true, "deleteFile and fsync parent dir", probe::decoration::rare);
 			return async_fsync_parent(filename);
 		} else
 			return Void();

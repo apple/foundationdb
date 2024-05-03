@@ -44,6 +44,7 @@ struct OperationInfo {
 };
 
 struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
+	static constexpr auto NAME = "AsyncFileCorrectness";
 	// Maximum number of bytes operated on by a file operation
 	int maxOperationSize;
 
@@ -67,7 +68,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	// Whether or not the correctness test succeeds
 	bool success;
 
-	// The targetted size of the file (the actual file can be anywhere in size from 1 byte to 2 * targetFileSize)
+	// The targeted size of the file (the actual file can be anywhere in size from 1 byte to 2 * targetFileSize)
 	int64_t targetFileSize;
 
 	double averageCpuUtilization;
@@ -94,8 +95,6 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	~AsyncFileCorrectnessWorkload() override {}
-
-	std::string description() const override { return "AsyncFileCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -436,4 +435,4 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 };
 
-WorkloadFactory<AsyncFileCorrectnessWorkload> AsyncFileCorrectnessWorkloadFactory("AsyncFileCorrectness");
+WorkloadFactory<AsyncFileCorrectnessWorkload> AsyncFileCorrectnessWorkloadFactory;

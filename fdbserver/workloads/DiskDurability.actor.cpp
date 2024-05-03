@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskDurabilityWorkload : public AsyncFileWorkload {
+	static constexpr auto NAME = "DiskDurability";
 	struct FileBlock {
 		FileBlock(int blockNum) : blockNum(blockNum), lastData(0), lock(new FlowLock(1)) {}
 		~FileBlock() {}
@@ -98,8 +99,6 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	}
 
 	~DiskDurabilityWorkload() override {}
-
-	std::string description() const override { return "DiskDurability"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -184,4 +183,4 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DiskDurabilityWorkload> DiskDurabilityWorkloadFactory("DiskDurability");
+WorkloadFactory<DiskDurabilityWorkload> DiskDurabilityWorkloadFactory;

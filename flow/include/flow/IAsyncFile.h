@@ -33,6 +33,10 @@
 // AsyncFileCached) maintain references, while others (AsyncFileNonDurable) don't, and the comment
 // is unapplicable to some others as well (AsyncFileKAIO). It's safest to assume that all operations
 // must complete or cancel, but you should probably look at the file implementations you'll be using.
+//
+// Wrapper classes such as AsyncFileWriteChecker and AsyncFileChaos ideally should be safe to destroy with
+// pending operations as they are inserted randomly into file opens in simulation and some use cases
+// will drop file references while operations are still pending.
 class IAsyncFile {
 public:
 	virtual ~IAsyncFile();
@@ -60,6 +64,8 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	virtual StringRef getClassName() { return "IAsyncFile"_sr; }
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	virtual Future<int> read(void* data,

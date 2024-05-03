@@ -16,11 +16,9 @@ import org.junit.jupiter.api.Assertions;
  * Consumer would consume the key by checking the existence of the key, if it does not find the key,
  * then the test would fail.
  *
- * This test is to verify the causal consistency of transactions for mutli-threaded client. 
+ * This test is to verify the causal consistency of transactions for multi-threaded client. 
  */
 public class SidebandMultiThreadClientTest {
-    public static final int API_VERSION = 720;
-
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 
     private static final Map<Database, BlockingQueue<String>> db2Queues = new HashMap<>();
@@ -28,7 +26,7 @@ public class SidebandMultiThreadClientTest {
     private static final int txnCnt = 1000;
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(API_VERSION);
+        FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         for (Database db : dbs) {

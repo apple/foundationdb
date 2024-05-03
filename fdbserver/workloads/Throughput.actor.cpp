@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -189,12 +189,11 @@ struct MeasureSinglePeriod : IMeasurer {
 	double delay, duration;
 	double startT;
 
-	ContinuousSample<double> totalLatency, grvLatency, rowReadLatency, commitLatency;
+	DDSketch<double> totalLatency, grvLatency, rowReadLatency, commitLatency;
 	ITransactor::Stats stats; // totalled over the period
 
 	MeasureSinglePeriod(double delay, double duration)
-	  : delay(delay), duration(duration), totalLatency(2000), grvLatency(2000), rowReadLatency(2000),
-	    commitLatency(2000) {}
+	  : delay(delay), duration(duration), totalLatency(), grvLatency(), rowReadLatency(), commitLatency() {}
 
 	Future<Void> start() override {
 		startT = now();
@@ -298,6 +297,8 @@ struct MeasureMulti : IMeasurer {
 };
 
 struct ThroughputWorkload : TestWorkload {
+	static constexpr auto NAME = "Throughput";
+
 	double targetLatency, testDuration, Pgain, Igain;
 	Reference<ITransactor> op;
 	Reference<IMeasurer> measurer;
@@ -358,8 +359,6 @@ struct ThroughputWorkload : TestWorkload {
 		// testDuration = getOption( options, "testDuration"_sr, measureDelay + measureDuration );
 	}
 
-	std::string description() const override { return "Throughput"; }
-
 	Future<Void> setup(Database const& cx) override {
 		return Void(); // No setup for now - use a separate workload to do setup
 	}
@@ -417,4 +416,4 @@ struct ThroughputWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { measurer->getMetrics(m); }
 };
-WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory("Throughput");
+WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory;

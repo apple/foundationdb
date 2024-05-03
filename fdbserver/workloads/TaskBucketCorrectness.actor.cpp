@@ -18,11 +18,6 @@
  * limitations under the License.
  */
 
-#include <iostream>
-#include <sstream>
-#include <cctype>
-
-#include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbclient/Tuple.h"
@@ -207,6 +202,8 @@ REGISTER_TASKFUNC(SaidHelloTaskFunc);
 
 // A workload which test the correctness of TaskBucket
 struct TaskBucketCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "TaskBucketCorrectness";
+
 	bool chained;
 	int subtaskCount;
 
@@ -214,8 +211,6 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		chained = getOption(options, "chained"_sr, false);
 		subtaskCount = getOption(options, "subtaskCount"_sr, 20);
 	}
-
-	std::string description() const override { return "TaskBucketCorrectness"; }
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -343,7 +338,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<TaskBucketCorrectnessWorkload> TaskBucketCorrectnessWorkloadFactory("TaskBucketCorrectness");
+WorkloadFactory<TaskBucketCorrectnessWorkload> TaskBucketCorrectnessWorkloadFactory;
 
 void print_subspace_key(const Subspace& subspace, int id) {
 	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
@@ -419,8 +414,8 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	t3.append(ghi);
 	printf("%d==========%s===%d\n", 13, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.get(StringRef()).get(def).pack(ghi));
-	ASSERT(subspace_test5.pack(t3) == LiteralStringRef("abc\x01user\x00\x15\x7b\x01\x00\x01"
-	                                                   "def\x00\x01ghi\x00"));
+	ASSERT(subspace_test5.pack(t3) == "abc\x01user\x00\x15\x7b\x01\x00\x01"
+	                                  "def\x00\x01ghi\x00"_sr);
 
 	printf("%d==========%s===%d\n",
 	       14,

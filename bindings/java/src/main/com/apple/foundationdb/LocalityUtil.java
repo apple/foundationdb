@@ -95,6 +95,10 @@ public class LocalityUtil {
 	 * the storage servers responsible for storing {@code key} and its associated
 	 * value.
 	 *
+	 * The storage server network ports are not included to the list unless
+	 * tr.options().{@link com.apple.foundationdb.TransactionOptions#setIncludePortInAddress() setIncludePortInAddress()}
+	 * has been called.
+	 *
 	 * If locality information is not available, the returned future will carry a
 	 *  {@link FDBException} locality_information_unavailable.
 	 *

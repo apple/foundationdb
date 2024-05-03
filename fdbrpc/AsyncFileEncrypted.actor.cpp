@@ -48,15 +48,17 @@ public:
 	ACTOR static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
 		state Arena arena;
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
-		int bytes = wait(
-		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block));
+		int bytes = wait(uncancellable(holdWhile(arena,
+		                                         self->file->read(encrypted,
+		                                                          FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE,
+		                                                          FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block))));
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
 		return Standalone<StringRef>(decrypted, arena);
 	}
 
-	ACTOR static Future<int> read(AsyncFileEncrypted* self, void* data, int length, int64_t offset) {
+	ACTOR static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
 		state const uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		state const uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		state uint32_t block;
@@ -70,7 +72,7 @@ public:
 			if (cachedBlock.present()) {
 				plaintext = cachedBlock.get();
 			} else {
-				wait(store(plaintext, readBlock(self, block)));
+				wait(store(plaintext, readBlock(self.getPtr(), block)));
 				self->readBuffers.insert(block, plaintext);
 			}
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
@@ -96,7 +98,7 @@ public:
 		return bytesRead;
 	}
 
-	ACTOR static Future<Void> write(AsyncFileEncrypted* self, void const* data, int length, int64_t offset) {
+	ACTOR static Future<Void> write(Reference<AsyncFileEncrypted> self, void const* data, int length, int64_t offset) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// All writes must append to the end of the file:
 		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
@@ -122,7 +124,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> sync(AsyncFileEncrypted* self) {
+	ACTOR static Future<Void> sync(Reference<AsyncFileEncrypted> self) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		wait(self->writeLastBlockToFile());
 		wait(self->file->sync());
@@ -135,7 +137,7 @@ public:
 		Arena arena;
 		auto zeroes = new (arena) unsigned char[length];
 		memset(zeroes, 0, length);
-		wait(self->write(zeroes, length, offset));
+		wait(uncancellable(holdWhile(arena, self->write(zeroes, length, offset))));
 		return Void();
 	}
 };
@@ -159,11 +161,11 @@ void AsyncFileEncrypted::delref() {
 }
 
 Future<int> AsyncFileEncrypted::read(void* data, int length, int64_t offset) {
-	return AsyncFileEncryptedImpl::read(this, data, length, offset);
+	return AsyncFileEncryptedImpl::read(Reference<AsyncFileEncrypted>::addRef(this), data, length, offset);
 }
 
 Future<Void> AsyncFileEncrypted::write(void const* data, int length, int64_t offset) {
-	return AsyncFileEncryptedImpl::write(this, data, length, offset);
+	return AsyncFileEncryptedImpl::write(Reference<AsyncFileEncrypted>::addRef(this), data, length, offset);
 }
 
 Future<Void> AsyncFileEncrypted::zeroRange(int64_t offset, int64_t length) {
@@ -177,7 +179,7 @@ Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
 
 Future<Void> AsyncFileEncrypted::sync() {
 	ASSERT(mode == Mode::APPEND_ONLY);
-	return AsyncFileEncryptedImpl::sync(this);
+	return AsyncFileEncryptedImpl::sync(Reference<AsyncFileEncrypted>::addRef(this));
 }
 
 Future<Void> AsyncFileEncrypted::flush() {
@@ -217,7 +219,11 @@ StreamCipher::IV AsyncFileEncrypted::getIV(uint32_t block) const {
 }
 
 Future<Void> AsyncFileEncrypted::writeLastBlockToFile() {
-	return file->write(&writeBuffer[0], offsetInBlock, currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE);
+	// The source buffer for the write is owned by *this so this must be kept alive by reference count until the write
+	// is finished.
+	return uncancellable(
+	    holdWhile(Reference<AsyncFileEncrypted>::addRef(this),
+	              file->write(&writeBuffer[0], offsetInBlock, currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)));
 }
 
 size_t AsyncFileEncrypted::RandomCache::evict() {

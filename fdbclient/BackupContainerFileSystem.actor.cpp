@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainer.h"
+#include "flow/BooleanParam.h"
 #ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
@@ -159,7 +161,8 @@ public:
 	ACTOR static Future<Void> writeKeyspaceSnapshotFile(Reference<BackupContainerFileSystem> bc,
 	                                                    std::vector<std::string> fileNames,
 	                                                    std::vector<std::pair<Key, Key>> beginEndKeys,
-	                                                    int64_t totalBytes) {
+	                                                    int64_t totalBytes,
+	                                                    IncludeKeyRangeMap includeKeyRangeMap) {
 		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 		state Version minVer = std::numeric_limits<Version>::max();
@@ -188,11 +191,13 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
-		auto ranges = doc.subDoc("keyRanges");
-		for (int i = 0; i < beginEndKeys.size(); i++) {
-			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
-			fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
-			fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+		if (includeKeyRangeMap) {
+			auto ranges = doc.subDoc("keyRanges");
+			for (int i = 0; i < beginEndKeys.size(); i++) {
+				auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
+				fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
+				fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+			}
 		}
 
 		wait(yield());
@@ -237,7 +242,7 @@ public:
 	}
 
 	// For a list of log files specified by their indices (of the same tag),
-	// returns if they are continous in the range [begin, end]. If "tags" is not
+	// returns if they are continuous in the range [begin, end]. If "tags" is not
 	// nullptr, then it will be populated with [begin, end] -> tags, where next
 	// pair's begin <= previous pair's end + 1. On return, the last pair's end
 	// version (inclusive) gives the continuous range from begin.
@@ -319,10 +324,10 @@ public:
 		end = std::min(end, tags.rbegin()->first.second);
 		TraceEvent("ContinuousLogEnd").detail("Partition", 0).detail("EndVersion", end).detail("Begin", begin);
 
-		// for each range in tags, check all partitions from 1 are continouous
+		// for each range in tags, check all partitions from 1 are continuous
 		Version lastEnd = begin;
 		for (const auto& [beginEnd, count] : tags) {
-			Version tagEnd = beginEnd.second; // This range's minimum continous partition version
+			Version tagEnd = beginEnd.second; // This range's minimum continuous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
 				isContinuous(logs, tagIndices[i], beginEnd.first, beginEnd.second, &rangeTags);
@@ -389,11 +394,13 @@ public:
 	                                     Version* end,
 	                                     Version targetVersion) {
 		auto i = logs.begin();
-		if (outLogs != nullptr)
+		if (outLogs != nullptr) {
 			outLogs->push_back(*i);
+			++i; // skip the first file
+		}
 
 		// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
-		while (++i != logs.end()) {
+		while (i != logs.end()) {
 			if (i->beginVersion > *end || i->beginVersion > targetVersion)
 				break;
 
@@ -403,6 +410,7 @@ public:
 					outLogs->push_back(*i);
 				*end = i->endVersion;
 			}
+			++i;
 		}
 	}
 
@@ -503,7 +511,7 @@ public:
 		state Version scanEnd = std::numeric_limits<Version>::max();
 
 		// Use the known log range if present
-		// Logs are assumed to be contiguious between metaLogBegin and metaLogEnd, so initalize desc accordingly
+		// Logs are assumed to be contiguous between metaLogBegin and metaLogEnd, so initialize desc accordingly
 		if (metaLogBegin.present() && metaLogEnd.present()) {
 			// minLogBegin is the greater of the log begin metadata OR the unreliable end version since we can't count
 			// on log file presence before that version.
@@ -906,7 +914,6 @@ public:
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                               Version targetVersion,
 	                                                               VectorRef<KeyRangeRef> keyRangesFilter,
-	                                                               Optional<Database> cx,
 	                                                               bool logsOnly = false,
 	                                                               Version beginVersion = invalidVersion) {
 		for (const auto& range : keyRangesFilter) {
@@ -915,6 +922,7 @@ public:
 
 		if (logsOnly) {
 			state RestorableFileSet restorableSet;
+			restorableSet.targetVersion = targetVersion;
 			state std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
 			wait(store(logFiles, bc->listLogFiles(begin, targetVersion, false)));
@@ -941,13 +949,9 @@ public:
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
-			// Old backup does not have metadata about key ranges and can not be filtered with key ranges.
-			if (keyRangesFilter.size() && results.second.empty() && !results.first.empty()) {
-				throw backup_not_filterable_with_key_ranges();
-			}
-
-			// Filter by keyRangesFilter.
-			if (keyRangesFilter.empty()) {
+			// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range info
+			// then return all of the range files
+			if (keyRangesFilter.empty() || results.second.empty()) {
 				restorable.ranges = std::move(results.first);
 				restorable.keyRanges = std::move(results.second);
 				minKeyRangeVersion = snapshots[i].beginVersion;
@@ -974,19 +978,6 @@ public:
 				continue;
 
 			restorable.snapshot = snapshots[i];
-			// TODO: Reenable the sanity check after TooManyFiles error is resolved
-			if (false && g_network->isSimulated()) {
-				// Sanity check key ranges
-				state std::map<std::string, KeyRange>::iterator rit;
-				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
-					auto it = std::find_if(restorable.ranges.begin(),
-					                       restorable.ranges.end(),
-					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
-					ASSERT(it != restorable.ranges.end());
-					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it, cx));
-					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
-				}
-			}
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
@@ -1131,6 +1122,16 @@ public:
 		return false;
 	}
 
+	// fallback for using existing write api if the underlying blob store doesn't support efficient writeEntireFile
+	ACTOR static Future<Void> writeEntireFileFallback(Reference<BackupContainerFileSystem> bc,
+	                                                  std::string fileName,
+	                                                  std::string fileContents) {
+		state Reference<IBackupFile> objectFile = wait(bc->writeFile(fileName));
+		wait(objectFile->append(&fileContents[0], fileContents.size()));
+		wait(objectFile->finish());
+		return Void();
+	}
+
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
@@ -1219,9 +1220,10 @@ BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 
 Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
                                                                   const std::vector<std::pair<Key, Key>>& beginEndKeys,
-                                                                  int64_t totalBytes) {
+                                                                  int64_t totalBytes,
+                                                                  IncludeKeyRangeMap includeKeyRangeMap) {
 	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(
-	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes);
+	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes, includeKeyRangeMap);
 };
 
 Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
@@ -1352,7 +1354,7 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 
 ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
                                                            RangeFile file,
-                                                           Optional<Database> cx) {
+                                                           Database cx) {
 	state int readFileRetries = 0;
 	state bool beginKeySet = false;
 	state Key beginKey;
@@ -1438,18 +1440,17 @@ ACTOR static Future<Optional<Version>> readVersionProperty(Reference<BackupConta
 	}
 }
 
-Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file, Optional<Database> cx) {
+Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file, Database cx) {
 	ASSERT(g_network->isSimulated());
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file, cx);
 }
 
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
-                                                                             Optional<Database> cx,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
                                                                              bool logsOnly,
                                                                              Version beginVersion) {
 	return BackupContainerFileSystemImpl::getRestoreSet(
-	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, cx, logsOnly, beginVersion);
+	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, logsOnly, beginVersion);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -1484,6 +1485,12 @@ Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
 }
 
+Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
+                                                                const std::string& fileContents) {
+	return BackupContainerFileSystemImpl::writeEntireFileFallback(
+	    Reference<BackupContainerFileSystem>::addRef(this), fileName, fileContents);
+}
+
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
@@ -1499,7 +1506,8 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
     const std::string& url,
     const Optional<std::string>& proxy,
-    const Optional<std::string>& encryptionKeyFileName) {
+    const Optional<std::string>& encryptionKeyFileName,
+    bool isBackup) {
 	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
 
 	Reference<BackupContainerFileSystem>& r = m_cache[url];
@@ -1512,18 +1520,28 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
+			Optional<std::string> blobstoreProxy;
+
+			// If no proxy is passed down to the openContainer method, try to fallback to the
+			// fileBackupAgentProxy which is a global variable and will be set for the backup_agent.
+			if (proxy.present()) {
+				blobstoreProxy = proxy.get();
+			} else if (fileBackupAgentProxy.present()) {
+				blobstoreProxy = fileBackupAgentProxy.get();
+			}
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
 			S3BlobStoreEndpoint::ParametersT backupParams;
 			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, proxy, &resource, &lastOpenError, &backupParams);
+			    S3BlobStoreEndpoint::fromString(url, blobstoreProxy, &resource, &lastOpenError, &backupParams);
 
 			if (resource.empty())
 				throw backup_invalid_url();
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
-			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
+			r = makeReference<BackupContainerS3BlobStore>(
+			    bstore, resource, backupParams, encryptionKeyFileName, isBackup);
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
@@ -1671,8 +1689,7 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 
 ACTOR Future<Void> testBackupContainer(std::string url,
                                        Optional<std::string> proxy,
-                                       Optional<std::string> encryptionKeyFileName,
-                                       Optional<Database> cx) {
+                                       Optional<std::string> encryptionKeyFileName) {
 	state FlowLock lock(100e6);
 
 	if (encryptionKeyFileName.present()) {
@@ -1737,8 +1754,10 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if (deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(
-				    snapshots.rbegin()->second, snapshotBeginEndKeys.rbegin()->second, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second,
+				                                              snapshotBeginEndKeys.rbegin()->second,
+				                                              snapshotSizes.rbegin()->second,
+				                                              IncludeKeyRangeMap(BUGGIFY)));
 				snapshots[v] = {};
 				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
@@ -1779,13 +1798,13 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 	for (; i < listing.snapshots.size(); ++i) {
 		{
 			// Ensure we can still restore to the latest version
-			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get(), cx));
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
 			ASSERT(rest.present());
 		}
 
 		{
 			// Ensure we can restore to the end version of snapshot i
-			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion, cx));
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
 			ASSERT(rest.present());
 		}
 
@@ -1826,16 +1845,14 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 }
 
 TEST_CASE("/backup/containers/localdir/unencrypted") {
-	wait(testBackupContainer(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}, {}));
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}));
 	return Void();
 }
 
 TEST_CASE("/backup/containers/localdir/encrypted") {
 	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                         {},
-	                         format("%s/test_encryption_key", params.getDataDir().c_str()),
-	                         {}));
+	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
 	return Void();
 }
 
@@ -1843,7 +1860,7 @@ TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		wait(testBackupContainer(url, {}, {}, {}));
+		wait(testBackupContainer(url, {}, {}));
 	}
 	return Void();
 }

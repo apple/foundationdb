@@ -26,12 +26,12 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/BooleanParam.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(CheckHashes);
+FDB_BOOLEAN_PARAM(CheckHashes);
 
 class IDiskQueue : public IClosable {
 public:
 	struct location {
-		// location is same with seq., specifying the index of the virtualy infinite queue.
+		// location is same with seq., specifying the index of the virtually infinite queue.
 		int64_t hi, lo; // hi is always 0, lo is always equal to seq.
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
@@ -76,8 +76,6 @@ public:
 	virtual location getNextReadLocation()
 	    const = 0; // Returns a location >= the location of all bytes previously returned by readNext(), and <= the
 	               // location of all bytes subsequently returned
-	virtual location getNextCommitLocation()
-	    const = 0; // If commit() were to be called, all buffered writes would be written starting at `location`.
 	virtual location getNextPushLocation()
 	    const = 0; // If push() were to be called, the pushed data would be written starting at `location`.
 

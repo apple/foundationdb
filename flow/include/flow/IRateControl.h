@@ -65,7 +65,7 @@ public:
 		// If budget is still >= 0 then it's safe to use the allowance right now.
 		if (m_budget >= 0)
 			return Void();
-		// Otherise return the amount of time it will take for the budget to rise to 0.
+		// Otherwise return the amount of time it will take for the budget to rise to 0.
 		return m_stop.getFuture() || delay(m_seconds * -m_budget / m_limit);
 	}
 

@@ -22,13 +22,14 @@
 
 package fdb
 
-// #define FDB_API_VERSION 720
+// #define FDB_API_VERSION 740
 // #include <foundationdb/fdb_c.h>
 // #include <stdlib.h>
 import "C"
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -39,6 +40,7 @@ import (
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
+//
 //export unlockMutex
 func unlockMutex(p unsafe.Pointer) {
 	m := (*sync.Mutex)(p)
@@ -108,7 +110,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // library, an error will be returned. APIVersion must be called prior to any
 // other functions in the fdb package.
 //
-// Currently, this package supports API versions 200 through 720.
+// Currently, this package supports API versions 200 through 740.
 //
 // Warning: When using the multi-version client API, setting an API version that
 // is not supported by a particular client library will prevent that client from
@@ -116,7 +118,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 720
+	headerVersion := 740
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -192,15 +194,24 @@ func MustGetAPIVersion() int {
 
 var apiVersion int
 var networkStarted bool
-var networkMutex sync.Mutex
+var networkMutex sync.RWMutex
 
-var openDatabases map[string]Database
-
-func init() {
-	openDatabases = make(map[string]Database)
-}
+var openDatabases sync.Map
 
 func startNetwork() error {
+	networkMutex.RLock()
+	if networkStarted {
+		networkMutex.RUnlock()
+		return nil
+	}
+	// release read lock and acquire write lock
+	networkMutex.RUnlock()
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+	if networkStarted {
+		return nil
+	}
+
 	if e := C.fdb_setup_network(); e != 0 {
 		return Error{int(e)}
 	}
@@ -221,9 +232,6 @@ func startNetwork() error {
 // StartNetwork initializes the FoundationDB client networking engine. StartNetwork
 // must not be called more than once.
 func StartNetwork() error {
-	networkMutex.Lock()
-	defer networkMutex.Unlock()
-
 	if apiVersion == 0 {
 		return errAPIVersionUnset
 	}
@@ -264,32 +272,32 @@ func MustOpenDefault() Database {
 // To connect to multiple clusters running at different, incompatible versions,
 // the multi-version client API must be used.
 func OpenDatabase(clusterFile string) (Database, error) {
-	networkMutex.Lock()
-	defer networkMutex.Unlock()
-
-	if apiVersion == 0 {
-		return Database{}, errAPIVersionUnset
+	if err := ensureNetworkIsStarted(); err != nil {
+		return Database{}, err
 	}
 
-	var e error
-
-	if !networkStarted {
-		e = startNetwork()
-		if e != nil {
-			return Database{}, e
-		}
-	}
-
-	db, ok := openDatabases[clusterFile]
-	if !ok {
+	var db Database
+	var okDb bool
+	anyy, exist := openDatabases.Load(clusterFile)
+	if db, okDb = anyy.(Database); !exist || !okDb {
+		var e error
 		db, e = createDatabase(clusterFile)
 		if e != nil {
 			return Database{}, e
 		}
-		openDatabases[clusterFile] = db
+		openDatabases.Store(clusterFile, db)
 	}
 
 	return db, nil
+}
+
+// ensureNetworkIsStarted starts the network if not already done and ensures that the API version is set.
+func ensureNetworkIsStarted() error {
+	if apiVersion == 0 {
+		return errAPIVersionUnset
+	}
+
+	return startNetwork()
 }
 
 // MustOpenDatabase is like OpenDatabase but panics if the default database cannot
@@ -337,7 +345,35 @@ func createDatabase(clusterFile string) (Database, error) {
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{db}, nil
+	return Database{clusterFile, true, db}, nil
+}
+
+// OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
+// by the provided connection string. This method can be useful for scenarios where you want to connect
+// to the database only for a short time e.g. to test different connection strings.
+func OpenWithConnectionString(connectionString string) (Database, error) {
+	if err := ensureNetworkIsStarted(); err != nil {
+		return Database{}, err
+	}
+
+	var cf *C.char
+
+	if connectionString == "" {
+		return Database{}, errors.New("connection string must be a non-empty string")
+	}
+
+	cf = C.CString(connectionString)
+	defer C.free(unsafe.Pointer(cf))
+
+	var outdb *C.FDBDatabase
+	if err := C.fdb_create_database_from_connection_string(cf, &outdb); err != 0 {
+		return Database{}, Error{int(err)}
+	}
+
+	db := &database{outdb}
+	runtime.SetFinalizer(db, (*database).destroy)
+
+	return Database{"", false, db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.

@@ -35,7 +35,7 @@ class RangeResult {
 
 	RangeResult(byte[] keyValues, int[] lengths, boolean more) {
 		if(lengths.length % 2 != 0) {
-			throw new IllegalArgumentException("There needs to be an even number of lenghts!");
+			throw new IllegalArgumentException("There needs to be an even number of lengths!");
 		}
 
 		int count = lengths.length / 2;

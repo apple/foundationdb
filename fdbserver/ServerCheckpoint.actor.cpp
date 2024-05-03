@@ -23,10 +23,12 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
+                                       const CheckpointAsKeyValues checkpointAsKeyValues,
+                                       UID logID) {
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == RocksDBColumnFamily || format == RocksDB) {
-		return newRocksDBCheckpointReader(checkpoint, logID);
+	if (format == DataMoveRocksCF || format == RocksDB) {
+		return newRocksDBCheckpointReader(checkpoint, checkpointAsKeyValues, logID);
 	} else {
 		throw not_implemented();
 	}
@@ -36,9 +38,13 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID
 
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
-	state CheckpointFormat format = checkpoint.getFormat();
-	if (format == RocksDBColumnFamily || format == RocksDB) {
-		wait(deleteRocksCheckpoint(checkpoint));
+	const CheckpointFormat format = checkpoint.getFormat();
+	if (format == DataMoveRocksCF || format == RocksDB || format == RocksDBKeyValues) {
+		if (!checkpoint.dir.empty()) {
+			platform::eraseDirectoryRecursive(checkpoint.dir);
+		} else {
+			TraceEvent(SevWarn, "CheckpointDirNotFound").detail("Checkpoint", checkpoint.toString());
+		}
 	} else {
 		throw not_implemented();
 	}
@@ -51,11 +57,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
+
 	state CheckpointMetaData result;
 	const CheckpointFormat format = initialState.getFormat();
-	if (format == RocksDBColumnFamily || format == RocksDB) {
-		CheckpointMetaData _result = wait(fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
-		result = _result;
+	ASSERT(format != RocksDBKeyValues);
+	if (format == DataMoveRocksCF || format == RocksDB) {
+		wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
 	} else {
 		throw not_implemented();
 	}
@@ -64,15 +71,40 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 	return result;
 }
 
-ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
-    Database cx,
-    std::vector<CheckpointMetaData> initialStates,
-    std::string dir,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
-	std::vector<Future<CheckpointMetaData>> actors;
-	for (const auto& checkpoint : initialStates) {
-		actors.push_back(fetchCheckpoint(cx, checkpoint, dir, cFun));
+ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
+                                                       CheckpointMetaData initialState,
+                                                       std::string dir,
+                                                       std::vector<KeyRange> ranges,
+                                                       std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	TraceEvent(SevDebug, "FetchCheckpointRangesBegin", initialState.checkpointID)
+	    .detail("CheckpointMetaData", initialState.toString())
+	    .detail("Ranges", describe(ranges));
+	ASSERT(!ranges.empty());
+
+	state CheckpointMetaData result;
+	const CheckpointFormat format = initialState.getFormat();
+	if (format != RocksDBKeyValues) {
+		if (format != DataMoveRocksCF) {
+			throw not_implemented();
+		}
+		initialState.setFormat(RocksDBKeyValues);
+		initialState.ranges = ranges;
+		initialState.dir = dir;
+		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion());
 	}
-	std::vector<CheckpointMetaData> res = wait(getAll(actors));
-	return res;
+
+	wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
+
+	TraceEvent(SevDebug, "FetchCheckpointRangesEnd", initialState.checkpointID)
+	    .detail("CheckpointMetaData", result.toString())
+	    .detail("Ranges", describe(ranges));
+	return result;
+}
+
+std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId) {
+	return joinPath(baseDir, checkpointId.toString());
+}
+
+std::string fetchedCheckpointDir(const std::string& baseDir, const UID& checkpointId) {
+	return joinPath(baseDir, UID(checkpointId.first(), deterministicRandom()->randomUInt64()).toString());
 }

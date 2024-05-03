@@ -19,16 +19,15 @@
  */
 #pragma once
 
+#include "fdbclient/Knobs.h"
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 
-#include <cstddef>
-#include <stdint.h>
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/Tenant.h"
-#include "fdbserver/IClosable.h"
+#include "fdbclient/IClosable.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastAlloc.h"
@@ -38,6 +37,10 @@
 
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
+
+#include <array>
+#include <cstddef>
+#include <stdint.h>
 
 typedef uint32_t LogicalPageID;
 typedef uint32_t PhysicalPageID;
@@ -94,7 +97,22 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
 };
 
-enum EncodingType : uint8_t { XXHash64 = 0, XOREncryption_TestOnly = 1, AESEncryptionV1 = 2, MAX_ENCODING_TYPE = 3 };
+enum EncodingType : uint8_t {
+	XXHash64 = 0,
+	XOREncryption_TestOnly = 1,
+	AESEncryption = 2,
+	AESEncryptionWithAuth = 3,
+	MAX_ENCODING_TYPE = 4
+};
+
+static constexpr std::array EncryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth, XOREncryption_TestOnly };
+inline bool isEncodingTypeEncrypted(EncodingType encoding) {
+	return std::count(EncryptedEncodingTypes.begin(), EncryptedEncodingTypes.end(), encoding) > 0;
+}
+
+inline bool isEncodingTypeAESEncrypted(EncodingType encoding) {
+	return encoding == AESEncryption || encoding == AESEncryptionWithAuth;
+}
 
 enum PageType : uint8_t {
 	HeaderPage = 0,
@@ -188,7 +206,7 @@ private:
 //
 // preWrite() must be called before writing a page to disk to update checksums and encrypt as needed
 // After reading a page from disk,
-//   postReadHeader() must be called to verify the verison, main, and encoding headers
+//   postReadHeader() must be called to verify the version, main, and encoding headers
 //   postReadPayload() must be called, after potentially setting encryption secret, to verify and possibly
 //                     decrypt the payload
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
@@ -224,12 +242,12 @@ public:
 	int rawSize() const { return bufferSize; }
 
 	// Encryption key used to encrypt a page. Different encoding types may use different structs to represent
-	// an encryption key, and EncryptionKeyRef is a union of these structs.
-	struct EncryptionKeyRef {
-		TextAndHeaderCipherKeys aesKey; // For AESEncryptionV1
+	// an encryption key, and EncryptionKey is a union of these structs.
+	struct EncryptionKey {
+		TextAndHeaderCipherKeys aesKey; // For AESEncryption and AESEncryptionWithAuth
 		uint8_t xorKey; // For XOREncryption_TestOnly
+		uint8_t xorWith; // For XOREncryption_TestOnly
 	};
-	using EncryptionKey = Standalone<EncryptionKeyRef>;
 
 #pragma pack(push, 1)
 
@@ -264,7 +282,7 @@ public:
 	// Redwood header version 1
 	// Protects all headers with a 64-bit XXHash checksum
 	// Most other fields are forensic in nature and are not required to be set for correct
-	// behavior but they can faciliate forensic investigation of data on disk.  Some of them
+	// behavior but they can facilitate forensic investigation of data on disk.  Some of them
 	// could be used for sanity checks at runtime.
 	struct RedwoodHeaderV1 {
 		PageType pageType;
@@ -345,8 +363,9 @@ public:
 			Header* h = reinterpret_cast<Header*>(header);
 			h->checksum = XXH3_64bits_withSeed(payload, len, seed);
 			h->xorKey = encryptionKey.xorKey;
+			uint8_t xorMask = ~encryptionKey.xorKey ^ encryptionKey.xorWith;
 			for (int i = 0; i < len; ++i) {
-				payload[i] ^= h->xorKey;
+				payload[i] ^= xorMask;
 			}
 		}
 
@@ -356,8 +375,9 @@ public:
 		                   int len,
 		                   PhysicalPageID seed) {
 			Header* h = reinterpret_cast<Header*>(header);
+			uint8_t xorMask = ~encryptionKey.xorKey ^ encryptionKey.xorWith;
 			for (int i = 0; i < len; ++i) {
-				payload[i] ^= h->xorKey;
+				payload[i] ^= xorMask;
 			}
 			if (h->checksum != XXH3_64bits_withSeed(payload, len, seed)) {
 				throw page_decoding_failed();
@@ -365,31 +385,98 @@ public:
 		}
 	};
 
-	struct AESEncryptionV1Encoder {
-		using Header = BlobCipherEncryptHeader;
+	// By default, xxhash is used to checksum the page. But ff authentication is enabled (such as when we are using
+	// aes256-ctr-hmac-sha256 encryption scheme), the auth tag plays the role of a checksum while assuring authenticity
+	// of the data. xxhash checksum is not needed in this case.
+	//
+	// To support configurable encryption, which may come with variable size encryption header, we assume the encryption
+	// header size is no larger than that of BlobCipherEncryptHeader. This is true for current supported encryption
+	// header format types. Moving forward, the plan is to make IPager support variable size encoding header, and let
+	// Redwood rebuild a page when it tries to in-place update the page, but the reserved buffer for the encoding header
+	// is not large enough.
+	// TODO(yiwu): Cleanup the old encryption header, and update headerSize to be the maximum size of the supported
+	// encryption header format type.
+	// TODO(yiwu): Support variable size encoding header.
+	template <EncodingType encodingType,
+	          typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth,
+	                                  bool>::type = true>
+	struct AESEncryptionEncoder {
+		struct AESEncryptionEncodingHeader {
+			XXH64_hash_t checksum;
+			union {
+				BlobCipherEncryptHeader encryption;
+				uint8_t encryptionHeaderBuf[0]; // for configurable encryption
+			};
+		};
 
-		static void encode(void* header, const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
+		struct AESEncryptionWithAuthEncodingHeader {
+			union {
+				BlobCipherEncryptHeader encryption;
+				uint8_t encryptionHeaderBuf[0]; // for configurable encryption
+			};
+		};
+
+		using Header = typename std::conditional<encodingType == AESEncryption,
+		                                         AESEncryptionEncodingHeader,
+		                                         AESEncryptionWithAuthEncodingHeader>::type;
+
+		static constexpr size_t headerSize = sizeof(Header);
+
+		static void encode(void* header,
+		                   const TextAndHeaderCipherKeys& cipherKeys,
+		                   uint8_t* payload,
+		                   int len,
+		                   PhysicalPageID seed) {
 			Header* h = reinterpret_cast<Header*>(header);
 			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
 			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
-			StringRef ciphertext = cipher.encrypt(payload, len, h, arena)->toStringRef();
-			ASSERT_EQ(len, ciphertext.size());
-			memcpy(payload, ciphertext.begin(), len);
+
+			BlobCipherEncryptHeaderRef headerRef;
+			cipher.encryptInplace(payload, len, &headerRef);
+
+			Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+			ASSERT(serializedHeader.size() <= BlobCipherEncryptHeader::headerSize);
+			memcpy(h->encryptionHeaderBuf, serializedHeader.begin(), serializedHeader.size());
+			if (serializedHeader.size() < BlobCipherEncryptHeader::headerSize) {
+				memset(h->encryptionHeaderBuf + serializedHeader.size(),
+				       0,
+				       BlobCipherEncryptHeader::headerSize - serializedHeader.size());
+			}
+
+			if constexpr (encodingType == AESEncryption) {
+				h->checksum = XXH3_64bits_withSeed(payload, len, seed);
+			}
 		}
 
-		static void decode(void* header, const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
+		static BlobCipherEncryptHeaderRef getEncryptionHeaderRef(const void* header) {
+			const Header* h = reinterpret_cast<const Header*>(header);
+			return BlobCipherEncryptHeaderRef::fromStringRef(
+			    StringRef(h->encryptionHeaderBuf, headerSize - (h->encryptionHeaderBuf - (const uint8_t*)h)));
+		}
+
+		static void decode(void* header,
+		                   const TextAndHeaderCipherKeys& cipherKeys,
+		                   uint8_t* payload,
+		                   int len,
+		                   PhysicalPageID seed,
+		                   double* decryptTime = nullptr) {
 			Header* h = reinterpret_cast<Header*>(header);
-			DecryptBlobCipherAes256Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, h->iv, BlobCipherMetrics::KV_REDWOOD);
+			if constexpr (encodingType == AESEncryption) {
+				if (h->checksum != XXH3_64bits_withSeed(payload, len, seed)) {
+					throw page_decoding_failed();
+				}
+			}
 			Arena arena;
-			StringRef plaintext = cipher.decrypt(payload, len, *h, arena)->toStringRef();
-			ASSERT_EQ(len, plaintext.size());
-			memcpy(payload, plaintext.begin(), len);
+			BlobCipherEncryptHeaderRef headerRef = getEncryptionHeaderRef(header);
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::KV_REDWOOD);
+			cipher.decryptInplace(payload, len, headerRef, decryptTime);
 		}
 	};
+
 #pragma pack(pop)
 
 	// Get the size of the encoding header based on type
@@ -400,8 +487,10 @@ public:
 			return sizeof(XXHashEncoder::Header);
 		} else if (t == EncodingType::XOREncryption_TestOnly) {
 			return sizeof(XOREncryptionEncoder::Header);
-		} else if (t == EncodingType::AESEncryptionV1) {
-			return sizeof(AESEncryptionV1Encoder::Header);
+		} else if (t == EncodingType::AESEncryption) {
+			return sizeof(AESEncryptionEncoder<AESEncryption>::Header);
+		} else if (t == EncodingType::AESEncryptionWithAuth) {
+			return sizeof(AESEncryptionEncoder<AESEncryptionWithAuth>::Header);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -498,7 +587,7 @@ public:
 	//        Secret is set if needed
 	// Post:  Main and Encoding subheaders are updated
 	//        Payload is possibly encrypted
-	void preWrite(PhysicalPageID pageID) const {
+	void preWrite(PhysicalPageID pageID) {
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
@@ -508,8 +597,12 @@ public:
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			XOREncryptionEncoder::encode(page->getEncodingHeader(), encryptionKey, pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			AESEncryptionV1Encoder::encode(page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize);
+		} else if (page->encodingType == EncodingType::AESEncryption) {
+			AESEncryptionEncoder<AESEncryption>::encode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::AESEncryptionWithAuth) {
+			AESEncryptionEncoder<AESEncryptionWithAuth>::encode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -519,6 +612,7 @@ public:
 		} else {
 			throw page_header_version_not_supported();
 		}
+		encodingHeaderAvailable = true;
 	}
 
 	// Must be called after reading from disk to verify all non-payload bytes
@@ -531,6 +625,7 @@ public:
 	void postReadHeader(PhysicalPageID pageID, bool verify = true) {
 		pPayload = page->getPayload();
 		payloadSize = logicalSize - (pPayload - buffer);
+		encodingHeaderAvailable = true;
 
 		if (page->headerVersion == 1) {
 			if (verify) {
@@ -547,13 +642,17 @@ public:
 
 	// Pre:   postReadHeader has been called, encoding-specific parameters (such as the encryption secret) have been set
 	// Post:  Payload has been verified and decrypted if necessary
-	void postReadPayload(PhysicalPageID pageID) {
+	void postReadPayload(PhysicalPageID pageID, double* decryptTime = nullptr) {
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::decode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			XOREncryptionEncoder::decode(page->getEncodingHeader(), encryptionKey, pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			AESEncryptionV1Encoder::decode(page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize);
+		} else if (page->encodingType == EncodingType::AESEncryption) {
+			AESEncryptionEncoder<AESEncryption>::decode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID, decryptTime);
+		} else if (page->encodingType == EncodingType::AESEncryptionWithAuth) {
+			AESEncryptionEncoder<AESEncryptionWithAuth>::decode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID, decryptTime);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -561,14 +660,22 @@ public:
 
 	const Arena& getArena() const { return arena; }
 
-	static bool isEncodingTypeEncrypted(EncodingType t) {
-		return t == EncodingType::AESEncryptionV1 || t == EncodingType::XOREncryption_TestOnly;
-	}
-
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
 
-	void* getEncodingHeader() { return page->getEncodingHeader(); }
+	// Return encryption domain id used. This method only use information from the encryptionKey.
+	// Caller should make sure encryption domain is in use.
+	int64_t getEncryptionDomainId() const {
+		// encryption domain is only supported by AESEncryption and AESEncryptionWithAuth.
+		ASSERT(getEncodingType() == EncodingType::AESEncryption ||
+		       getEncodingType() == EncodingType::AESEncryptionWithAuth);
+		const Reference<BlobCipherKey>& cipherKey = encryptionKey.aesKey.cipherTextKey;
+		ASSERT(cipherKey.isValid());
+		return cipherKey->getDomainId();
+	}
+
+	// Return pointer to encoding header.
+	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
 
 private:
 	Arena arena;
@@ -608,6 +715,9 @@ public:
 	// Used by encodings that do encryption
 	EncryptionKey encryptionKey;
 
+	// Whether encoding header is set
+	bool encodingHeaderAvailable = false;
+
 	mutable ArbitraryObject extra;
 };
 
@@ -637,10 +747,15 @@ public:
 	ArbitraryObject extra;
 };
 
+class IPageEncryptionKeyProvider;
+
 // This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.
 class IPager2 : public IClosable {
 public:
 	virtual std::string getName() const = 0;
+
+	// Set an encryption key provider.
+	virtual void setEncryptionKeyProvider(Reference<IPageEncryptionKeyProvider> keyProvider) = 0;
 
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
 	virtual Reference<ArenaPage> newPageBuffer(size_t blocks = 1) = 0;
@@ -755,7 +870,7 @@ public:
 	// invalidate them or keep their versions around until the snapshots are no longer in use.
 	virtual void setOldestReadableVersion(Version v) = 0;
 
-	// Advance the commit version and the oldest readble version and commit until the remap queue is empty.
+	// Advance the commit version and the oldest readable version and commit until the remap queue is empty.
 	virtual Future<Void> clearRemapQueue() = 0;
 
 	// Get a pointer to an integer representing a byte count penalty the pager should apply against usable page cache

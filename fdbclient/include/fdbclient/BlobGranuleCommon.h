@@ -25,7 +25,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
@@ -55,43 +55,85 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
+#pragma pack(push, 4)
+struct GranuleMutationRef {
+	MutationRef::Type type;
+	Version version;
+	StringRef param1;
+	StringRef param2;
+
+	GranuleMutationRef() {}
+	GranuleMutationRef(MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(param1), param2(param2) {}
+	GranuleMutationRef(Arena& to, MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(to, param1), param2(to, param2) {}
+	GranuleMutationRef(Arena& to, const GranuleMutationRef& from)
+	  : type(from.type), version(from.version), param1(to, from.param1), param2(to, from.param2) {}
+};
+#pragma pack(pop)
+
 struct GranuleMaterializeStats {
+	// file-level stats
 	int64_t inputBytes;
 	int64_t outputBytes;
 
-	GranuleMaterializeStats() : inputBytes(0), outputBytes(0) {}
+	// merge stats
+	int32_t snapshotRows;
+	int32_t rowsCleared;
+	int32_t rowsInserted;
+	int32_t rowsUpdated;
+
+	GranuleMaterializeStats()
+	  : inputBytes(0), outputBytes(0), snapshotRows(0), rowsCleared(0), rowsInserted(0), rowsUpdated(0) {}
 };
 
 struct BlobGranuleCipherKeysMeta {
 	EncryptCipherDomainId textDomainId;
 	EncryptCipherBaseKeyId textBaseCipherId;
+	EncryptCipherKeyCheckValue textBaseCipherKCV;
 	EncryptCipherRandomSalt textSalt;
 	EncryptCipherDomainId headerDomainId;
 	EncryptCipherBaseKeyId headerBaseCipherId;
+	EncryptCipherKeyCheckValue headerBaseCipherKCV;
 	EncryptCipherRandomSalt headerSalt;
 	std::string ivStr;
 
 	BlobGranuleCipherKeysMeta() {}
 	BlobGranuleCipherKeysMeta(const EncryptCipherDomainId tDomainId,
 	                          const EncryptCipherBaseKeyId tBaseCipherId,
+	                          const EncryptCipherKeyCheckValue tBaseCipherKCV,
 	                          const EncryptCipherRandomSalt tSalt,
 	                          const EncryptCipherDomainId hDomainId,
 	                          const EncryptCipherBaseKeyId hBaseCipherId,
+	                          const EncryptCipherKeyCheckValue hBaseCipherKCV,
 	                          const EncryptCipherRandomSalt hSalt,
 	                          const std::string& iv)
-	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textSalt(tSalt), headerDomainId(hDomainId),
-	    headerBaseCipherId(hBaseCipherId), headerSalt(hSalt), ivStr(iv) {}
+	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textBaseCipherKCV(tBaseCipherKCV), textSalt(tSalt),
+	    headerDomainId(hDomainId), headerBaseCipherId(hBaseCipherId), headerBaseCipherKCV(hBaseCipherKCV),
+	    headerSalt(hSalt), ivStr(iv) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, textDomainId, textBaseCipherId, textSalt, headerDomainId, headerBaseCipherId, headerSalt, ivStr);
+		serializer(ar,
+		           textDomainId,
+		           textBaseCipherId,
+		           textBaseCipherKCV,
+		           textSalt,
+		           headerDomainId,
+		           headerBaseCipherId,
+		           headerBaseCipherKCV,
+		           headerSalt,
+		           ivStr);
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKey {
 	constexpr static FileIdentifier file_identifier = 7274734;
 	EncryptCipherDomainId encryptDomainId;
 	EncryptCipherBaseKeyId baseCipherId;
+	EncryptCipherKeyCheckValue baseCipherKCV;
 	EncryptCipherRandomSalt salt;
 	StringRef baseCipher;
 
@@ -99,6 +141,7 @@ struct BlobGranuleCipherKey {
 		BlobGranuleCipherKey cipherKey;
 		cipherKey.encryptDomainId = keyRef->getDomainId();
 		cipherKey.baseCipherId = keyRef->getBaseCipherId();
+		cipherKey.baseCipherKCV = keyRef->getBaseCipherKCV();
 		cipherKey.salt = keyRef->getSalt();
 		cipherKey.baseCipher = makeString(keyRef->getBaseCipherLen(), arena);
 		memcpy(mutateString(cipherKey.baseCipher), keyRef->rawBaseCipher(), keyRef->getBaseCipherLen());
@@ -108,10 +151,12 @@ struct BlobGranuleCipherKey {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainId, baseCipherId, salt, baseCipher);
+		serializer(ar, encryptDomainId, baseCipherId, baseCipherKCV, salt, baseCipher);
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKeysCtx {
 	constexpr static FileIdentifier file_identifier = 1278718;
 	BlobGranuleCipherKey textCipherKey;
@@ -121,9 +166,11 @@ struct BlobGranuleCipherKeysCtx {
 	static BlobGranuleCipherKeysMeta toCipherKeysMeta(const BlobGranuleCipherKeysCtx& ctx) {
 		return BlobGranuleCipherKeysMeta(ctx.textCipherKey.encryptDomainId,
 		                                 ctx.textCipherKey.baseCipherId,
+		                                 ctx.textCipherKey.baseCipherKCV,
 		                                 ctx.textCipherKey.salt,
 		                                 ctx.headerCipherKey.encryptDomainId,
 		                                 ctx.headerCipherKey.baseCipherId,
+		                                 ctx.headerCipherKey.baseCipherKCV,
 		                                 ctx.headerCipherKey.salt,
 		                                 ctx.ivRef.toString());
 	}
@@ -168,6 +215,7 @@ struct BlobFilePointerRef {
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	Version fileVersion;
 	Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 
 	// Non-serializable fields
@@ -176,25 +224,34 @@ struct BlobFilePointerRef {
 
 	BlobFilePointerRef() {}
 
-	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length, int64_t fullFileLength)
-	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
+	BlobFilePointerRef(Arena& to,
+	                   const std::string& filename,
+	                   int64_t offset,
+	                   int64_t length,
+	                   int64_t fullFileLength,
+	                   Version fileVersion)
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    fileVersion(fileVersion) {}
 
 	BlobFilePointerRef(Arena& to,
 	                   const std::string& filename,
 	                   int64_t offset,
 	                   int64_t length,
 	                   int64_t fullFileLength,
+	                   Version fileVersion,
 	                   Optional<BlobGranuleCipherKeysCtx> ciphKeysCtx)
 	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
-	    cipherKeysCtx(ciphKeysCtx) {}
+	    fileVersion(fileVersion), cipherKeysCtx(ciphKeysCtx) {}
 
 	BlobFilePointerRef(Arena& to,
 	                   const std::string& filename,
 	                   int64_t offset,
 	                   int64_t length,
 	                   int64_t fullFileLength,
+	                   Version fileVersion,
 	                   Optional<BlobGranuleCipherKeysMeta> ciphKeysMeta)
-	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    fileVersion(fileVersion) {
 		if (ciphKeysMeta.present()) {
 			cipherKeysMetaRef = BlobGranuleCipherKeysMetaRef(to, ciphKeysMeta.get());
 		}
@@ -202,12 +259,12 @@ struct BlobFilePointerRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length, fullFileLength, cipherKeysCtx);
+		serializer(ar, filename, offset, length, fullFileLength, fileVersion, cipherKeysCtx);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength;
+		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength << "@" << fileVersion;
 		if (cipherKeysCtx.present()) {
 			ss << ":CipherKeysCtx:TextCipher:" << cipherKeysCtx.get().textCipherKey.encryptDomainId << ":"
 			   << cipherKeysCtx.get().textCipherKey.baseCipherId << ":" << cipherKeysCtx.get().textCipherKey.salt
@@ -228,6 +285,7 @@ struct BlobGranuleChunkRef {
 	constexpr static FileIdentifier file_identifier = 865198;
 	KeyRangeRef keyRange;
 	Version includedVersion;
+	// FIXME: remove snapshotVersion, it is deprecated with fileVersion in BlobFilePointerRef
 	Version snapshotVersion;
 	Optional<BlobFilePointerRef> snapshotFile; // not set if it's an incremental read
 	VectorRef<BlobFilePointerRef> deltaFiles;
@@ -295,13 +353,40 @@ struct GranuleHistory {
 };
 
 // A manifest to assist full fdb restore from blob granule files
-struct BlobManifest {
-	constexpr static FileIdentifier file_identifier = 298872;
-	VectorRef<KeyValueRef> rows;
+struct BlobManifestTailer {
+	constexpr static FileIdentifier file_identifier = 379431;
+	int64_t totalRows;
+	int64_t totalSegments;
+	int64_t totalBytes;
+	// All manifest files are currently encrypted using default_domain
+	// and with a single encryption key.
+	// TODO: Extend domain_aware encryption semantics to manifest file(s)
+	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rows);
+		serializer(ar, totalRows, totalSegments, totalBytes, cipherKeysMeta);
+	}
+};
+
+// Value of blob range change log.
+struct BlobRangeChangeLogRef {
+	constexpr static FileIdentifier file_identifier = 9774587;
+
+	KeyRangeRef range;
+	ValueRef value;
+
+	BlobRangeChangeLogRef() {}
+	BlobRangeChangeLogRef(KeyRangeRef range, ValueRef value) : range(range), value(value) {}
+	BlobRangeChangeLogRef(Arena& to, KeyRangeRef range, ValueRef value) : range(to, range), value(to, value) {}
+	BlobRangeChangeLogRef(Arena& to, const BlobRangeChangeLogRef& from)
+	  : range(to, from.range), value(to, from.value) {}
+
+	int expectedSize() const { return range.expectedSize() + value.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, value);
 	}
 };
 

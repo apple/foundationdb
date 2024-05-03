@@ -49,6 +49,13 @@ The ``clear`` command clears a key from the database. Its syntax is ``clear <KEY
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
+clearknob
+---------
+
+The ``clearknob`` command can be used to clear knobs set in the configuration database. Its syntax is ``clearknob <KNOBNAME> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change.
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
 clearrange
 ----------
 
@@ -131,12 +138,42 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
 
+consistencyscan
+----------------
+
+This command controls a native data consistency scan role that is automatically recruited in the FDB cluster.  The consistency scan reads all replicas of each shard to verify data consistency.  It is useful for finding corrupt cold data by ensuring that all data is read periodically.  Any errors found will be logged as TraceEvents with Severity = 40.
+
+The syntax is
+
+``consistencyscan [on|off] [restart] [stats] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
+
+* ``on`` enables the scan.
+
+* ``off`` disables the scan but keeps the current cycle's progress so it will resume later if enabled again.
+
+* ``restart`` will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when it is re-enabled.
+
+* ``stats`` dumps the current round and lifetime stats of the consistency scan. It is a convenience method to expose the stats which are also in status json.
+
+* ``clearstats`` will clear all of the stats for the consistency scan but otherwise leave the configuration as is. This can be used to clear errors or reset stat counts, for example.
+
+* ``maxRate <BYTES_PER_SECOND>`` sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.
+
+* ``targetInterval <SECONDS>`` sets the target interval for the scan to SECONDS.  The scan will adjust speed to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND.
+
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan``.
+
+For more details, see :ref:`consistency-scan`.
+
 consistencycheck
 ----------------
 
-The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
+.. note::
+   This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command above to control FDB's internal consistency scan role instead.
 
-You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+This command controls a key which controls behavior of any externally configured consistency check roles.  You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+
+The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
 
 coordinators
 ------------
@@ -159,6 +196,23 @@ defaulttenant
 The ``defaulttenant`` command configures ``fdbcli`` to run its commands without a tenant. This is the default behavior.
 
 The active tenant cannot be changed while a transaction (using ``begin``) is open.
+
+datadistribution
+----------------
+
+The ``datadistribution`` command is used to enable or disable functionalities of data distributor.
+Its syntax is
+- ``datadistribution <on|off>``. Fully enable or disable the data distributor.
+- ``datadistribution <enable|disable> <ssfailure|rebalance|rebalance_disk|rebalance_read>``. Enable or disable part of data distribution features.
+
+ssfailure
+    Whether storage server failure will trigger data movement for replica repairing.
+rebalance_disk
+    If enabled, data distributor will do data movement to make sure every storage server use similar disk space.
+rebalance_read
+    If enabled, data distributor will do data movement to balance the read bytes bandwidth among storage servers. This feature needs ``knob_read_sampling_enabled=true``.
+rebalance
+    Control both rebalance_disk and rebalance_read.
 
 exclude
 -------
@@ -200,6 +254,13 @@ get
 ---
 
 The ``get`` command fetches the value of a given key. Its syntax is ``get <KEY>``. It displays the value of ``<KEY>`` if ``<KEY>`` is present in the database and ``not found`` otherwise.
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
+getknob
+-------
+
+The ``getknob`` command fetches the value of a given knob that has been populated by ``setknob``. Its syntax is ``getknob <KNOBNAME> [CONFIGCLASS]``. It displays the value of ``<KNOBNAME>`` if ``<KNOBNAME>`` is present in the database and ``not found`` otherwise.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
@@ -362,7 +423,7 @@ flow
 
 ``profile flow run <DURATION> <FILENAME> <PROCESS...>``
 
-Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
+Enables flow profiling on the specified processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
 
 heap
 ^^^^
@@ -394,6 +455,13 @@ setclass
 The ``setclass`` command can be used to change the :ref:`process class <guidelines-process-class-config>` for a given process. Its syntax is ``setclass [<ADDRESS> <CLASS>]``. If no arguments are specified, then the process classes of all processes are listed. Setting the class to ``default`` to revert to the process class specified on the command line.
 
 The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``grv_proxy``, ``commit_proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
+
+setknob
+-------
+
+The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change.
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
 sleep
 -----
@@ -429,8 +497,6 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
-.. _cli-throttle:
-
 tenant
 ------
 
@@ -439,13 +505,15 @@ The ``tenant`` command is used to view and manage the tenants in a cluster. The 
 create
 ^^^^^^
 
-``tenant create <NAME> [tenant_group=<TENANT_GROUP>]``
+``tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]``
 
 Creates a new tenant in the cluster.
 
-``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte. 
+``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte.
 
 ``TENANT_GROUP`` - The tenant group the tenant will be placed in.
+
+``CLUSTER_NAME`` - The cluster the tenant will be placed in (metacluster only). If unspecified, the metacluster will choose the cluster.
 
 delete
 ^^^^^^
@@ -459,7 +527,7 @@ Deletes a tenant from the cluster. The tenant must be empty.
 list
 ^^^^
 
-``tenant list [BEGIN] [END] [LIMIT]``
+``tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]``
 
 Lists the tenants present in the cluster.
 
@@ -468,6 +536,10 @@ Lists the tenants present in the cluster.
 ``END`` - the exclusive end tenant to list. Defaults to ``\xff\xff``.
 
 ``LIMIT`` - the number of tenants to list. Defaults to 100.
+
+``OFFSET`` - the number of items to skip over, starting from the beginning of the range. Defaults to 0.
+
+``STATE``` - TenantState(s) to filter the list with. Defaults to no filters.
 
 get
 ^^^
@@ -565,6 +637,8 @@ In the event of an error, the JSON output will include an error message::
         "error": "...",
         "type": "error"
     }
+
+.. _cli-throttle:
 
 throttle
 --------
@@ -694,4 +768,17 @@ Removes a TSS process from quarantine, disposing of the TSS and allowing Data Di
 ``tssq list``:
 
 Lists the storage UIDs of all TSS processes currently in quarantine.
+
+hotrange
+--------
+
+Utility commands for fetching sampled read bytes/ops metrics from the specified storage server.
+
+``hotrange``
+
+It will populate a list of available storage servers' network addresses. Users need to run this first before fetching metrics from a specific storage server. Otherwise, the address is not recognized.
+
+``hotrange <IP:PORT> <bytes|readBytes|readOps> <begin> <end> <splitCount>``
+
+Fetch read metrics from the given storage server to find the hot range. Run ``help hotrange`` to read the guide.
 

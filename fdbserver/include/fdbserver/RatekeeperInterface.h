@@ -32,6 +32,7 @@ struct RatekeeperInterface {
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
 	RequestStream<struct HaltRatekeeperRequest> haltRatekeeper;
 	RequestStream<struct ReportCommitCostEstimationRequest> reportCommitCostEstimation;
+	RequestStream<struct GetSSVersionLagRequest> getSSVersionLag;
 	struct LocalityData locality;
 	UID myId;
 
@@ -46,7 +47,8 @@ struct RatekeeperInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, haltRatekeeper, reportCommitCostEstimation, locality, myId);
+		serializer(
+		    ar, waitFailure, getRateInfo, haltRatekeeper, reportCommitCostEstimation, getSSVersionLag, locality, myId);
 	}
 };
 
@@ -81,7 +83,7 @@ struct GetRateInfoReply {
 	// Depending on the value of SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES,
 	// one of these fields may be populated
 	Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> clientThrottledTags;
-	Optional<PrioritizedTransactionTagMap<double>> proxyThrottledTags;
+	Optional<TransactionTagMap<double>> proxyThrottledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -150,12 +152,36 @@ struct ReportCommitCostEstimationRequest {
 	ReplyPromise<Void> reply;
 
 	ReportCommitCostEstimationRequest() {}
-	ReportCommitCostEstimationRequest(UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost)
-	  : ssTrTagCommitCost(ssTrTagCommitCost) {}
+	explicit ReportCommitCostEstimationRequest(
+	    UIDTransactionTagMap<TransactionCommitCostEstimation>&& ssTrTagCommitCost)
+	  : ssTrTagCommitCost(std::move(ssTrTagCommitCost)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ssTrTagCommitCost, reply);
+	}
+};
+
+struct GetSSVersionLagReply {
+	constexpr static FileIdentifier file_identifier = 4022000;
+	Version maxPrimarySSVersion;
+	Version maxRemoteSSVersion;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, maxPrimarySSVersion, maxRemoteSSVersion);
+	}
+};
+
+struct GetSSVersionLagRequest {
+	constexpr static FileIdentifier file_identifier = 4022009;
+	ReplyPromise<struct GetSSVersionLagReply> reply;
+
+	GetSSVersionLagRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

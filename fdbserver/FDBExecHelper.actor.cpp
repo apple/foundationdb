@@ -19,9 +19,15 @@
  */
 
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include <boost/process.hpp>
 #endif
 #include <boost/algorithm/string.hpp>
@@ -35,6 +41,7 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
@@ -103,11 +110,11 @@ void ExecCmdValueString::dbgPrint() const {
 	return;
 }
 
-ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
+ACTOR void destroyChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
 	// This code path should be bug free
 	wait(parentSSClosed);
 	TraceEvent(SevDebug, message.c_str()).log();
-	// This one is root cause for most failures, make sure it's okay to destory
+	// This one is root cause for most failures, make sure it's okay to destroy
 	g_simulator->destroyProcess(childInfo);
 	// Explicitly reset the connection with the child process in case re-spawn very quickly
 	FlowTransport::transport().resetConnection(childInfo->address);
@@ -170,7 +177,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	    ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
 	    self->dataFolder.c_str(),
 	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
-	    self->protocolVersion);
+	    self->protocolVersion,
+	    false);
 	wait(g_simulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
@@ -201,7 +209,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					TraceEvent(SevDebug, "ChildProcessKilled").log();
 					wait(g_simulator->onProcess(self));
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
-					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
+					destroyChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}
 				when(wait(success(onShutdown))) {
 					ASSERT(false);

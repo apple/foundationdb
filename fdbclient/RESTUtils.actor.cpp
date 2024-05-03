@@ -19,28 +19,47 @@
  */
 
 #include "fdbclient/RESTUtils.h"
+#include "fdbclient/Knobs.h"
 
 #include "flow/flat_buffers.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 
 #include <boost/algorithm/string.hpp>
+#include <queue>
 
 #include "flow/actorcompiler.h" // always the last include
 
-namespace {
-std::unordered_set<std::string> protocols = { "http", "https" };
+const std::unordered_map<std::string, RESTConnectionType> RESTConnectionType::supportedConnTypes = {
+	{ "http", RESTConnectionType("http", RESTConnectionType::NOT_SECURE_CONNECTION) },
+	{ "https", RESTConnectionType("https", RESTConnectionType::SECURE_CONNECTION) }
+};
 
-bool isProtocolSupported(const std::string& protocol) {
-	return protocols.find(protocol) != protocols.end();
+RESTConnectionType RESTConnectionType::getConnectionType(const std::string& protocol) {
+	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
+	if (itr == RESTConnectionType::supportedConnTypes.end()) {
+		TraceEvent("RESTConnectionTypeUnsupportedPrototocol").detail("Protocol", protocol);
+		CODE_PROBE(true, "REST URI unsupported protocol");
+		throw rest_unsupported_protocol();
+	}
+	return itr->second;
 }
 
-bool isSecurePrototol(const std::string& protocol) {
-	return protocol.compare("https") == 0;
+bool RESTConnectionType::isProtocolSupported(const std::string& protocol) {
+	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
+	return itr != RESTConnectionType::supportedConnTypes.end();
 }
-} // namespace
+
+bool RESTConnectionType::isSecure(const std::string& protocol) {
+	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
+	if (itr == RESTConnectionType::supportedConnTypes.end()) {
+		TraceEvent("RESTConnectionTypeUnsupportedPrototocol").detail("Protocol", protocol);
+		throw rest_unsupported_protocol();
+	}
+	return itr->second.secure == RESTConnectionType::SECURE_CONNECTION;
+}
 
 RESTClientKnobs::RESTClientKnobs() {
-	secure_connection = RESTClientKnobs::SECURE_CONNECTION;
 	connection_pool_size = FLOW_KNOBS->RESTCLIENT_MAX_CONNECTIONPOOL_SIZE;
 	connect_tries = FLOW_KNOBS->RESTCLIENT_CONNECT_TRIES;
 	connect_timeout = FLOW_KNOBS->RESTCLIENT_CONNECT_TIMEOUT;
@@ -50,8 +69,6 @@ RESTClientKnobs::RESTClientKnobs() {
 
 	knobMap["connection_pool_size"] = std::addressof(connection_pool_size);
 	knobMap["pz"] = std::addressof(connection_pool_size);
-	knobMap["secure_connection"] = std::addressof(secure_connection);
-	knobMap["sc"] = std::addressof(secure_connection);
 	knobMap["connect_tries"] = std::addressof(connect_tries);
 	knobMap["ct"] = std::addressof(connect_tries);
 	knobMap["connect_timeout"] = std::addressof(connect_timeout);
@@ -65,23 +82,21 @@ RESTClientKnobs::RESTClientKnobs() {
 }
 
 void RESTClientKnobs::set(const std::unordered_map<std::string, int>& knobSettings) {
-	TraceEvent trace = TraceEvent("RESTClient_SetKnobs");
 
 	for (const auto& itr : knobSettings) {
 		const auto& kItr = RESTClientKnobs::knobMap.find(itr.first);
 		if (kItr == RESTClientKnobs::knobMap.end()) {
-			trace.detail("RESTClient_InvalidKnobName", itr.first);
+			TraceEvent("RESTClientInvalidKnobName").detail("KnobName", itr.first);
 			throw rest_invalid_rest_client_knob();
 		}
+		ASSERT_EQ(itr.first.compare(kItr->first), 0);
 		*(kItr->second) = itr.second;
-		trace.detail(itr.first.c_str(), itr.second);
 	}
 }
 
 std::unordered_map<std::string, int> RESTClientKnobs::get() const {
 	std::unordered_map<std::string, int> details = {
 		{ "connection_pool_size", connection_pool_size },
-		{ "secure_connection", secure_connection },
 		{ "connect_tries", connect_tries },
 		{ "connect_timeout", connect_timeout },
 		{ "max_connection_life", max_connection_life },
@@ -96,27 +111,46 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
                                                                   RESTConnectionPoolKey connectKey,
                                                                   bool isSecure,
                                                                   int maxConnLife) {
-	auto poolItr = connectionPool->connectionPoolMap.find(connectKey);
-	if (poolItr == connectionPool->connectionPoolMap.end()) {
-		throw rest_connectpool_key_not_found();
+
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTUtilConnectStart")
+		    .detail("Host", connectKey.first)
+		    .detail("Service", connectKey.second)
+		    .detail("IsSecure", isSecure)
+		    .detail("ConnectPoolNumKeys", connectionPool->connectionPoolMap.size());
 	}
 
-	while (!poolItr->second.empty()) {
+	auto poolItr = connectionPool->connectionPoolMap.find(connectKey);
+	while (poolItr != connectionPool->connectionPoolMap.end() && !poolItr->second.empty()) {
 		RESTConnectionPool::ReusableConnection rconn = poolItr->second.front();
 		poolItr->second.pop();
 
 		if (rconn.expirationTime > now()) {
-			TraceEvent("RESTClient_ReusableConnection")
-			    .suppressFor(60)
-			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			    .detail("ExpireIn", rconn.expirationTime - now());
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+				TraceEvent("RESTUtilReuseConn")
+				    .detail("Host", connectKey.first)
+				    .detail("Service", connectKey.second)
+				    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
+				    .detail("ExpireIn", rconn.expirationTime - now())
+				    .detail("NumConnsInPool", poolItr->second.size());
+			}
 			return rconn;
 		}
 	}
 
+	ASSERT(poolItr == connectionPool->connectionPoolMap.end() || poolItr->second.empty());
+
+	// No valid connection exists, create a new one
 	state Reference<IConnection> conn =
 	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
 	wait(conn->connectHandshake());
+
+	TraceEvent("RESTTUilCreateNewConn")
+	    .suppressFor(60)
+	    .detail("Host", connectKey.first)
+	    .detail("Service", connectKey.second)
+	    .detail("RemoteEndpoint", conn->getPeerAddress())
+	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size());
 
 	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
 }
@@ -130,73 +164,105 @@ Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTC
 void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
                                           ReusableConnection& rconn,
                                           const int maxConnections) {
-	auto poolItr = connectionPoolMap.find(connectKey);
-	if (poolItr == connectionPoolMap.end()) {
-		throw rest_connectpool_key_not_found();
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTUtilReturnConnStart")
+		    .detail("Host", connectKey.first)
+		    .detail("Service", connectKey.second)
+		    .detail("ConnectPoolNumKeys", connectionPoolMap.size());
 	}
 
+	auto poolItr = connectionPoolMap.find(connectKey);
 	// If it expires in the future then add it to the pool in the front iff connection pool size is not maxed
-	if (rconn.expirationTime > now() && poolItr->second.size() < maxConnections) {
-		poolItr->second.push(rconn);
+	if (rconn.expirationTime > now()) {
+		bool returned = true;
+		if (poolItr == connectionPoolMap.end()) {
+			connectionPoolMap.insert({ connectKey, std::queue<RESTConnectionPool::ReusableConnection>({ rconn }) });
+		} else if (poolItr->second.size() < maxConnections) {
+			poolItr->second.push(rconn);
+		} else {
+			// Connection pool at its capacity; do nothing
+			returned = false;
+		}
+
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG && returned) {
+			poolItr = connectionPoolMap.find(connectKey);
+			TraceEvent("RESTUtilReturnConnToPool")
+			    .detail("Host", connectKey.first)
+			    .detail("Service", connectKey.second)
+			    .detail("ConnPoolSize", connectionPoolMap.size())
+			    .detail("CachedConns", poolItr->second.size())
+			    .detail("TimeToExpire", rconn.expirationTime - now());
+		}
 	}
 	rconn.conn = Reference<IConnection>();
 }
 
-RESTUrl::RESTUrl(const std::string& fUrl, const bool isSecure) {
-	parseUrl(fUrl, isSecure);
+RESTUrl::RESTUrl(const std::string& fUrl) {
+	parseUrl(fUrl);
 }
 
-RESTUrl::RESTUrl(const std::string& fullUrl, const std::string& b, const bool isSecure) : body(b) {
-	parseUrl(fullUrl, isSecure);
+RESTUrl::RESTUrl(const std::string& fullUrl, const std::string& b) : body(b) {
+	parseUrl(fullUrl);
 }
 
-void RESTUrl::parseUrl(const std::string& fullUrl, const bool isSecure) {
+void RESTUrl::parseUrl(const std::string& fullUrl) {
 	// Sample valid URIs
 	// 1. With 'host' & 'resource' := '<protocol>://<host>/<resource>'
 	// 2. With 'host', 'service' & 'resource' := '<protocol>://<host>:port/<resource>'
 	// 3. With 'host', 'service', 'resource' & 'reqParameters' := '<protocol>://<host>:port/<resource>?<parameter-list>'
+
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTParseURI").detail("URI", fullUrl);
+	}
 
 	try {
 		StringRef t(fullUrl);
 		StringRef p = t.eat("://");
 		std::string protocol = p.toString();
 		boost::algorithm::to_lower(protocol);
-		if (!isProtocolSupported(protocol)) {
-			throw format("Invalid REST URI protocol '%s'", protocol.c_str());
-		}
-
-		// Ensure connection secure knob setting matches with the input URI
-		if ((isSecurePrototol(protocol) && !isSecure) || (!isSecurePrototol(protocol) && isSecure)) {
-			throw format("Invalid REST URI protocol secure knob '%s'", fullUrl.c_str());
+		this->connType = RESTConnectionType::getConnectionType(protocol);
+		if (!this->connType.secure && !CLIENT_KNOBS->REST_KMS_ALLOW_NOT_SECURE_CONNECTION) {
+			TraceEvent(SevWarnAlways, "RESTUtilsUnSupportedNotSecureConn").detail("Protocol", protocol);
+			CODE_PROBE(true, "REST URI not-secure connection not supported");
+			throw rest_unsupported_protocol();
 		}
 
 		// extract 'resource' and optional 'parameter list' if supplied in the URL
 		uint8_t foundSeparator = 0;
 		StringRef hostPort = t.eatAny("/?", &foundSeparator);
+		this->resource = "/";
 		if (foundSeparator == '/') {
-			resource = t.eat("?").toString();
-			reqParameters = t.eat().toString();
+			this->resource += t.eat("?").toString();
+			this->reqParameters = t.eat().toString();
 		}
 
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
 		StringRef hRef(hostPort);
 		StringRef h = hRef.eat(":");
 		if (h.size() == 0) {
+			CODE_PROBE(true, "REST URI empty host");
 			throw std::string("host cannot be empty");
 		}
-		host = h.toString();
-		service = hRef.eat().toString();
+		this->host = h.toString();
+		this->service = hRef.eat().toString();
 
-		TraceEvent("RESTClient_ParseURI")
-		    .detail("URI", fullUrl)
-		    .detail("Host", host)
-		    .detail("Service", service)
-		    .detail("Resource", resource)
-		    .detail("ReqParameters", reqParameters);
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+			TraceEvent("RESTUtilParseURI")
+			    .detail("URI", fullUrl)
+			    .detail("Host", this->host)
+			    .detail("Service", this->service)
+			    .detail("Resource", this->resource)
+			    .detail("ReqParameters", this->reqParameters)
+			    .detail("ConnectionType", this->connType.toString());
+		}
 	} catch (std::string& err) {
-		TraceEvent("RESTClient_ParseError").detail("URI", fullUrl).detail("Error", err);
+		TraceEvent(SevWarnAlways, "RESTUtilParseError").detail("URI", fullUrl).detail("Error", err);
 		throw rest_invalid_uri();
 	}
+}
+
+double continuousTimeDecay(double initialValue, double decayRate, double time) {
+	return initialValue * exp(-decayRate * time);
 }
 
 // Only used to link unit tests
@@ -205,24 +271,10 @@ void forceLinkRESTUtilsTests() {}
 TEST_CASE("/RESTUtils/InvalidProtocol") {
 	try {
 		std::string uri("httpx://foo/bar");
-		RESTUrl r(uri, false);
+		RESTUrl r(uri);
 		ASSERT(false);
 	} catch (Error& e) {
-		if (e.code() != error_code_rest_invalid_uri) {
-			throw e;
-		}
-	}
-	return Void();
-}
-
-TEST_CASE("/RESTUtils/MismatchKnobVal") {
-	// mismatch protocol and knob values
-	try {
-		std::string uri("http://foo/bar");
-		RESTUrl r(uri, true);
-		ASSERT(false);
-	} catch (Error& e) {
-		if (e.code() != error_code_rest_invalid_uri) {
+		if (e.code() != error_code_rest_unsupported_protocol) {
 			throw e;
 		}
 	}
@@ -232,7 +284,7 @@ TEST_CASE("/RESTUtils/MismatchKnobVal") {
 TEST_CASE("/RESTUtils/MissingHost") {
 	try {
 		std::string uri("https://:/bar");
-		RESTUrl r(uri, true);
+		RESTUrl r(uri);
 		ASSERT(false);
 	} catch (Error& e) {
 		if (e.code() != error_code_rest_invalid_uri) {
@@ -244,28 +296,67 @@ TEST_CASE("/RESTUtils/MissingHost") {
 
 TEST_CASE("/RESTUtils/ValidURIWithService") {
 	std::string uri("https://host:80/foo/bar");
-	RESTUrl r(uri, true);
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT_EQ(r.service.compare("80"), 0);
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	return Void();
 }
 
 TEST_CASE("/RESTUtils/ValidURIWithoutService") {
 	std::string uri("https://host/foo/bar");
-	RESTUrl r(uri, true);
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithExtraForwardSlash") {
+	std::string uri("https://host//foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
+	ASSERT_EQ(r.resource.compare("//foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithParamsSecure") {
+	std::string uri("https://host/foo/bar?param1,param2");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithParamsKnobNotEnabled") {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ false }));
+	std::string uri("http://host/foo/bar?param1,param2");
+	try {
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_rest_unsupported_protocol);
+	}
 	return Void();
 }
 
 TEST_CASE("/RESTUtils/ValidURIWithParams") {
-	std::string uri("https://host/foo/bar?param1,param2");
-	RESTUrl r(uri, true);
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ true }));
+	std::string uri("http://host/foo/bar?param1,param2");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::NOT_SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
 	return Void();
 }

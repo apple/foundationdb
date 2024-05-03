@@ -395,7 +395,7 @@ class TuplePackingTest {
 		Assumptions.assumeTrue(FDB.instance().getAPIVersion() > 520, "Skipping test because version is too old");
 
 		// this is a tricky case where there are two tuples with identical
-		// respresentations but different semantics.
+		// representations but different semantics.
 		byte[] arr = new byte[0x0100fe];
 		Arrays.fill(arr, (byte)0x7f); // the actual value doesn't matter, as long as it's not zero
 		Tuple t1 = Tuple.from(arr, Versionstamp.complete(new byte[] { FF, FF, FF, FF, FF, FF, FF, FF, FF, FF }),

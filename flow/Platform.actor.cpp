@@ -44,6 +44,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/asio.hpp>
 
 #include "fmt/format.h"
 
@@ -58,6 +59,12 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Util.h"
+
+// boost uses either std::array or boost::asio::detail::array to store the IPv6 Addresses.
+// Enforce the format of IPAddressStore, which is declared in IPAddress.h, is using the same type
+// to boost.
+static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<uint8_t, 16>>::value,
+              "IPAddressStore must be std::array<uint8_t, 16>");
 
 #ifdef _WIN32
 
@@ -644,7 +651,11 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 #endif
 
 	free = std::min((uint64_t)std::numeric_limits<int64_t>::max(), buf.f_bavail * blockSize);
-	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), buf.f_blocks * blockSize);
+
+	// f_blocks is the total fs space but (f_bfree - f_bavail) is space only available to privileged users
+	// so that amount will be subtracted from the reported total since FDB can't use it.
+	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(),
+	                 (buf.f_blocks - (buf.f_bfree - buf.f_bavail)) * blockSize);
 
 #elif defined(_WIN32)
 	std::string fullPath = abspath(directory);
@@ -1968,6 +1979,9 @@ std::string epochsToGMTString(double epochs) {
 }
 
 std::vector<std::string> getEnvironmentKnobOptions() {
+#if defined(__FreeBSD__)
+	extern char** environ;
+#endif
 	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
 	std::vector<std::string> knobOptions;
 #if defined(_WIN32)
@@ -1983,7 +1997,7 @@ std::vector<std::string> getEnvironmentKnobOptions() {
 	}
 #else
 	char** e = nullptr;
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 	e = environ;
 #elif defined(__APPLE__)
 	e = *_NSGetEnviron();
@@ -2126,7 +2140,7 @@ static void mprotectSafe(void* p, size_t s, int prot) {
 }
 
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
-	if (guardPages) {
+	if (guardPages && FLOW_KNOBS->FAST_ALLOC_ALLOW_GUARD_PAGES) {
 		static size_t pageSize = sysconf(_SC_PAGESIZE);
 		length = RightAlign(length, pageSize);
 		length += 2 * pageSize; // Map enough for the guard pages
@@ -2210,7 +2224,7 @@ void* numaAllocate(size_t size) {
 		char* p = (char*)thePtr + i*nVAPages/nodes*vaPageSize;
 		char* e = (char*)thePtr + (i+1)*nVAPages/nodes*vaPageSize;
 		//printf("  %p + %lld\n", p, e-p);
-		// SOMEDAY: removed NUMA extensions for compatibity with Windows Server 2003 -- make execution dynamic
+		// SOMEDAY: removed NUMA extensions for compatibility with Windows Server 2003 -- make execution dynamic
 		if (!VirtualAlloc/*ExNuma*/(/*GetCurrentProcess(),*/ p, e-p, MEM_COMMIT|MEM_RESERVE|MEM_LARGE_PAGES, PAGE_READWRITE/*, i*/)) {
 			Error e = platform_error();
 			TraceEvent(e, "VirtualAlloc").GetLastError();
@@ -2246,35 +2260,21 @@ namespace platform {
 int getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
 	int randomSeed;
-	int retryCount = 0;
 
 #ifdef _WIN32
-	do {
-		retryCount++;
-		if (rand_s((unsigned int*)&randomSeed) != 0) {
-			TraceEvent(SevError, "WindowsRandomSeedError").log();
-			throw platform_error();
-		}
-	} while (randomSeed == 0 &&
-	         retryCount <
-	             FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT); // randomSeed cannot be 0 since we use mersenne twister in
-	                                                  // DeterministicRandom. Get a new one if randomSeed is 0.
+	if (rand_s((unsigned int*)&randomSeed) != 0) {
+		TraceEvent(SevError, "WindowsRandomSeedError").log();
+		throw platform_error();
+	}
 #else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	do {
-		retryCount++;
-		if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
-			TraceEvent(SevError, "OpenURandom").GetLastError();
-			throw platform_error();
-		}
-	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);
+	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
+		TraceEvent(SevError, "OpenURandom").GetLastError();
+		throw platform_error();
+	}
 	close(devRandom);
 #endif
 
-	if (randomSeed == 0) {
-		TraceEvent(SevError, "RandomSeedZeroError").log();
-		throw platform_error();
-	}
 	return randomSeed;
 }
 } // namespace platform
@@ -3013,6 +3013,24 @@ int64_t fileSize(std::string const& filename) {
 #endif
 }
 
+time_t fileModifiedTime(const std::string& filename) {
+#ifdef _WIN32
+	struct _stati64 file_status;
+	if (_stati64(filename.c_str(), &file_status) != 0)
+		return 0;
+	else
+		return file_status.st_mtime;
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+	struct stat file_status;
+	if (stat(filename.c_str(), &file_status) != 0)
+		return 0;
+	else
+		return file_status.st_mtime;
+#else
+#error Port me!
+#endif
+}
+
 size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
 	std::fstream ifs(filename, std::fstream::in | std::fstream::binary);
 	if (!ifs.good()) {
@@ -3224,10 +3242,10 @@ void outOfMemory() {
 	    .detail("BackTraces", traceCounts.size());
 
 	for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
-		char buf[1024];
 		std::vector<void*>* frames = i->second.backTrace;
 		std::string backTraceStr;
 #if defined(_WIN32)
+		char buf[1024];
 		for (int j = 1; j < frames->size(); j++) {
 			_snprintf(buf, 1024, "%p ", frames->at(j));
 			backTraceStr += buf;
@@ -3354,9 +3372,9 @@ void TmpFile::write(const uint8_t* buff, size_t len) {
 bool TmpFile::destroyFile() {
 	bool deleted = deleteFile(filename);
 	if (deleted) {
-		TraceEvent("TmpFileDestory_Success").detail("Filename", filename);
+		TraceEvent("TmpFileDestroy_Success").detail("Filename", filename);
 	} else {
-		TraceEvent("TmpFileDestory_Failed").detail("Filename", filename);
+		TraceEvent("TmpFileDestroy_Failed").detail("Filename", filename);
 	}
 	return deleted;
 }
@@ -3399,6 +3417,13 @@ extern "C" void flushAndExit(int exitCode) {
 	// to the crashAndDie call below.
 	TerminateProcess(GetCurrentProcess(), exitCode);
 #else
+	// Send a signal to allow the Kernel to generate a coredump for this process.
+	// See: https://man7.org/linux/man-pages/man5/core.5.html
+	// The abort method will send a SIGABRT, which causes the kernel to collect a coredump.
+	// See: https://man7.org/linux/man-pages/man3/abort.3.html.
+	if (exitCode != FDB_EXIT_SUCCESS && FLOW_KNOBS->ABORT_ON_FAILURE)
+		abort();
+	// In the success case exit the process gracefully.
 	_exit(exitCode);
 #endif
 	// should never reach here, but you never know
@@ -3728,7 +3753,14 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
+#ifdef USE_GCOV
+	// SIGTERM is the "graceful" way to end an fdbserver process, so we actually
+	// don't want to invoke crashHandler. crashHandler is not actually
+	// async-signal-safe, so we can only justify calling it if we were going to
+	// crash anyway. For USE_GCOV though we need to flush coverage info, which
+	// we do through crashHandler.
 	sigaction(SIGTERM, &action, nullptr);
+#endif
 	sigaction(SIGABRT, &action, nullptr);
 #else
 	// No crash handler for other platforms!
@@ -3745,38 +3777,71 @@ extern std::atomic<int64_t> net2RunLoopIterations;
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
 
+namespace {
+
 std::atomic<double> checkThreadTime;
+std::mutex loopProfilerThreadMutex;
+std::optional<pthread_t> loopProfilerThread;
+std::atomic<bool> loopProfilerStopRequested = false;
+
+} // namespace
 #endif
 
-volatile thread_local bool profileThread = false;
-volatile thread_local int profilingEnabled = 1;
+// True if this thread is the thread being profiled. Not to be used from the signal handler.
+thread_local bool profileThread = false;
 
-volatile thread_local int64_t numProfilesDeferred = 0;
-volatile thread_local int64_t numProfilesOverflowed = 0;
-volatile thread_local int64_t numProfilesCaptured = 0;
-volatile thread_local bool profileRequested = false;
+// The thread ID of the profiled thread. This can be compared against the current thread ID
+// to see if we are on the profiled thread. Can be used in the signal handler.
+volatile int64_t profileThreadId = -1;
 
-int64_t getNumProfilesDeferred() {
-	return numProfilesDeferred;
+#ifdef __linux__
+struct sigaction chainedAction;
+#endif
+
+volatile bool profilingEnabled = 1;
+volatile thread_local bool flowProfilingEnabled = 1;
+
+volatile int64_t numProfilesDisabled = 0;
+volatile int64_t numProfilesOverflowed = 0;
+volatile int64_t numProfilesCaptured = 0;
+
+int64_t getNumProfilesDisabled() {
+	if (profileThread) {
+		return numProfilesDisabled;
+	} else {
+		return 0;
+	}
 }
 
 int64_t getNumProfilesOverflowed() {
-	return numProfilesOverflowed;
+	if (profileThread) {
+		return numProfilesOverflowed;
+	} else {
+		return 0;
+	}
 }
 
 int64_t getNumProfilesCaptured() {
-	return numProfilesCaptured;
+	if (profileThread) {
+		return numProfilesCaptured;
+	} else {
+		return 0;
+	}
 }
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread) {
-		return;
+	if (chainedAction.sa_handler != SIG_DFL && chainedAction.sa_handler != SIG_IGN &&
+	    chainedAction.sa_handler != nullptr) {
+		chainedAction.sa_handler(sig);
 	}
 
-	if (!profilingEnabled) {
-		profileRequested = true;
-		++numProfilesDeferred;
+	// This is not documented in the POSIX list of signal-safe functions, but numbered syscalls are reported to be
+	// async safe in Linux.
+	if (profileThreadId != syscall(__NR_gettid)) {
+		return;
+	} else if (!profilingEnabled) {
+		++numProfilesDisabled;
 		return;
 	}
 
@@ -3797,28 +3862,37 @@ void profileHandler(int sig) {
 
 	// We can only read the check thread time in a signal handler if the atomic is lock free.
 	// We can't get the time from a timer() call because it's not signal safe.
+#ifndef WITH_SWIFT
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
+#else
+	// FIXME: problem with Swift build: lib/libflow.a(Platform.actor.g.cpp.o):Platform.actor.g.cpp:function
+	// profileHandler(int): error: undefined reference to '__atomic_is_lock_free'
+	ps->timestamp = 0;
+#endif /* WITH_SWIFT */
 
+#if defined(USE_SANITIZER)
+	// In sanitizer builds the workaround implemented in SignalSafeUnwind.cpp is disabled
+	// so calling backtrace may cause a deadlock
+	size_t size = 0;
+#else
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+#endif
 
 	ps->length = size;
 
 	net2backtraces_offset += size + 2;
 #else
-	// No slow task profiling for other platforms!
+// No slow task profiling for other platforms!
 #endif
 }
 
 void setProfilingEnabled(int enabled) {
 #ifdef __linux__
-	if (profileThread && enabled && !profilingEnabled && profileRequested) {
-		profilingEnabled = true;
-		profileRequested = false;
-		pthread_kill(pthread_self(), SIGPROF);
-	} else {
+	if (profileThread) {
 		profilingEnabled = enabled;
 	}
+	flowProfilingEnabled = enabled;
 #else
 	// No profiling for other platforms!
 #endif
@@ -3845,7 +3919,7 @@ void* checkThread(void* arg) {
 	double slowTaskLogInterval = minSlowTaskLogInterval;
 	double saturatedLogInterval = minSaturationLogInterval;
 
-	while (true) {
+	while (!loopProfilerStopRequested) {
 		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
@@ -3965,24 +4039,56 @@ std::string getExecPath() {
 
 void setupRunLoopProfiler() {
 #ifdef __linux__
-	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		chainedAction.sa_handler = SIG_DFL;
+
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
-		initProfiling();
+
 		profileThread = true;
+		profileThreadId = syscall(__NR_gettid);
+		if (profileThreadId < 0) {
+			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
+			    .detail("Reason", "Error getting thread ID")
+			    .GetLastError();
+			return;
+		}
+
+		initProfiling();
 
 		struct sigaction action;
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		sigaction(SIGPROF, &action, nullptr);
+		if (sigaction(SIGPROF, &action, &chainedAction)) {
+			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
+			    .detail("Reason", "Error configuring signal handler")
+			    .GetLastError();
+			return;
+		}
 
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+		{
+			std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+			if (!loopProfilerStopRequested) {
+				loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+			}
+		}
 	}
 #else
 	// No slow task profiling for other platforms!
+#endif
+}
+
+void stopRunLoopProfiler() {
+#ifdef __linux__
+	std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+	loopProfilerStopRequested.store(true);
+	if (loopProfilerThread) {
+		pthread_join(loopProfilerThread.value(), NULL);
+		loopProfilerThread = {};
+	}
 #endif
 }
 
@@ -4031,13 +4137,13 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	std::stringstream memInfoStream(memString);
 	linux_os::getMemoryInfo(request, memInfoStream);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 24733228);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 2077580);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 0);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 266940);
-	ASSERT(request[LiteralStringRef("Cached:")] == 16798292);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
+	ASSERT(request["MemTotal:"_sr] == 24733228);
+	ASSERT(request["MemFree:"_sr] == 2077580);
+	ASSERT(request["MemAvailable:"_sr] == 0);
+	ASSERT(request["Buffers:"_sr] == 266940);
+	ASSERT(request["Cached:"_sr] == 16798292);
+	ASSERT(request["SwapTotal:"_sr] == 25165820);
+	ASSERT(request["SwapFree:"_sr] == 23680228);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
@@ -4082,13 +4188,13 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	std::stringstream memInfoStream1(memString1);
 	linux_os::getMemoryInfo(request, memInfoStream1);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 31856496);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 25492716);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 28470756);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 313644);
-	ASSERT(request[LiteralStringRef("Cached:")] == 2956444);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
+	ASSERT(request["MemTotal:"_sr] == 31856496);
+	ASSERT(request["MemFree:"_sr] == 25492716);
+	ASSERT(request["MemAvailable:"_sr] == 28470756);
+	ASSERT(request["Buffers:"_sr] == 313644);
+	ASSERT(request["Cached:"_sr] == 2956444);
+	ASSERT(request["SwapTotal:"_sr] == 0);
+	ASSERT(request["SwapFree:"_sr] == 0);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}

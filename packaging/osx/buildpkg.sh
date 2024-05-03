@@ -38,7 +38,7 @@ mkdir -p -m 0775 $CLIENTSDIR/usr/local/etc/foundationdb
 mkdir -p -m 0755 $CLIENTSDIR/usr/local/foundationdb/backup_agent
 
 install -m 0755 "$BUILDDIR"/bin/fdbcli $CLIENTSDIR/usr/local/bin
-install -m 0644 "$SRCDIR"/bindings/c/foundationdb/fdb_c.h "$BUILDDIR"/bindings/c/foundationdb/fdb_c_options.g.h "$SRCDIR"/bindings/c/foundationdb/fdb_c_types.h "$SRCDIR"/bindings/c/foundationdb/fdb_c_internal.h "$SRCDIR"/fdbclient/vexillographer/fdb.options $CLIENTSDIR/usr/local/include/foundationdb
+install -m 0644 "$SRCDIR"/bindings/c/foundationdb/fdb_c.h "$BUILDDIR"/bindings/c/foundationdb/fdb_c_options.g.h "$BUILDDIR"/bindings/c/foundationdb/fdb_c_apiversion.g.h "$SRCDIR"/bindings/c/foundationdb/fdb_c_types.h "$SRCDIR"/bindings/c/foundationdb/fdb_c_internal.h "$SRCDIR"/fdbclient/vexillographer/fdb.options $CLIENTSDIR/usr/local/include/foundationdb
 install -m 0755 "$BUILDDIR"/lib/libfdb_c.dylib $CLIENTSDIR/usr/local/lib
 install -m 0644 "$BUILDDIR"/bindings/python/fdb/*.py $CLIENTSDIR/Library/Python/2.7/site-packages/fdb
 install -m 0755 "$BUILDDIR"/bin/fdbbackup $CLIENTSDIR/usr/local/foundationdb/backup_agent/backup_agent

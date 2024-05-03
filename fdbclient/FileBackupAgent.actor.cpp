@@ -18,29 +18,36 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/TenantEntryCache.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
+#include "fdbrpc/TenantInfo.h"
+#include "fdbrpc/simulator.h"
+#include "flow/EncryptUtils.h"
+#include "flow/FastRef.h"
+#include "flow/flow.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/JsonBuilder.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TaskBucket.h"
 #include "fdbclient/Tenant.h"
-#include "fdbclient/TenantEntryCache.actor.h"
-
-#include "flow/Arena.h"
-#include "flow/CodeProbe.h"
-#include "flow/EncryptUtils.h"
 #include "flow/network.h"
-#include "flow/ObjectSerializer.h"
-#include "flow/ProtocolVersion.h"
-#include "flow/serialize.h"
 #include "flow/Trace.h"
 
 #include <cinttypes>
@@ -61,11 +68,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_DEFINE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
+Optional<std::string> fileBackupAgentProxy = Optional<std::string>();
 
 #define SevFRTestInfo SevVerbose
-//#define SevFRTestInfo SevInfo
+// #define SevFRTestInfo SevInfo
 
 static std::string boolToYesOrNo(bool val) {
 	return val ? std::string("Yes") : std::string("No");
@@ -115,8 +121,8 @@ typedef FileBackupAgent::ERestoreState ERestoreState;
 
 StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	switch (id) {
-	case ERestoreState::UNITIALIZED:
-		return "unitialized"_sr;
+	case ERestoreState::UNINITIALIZED:
+		return "uninitialized"_sr;
 	case ERestoreState::QUEUED:
 		return "queued"_sr;
 	case ERestoreState::STARTING:
@@ -152,46 +158,48 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
-class RestoreConfig : public KeyBackedConfig {
+class RestoreConfig : public KeyBackedTaskConfig {
 public:
-	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
+	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
-	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr),
 		           [](ERestoreState s) -> StringRef { return FileBackupAgent::restoreStateText(s); });
 	}
-	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
-	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Version> firstConsistentVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
+	// XXX: Changed to restoreRangeSet. It can be removed.
+	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedSet<KeyRange> restoreRangeSet() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> firstConsistentVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Reference<IBackupContainer>> sourceContainer() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Reference<IBackupContainer>> sourceContainer() { return configSpace.pack(__FUNCTION__sr); }
 	// Get the source container as a bare URL, without creating a container instance
 	KeyBackedProperty<Value> sourceContainerURL() { return configSpace.pack("sourceContainer"_sr); }
 
 	// Total bytes written by all log and range restore tasks.
-	KeyBackedBinaryValue<int64_t> bytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> bytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 	// File blocks that have had tasks created for them by the Dispatch task
-	KeyBackedBinaryValue<int64_t> filesBlocksDispatched() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> filesBlocksDispatched() { return configSpace.pack(__FUNCTION__sr); }
 	// File blocks whose tasks have finished
-	KeyBackedBinaryValue<int64_t> fileBlocksFinished() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> fileBlocksFinished() { return configSpace.pack(__FUNCTION__sr); }
 	// Total number of files in the fileMap
-	KeyBackedBinaryValue<int64_t> fileCount() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> fileCount() { return configSpace.pack(__FUNCTION__sr); }
 	// Total number of file blocks in the fileMap
-	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(__FUNCTION__sr); }
+
+	// True for blob granule restore
+	KeyBackedBinaryValue<bool> isBlobGranuleRestore() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
 		return getRestoreRangesOrDefault_impl(this, tr);
@@ -199,10 +207,29 @@ public:
 
 	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
 	                                                                          Reference<ReadYourWritesTransaction> tr) {
-		state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
+		state std::vector<KeyRange> ranges;
+		state int batchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
+		state Optional<KeyRange> begin;
+		state Arena arena;
+		loop {
+			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
+			    wait(self->restoreRangeSet().getRange(tr, begin, {}, batchSize));
+			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
+			if (!rangeResult.more) {
+				break;
+			}
+			ASSERT(!rangeResult.results.empty());
+			begin = KeyRangeRef(KeyRef(arena, ranges.back().begin), keyAfter(ranges.back().end, arena));
+		}
+
+		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			state KeyRange range = wait(self->restoreRange().getD(tr));
-			ranges.push_back(range);
+			std::vector<KeyRange> _ranges = wait(self->restoreRanges().getD(tr));
+			ranges = _ranges;
+			if (ranges.empty()) {
+				KeyRange range = wait(self->restoreRange().getD(tr));
+				ranges.push_back(range);
+			}
 		}
 		return ranges;
 	}
@@ -234,11 +261,11 @@ public:
 	};
 
 	typedef KeyBackedSet<RestoreFile> FileSetT;
-	FileSetT fileSet() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	FileSetT fileSet() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
-			return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNITIALIZED;
+			return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNINITIALIZED;
 		});
 	}
 
@@ -281,7 +308,10 @@ public:
 		return getApplyVersionLag_impl(tr, uid);
 	}
 
-	void initApplyMutations(Reference<ReadYourWritesTransaction> tr, Key addPrefix, Key removePrefix) {
+	void initApplyMutations(Reference<ReadYourWritesTransaction> tr,
+	                        Key addPrefix,
+	                        Key removePrefix,
+	                        OnlyApplyMutationLogs onlyApplyMutationLogs) {
 		// Set these because they have to match the applyMutations values.
 		this->addPrefix().set(tr, addPrefix);
 		this->removePrefix().set(tr, removePrefix);
@@ -291,6 +321,7 @@ public:
 		// Initialize add/remove prefix, range version map count and set the map's start key to InvalidVersion
 		tr->set(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid), addPrefix);
 		tr->set(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid), removePrefix);
+
 		int64_t startCount = 0;
 		tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid), StringRef((uint8_t*)&startCount, 8));
 		Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
@@ -491,8 +522,7 @@ public:
 
 struct SnapshotFileBackupEncryptionKeys {
 	Reference<BlobCipherKey> textCipherKey;
-	EncryptCipherDomainName textDomain;
-	Reference<BlobCipherKey> headerCipherKey;
+	Optional<Reference<BlobCipherKey>> headerCipherKey;
 	StringRef ivRef;
 };
 
@@ -535,135 +565,102 @@ struct SnapshotFileBackupEncryptionKeys {
 //   truncated to just the tenant prefix and the value will be empty (to avoid having sensitive data of one tenant be
 //   encrypted with a key for a different tenant)
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
-	struct Options {
-		constexpr static FileIdentifier file_identifier = 3152016;
-
-		// TODO: Compression is not currently supported so this should always be false
-		bool compressionEnabled = false;
-
-		Options() {}
-
-		template <class Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, compressionEnabled);
-		}
-	};
-
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
-	                         Reference<TenantEntryCache<Void>> tenantCache,
+	                         EncryptionAtRestMode encryptMode,
+	                         Optional<Reference<TenantEntryCache<Void>>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
-	                         int blockSize = 0,
-	                         Options options = Options())
-	  : cx(cx), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
-	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
+	                         int blockSize = 0)
+	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), tenantCache(tenantCache), blockSize(blockSize),
+	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(Reference<BlobCipherKey> headerCipherKey,
-	                                     Reference<BlobCipherKey> textCipherKey,
-	                                     BlobCipherEncryptHeader& header) {
-		// Validate encryption header 'cipherHeader' details
-		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
-		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
-		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
-			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
-			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
-			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
-			    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
-			    .detail("HeaderSalt", headerCipherKey->getSalt())
-			    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
-			throw encrypt_header_metadata_mismatch();
-		}
-
-		// Validate encryption text 'cipherText' details sanity
-		if (!(header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
-		      header.cipherTextDetails.encryptDomainId == textCipherKey->getDomainId() &&
-		      header.cipherTextDetails.salt == textCipherKey->getSalt())) {
-			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
-			    .detail("TextDomainId", textCipherKey->getDomainId())
-			    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
-			    .detail("TextBaseCipherId", textCipherKey->getBaseCipherId())
-			    .detail("ExpectedTextBaseCipherId", header.cipherTextDetails.baseCipherId)
-			    .detail("TextSalt", textCipherKey->getSalt())
-			    .detail("ExpectedTextSalt", header.cipherTextDetails.salt);
-			throw encrypt_header_metadata_mismatch();
-		}
-	}
-
 	ACTOR static Future<StringRef> decryptImpl(Database cx,
-	                                           StringRef headerS,
+	                                           BlobCipherEncryptHeaderRef header,
 	                                           const uint8_t* dataP,
 	                                           int64_t dataLen,
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-		state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::BACKUP));
-		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
-		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
+		state BlobCipherEncryptHeaderRef headerRef = header;
+		TextAndHeaderCipherKeys cipherKeys = wait(
+		    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
+		EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
+		cipherDetails.textCipherDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
+		if (cipherDetails.headerCipherDetails.present()) {
+			cipherDetails.headerCipherDetails.get().validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
+		}
 		DecryptBlobCipherAes256Ctr decryptor(
-		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
-		return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
+		return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 	}
 
 	static Future<StringRef> decrypt(Database cx,
-	                                 StringRef headerS,
+	                                 BlobCipherEncryptHeaderRef header,
 	                                 const uint8_t* dataP,
 	                                 int64_t dataLen,
 	                                 Arena* arena) {
-		return decryptImpl(cx, headerS, dataP, dataLen, arena);
+		return decryptImpl(cx, header, dataP, dataLen, arena);
 	}
 
 	ACTOR static Future<Reference<BlobCipherKey>> refreshKey(EncryptedRangeFileWriter* self,
-	                                                         EncryptCipherDomainId domainId,
-	                                                         EncryptCipherDomainName domainName) {
+	                                                         EncryptCipherDomainId domainId) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, domainName, BlobCipherMetrics::BACKUP));
+		    wait(GetEncryptCipherKeys<ClientDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        dbInfo, domainId, BlobCipherMetrics::BACKUP));
 		return cipherKeys.cipherTextKey;
 	}
 
 	ACTOR static Future<Void> encrypt(EncryptedRangeFileWriter* self) {
-		ASSERT(self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid());
+		// TODO: HeaderCipher key not needed for 'no authentication encryption'
+		ASSERT(self->cipherKeys.headerCipherKey.present() && self->cipherKeys.headerCipherKey.get().isValid() &&
+		       self->cipherKeys.textCipherKey.isValid());
 		// Ensure that the keys we got are still valid before flushing the block
-		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
+		if (self->cipherKeys.headerCipherKey.get()->isExpired() ||
+		    self->cipherKeys.headerCipherKey.get()->needsRefresh()) {
 			Reference<BlobCipherKey> cipherKey =
-			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId(), FDB_ENCRYPT_HEADER_DOMAIN_NAME));
+			    wait(refreshKey(self, self->cipherKeys.headerCipherKey.get()->getDomainId()));
 			self->cipherKeys.headerCipherKey = cipherKey;
 		}
 		if (self->cipherKeys.textCipherKey->isExpired() || self->cipherKeys.textCipherKey->needsRefresh()) {
-			Reference<BlobCipherKey> cipherKey =
-			    wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId(), self->cipherKeys.textDomain));
+			Reference<BlobCipherKey> cipherKey = wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId()));
 			self->cipherKeys.textCipherKey = cipherKey;
 		}
-		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
-		                                     self->cipherKeys.headerCipherKey,
-		                                     self->cipherKeys.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BACKUP);
-		Arena arena;
+		EncryptBlobCipherAes265Ctr encryptor(
+		    self->cipherKeys.textCipherKey,
+		    self->cipherKeys.headerCipherKey,
+		    self->cipherKeys.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BACKUP);
 		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
-		auto encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, self->encryptHeader, arena);
+		StringRef encryptedData;
+		BlobCipherEncryptHeaderRef headerRef;
+		encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena);
+		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+		self->arena->dependsOn(serialized.arena());
+		ASSERT(serialized.size() == self->encryptHeader.size());
+		std::memcpy(mutateString(self->encryptHeader), serialized.begin(), self->encryptHeader.size());
 
 		// re-write encrypted data to buffer
-		std::memcpy(self->dataPayloadStart, encryptedData->begin(), payloadSize);
+		std::memcpy(self->dataPayloadStart, encryptedData.begin(), payloadSize);
 		return Void();
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
 	                                                  KeyRef key,
-	                                                  Reference<TenantEntryCache<Void>> cache) {
-		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, cache));
+	                                                  SnapshotBackupUseTenantCache checkTenantCache) {
+		state EncryptCipherDomainId curDomainId =
+		    wait(getEncryptionDomainDetails(key, self->encryptMode, self->tenantCache, checkTenantCache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
-		TextAndHeaderCipherKeys textAndHeaderCipherKeys = wait(getLatestEncryptCipherKeysForDomain(
-		    dbInfo, curTenantInfo.first, curTenantInfo.second, BlobCipherMetrics::BACKUP));
+		TextAndHeaderCipherKeys textAndHeaderCipherKeys =
+		    wait(GetEncryptCipherKeys<ClientDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
 		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
-		self->cipherKeys.textDomain = curTenantInfo.second;
 		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;
 
 		// Set ivRef
@@ -696,30 +693,30 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
-	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
-
-	ACTOR static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetailsImpl(
+	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
 	    KeyRef key,
-	    Reference<TenantEntryCache<Void>> tenantCache) {
+	    EncryptionAtRestMode encryptMode,
+	    Optional<Reference<TenantEntryCache<Void>>> tenantCache,
+	    SnapshotBackupUseTenantCache checkTenantCache) {
 		if (isSystemKey(key)) {
-			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
-		if (key.size() < TENANT_PREFIX_SIZE) {
-			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		if (key.size() < TenantAPI::PREFIX_SIZE || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
+			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 		}
-		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
-		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
-		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
-		if (payload.present()) {
-			return std::make_pair(tenantId, payload.get().name);
+		// dealing with domain aware encryption so all keys should belong to a tenant
+		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
+		state int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
+		// It's possible for the first and last key in a block (when writeKey is called) to not have a valid tenant
+		// prefix, since they mark the start and end of a range, in that case we denote them as having a default encrypt
+		// domain for the purpose of encrypting the block
+		if (checkTenantCache && tenantCache.present()) {
+			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
+			if (!payload.present()) {
+				return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+			}
 		}
-		return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
-	}
-
-	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(
-	    KeyRef key,
-	    Reference<TenantEntryCache<Void>> tenantCache) {
-		return getEncryptionDomainDetailsImpl(key, tenantCache);
+		return tenantId;
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -758,14 +755,23 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// write Header
 		copyToBuffer(self, (uint8_t*)&self->fileVersion, sizeof(self->fileVersion));
 
-		// write options struct
-		Value serialized =
-		    ObjectWriter::toValue(self->options, IncludeVersion(ProtocolVersion::withEncryptedSnapshotBackupFile()));
-		appendStringRefWithLenToBuffer(self, &serialized);
-
+		// calculate encryption header size
+		uint32_t headerSize = 0;
+		EncryptAuthTokenMode authTokenMode =
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		EncryptAuthTokenAlgo authTokenAlgo = getAuthTokenAlgoFromMode(authTokenMode);
+		headerSize =
+		    BlobCipherEncryptHeaderRef::getHeaderSize(CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION,
+		                                              getEncryptCurrentAlgoHeaderVersion(authTokenMode, authTokenAlgo),
+		                                              ENCRYPT_CIPHER_MODE_AES_256_CTR,
+		                                              authTokenMode,
+		                                              authTokenAlgo);
+		ASSERT(headerSize > 0);
+		// write header size to buffer
+		copyToBuffer(self, (uint8_t*)&headerSize, sizeof(headerSize));
 		// leave space for encryption header
-		self->encryptHeader = (BlobCipherEncryptHeader*)self->wPtr;
-		self->wPtr += BlobCipherEncryptHeader::headerSize;
+		self->encryptHeader = StringRef(self->wPtr, headerSize);
+		self->wPtr += headerSize;
 		self->dataPayloadStart = self->wPtr;
 
 		// If this is NOT the first block then write duplicate stuff needed from last block
@@ -804,38 +810,40 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                              Key k,
 	                                              Value v,
 	                                              bool writeValue,
-	                                              std::pair<int64_t, TenantName> curKeyTenantInfo) {
+	                                              EncryptCipherDomainId curKeyDomainId,
+	                                              SnapshotBackupUseTenantCache checkTenantCache) {
 		state KeyRef endKey = k;
 		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
-		if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
-		    curKeyTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-			endKey = StringRef(k.begin(), TENANT_PREFIX_SIZE);
+		if (curKeyDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curKeyDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+			endKey = StringRef(k.begin(), TenantAPI::PREFIX_SIZE);
 		}
+
 		state ValueRef newValue = StringRef();
 		self->lastKey = k;
 		self->lastValue = v;
 		appendStringRefWithLenToBuffer(self, &endKey);
 		appendStringRefWithLenToBuffer(self, &newValue);
 		wait(newBlock(self, 0, endKey, writeValue));
-		wait(updateEncryptionKeysCtx(self, self->lastKey, self->tenantCache));
+		wait(updateEncryptionKeysCtx(self, self->lastKey, checkTenantCache));
 		return Void();
 	}
 
 	ACTOR static Future<bool> finishCurTenantBlockStartNewIfNeeded(EncryptedRangeFileWriter* self,
 	                                                               Key k,
 	                                                               Value v,
-	                                                               bool writeValue) {
+	                                                               bool writeValue,
+	                                                               SnapshotBackupUseTenantCache checkTenantCache) {
 		// Don't want to start a new block if the current key or previous key is empty
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self->tenantCache));
-		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
-		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
-		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
+		state EncryptCipherDomainId curKeyDomainId =
+		    wait(getEncryptionDomainDetails(k, self->encryptMode, self->tenantCache, checkTenantCache));
+		state EncryptCipherDomainId prevKeyDomainId =
+		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache, checkTenantCache));
+		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
-			wait(handleTenantBondary(self, k, v, writeValue, curKeyTenantInfo));
+			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
 			return true;
 		}
 		return false;
@@ -843,12 +851,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
-		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
+		if (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
+		    !self->cipherKeys.textCipherKey.isValid()) {
+			wait(updateEncryptionKeysCtx(self, k, SnapshotBackupUseTenantCache::False));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(newBlockIfNeeded(self, toWrite));
-		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true));
+		bool createdNewBlock =
+		    wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true, SnapshotBackupUseTenantCache::False));
 		if (createdNewBlock) {
 			return Void();
 		}
@@ -865,14 +875,17 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		// TODO (Nim): Is it possible to write empty begin and end keys?
 		if (k.size() > 0 &&
-		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
-			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
+		    (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
+		     !self->cipherKeys.textCipherKey.isValid())) {
+			wait(updateEncryptionKeysCtx(self, k, SnapshotBackupUseTenantCache::True));
 		}
-
 		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
 		int toWrite = sizeof(uint32_t) + k.size() + sizeof(uint32_t);
 		wait(newBlockIfNeeded(self, toWrite));
-		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false));
+		// We want to check the tenant cache here since the first/last key for a block may not be a valid KV pair (in
+		// which case we use the default domain)
+		bool createdNewBlock =
+		    wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false, SnapshotBackupUseTenantCache::True));
 		if (createdNewBlock) {
 			return Void();
 		}
@@ -896,18 +909,18 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	Database cx;
 	Arena* arena;
-	Reference<TenantEntryCache<Void>> tenantCache;
+	EncryptionAtRestMode encryptMode;
 	Reference<IBackupFile> file;
+	Optional<Reference<TenantEntryCache<Void>>> tenantCache;
 	int blockSize;
 
 private:
 	Standalone<StringRef> buffer;
 	uint8_t* wPtr;
-	BlobCipherEncryptHeader* encryptHeader;
+	StringRef encryptHeader;
 	uint8_t* dataPayloadStart;
 	int64_t blockEnd;
 	uint32_t fileVersion;
-	Options options;
 	Key lastKey;
 	Key lastValue;
 	SnapshotFileBackupEncryptionKeys cipherKeys;
@@ -1039,18 +1052,52 @@ private:
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
-                                        Optional<Database> cx,
-                                        Reference<TenantEntryCache<Void>> tenantCache) {
+                                        EncryptionAtRestMode encryptMode,
+                                        Optional<int64_t> blockDomainId,
+                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
+	state KeyRef prevKey = KeyRef(k, kLen);
+	state bool done = false;
+	state Optional<EncryptCipherDomainId> prevDomainId;
 	// Read kv pairs and end key
 	while (1) {
 		// Read a key.
 		kLen = reader->consumeNetworkUInt32();
 		k = reader->consume(kLen);
+
+		// make sure that all keys in a block belong to exactly one tenant,
+		// unless its the last key in which case it can be a truncated (different) tenant prefix
+		if (encryptedBlock && g_network && g_network->isSimulated()) {
+			ASSERT(blockDomainId.present());
+			state KeyRef curKey = KeyRef(k, kLen);
+			if (!prevDomainId.present()) {
+				EncryptCipherDomainId domainId = wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(
+				    prevKey, encryptMode, tenantCache, SnapshotBackupUseTenantCache::False));
+				prevDomainId = domainId;
+			}
+			state EncryptCipherDomainId curDomainId = wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(
+			    curKey, encryptMode, tenantCache, SnapshotBackupUseTenantCache::False));
+			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
+				ASSERT(!done);
+				// Make sure that all tenant specific keys in a block have the correct prefix size
+				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID &&
+				    curKey.size() != TenantAPI::PREFIX_SIZE) {
+					ASSERT(tenantCache.present());
+					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(curDomainId));
+					ASSERT(!payload.present());
+				}
+				done = true;
+			}
+			// make sure that all keys (except the last key) in a block are encrypted using the correct key.;
+			if (blockDomainId.get() != FDB_DEFAULT_ENCRYPT_DOMAIN_ID && !prevKey.empty()) {
+				ASSERT_EQ(prevDomainId.get(), blockDomainId.get());
+			}
+			prevKey = curKey;
+			prevDomainId = curDomainId;
+		}
 
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF) {
@@ -1059,9 +1106,22 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		}
 
 		// Read a value, which must exist or the block is invalid
-		uint32_t vLen = reader->consumeNetworkUInt32();
-		const uint8_t* v = reader->consume(vLen);
-		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		state uint32_t vLen = reader->consumeNetworkUInt32();
+		state const uint8_t* v = reader->consume(vLen);
+		if (tenantCache.present() && !isSystemKey(KeyRef(k, kLen))) {
+			state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(StringRef(k, kLen));
+			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
+			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
+			// to include it in the restore set
+			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {
+				TraceEvent(SevWarnAlways, "SnapshotRestoreTenantNotFound").detail("TenantId", tenantId);
+				CODE_PROBE(true, "Snapshot restore tenant not found");
+			} else {
+				results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+			}
+		} else {
+			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		}
 
 		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF)
@@ -1072,15 +1132,55 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 	for (auto b : reader->remainder())
 		if (b != 0xFF)
 			throw restore_corrupted_data_padding();
+
 	return Void();
+}
+
+static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackupContainer> _bc) {
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(_bc->getURL(), fileBackupAgentProxy, {});
+	return bc;
+}
+
+Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf) {
+	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	StringRefReader reader(buf, restore_corrupted_data());
+
+	// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
+	if (reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
+		throw restore_unsupported_file_version();
+
+	// Read begin key, if this fails then block was invalid.
+	uint32_t kLen = reader.consumeNetworkUInt32();
+	const uint8_t* k = reader.consume(kLen);
+	results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+
+	// Read kv pairs and end key
+	while (1) {
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader.eof() || *reader.rptr == 0xFF) {
+			break;
+		}
+
+		// Read a value, which must exist or the block is invalid
+		uint32_t vLen = reader.consumeNetworkUInt32();
+		const uint8_t* v = reader.consume(vLen);
+		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+	}
+
+	// Make sure any remaining bytes in the block are 0xFF
+	for (auto b : reader.remainder())
+		if (b != 0xFF)
+			throw restore_corrupted_data_padding();
+
+	return results;
 }
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
-                                                                      Optional<Database> cx) {
+                                                                      Database cx) {
 	state Standalone<StringRef> buf = makeString(len);
-	int rLen = wait(file->read(mutateString(buf), len, offset));
+	int rLen = wait(uncancellable(holdWhile(buf, file->read(mutateString(buf), len, offset))));
 	if (rLen != len)
 		throw restore_bad_read();
 
@@ -1089,42 +1189,64 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
 	state Arena arena;
+	state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+	if (config.tenantMode == TenantMode::REQUIRED) {
+		tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+		wait(tenantCache.get()->init());
+	}
+	state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
+	state int64_t blockDomainId = TenantInfo::INVALID_TENANT;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
+		ASSERT(!encryptMode.isEncryptionEnabled() || file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION);
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader, &results, false, cx, Reference<TenantEntryCache<Void>>()));
+			wait(decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>(), tenantCache));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
-			ASSERT(cx.present());
-			// decode options struct
-			uint32_t optionsLen = reader.consumeNetworkUInt32();
-			const uint8_t* o = reader.consume(optionsLen);
-			StringRef optionsStringRef = StringRef(o, optionsLen);
-			EncryptedRangeFileWriter::Options options =
-			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
-			ASSERT(!options.compressionEnabled);
+			// read header size
+			state uint32_t headerLen = reader.consume<uint32_t>();
+			// read the encryption header
+			state const uint8_t* headerStart = reader.consume(headerLen);
+			StringRef headerS = StringRef(headerStart, headerLen);
+			state BlobCipherEncryptHeaderRef encryptHeader;
 
-			// read encryption header
-			const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);
-			StringRef header = StringRef(headerStart, BlobCipherEncryptHeader::headerSize);
-			const uint8_t* dataPayloadStart = headerStart + BlobCipherEncryptHeader::headerSize;
+			encryptHeader = BlobCipherEncryptHeaderRef::fromStringRef(headerS);
+			blockDomainId = encryptHeader.getCipherDetails().textCipherDetails.encryptDomainId;
+
+			if (config.tenantMode == TenantMode::REQUIRED && !isReservedEncryptDomain(blockDomainId)) {
+				ASSERT(tenantCache.present());
+				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(blockDomainId));
+				if (!payload.present()) {
+					throw tenant_not_found();
+				}
+			}
+			const uint8_t* dataPayloadStart = headerStart + headerLen;
 			// calculate the total bytes read up to (and including) the header
-			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
+			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + headerLen;
 			// get the size of the encrypted payload and decrypt it
 			int64_t dataLen = len - bytesRead;
 			StringRef decryptedData =
-			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
+			    wait(EncryptedRangeFileWriter::decrypt(cx, encryptHeader, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx.get());
-			wait(decodeKVPairs(&reader, &results, true, cx, tenantCache));
+			wait(decodeKVPairs(&reader, &results, true, encryptMode, blockDomainId, tenantCache));
 		} else {
 			throw restore_unsupported_file_version();
 		}
 		return results;
 	} catch (Error& e) {
+		if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_encrypt_key_not_found) {
+			ASSERT(!isReservedEncryptDomain(blockDomainId));
+			TraceEvent(SevWarnAlways, "SnapshotRestoreEncryptKeyFetchFailed").detail("TenantId", blockDomainId);
+			CODE_PROBE(true, "Snapshot restore encrypt keys not found");
+		} else if (e.code() == error_code_tenant_not_found) {
+			ASSERT(!isReservedEncryptDomain(blockDomainId));
+			TraceEvent(SevWarnAlways, "EncryptedSnapshotRestoreTenantNotFound").detail("TenantId", blockDomainId);
+			CODE_PROBE(true, "Encrypted Snapshot restore tenant not found");
+		}
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
@@ -1180,6 +1302,37 @@ private:
 	int64_t blockEnd;
 };
 
+Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf) {
+	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	StringRefReader reader(buf, restore_corrupted_data());
+
+	// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
+	if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
+		throw restore_unsupported_file_version();
+
+	// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
+	while (1) {
+		// If eof reached or first key len bytes is 0xFF then end of block was reached.
+		if (reader.eof() || *reader.rptr == 0xFF)
+			break;
+
+		// Read key and value.  If anything throws then there is a problem.
+		uint32_t kLen = reader.consumeNetworkUInt32();
+		const uint8_t* k = reader.consume(kLen);
+		uint32_t vLen = reader.consumeNetworkUInt32();
+		const uint8_t* v = reader.consume(vLen);
+
+		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+	}
+
+	// Make sure any remaining bytes in the block are 0xFF
+	for (auto b : reader.remainder())
+		if (b != 0xFF)
+			throw restore_corrupted_data_padding();
+
+	return results;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
                                                                             int64_t offset,
                                                                             int len) {
@@ -1188,44 +1341,14 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Refe
 	if (rLen != len)
 		throw restore_bad_read();
 
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state StringRefReader reader(buf, restore_corrupted_data());
-
 	try {
-		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
-			throw restore_unsupported_file_version();
-
-		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
-		while (1) {
-			// If eof reached or first key len bytes is 0xFF then end of block was reached.
-			if (reader.eof() || *reader.rptr == 0xFF)
-				break;
-
-			// Read key and value.  If anything throws then there is a problem.
-			uint32_t kLen = reader.consumeNetworkUInt32();
-			const uint8_t* k = reader.consume(kLen);
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF)
-				throw restore_corrupted_data_padding();
-
-		return results;
-
+		return decodeMutationLogFileBlock(buf);
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", offset)
-		    .detail("BlockLen", len)
-		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		    .detail("BlockLen", len);
 		throw;
 	}
 }
@@ -1239,7 +1362,7 @@ ACTOR Future<Void> checkTaskVersion(Database cx, Reference<Task> task, StringRef
 		    .detail("TaskVersion", taskVersion)
 		    .detail("Name", name)
 		    .detail("Version", version);
-		if (KeyBackedConfig::TaskParams.uid().exists(task)) {
+		if (KeyBackedTaskConfig::TaskParams.uid().exists(task)) {
 			std::string msg = format("%s task version `%lu' is greater than supported version `%lu'",
 			                         task->params[Task::reservedTaskParamKeyType].toString().c_str(),
 			                         (unsigned long)taskVersion,
@@ -1533,9 +1656,9 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Key> beginKey() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Key> endKey() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<bool> addBackupRangeTasks() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Key> beginKey() { return __FUNCTION__sr; }
+		static TaskParam<Key> endKey() { return __FUNCTION__sr; }
+		static TaskParam<bool> addBackupRangeTasks() { return __FUNCTION__sr; }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -1702,18 +1825,25 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 		state Arena arena;
-		state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
+
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
+		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+		if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
+			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+			wait(tenantCache.get()->init());
+		}
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
-		if (!bc) {
+		Reference<IBackupContainer> _bc = wait(backup.backupContainer().getD(cx.getReference()));
+		if (!_bc) {
 			return Void();
 		}
-
+		state Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
 		state bool done = false;
 		state int64_t nrKeys = 0;
-		state bool encryptionEnabled = false;
+		state Optional<bool> encryptionEnabled;
 
 		loop {
 			state RangeResultWithVersion values;
@@ -1779,7 +1909,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 						wait(taskBucket->keepRunning(tr, task) &&
 						     storeOrThrow(snapshotBeginVersion, backup.snapshotBeginVersion().get(tr)) &&
-						     storeOrThrow(encryptionEnabled, backup.enableSnapshotBackupEncryption().get(tr)) &&
+						     store(encryptionEnabled, backup.enableSnapshotBackupEncryption().get(tr)) &&
 						     store(snapshotRangeFileCount, backup.snapshotRangeFileCount().getD(tr)));
 
 						break;
@@ -1792,11 +1922,15 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				    wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 				outFile = f;
 
-				encryptionEnabled = encryptionEnabled && cx->clientInfo->get().isEncryptionEnabled;
+				if (!encryptionEnabled.present() || !encryptionEnabled.get()) {
+					encryptMode = EncryptionAtRestMode::DISABLED;
+				}
+				TraceEvent(SevDebug, "EncryptionMode").detail("EncryptMode", encryptMode.toString());
 				// Initialize range file writer and write begin key
-				if (encryptionEnabled) {
+				if (encryptMode.mode != EncryptionAtRestMode::DISABLED) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, tenantCache, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(
+					    cx, &arena, encryptMode, tenantCache, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
@@ -1899,11 +2033,11 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 	static struct {
 		// Set by Execute, used by Finish
-		static TaskParam<int64_t> shardsBehind() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<int64_t> shardsBehind() { return __FUNCTION__sr; }
 		// Set by Execute, used by Finish
-		static TaskParam<bool> snapshotFinished() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<bool> snapshotFinished() { return __FUNCTION__sr; }
 		// Set by Execute, used by Finish
-		static TaskParam<Version> nextDispatchVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> nextDispatchVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -2031,7 +2165,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 					// so store a completion key for the dispatch finish() to set when dispatching the batch is
 					// done.
 					state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
-					// this is a bad hack - but flow doesn't work well with lambda functions and caputring
+					// this is a bad hack - but flow doesn't work well with lambda functions and capturing
 					// state variables...
 					auto cfg = &config;
 					auto tx = &tr;
@@ -2471,10 +2605,10 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<bool> addBackupLogRangeTasks() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> fileSize() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<bool> addBackupLogRangeTasks() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> fileSize() { return __FUNCTION__sr; }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -2517,7 +2651,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 				if (!bc) {
 					// Backup container must be present if we're still here
 					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
-					bc = _bc;
+					bc = getBackupContainerWithProxy(_bc);
 				}
 
 				Version currentVersion = tr->getReadVersion().get();
@@ -2563,7 +2697,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 			    readCommitted(cx, results, lock, range, Terminator::False, AccessSystemKeys::True, LockAware::True));
 		}
 
-		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) {
+		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) mutable {
 			if (result.isError())
 				results.sendError(result.getError());
 			else
@@ -2712,9 +2846,9 @@ struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 	StringRef getName() const override { return name; };
 
 	static struct {
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Key> destUidValue() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		static TaskParam<Key> destUidValue() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -2786,8 +2920,8 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Version> prevBeginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> prevBeginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -3015,7 +3149,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
 	static struct {
-		static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _execute(Database cx,
@@ -3024,6 +3158,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                                   Reference<Task> task) {
 		state BackupConfig config(task);
 		state Reference<IBackupContainer> bc;
+		state DatabaseConfiguration dbConfig;
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
@@ -3039,10 +3174,12 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(taskBucket->keepRunning(tr, task));
+				wait(store(dbConfig, getDatabaseConfiguration(cx)));
 
 				if (!bc) {
 					// Backup container must be present if we're still here
-					wait(store(bc, config.backupContainer().getOrThrow(tr)));
+					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+					bc = getBackupContainerWithProxy(_bc);
 				}
 
 				BackupConfig::RangeFileMapT::RangeResultType rangeresults =
@@ -3062,8 +3199,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 			}
 		}
 
-		std::vector<std::string> files;
-		std::vector<std::pair<Key, Key>> beginEndKeys;
+		state std::vector<std::string> files;
+		state std::vector<std::pair<Key, Key>> beginEndKeys;
 		state Version maxVer = 0;
 		state Version minVer = std::numeric_limits<Version>::max();
 		state int64_t totalBytes = 0;
@@ -3104,7 +3241,14 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		}
 
 		Params.endVersion().set(task, maxVer);
-		wait(bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes));
+
+		// Avoid keyRange filtering optimization for 'manifest' files
+		wait(bc->writeKeyspaceSnapshotFile(files,
+		                                   beginEndKeys,
+		                                   totalBytes,
+		                                   dbConfig.encryptionAtRestMode.isEncryptionEnabled()
+		                                       ? IncludeKeyRangeMap::False
+		                                       : IncludeKeyRangeMap::True));
 
 		TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 		    .detail("BackupUID", config.getUid())
@@ -3214,7 +3358,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _execute(Database cx,
@@ -3231,10 +3375,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				partitionedLog = config.partitionedLogEnabled().get(tr);
-				state Future<Version> startVersionFuture = tr->getReadVersion();
-				wait(success(partitionedLog) && success(startVersionFuture));
-
-				Params.beginVersion().set(task, startVersionFuture.get());
+				wait(success(partitionedLog));
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -3249,6 +3390,23 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			// the flag was not set before.
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true)));
 			backupWorkerEnabled = true;
+			// the user is responsible for manually disabling backup worker after the last backup is done
+		}
+
+		// Get start version after backup worker are enabled
+		loop {
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state Future<Version> startVersionFuture = tr->getReadVersion();
+				wait(success(startVersionFuture));
+				Params.beginVersion().set(task, startVersionFuture.get());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
 		}
 
 		// Set the "backupStartedKey" and wait for all backup worker started
@@ -3392,10 +3550,13 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 	                                  Reference<TaskBucket> taskBucket,
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
+
 		wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 
 		state RestoreConfig restore(task);
 		restore.stateEnum().set(tr, ERestoreState::COMPLETED);
+		state bool unlockDB = wait(restore.unlockDBAfterRestore().getD(tr, Snapshot::False, true));
+
 		tr->atomicOp(metadataVersionKey, metadataVersionRequiredValue, MutationRef::SetVersionstampedValue);
 		// Clear the file map now since it could be huge.
 		restore.fileSet().clear(tr);
@@ -3411,7 +3572,23 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 		restore.clearApplyMutationsKeys(tr);
 
 		wait(taskBucket->finish(tr, task));
-		wait(unlockDatabase(tr, restore.getUid()));
+
+		if (unlockDB) {
+			wait(unlockDatabase(tr, restore.getUid()));
+		}
+
+		bool bgRestoreEnabled = wait(restore.isBlobGranuleRestore().getD(tr));
+		if (bgRestoreEnabled) {
+			// No support to access historical data after blob granules restore. so cleanup the following keys
+			TraceEvent("BlobGranuleRestoreCleanup").log();
+			CODE_PROBE(true, "Cleanup blob granules keys after restore");
+			tr->clear(blobGranuleHistoryKeys);
+			tr->clear(blobGranuleFileKeys);
+			tr->clear(blobGranuleMappingKeys);
+			tr->clear(blobGranuleLockKeys);
+			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
+			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
+		}
 
 		return Void();
 	}
@@ -3457,9 +3634,9 @@ REGISTER_TASKFUNC(RestoreCompleteTaskFunc);
 
 struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
 	struct InputParams {
-		static TaskParam<RestoreFile> inputFile() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> readOffset() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> readLen() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<RestoreFile> inputFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> readOffset() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> readLen() { return __FUNCTION__sr; }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -3474,8 +3651,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static struct : InputParams {
 		// The range of data that the (possibly empty) data represented, which is set if it intersects the target
 		// restore range
-		static TaskParam<KeyRange> originalFileRange() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<std::vector<KeyRange>> originalFileRanges() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<KeyRange> originalFileRange() { return __FUNCTION__sr; }
+		static TaskParam<std::vector<KeyRange>> originalFileRanges() { return __FUNCTION__sr; }
 
 		static std::vector<KeyRange> getOriginalFileRanges(Reference<Task> task) {
 			if (originalFileRanges().exists(task)) {
@@ -3494,6 +3671,16 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		for (auto& range : Params.getOriginalFileRanges(task))
 			returnStr += format("  originalFileRange '%s'", printable(range).c_str());
 		return returnStr;
+	}
+
+	ACTOR static Future<Void> _validTenantAccess(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
+		if (isSystemKey(key)) {
+			return Void();
+		}
+		state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
+		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		ASSERT(payload.present());
+		return Void();
 	}
 
 	ACTOR static Future<Void> _execute(Database cx,
@@ -3527,7 +3714,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				bc = restore.sourceContainer().getOrThrow(tr);
+				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
+				bc = getBackupContainerWithProxy(_bc);
 				restoreRanges = restore.getRestoreRangesOrDefault(tr);
 				addPrefix = restore.addPrefix().getD(tr);
 				removePrefix = restore.removePrefix().getD(tr);
@@ -3544,16 +3732,35 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		state Reference<IAsyncFile> inFile = wait(bc.get()->readFile(rangeFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> blockData =
-		    wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
+		state Standalone<VectorRef<KeyValueRef>> blockData;
+		try {
+			Standalone<VectorRef<KeyValueRef>> data = wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
+			blockData = data;
+		} catch (Error& e) {
+			// It's possible a tenant was deleted and the encrypt key fetch failed
+			if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_tenant_not_found ||
+			    e.code() == error_code_encrypt_key_not_found) {
+				return Void();
+			}
+			throw;
+		}
+		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+		state std::vector<Future<Void>> validTenantCheckFutures;
+		state Arena arena;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		if (config.tenantMode == TenantMode::REQUIRED && g_network && g_network->isSimulated()) {
+			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+			wait(tenantCache.get()->init());
+		}
 
 		// First and last key are the range for this file
-		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
+		state KeyRange fileRange;
 		state std::vector<KeyRange> originalFileRanges;
 		// If fileRange doesn't intersect restore range then we're done.
 		state int index;
 		for (index = 0; index < restoreRanges.get().size(); index++) {
 			auto& restoreRange = restoreRanges.get()[index];
+			fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
 			if (!fileRange.intersects(restoreRange))
 				continue;
 
@@ -3623,6 +3830,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+						if (tenantCache.present()) {
+							validTenantCheckFutures.push_back(_validTenantAccess(
+							    StringRef(arena,
+							              data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get())),
+							    tenantCache.get()));
+						}
 						tr->set(data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 						        data[i].value);
 					}
@@ -3637,6 +3850,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					wait(checkLock);
 
 					wait(tr->commit());
+
+					if (!validTenantCheckFutures.empty()) {
+						waitForAll(validTenantCheckFutures);
+						validTenantCheckFutures.clear();
+					}
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -3835,36 +4053,57 @@ bool AccumulatedMutations::isComplete() const {
 // Returns true if a complete chunk contains any MutationRefs which intersect with any
 // range in ranges.
 // It is undefined behavior to run this if isComplete() does not return true.
-bool AccumulatedMutations::matchesAnyRange(const std::vector<KeyRange>& ranges) const {
+bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const {
 	std::vector<MutationRef> mutations = decodeMutationLogValue(serializedMutations);
 	for (auto& m : mutations) {
-		for (auto& r : ranges) {
-			if (m.type == MutationRef::Encrypted) {
-				// TODO:  In order to filter out encrypted mutations that are not relevant to the
-				// target range, they would have to be decrypted here in order to check relevance
-				// below, however the staged mutations would still need to remain encrypted for
-				// staging into the destination database.  Without decrypting, we must assume that
-				// some data could match the range and return true here.
-				return true;
-			}
-			if (m.type == MutationRef::ClearRange) {
-				if (r.intersects(KeyRangeRef(m.param1, m.param2))) {
-					return true;
-				}
-			} else {
-				if (r.contains(m.param1)) {
-					return true;
-				}
-			}
+		if (m.type == MutationRef::Encrypted) {
+			// TODO:  In order to filter out encrypted mutations that are not relevant to the
+			// target range, they would have to be decrypted here in order to check relevance
+			// below, however the staged mutations would still need to remain encrypted for
+			// staging into the destination database.  Without decrypting, we must assume that
+			// some data could match the range and return true here.
+			return true;
+		}
+		if (filters.match(m)) {
+			return true;
 		}
 	}
 
 	return false;
 }
 
+bool RangeMapFilters::match(const MutationRef& m) const {
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		if (match(singleKeyRange(m.param1))) {
+			return true;
+		}
+	} else if (m.type == MutationRef::ClearRange) {
+		if (match(KeyRangeRef(m.param1, m.param2))) {
+			return true;
+		}
+	} else {
+		ASSERT(false);
+	}
+	return false;
+}
+
+bool RangeMapFilters::match(const KeyValueRef& kv) const {
+	return match(singleKeyRange(kv.key));
+}
+
+bool RangeMapFilters::match(const KeyRangeRef& range) const {
+	auto ranges = rangeMap.intersectingRanges(range);
+	for (const auto& r : ranges) {
+		if (r.cvalue() == 1) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
-std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const std::vector<KeyRange>& ranges) {
+std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const RangeMapFilters& filters) {
 	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
 
 	for (auto& kv : data) {
@@ -3878,7 +4117,7 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 		AccumulatedMutations& m = vb.second;
 
 		// If the mutations are incomplete or match one of the ranges, include in results.
-		if (!m.isComplete() || m.matchesAnyRange(ranges)) {
+		if (!m.isComplete() || m.matchesAnyRange(filters)) {
 			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
 		}
 	}
@@ -3924,7 +4163,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
-				bc = _bc;
+				bc = getBackupContainerWithProxy(_bc);
 
 				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
 
@@ -3944,7 +4183,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for
 		// this restore based on the restore range set.
-		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, ranges);
+		RangeMapFilters filters(ranges);
+		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, filters);
 
 		state int start = 0;
 		state int end = dataFiltered.size();
@@ -4071,11 +4311,11 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	StringRef getName() const override { return name; };
 
 	static struct {
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<std::string> beginFile() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> beginBlock() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> batchSize() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> remainingInBatch() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> beginFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> beginBlock() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> batchSize() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> remainingInBatch() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -4482,7 +4722,7 @@ ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr
 	state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 	state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 	if (!current.present())
-		return ERestoreState::UNITIALIZED;
+		return ERestoreState::UNINITIALIZED;
 
 	state RestoreConfig restore(current.get().first);
 
@@ -4499,6 +4739,15 @@ ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr
 
 	// Cancel the backup tasks on this tag
 	wait(tag.cancel(tr));
+
+	bool bgRestoreEnabled = wait(restore.isBlobGranuleRestore().getD(tr));
+	if (bgRestoreEnabled) {
+		BlobGranuleRestoreConfig bgRestoreConfig;
+		bgRestoreConfig.phase().set(tr, BlobRestorePhase::ERROR);
+		bgRestoreConfig.phaseStartTs().set(tr, BlobRestorePhase::ERROR, now());
+		bgRestoreConfig.error().set(tr, "Aborted");
+	}
+
 	wait(unlockDatabase(tr, current.get().first));
 	return ERestoreState::ABORTED;
 }
@@ -4544,7 +4793,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Version> firstVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	// Find all files needed for the restore and save them in the RestoreConfig for the task.
@@ -4561,6 +4810,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<KeyRange> ranges;
 		state bool logsOnly;
 		state bool inconsistentSnapshotOnly;
+		state bool isBlobGranuleRestore;
 
 		loop {
 			try {
@@ -4575,7 +4825,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(store(logsOnly, restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false)));
 				wait(store(inconsistentSnapshotOnly,
 				           restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false)));
-
+				wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -4591,10 +4841,49 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				restore.fileBlockCount().clear(tr);
 				restore.fileCount().clear(tr);
 				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
-				bc = _bc;
+				bc = getBackupContainerWithProxy(_bc);
 
 				wait(tr->commit());
 				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		loop {
+			if (!isBlobGranuleRestore) {
+				break; // Skip this loop if it's not blob granule restore
+			}
+			CODE_PROBE(true, "Blob granule restore - wait data copy for completion");
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state BlobRestorePhase phase = wait(BlobGranuleRestoreConfig().phase().getD(tr));
+				TraceEvent("BlobGranuleRestoreWaitPhase").detail("BlobRestorePhase", phase);
+				if (phase == BlobRestorePhase::ERROR) {
+					TraceEvent("BlobGranuleRestoreError").log();
+					restore.stateEnum().set(tr, ERestoreState::ABORTED);
+					wait(tr->commit());
+					return Void();
+				}
+				if (phase != BlobRestorePhase::APPLYING_MLOGS) {
+					wait(delay(CLIENT_KNOBS->BLOB_GRANULE_RESTORE_CHECK_INTERVAL));
+				} else {
+					Version version = wait(BlobGranuleRestoreConfig().beginVersion().getOrThrow(tr));
+					beginVersion = version;
+					restore.beginVersion().set(tr, beginVersion);
+					TraceEvent("BlobGranuleRestoreResume").detail("BeginVersion", beginVersion);
+					wait(tr->commit());
+					if (restoreVersion <= beginVersion) {
+						TraceEvent("BlobGranuleRestoreDone")
+						    .detail("BeginVersion", beginVersion)
+						    .detail("Target", restoreVersion);
+						return Void();
+					}
+					break;
+				}
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -4630,7 +4919,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		state Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, logsOnly, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -4736,7 +5025,25 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state RestoreConfig restore(task);
 
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
+		state bool isBlobGranuleRestore;
+		wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
+
 		if (firstVersion == invalidVersion) {
+			if (isBlobGranuleRestore) {
+				// For blob granule restore, we can complete the restore job if no mutation log is needed
+				state Version beginVersion;
+				state Version restoreVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				// no need to apply mutations if target version is less than begin version
+				if (restoreVersion <= beginVersion) {
+					wait(
+					    success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
+					wait(taskBucket->finish(tr, task));
+					return Void();
+				}
+			}
+
 			wait(restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 			std::string tag = wait(restore.tag().getD(tr));
@@ -4756,13 +5063,18 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 		wait(taskBucket->finish(tr, task));
-		state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
-		wait(success(logsOnly));
-		if (logsOnly.get().present() && logsOnly.get().get()) {
-			// If this is an incremental restore, we need to set the applyMutationsMapPrefix
-			// to the earliest log version so no mutations are missed
-			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), allKeys, versionEncoded));
+
+		// Initialize apply mutations map for non-blob-restore case. For blob restore, it's initialized
+		// in blob migrator
+		if (!isBlobGranuleRestore) {
+			state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
+			wait(success(logsOnly));
+			if (logsOnly.get().present() && logsOnly.get().get()) {
+				//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
+				//  to the earliest log version so no mutations are missed
+				Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
+				wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
+			}
 		}
 		return Void();
 	}
@@ -4892,7 +5204,7 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, cx));
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -5001,7 +5313,7 @@ public:
 					if (pContainer != nullptr) {
 						Reference<IBackupContainer> c =
 						    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
-						*pContainer = c;
+						*pContainer = fileBackup::getBackupContainerWithProxy(c);
 					}
 
 					if (pUID != nullptr) {
@@ -5033,7 +5345,8 @@ public:
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
-	                                       Optional<std::string> encryptionKeyFileName) {
+	                                       Optional<std::string> encryptionKeyFileName,
+	                                       Optional<std::string> blobManifestUrl) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -5089,6 +5402,23 @@ public:
 			        "ERROR: The last backup `%s' happened in the future.\n",
 			        printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
+		}
+
+		if (blobManifestUrl.present()) {
+			state BlobGranuleBackupConfig bgBackupConfig;
+			bool enabled = wait(bgBackupConfig.enabled().getD(tr));
+			if (enabled) {
+				fprintf(stderr, "ERROR: Abort existing blob manifest backup first before creating new one.\n");
+				throw backup_error();
+			} else {
+				bgBackupConfig.manifestUrl().set(tr, blobManifestUrl.get());
+				bgBackupConfig.mutationLogsUrl().set(tr, bc->getURL());
+				bgBackupConfig.enabled().set(tr, true);
+				bgBackupConfig.lastFlushTs().set(tr, 0);
+			}
+			// Allow only incremental backup
+			incrementalBackupOnly = IncrementalBackupOnly::True;
+			stopWhenDone = StopWhenDone::False;
 		}
 
 		KeyRangeMap<int> backupRangeSet;
@@ -5153,6 +5483,7 @@ public:
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
+		config.blobBackupEnabled().set(tr, blobManifestUrl.present());
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -5170,10 +5501,12 @@ public:
 	                                        Key addPrefix,
 	                                        Key removePrefix,
 	                                        LockDB lockDB,
+	                                        UnlockDB unlockDB,
 	                                        OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                        InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                        Version beginVersion,
-	                                        UID uid) {
+	                                        UID uid,
+	                                        Optional<std::string> blobManifestUrl) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -5217,14 +5550,16 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		state int index;
-		for (index = 0; index < restoreRanges.size(); index++) {
-			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
-			                                .removePrefix(removePrefix)
-			                                .withPrefix(addPrefix);
-			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0 && !onlyApplyMutationLogs) {
-				throw restore_destination_not_empty();
+		if (!onlyApplyMutationLogs || blobManifestUrl.present()) {
+			state int index;
+			for (index = 0; index < restoreRanges.size(); index++) {
+				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
+				                                .removePrefix(removePrefix)
+				                                .withPrefix(addPrefix);
+				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				if (existingRows.size() > 0) {
+					throw restore_destination_not_empty();
+				}
 			}
 		}
 		// Make new restore config
@@ -5243,13 +5578,34 @@ public:
 		restore.onlyApplyMutationLogs().set(tr, onlyApplyMutationLogs);
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
+		restore.unlockDBAfterRestore().set(tr, unlockDB);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
-			restore.restoreRanges().set(tr, restoreRanges);
+			for (auto& range : restoreRanges) {
+				restore.restoreRangeSet().insert(tr, range);
+			}
+		}
+		if (blobManifestUrl.present()) {
+			state BlobGranuleRestoreConfig bgRestoreConfig;
+			BlobRestorePhase phase = wait(bgRestoreConfig.phase().getD(tr, Snapshot::True, BlobRestorePhase::MAX));
+			if (phase < BlobRestorePhase::DONE) {
+				fprintf(stderr, "ERROR: Abort existing blob granules restore first before creating new one.\n");
+				throw restore_error();
+			} else {
+				bgRestoreConfig.manifestUrl().set(tr, blobManifestUrl.get());
+				bgRestoreConfig.mutationLogsUrl().set(tr, backupURL.toString());
+				bgRestoreConfig.phase().set(tr, BlobRestorePhase::INIT);
+				bgRestoreConfig.uid().set(tr, uid);
+				bgRestoreConfig.targetVersion().set(tr, restoreVersion);
+				bgRestoreConfig.phaseStartTs().set(tr, BlobRestorePhase::INIT, now());
+				restore.isBlobGranuleRestore().set(tr, true);
+			}
 		}
 		// this also sets restore.add/removePrefix.
-		restore.initApplyMutations(tr, addPrefix, removePrefix);
+		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
+
+		//
 
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -5278,8 +5634,8 @@ public:
 					if (verbose)
 						printf("waitRestore: Tag: %s  State: %s\n",
 						       tagName.toString().c_str(),
-						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
-					return ERestoreState::UNITIALIZED;
+						       FileBackupAgent::restoreStateText(ERestoreState::UNINITIALIZED).toString().c_str());
+					return ERestoreState::UNINITIALIZED;
 				}
 
 				state RestoreConfig restore(current.get().first);
@@ -5383,6 +5739,13 @@ public:
 		TraceEvent(SevInfo, "FBA_AbortBackup")
 		    .detail("TagName", tagName.c_str())
 		    .detail("Status", BackupAgentBase::getStateText(status));
+
+		bool bgBackupEnabled = wait(config.blobBackupEnabled().getD(tr));
+		if (bgBackupEnabled) {
+			BlobGranuleBackupConfig bgbackupConfig;
+			bgbackupConfig.enabled().set(tr, false);
+			bgbackupConfig.lastFlushTs().set(tr, 0);
+		}
 
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
@@ -5493,6 +5856,7 @@ public:
 						wait(
 						    store(latestRestorable, getTimestampedVersion(tr, config.getLatestRestorableVersion(tr))) &&
 						    store(bc, config.backupContainer().getOrThrow(tr)));
+						bc = fileBackup::getBackupContainerWithProxy(bc);
 
 						doc.setKey("Restorable", latestRestorable.present());
 
@@ -5636,6 +6000,7 @@ public:
 					wait(store(latestRestorableVersion, config.getLatestRestorableVersion(tr)) &&
 					     store(bc, config.backupContainer().getOrThrow(tr)) &&
 					     store(recentReadVersion, tr->getReadVersion()));
+					bc = fileBackup::getBackupContainerWithProxy(bc);
 
 					bool snapshotProgress = false;
 
@@ -5741,8 +6106,8 @@ public:
 							        .c_str(),
 							    e.second.first.c_str());
 
-							// If error version is at or more recent than the latest restorable version then it could be
-							// inhibiting progress
+							// If error version is at or more recent than the latest restorable version then it
+							// could be inhibiting progress
 							if (v >= latestRestorableVersion.orDefault(0)) {
 								recentErrors += msg;
 							} else {
@@ -5819,7 +6184,7 @@ public:
 	//   onlyApplyMutationLogs: only perform incremental restore, by only applying mutation logs
 	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
 	//                             When set to true, gives an inconsistent snapshot, thus not recommended
-	//   beginVersion: restore's begin version
+	//   beginVersions: restore's begin version for each range
 	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
 	                                     Database cx,
@@ -5828,17 +6193,19 @@ public:
 	                                     Key url,
 	                                     Optional<std::string> proxy,
 	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     Standalone<VectorRef<Version>> beginVersions,
 	                                     WaitForComplete waitForComplete,
 	                                     Version targetVersion,
 	                                     Verbose verbose,
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     LockDB lockDB,
+	                                     UnlockDB unlockDB,
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
-	                                     Version beginVersion,
 	                                     Optional<std::string> encryptionKeyFileName,
-	                                     UID randomUid) {
+	                                     UID randomUid,
+	                                     Optional<std::string> blobManifestUrl) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
 			throw restore_error();
@@ -5858,11 +6225,19 @@ public:
 		if (targetVersion == invalidVersion && onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 			targetVersion = desc.contiguousLogEnd.get() - 1;
 		}
+		if (blobManifestUrl.present()) {
+			onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
+		}
 
+		state Version beginVersion = invalidVersion; // min begin version for all ranges
+		if (!beginVersions.empty()) {
+			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
+		}
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, cx, ranges, onlyApplyMutationLogs, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
-		if (!restoreSet.present()) {
+		// for blob granule restore, we don't have the begin version yet, so no need to check restore data set
+		if (!restoreSet.present() && !blobManifestUrl.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
@@ -5890,10 +6265,13 @@ public:
 				                   addPrefix,
 				                   removePrefix,
 				                   lockDB,
+				                   unlockDB,
 				                   onlyApplyMutationLogs,
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
-				                   randomUid));
+				                   randomUid,
+				                   blobManifestUrl));
+
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -5925,6 +6303,7 @@ public:
 		state Reference<ReadYourWritesTransaction> ryw_tr =
 		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		loop {
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -6015,7 +6394,8 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+		state Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+		bc = fileBackup::getBackupContainerWithProxy(bc);
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();
@@ -6041,24 +6421,81 @@ public:
 			return -1;
 		} else {
 			TraceEvent("AS_StartRestore").log();
-			Version ver = wait(restore(backupAgent,
-			                           cx,
-			                           cx,
-			                           tagName,
-			                           KeyRef(bc->getURL()),
-			                           bc->getProxy(),
-			                           ranges,
-			                           WaitForComplete::True,
-			                           ::invalidVersion,
-			                           Verbose::True,
-			                           addPrefix,
-			                           removePrefix,
-			                           LockDB::True,
-			                           OnlyApplyMutationLogs::False,
-			                           InconsistentSnapshotOnly::False,
-			                           ::invalidVersion,
-			                           {},
-			                           randomUid));
+			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
+			for (auto r : ranges) {
+				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
+					restoreRange.push_back_deep(restoreRange.arena(), r);
+				} else {
+					KeyRangeRef normalKeyRange = r & normalKeys;
+					KeyRangeRef systemKeyRange = r & systemKeys;
+					if (!normalKeyRange.empty()) {
+						restoreRange.push_back_deep(restoreRange.arena(), normalKeyRange);
+					}
+					if (!systemKeyRange.empty()) {
+						systemRestoreRange.push_back_deep(systemRestoreRange.arena(), systemKeyRange);
+					}
+				}
+			}
+			if (!systemRestoreRange.empty()) {
+				// restore system keys
+				wait(success(restore(backupAgent,
+				                     cx,
+				                     cx,
+				                     "system_restore"_sr,
+				                     KeyRef(bc->getURL()),
+				                     bc->getProxy(),
+				                     systemRestoreRange,
+				                     {},
+				                     WaitForComplete::True,
+				                     ::invalidVersion,
+				                     Verbose::True,
+				                     addPrefix,
+				                     removePrefix,
+				                     LockDB::True,
+				                     UnlockDB::False,
+				                     OnlyApplyMutationLogs::False,
+				                     InconsistentSnapshotOnly::False,
+				                     {},
+				                     randomUid,
+				                     {})));
+				state Reference<ReadYourWritesTransaction> rywTransaction =
+				    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+				// clear old restore config associated with system keys
+				loop {
+					try {
+						rywTransaction->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						rywTransaction->setOption(FDBTransactionOptions::LOCK_AWARE);
+						state RestoreConfig oldRestore(randomUid);
+						oldRestore.clear(rywTransaction);
+						wait(rywTransaction->commit());
+						break;
+					} catch (Error& e) {
+						wait(rywTransaction->onError(e));
+					}
+				}
+			}
+			// restore user data
+			state Version ver = wait(restore(backupAgent,
+			                                 cx,
+			                                 cx,
+			                                 tagName,
+			                                 KeyRef(bc->getURL()),
+			                                 bc->getProxy(),
+			                                 restoreRange,
+			                                 {},
+			                                 WaitForComplete::True,
+			                                 ::invalidVersion,
+			                                 Verbose::True,
+			                                 addPrefix,
+			                                 removePrefix,
+			                                 LockDB::True,
+			                                 UnlockDB::True,
+			                                 OnlyApplyMutationLogs::False,
+			                                 InconsistentSnapshotOnly::False,
+			                                 {},
+			                                 randomUid,
+			                                 {}));
 			return ver;
 		}
 	}
@@ -6112,16 +6549,18 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key url,
                                          Optional<std::string> proxy,
                                          Standalone<VectorRef<KeyRangeRef>> ranges,
+                                         Standalone<VectorRef<Version>> versions,
                                          WaitForComplete waitForComplete,
                                          Version targetVersion,
                                          Verbose verbose,
                                          Key addPrefix,
                                          Key removePrefix,
                                          LockDB lockDB,
+                                         UnlockDB unlockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<std::string> blobManifestUrl) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -6129,17 +6568,61 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    url,
 	                                    proxy,
 	                                    ranges,
+	                                    versions,
 	                                    waitForComplete,
 	                                    targetVersion,
 	                                    verbose,
 	                                    addPrefix,
 	                                    removePrefix,
 	                                    lockDB,
+	                                    unlockDB,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
-	                                    beginVersion,
 	                                    encryptionKeyFileName,
-	                                    deterministicRandom()->randomUniqueID());
+	                                    deterministicRandom()->randomUniqueID(),
+	                                    blobManifestUrl);
+}
+
+Future<Version> FileBackupAgent::restore(Database cx,
+                                         Optional<Database> cxOrig,
+                                         Key tagName,
+                                         Key url,
+                                         Optional<std::string> proxy,
+                                         Standalone<VectorRef<KeyRangeRef>> ranges,
+                                         WaitForComplete waitForComplete,
+                                         Version targetVersion,
+                                         Verbose verbose,
+                                         Key addPrefix,
+                                         Key removePrefix,
+                                         LockDB lockDB,
+                                         UnlockDB unlockDB,
+                                         OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                         InconsistentSnapshotOnly inconsistentSnapshotOnly,
+                                         Version beginVersion,
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<std::string> blobManifestUrl) {
+	Standalone<VectorRef<Version>> beginVersions;
+	for (auto i = 0; i < ranges.size(); ++i) {
+		beginVersions.push_back(beginVersions.arena(), beginVersion);
+	}
+	return restore(cx,
+	               cxOrig,
+	               tagName,
+	               url,
+	               proxy,
+	               ranges,
+	               beginVersions,
+	               waitForComplete,
+	               targetVersion,
+	               verbose,
+	               addPrefix,
+	               removePrefix,
+	               lockDB,
+	               unlockDB,
+	               onlyApplyMutationLogs,
+	               inconsistentSnapshotOnly,
+	               encryptionKeyFileName,
+	               blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -6157,29 +6640,35 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<std::string> blobManifestUrl) {
 	Standalone<VectorRef<KeyRangeRef>> rangeRef;
 	if (range.begin.empty() && range.end.empty()) {
 		addDefaultBackupRanges(rangeRef);
 	} else {
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 	}
+	Standalone<VectorRef<Version>> versionRef;
+	versionRef.push_back(versionRef.arena(), beginVersion);
+
 	return restore(cx,
 	               cxOrig,
 	               tagName,
 	               url,
 	               proxy,
 	               rangeRef,
+	               versionRef,
 	               waitForComplete,
 	               targetVersion,
 	               verbose,
 	               addPrefix,
 	               removePrefix,
 	               lockDB,
+	               UnlockDB::True,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               beginVersion,
-	               encryptionKeyFileName);
+	               encryptionKeyFileName,
+	               blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx,
@@ -6232,7 +6721,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
-                                           Optional<std::string> const& encryptionKeyFileName) {
+                                           Optional<std::string> const& encryptionKeyFileName,
+                                           Optional<std::string> const& blobManifestUrl) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -6245,7 +6735,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,
-	                                         encryptionKeyFileName);
+	                                         encryptionKeyFileName,
+	                                         blobManifestUrl);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

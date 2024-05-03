@@ -43,6 +43,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "fdbclient/Schemas.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -206,13 +207,51 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			EncryptionAtRestMode mode;
 			if (value == "disabled") {
 				mode = EncryptionAtRestMode::DISABLED;
-			} else if (value == "aes_256_ctr") {
-				mode = EncryptionAtRestMode::AES_256_CTR;
+			} else if (value == "domain_aware") {
+				mode = EncryptionAtRestMode::DOMAIN_AWARE;
+			} else if (value == "cluster_aware") {
+				mode = EncryptionAtRestMode::CLUSTER_AWARE;
 			} else {
-				printf("Error: Only disabled|aes_256_ctr are valid for encryption_at_rest_mode.\n");
+				printf("Error: Only disabled|domain_aware|cluster_aware are valid for encryption_at_rest_mode.\n");
 				return out;
 			}
 			out[p + key] = format("%d", mode);
+		}
+
+		if (key == "exclude") {
+			int p = 0;
+			while (p < value.size()) {
+				int end = value.find_first_of(',', p);
+				if (end == value.npos) {
+					end = value.size();
+				}
+				auto addrRef = StringRef(value).substr(p, end - p);
+				AddressExclusion addr = AddressExclusion::parse(addrRef);
+				if (addr.isValid()) {
+					out[encodeExcludedServersKey(addr)] = "";
+				} else {
+					printf("Error: invalid address format: %s\n", addrRef.toString().c_str());
+				}
+				p = end + 1;
+			}
+		}
+
+		if (key == "storage_engine" || key == "log_engine" || key == "perpetual_storage_wiggle_engine") {
+			StringRef s = value;
+
+			// Parse as engine_name[:p=v]... to handle future storage engine params
+			Value engine = s.eat(":");
+			std::map<Key, Value> params;
+			while (!s.empty()) {
+				params[s.eat("=")] = s.eat(":");
+			}
+
+			try {
+				out[p + key] = format("%d", KeyValueStoreType::fromString(engine.toString()).storeType());
+			} catch (Error& e) {
+				printf("Error: Invalid value for %s (%s): %s\n", key.c_str(), value.c_str(), e.what());
+			}
+			return out;
 		}
 
 		return out;
@@ -220,13 +259,17 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 	Optional<KeyValueStoreType> logType;
 	Optional<KeyValueStoreType> storeType;
+
+	// These are legacy shorthand commands to set a specific log engine and storage engine
+	// based only on the storage engine name.  Most of them assume SQLite should be the
+	// log engine.
 	if (mode == "ssd-1") {
 		logType = KeyValueStoreType::SSD_BTREE_V1;
 		storeType = KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-1-experimental") {
+	} else if (mode == "ssd-redwood-1" || mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-v1") {
@@ -241,7 +284,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "memory-1") {
 		logType = KeyValueStoreType::MEMORY;
 		storeType = KeyValueStoreType::MEMORY;
-	} else if (mode == "memory-radixtree-beta") {
+	} else if (mode == "memory-radixtree" || mode == "memory-radixtree-beta") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::MEMORY_RADIXTREE;
 	}
@@ -249,7 +292,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 	if (storeType.present()) {
 		out[p + "log_engine"] = format("%d", logType.get().storeType());
-		out[p + "storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
+		out[p + "storage_engine"] = format("%d", storeType.get().storeType());
 		return out;
 	}
 
@@ -386,7 +429,10 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 
 		for (auto t = m.begin(); t != m.end(); ++t) {
 			if (outConf.count(t->first)) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", t->first);
+				TraceEvent(SevWarnAlways, "ConflictingOption")
+				    .detail("Option", t->first)
+				    .detail("Value", t->second)
+				    .detail("ExistingValue", outConf[t->first]);
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -465,7 +511,172 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
+/*
+    - Validates encryption and tenant mode configurations
+    - During cluster creation (configure new) we allow the following:
+        - If encryption mode is disabled/cluster_aware then any tenant mode is allowed
+        - If the encryption mode is domain_aware then the only allowed tenant mode is required
+    - During cluster configuration changes the following is allowed:
+        - Encryption mode cannot be changed (can only be set during creation)
+        - If the encryption mode is disabled/cluster_aware then any tenant mode changes are allowed
+        - If the encryption mode is domain_aware then tenant mode changes are not allowed (as the only supported mode is
+          required)
+*/
+bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
+                                       std::map<std::string, std::string> newConfig,
+                                       bool creating) {
+	EncryptionAtRestMode encryptMode;
+	TenantMode tenantMode;
+	if (creating) {
+		if (newConfig.count(encryptionAtRestModeConfKey.toString()) != 0) {
+			encryptMode = EncryptionAtRestMode::fromValueRef(
+			    ValueRef(newConfig.find(encryptionAtRestModeConfKey.toString())->second));
+			// check if the tenant mode is being set during configure new (otherwise assume tenants are disabled)
+			if (newConfig.count(tenantModeConfKey.toString()) != 0) {
+				tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
+			}
+		}
+	} else {
+		ASSERT(oldConfiguration.present());
+		encryptMode = oldConfiguration.get().encryptionAtRestMode;
+		if (newConfig.count(tenantModeConfKey.toString()) != 0) {
+			tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
+		} else {
+			// Tenant mode and encryption mode didn't change
+			return true;
+		}
+	}
+	TraceEvent(SevDebug, "EncryptAndTenantModes")
+	    .detail("EncryptMode", encryptMode.toString())
+	    .detail("TenantMode", tenantMode.toString());
+
+	if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && tenantMode != TenantMode::REQUIRED) {
+		// For domain aware encryption only the required tenant mode is currently supported
+		TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
+		    .detail("EncryptMode", encryptMode.toString())
+		    .detail("TenantMode", tenantMode.toString());
+		return false;
+	}
+
+	return true;
+}
+
+bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration) {
+	TenantMode oldTenantMode = oldConfiguration.tenantMode;
+	TenantMode newTenantMode = newConfiguration.tenantMode;
+	TraceEvent(SevDebug, "TenantModes")
+	    .detail("OldTenantMode", oldTenantMode.toString())
+	    .detail("NewTenantMode", newTenantMode.toString());
+	if (oldTenantMode != TenantMode::REQUIRED && newTenantMode == TenantMode::REQUIRED) {
+		// TODO: Changing from optional/disabled to required tenant mode should be allowed if there is no non-tenant
+		// data present
+		TraceEvent(SevWarnAlways, "InvalidTenantConfiguration")
+		    .detail("OldTenantMode", oldTenantMode.toString())
+		    .detail("NewTenantMode", newTenantMode.toString());
+		return false;
+	}
+	return true;
+}
+
+TEST_CASE("/ManagementAPI/ChangeConfig/TenantMode") {
+	DatabaseConfiguration oldConfig;
+	DatabaseConfiguration newConfig;
+	std::vector<TenantMode> tenantModes = { TenantMode::DISABLED, TenantMode::OPTIONAL_TENANT, TenantMode::REQUIRED };
+	// required tenant mode can change to any other tenant mode
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	ASSERT(isTenantModeModeConfigValid(oldConfig, newConfig));
+	// optional/disabled tenant mode can switch to optional/disabled tenant mode
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	ASSERT(isTenantModeModeConfigValid(oldConfig, newConfig));
+	// optional/disabled tenant mode CANNOT switch to required tenant mode
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig.tenantMode = TenantMode::REQUIRED;
+	ASSERT(!isTenantModeModeConfigValid(oldConfig, newConfig));
+
+	return Void();
+}
+
+// unit test for changing encryption/tenant mode config options
+TEST_CASE("/ManagementAPI/ChangeConfig/TenantAndEncryptMode") {
+	std::map<std::string, std::string> newConfig;
+	std::string encryptModeKey = encryptionAtRestModeConfKey.toString();
+	std::string tenantModeKey = tenantModeConfKey.toString();
+	std::vector<TenantMode> tenantModes = { TenantMode::DISABLED, TenantMode::OPTIONAL_TENANT, TenantMode::REQUIRED };
+	std::vector<EncryptionAtRestMode> encryptionModes = { EncryptionAtRestMode::DISABLED,
+		                                                  EncryptionAtRestMode::CLUSTER_AWARE,
+		                                                  EncryptionAtRestMode::DOMAIN_AWARE };
+	// configure new test cases
+
+	// encryption disabled checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DISABLED);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// cluster aware encryption checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::CLUSTER_AWARE);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// domain aware encryption checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DOMAIN_AWARE);
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// no encrypt mode present
+	newConfig.erase(encryptModeKey);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// no tenant mode present
+	newConfig.erase(tenantModeKey);
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DOMAIN_AWARE);
+	ASSERT(!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::CLUSTER_AWARE);
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// change config test cases
+	DatabaseConfiguration oldConfig;
+
+	// encryption disabled checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	// domain aware encryption checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(!isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	// cluster aware encryption checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
+	// required tenant mode can switch to any other tenant mode with cluster aware encryption
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	// no tenant mode present
+	newConfig.erase(tenantModeKey);
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	oldConfig.encryptionAtRestMode = deterministicRandom()->randomChoice(encryptionModes);
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	return Void();
+}
+
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
+	if (useSystemPriority) {
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	}
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
@@ -475,11 +686,11 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
 	return config;
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr));
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr, useSystemPriority));
 			return config;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -874,12 +1085,12 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 
 ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
 	state Backoff backoff;
+	state Reference<ISingleThreadTransaction> configTr;
 	loop {
 		try {
 			// Attempt to read a random value from the configuration
 			// database to make sure it is online.
-			state Reference<ISingleThreadTransaction> configTr =
-			    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			configTr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
 			Tuple tuple;
 			tuple.appendNull(); // config class
 			tuple << "test"_sr;
@@ -962,6 +1173,14 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		if (!disableConfigDB) {
 			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
 		}
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			// Introduce a random delay in simulation to allow processes to be
+			// killed before previousCoordinatorKeys has been reset. This will
+			// help test scenarios where the previous configuration database
+			// state has been transferred to the new coordinators but the
+			// broadcaster thinks it has not been transferred.
+			wait(delay(deterministicRandom()->random01() * 10));
+		}
 		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
@@ -972,7 +1191,8 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	if (g_network->isSimulated()) {
 		int i = 0;
 		int protectedCount = 0;
-		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
+		int minimumCoordinators = (desiredCoordinators.size() / 2) + 1;
+		while (protectedCount < minimumCoordinators && i < desiredCoordinators.size()) {
 			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
@@ -988,6 +1208,15 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
 			i++;
+		}
+
+		if (protectedCount < minimumCoordinators) {
+			TraceEvent("NotEnoughReliableCoordinators")
+			    .detail("NumReliable", protectedCount)
+			    .detail("MinimumRequired", minimumCoordinators)
+			    .detail("ConnectionString", conn->toString());
+
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 		}
 	}
 
@@ -1010,7 +1239,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	choose {
 		when(wait(waitForAll(leaderServers))) {}
-		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+		when(wait(delay(5.0))) {
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+		}
 	}
 	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
 	    .detail("CurrentCoordinators", old.toString())
@@ -1112,7 +1343,9 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				                                           TaskPriority::CoordinationReply));
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
-				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+				when(wait(delay(5.0))) {
+					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+				}
 			}
 
 			tr.set(coordinatorsKey, newClusterConnectionString.toString());
@@ -1237,7 +1470,7 @@ struct AutoQuorumChange final : IQuorumChange {
 			desiredCount = redundancy * 2 - 1;
 		}
 
-		std::vector<AddressExclusion> excl = wait(getExcludedServers(tr));
+		std::vector<AddressExclusion> excl = wait(getAllExcludedServers(tr));
 		state std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
 		std::vector<ProcessData> _workers = wait(getWorkers(tr));
@@ -1383,23 +1616,37 @@ Reference<IQuorumChange> autoQuorumChange(int desired) {
 	return Reference<IQuorumChange>(new AutoQuorumChange(desired));
 }
 
-void excludeServers(Transaction& tr, std::vector<AddressExclusion>& servers, bool failed) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-	std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-	auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
-	tr.addReadConflictRange(singleKeyRange(serversVersionKey)); // To conflict with parallel includeServers
-	tr.set(serversVersionKey, excludeVersionKey);
+ACTOR Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	std::vector<AddressExclusion> excl = wait(failed ? getExcludedFailedServerList(tr) : getExcludedServerList(tr));
+	std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
+	bool containNewExclusion = false;
 	for (auto& s : servers) {
+		if (exclusions.find(s) != exclusions.end()) {
+			continue;
+		}
+		containNewExclusion = true;
 		if (failed) {
-			tr.set(encodeFailedServersKey(s), StringRef());
+			tr->set(encodeFailedServersKey(s), StringRef());
 		} else {
-			tr.set(encodeExcludedServersKey(s), StringRef());
+			tr->set(encodeExcludedServersKey(s), StringRef());
 		}
 	}
-	TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
+
+	if (containNewExclusion) {
+		std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
+		auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
+		tr->addReadConflictRange(singleKeyRange(serversVersionKey)); // To conflict with parallel includeServers
+		tr->set(serversVersionKey, excludeVersionKey);
+	}
+	TraceEvent("ExcludeServersCommit")
+	    .detail("Servers", describe(servers))
+	    .detail("ExcludeFailed", failed)
+	    .detail("ExclusionUpdated", containNewExclusion);
+	return Void();
 }
 
 ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
@@ -1432,7 +1679,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 		state Transaction tr(cx);
 		loop {
 			try {
-				excludeServers(tr, servers, failed);
+				wait(excludeServers(&tr, servers, failed));
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
@@ -1444,23 +1691,36 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 }
 
 // excludes localities by setting the keys in api version below 7.0
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-	std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-	auto localityVersionKey = failed ? failedLocalityVersionKey : excludedLocalityVersionKey;
-	tr.addReadConflictRange(singleKeyRange(localityVersionKey)); // To conflict with parallel includeLocalities
-	tr.set(localityVersionKey, excludeVersionKey);
+ACTOR Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> localities, bool failed) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	std::vector<std::string> excl = wait(failed ? getExcludedFailedLocalityList(tr) : getExcludedLocalityList(tr));
+	std::set<std::string> exclusion(excl.begin(), excl.end());
+	bool containNewExclusion = false;
 	for (const auto& l : localities) {
+		if (exclusion.find(l) != exclusion.end()) {
+			continue;
+		}
+		containNewExclusion = true;
 		if (failed) {
-			tr.set(encodeFailedLocalityKey(l), StringRef());
+			tr->set(encodeFailedLocalityKey(l), StringRef());
 		} else {
-			tr.set(encodeExcludedLocalityKey(l), StringRef());
+			tr->set(encodeExcludedLocalityKey(l), StringRef());
 		}
 	}
-	TraceEvent("ExcludeLocalitiesCommit").detail("Localities", describe(localities)).detail("ExcludeFailed", failed);
+	if (containNewExclusion) {
+		std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
+		auto localityVersionKey = failed ? failedLocalityVersionKey : excludedLocalityVersionKey;
+		tr->addReadConflictRange(singleKeyRange(localityVersionKey)); // To conflict with parallel includeLocalities
+		tr->set(localityVersionKey, excludeVersionKey);
+	}
+	TraceEvent("ExcludeLocalitiesCommit")
+	    .detail("Localities", describe(localities))
+	    .detail("ExcludeFailed", failed)
+	    .detail("ExclusionUpdated", containNewExclusion);
+	return Void();
 }
 
 // Exclude the servers matching the given set of localities from use as state servers.
@@ -1496,7 +1756,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 		state Transaction tr(cx);
 		loop {
 			try {
-				excludeLocalities(tr, localities, failed);
+				wait(excludeLocalities(&tr, localities, failed));
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
@@ -1730,11 +1990,9 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 	}
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr) {
 	state RangeResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-	state RangeResult r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
-	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<AddressExclusion> exclusions;
 	for (auto i = r.begin(); i != r.end(); ++i) {
@@ -1742,7 +2000,16 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr) 
 		if (a.isValid())
 			exclusions.push_back(a);
 	}
-	for (auto i = r2.begin(); i != r2.end(); ++i) {
+	uniquify(exclusions);
+	return exclusions;
+}
+
+ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr) {
+	state RangeResult r = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+
+	std::vector<AddressExclusion> exclusions;
+	for (auto i = r.begin(); i != r.end(); ++i) {
 		auto a = decodeFailedServersKey(i->key);
 		if (a.isValid())
 			exclusions.push_back(a);
@@ -1751,14 +2018,54 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr) 
 	return exclusions;
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx) {
+ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr) {
+	state std::vector<AddressExclusion> exclusions;
+	// Request all exclusion based information concurrently.
+	state Future<std::vector<AddressExclusion>> fExcludedServers = getExcludedServerList(tr);
+	state Future<std::vector<AddressExclusion>> fExcludedFailed = getExcludedFailedServerList(tr);
+	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(tr);
+	state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr);
+
+	// Wait until all data is gathered, we are not waiting here for the workers future to return
+	// instead we wait for the worker future only if we need the data.
+	wait(success(fExcludedServers) && success(fExcludedFailed) && success(fExcludedLocalities));
+	// Update the exclusions vector with all excluded servers.
+	auto excludedServers = fExcludedServers.get();
+	exclusions.insert(exclusions.end(), excludedServers.begin(), excludedServers.end());
+	auto excludedFailed = fExcludedFailed.get();
+	exclusions.insert(exclusions.end(), excludedFailed.begin(), excludedFailed.end());
+
+	// We have to return all servers that are excluded, this includes servers that are excluded
+	// based on the locality. Otherwise those excluded servers might be used, even if they shouldn't.
+	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+
+	// Only if at least one locality was found we have to perform this check.
+	if (!excludedLocalities.empty()) {
+		// First we have to fetch all workers to match the localities of each worker against the excluded localities.
+		wait(success(fWorkers));
+		state std::vector<ProcessData> workers = fWorkers.get();
+
+		for (const auto& locality : excludedLocalities) {
+			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality);
+			if (!localityAddresses.empty()) {
+				// Add all the server ipaddresses that belong to the given localities to the exclusionSet.
+				exclusions.insert(exclusions.end(), localityAddresses.begin(), localityAddresses.end());
+			}
+		}
+	}
+
+	uniquify(exclusions);
+	return exclusions;
+}
+
+ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			std::vector<AddressExclusion> exclusions = wait(getExcludedServers(&tr));
+			std::vector<AddressExclusion> exclusions = wait(getAllExcludedServers(&tr));
 			return exclusions;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1766,19 +2073,25 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx) {
 	}
 }
 
-// Get the current list of excluded localities by reading the keys.
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr) {
+ACTOR Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr) {
 	state RangeResult r = wait(tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-	state RangeResult r2 = wait(tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
-	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<std::string> excludedLocalities;
 	for (const auto& i : r) {
 		auto a = decodeExcludedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
 	}
-	for (const auto& i : r2) {
+	uniquify(excludedLocalities);
+	return excludedLocalities;
+}
+
+ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction* tr) {
+	state RangeResult r = wait(tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+
+	std::vector<std::string> excludedLocalities;
+	for (const auto& i : r) {
 		auto a = decodeFailedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
 	}
@@ -1786,15 +2099,32 @@ ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr) {
 	return excludedLocalities;
 }
 
+ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr) {
+	state std::vector<std::string> exclusions;
+	state Future<std::vector<std::string>> fExcludedLocalities = getExcludedLocalityList(tr);
+	state Future<std::vector<std::string>> fFailedLocalities = getExcludedFailedLocalityList(tr);
+
+	// Wait until all data is gathered.
+	wait(success(fExcludedLocalities) && success(fFailedLocalities));
+
+	auto excludedLocalities = fExcludedLocalities.get();
+	exclusions.insert(exclusions.end(), excludedLocalities.begin(), excludedLocalities.end());
+	auto failedLocalities = fFailedLocalities.get();
+	exclusions.insert(exclusions.end(), failedLocalities.begin(), failedLocalities.end());
+
+	uniquify(exclusions);
+	return exclusions;
+}
+
 // Get the list of excluded localities by reading the keys.
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx) {
+ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			std::vector<std::string> exclusions = wait(getExcludedLocalities(&tr));
+			std::vector<std::string> exclusions = wait(getAllExcludedLocalities(&tr));
 			return exclusions;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1816,21 +2146,56 @@ std::pair<std::string, std::string> decodeLocality(const std::string& locality) 
 	return std::make_pair("", "");
 }
 
-// Returns the list of IPAddresses of the workers that match the given locality.
-// Example: locality="dcid:primary" returns all the ip addresses of the workers in the primary dc.
-std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers,
-                                                  const std::string& locality) {
-	std::pair<std::string, std::string> localityKeyValue = decodeLocality(locality);
+// Returns the list of IPAddresses of the servers that match the given locality.
+// Example: locality="dcid:primary" returns all the ip addresses of the servers in the primary dc.
+std::set<AddressExclusion> getServerAddressesByLocality(
+    const std::map<std::string, StorageServerInterface> server_interfaces,
+    const std::string& locality) {
+	std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
+	std::set<AddressExclusion> locality_addresses;
 
-	std::set<AddressExclusion> localityAddresses;
-	for (int i = 0; i < workers.size(); i++) {
-		if (workers[i].locality.isPresent(localityKeyValue.first) &&
-		    workers[i].locality.get(localityKeyValue.first) == localityKeyValue.second) {
-			localityAddresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
+	for (auto& server : server_interfaces) {
+		auto locality_value = server.second.locality.get(locality_key_value.first);
+		if (!locality_value.present()) {
+			continue;
+		}
+
+		if (locality_value.get() != locality_key_value.second) {
+			continue;
+		}
+
+		auto primary_address = server.second.address();
+		locality_addresses.insert(AddressExclusion(primary_address.ip, primary_address.port));
+		if (server.second.secondaryAddress().present()) {
+			auto secondary_address = server.second.secondaryAddress().get();
+			locality_addresses.insert(AddressExclusion(secondary_address.ip, secondary_address.port));
 		}
 	}
 
-	return localityAddresses;
+	return locality_addresses;
+}
+
+// Returns the list of IPAddresses of the workers that match the given locality.
+// Example: locality="locality_dcid:primary" returns all the ip addresses of the workers in the primary dc.
+std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers,
+                                                  const std::string& locality) {
+	std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
+	std::set<AddressExclusion> locality_addresses;
+
+	for (int i = 0; i < workers.size(); i++) {
+		auto locality_value = workers[i].locality.get(locality_key_value.first);
+		if (!locality_value.present()) {
+			continue;
+		}
+
+		if (locality_value.get() != locality_key_value.second) {
+			continue;
+		}
+
+		locality_addresses.insert(AddressExclusion(workers[i].address.ip, workers[i].address.port));
+	}
+
+	return locality_addresses;
 }
 
 ACTOR Future<Void> printHealthyZone(Database cx) {
@@ -1922,6 +2287,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> old = wait(tr.get(dataDistributionModeKey));
 			if (oldMode < 0) {
 				oldMode = 1;
@@ -1940,6 +2306,8 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 			tr.set(dataDistributionModeKey, wr.toValue());
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
+				// set DDMode to 2 is a security mode which disables data moves but allows auditStorage part
+				// DDMode=2 is set when shard location metadata inconsistency is detected
 				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
 				if (currentHealthyZoneValue.present() &&
 				    decodeHealthyZoneValue(currentHealthyZoneValue.get()).first == ignoreSSFailuresZoneString) {
@@ -2145,6 +2513,9 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 
 ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 	state Transaction tr(cx);
+	UID debugID = deterministicRandom()->randomUniqueID();
+	TraceEvent("LockDatabaseTransaction", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			wait(lockDatabase(&tr, id));
@@ -2356,6 +2727,72 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               KeyRange range,
+                               AuditType type,
+                               KeyValueStoreType engineType,
+                               double timeoutSeconds) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevVerbose, "ManagementAPIAuditStorageTrigger").detail("AuditType", type).detail("Range", range);
+	state UID auditId;
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		TraceEvent(SevVerbose, "ManagementAPIAuditStorageBegin").detail("AuditType", type).detail("Range", range);
+		TriggerAuditRequest req(type, range, engineType);
+		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		auditId = auditId_;
+		TraceEvent(SevVerbose, "ManagementAPIAuditStorageEnd")
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("AuditID", auditId);
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ManagementAPIAuditStorageError")
+		    .errorUnsuppressed(e)
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("AuditID", auditId);
+		throw e;
+	}
+
+	return auditId;
+}
+
+ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                                     AuditType type,
+                                     UID auditId,
+                                     double timeoutSeconds) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageTrigger")
+	    .detail("AuditType", type)
+	    .detail("AuditId", auditId);
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageBegin")
+		    .detail("AuditType", type)
+		    .detail("AuditId", auditId);
+		TriggerAuditRequest req(type, auditId);
+		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		ASSERT(auditId_ == auditId);
+		TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageEnd")
+		    .detail("AuditType", type)
+		    .detail("AuditID", auditId);
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ManagementAPICancelAuditStorageError")
+		    .errorUnsuppressed(e)
+		    .detail("AuditType", type)
+		    .detail("AuditID", auditId);
+		throw e;
+	}
+
+	return auditId;
+}
+
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	state ReadYourWritesTransaction tr(cx);
 
@@ -2544,21 +2981,6 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
-void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantName);
-	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
-}
-
-ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
-	if (!v.present()) {
-		return Optional<uint64_t>();
-	}
-	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
-}
-
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 	// Note: the error message here should not be changed if possible
 	// If you do change the message here,
@@ -2624,7 +3046,8 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
 			                        "",
 			                        "",
-			                        currentProtocolVersion());
+			                        currentProtocolVersion(),
+			                        false);
 		}
 
 		workers.push_back(data);

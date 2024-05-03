@@ -24,7 +24,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PingWorkloadInterface {
@@ -39,6 +38,8 @@ struct PingWorkloadInterface {
 };
 
 struct PingWorkload : TestWorkload {
+	static constexpr auto NAME = "Ping";
+
 	double testDuration, operationsPerSecond;
 	PingWorkloadInterface interf;
 	bool logging, pingWorkers, registerInterface, broadcastTest, usePayload, parallelBroadcast, workerBroadcast;
@@ -69,7 +70,6 @@ struct PingWorkload : TestWorkload {
 		actorCount = getOption(options, "actorCount"_sr, 1);
 	}
 
-	std::string description() const override { return "PingWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (pingWorkers || !registerInterface)
 			return Void();
@@ -304,4 +304,4 @@ struct PingWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<PingWorkload> PingWorkloadFactory("Ping");
+WorkloadFactory<PingWorkload> PingWorkloadFactory;

@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import random_secret_string
+from test_util import random_alphanum_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
@@ -14,7 +14,7 @@ class ClusterFileGenerator:
         self.output_dir = Path(output_dir).resolve()
         assert self.output_dir.exists(), "{} does not exist".format(output_dir)
         assert self.output_dir.is_dir(), "{} is not a directory".format(output_dir)
-        self.tmp_dir = self.output_dir.joinpath("tmp", random_secret_string(16))
+        self.tmp_dir = self.output_dir.joinpath("tmp", random_alphanum_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.cluster_file_path = self.tmp_dir.joinpath("fdb.cluster")
 

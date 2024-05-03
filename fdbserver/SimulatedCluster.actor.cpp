@@ -21,13 +21,19 @@
 #include <cstdint>
 #include <fstream>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string_view>
+#include <unordered_map>
+
 #include <toml.hpp>
+
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/IPAllowList.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
@@ -42,15 +48,20 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/IRandom.h"
 #include "flow/MkCert.h"
+#include "flow/ProcessEvents.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbserver/SimulatedCluster.h"
+#include "flow/IConnection.h"
+#include "fdbserver/MockGlobalState.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
 #undef min
@@ -60,19 +71,29 @@ extern const char* getSourceVersion();
 
 using namespace std::literals;
 
+bool isSimulatorProcessUnreliable() {
+	return g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable();
+}
+
+namespace {
+
+constexpr bool hasRocksDB =
+#ifdef WITH_ROCKSDB
+    true
+#else
+    false
+#endif
+    ;
+
+} // anonymous namespace
+
 namespace probe {
 
 namespace assert {
 
 struct HasRocksDB {
 	constexpr static AnnotationType type = AnnotationType::Assertion;
-	bool operator()(ICodeProbe const* self) const {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-		return true;
-#else
-		return false;
-#endif
-	}
+	constexpr bool operator()(ICodeProbe const* self) const { return ::hasRocksDB; }
 };
 
 constexpr HasRocksDB hasRocksDB;
@@ -92,13 +113,23 @@ std::string describe(int const& val) {
 	return format("%d", val);
 }
 
+template <>
+std::string describe(const SimulationStorageEngine& val) {
+	return std::to_string(static_cast<uint32_t>(val));
+}
+
 namespace {
 
-const int MACHINE_REBOOT_TIME = 10;
+bool isValidSimulationStorageEngineValue(const std::underlying_type_t<SimulationStorageEngine>& value) {
+	return value < static_cast<std::underlying_type_t<SimulationStorageEngine>>(
+	                   SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE);
+}
+
+constexpr int MACHINE_REBOOT_TIME = 10;
 
 // The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
 // Note that this is in addition to the two we always have.
-const int NUM_EXTRA_BW_MACHINES = 5;
+constexpr int NUM_EXTRA_BW_MACHINES = 5;
 
 bool destructed = false;
 
@@ -107,7 +138,16 @@ bool destructed = false;
 class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::variant<int, float, double, bool, std::string, std::vector<int>, ConfigDBType>;
+		using base_variant = std::variant<int,
+		                                  float,
+		                                  double,
+		                                  bool,
+		                                  std::string,
+		                                  std::vector<int>,
+		                                  std::vector<std::string>,
+		                                  ConfigDBType,
+		                                  SimulationStorageEngine,
+		                                  std::set<SimulationStorageEngine>>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -148,6 +188,40 @@ class TestConfig : public BasicTestConfig {
 				(*this)(&res);
 				*val = std::move(res);
 			}
+			void operator()(std::vector<std::string>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					val->emplace_back(i.as_string());
+				}
+			}
+			void operator()(Optional<std::vector<std::string>>* val) const {
+				std::vector<std::string> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+			void operator()(std::set<SimulationStorageEngine>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					const auto intVal = static_cast<uint8_t>(i.as_integer());
+					ASSERT(isValidSimulationStorageEngineValue(intVal));
+					val->insert(static_cast<SimulationStorageEngine>(intVal));
+				}
+			}
+			void operator()(Optional<std::set<SimulationStorageEngine>>* val) const {
+				std::set<SimulationStorageEngine> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
+			void operator()(SimulationStorageEngine* val) const {
+				uint8_t intVal = static_cast<uint8_t>(value.as_integer());
+				ASSERT(isValidSimulationStorageEngineValue(intVal));
+				*val = static_cast<SimulationStorageEngine>(intVal);
+			}
+			void operator()(Optional<SimulationStorageEngine>* val) const {
+				SimulationStorageEngine v;
+				(*this)(&v);
+				*val = v;
+			}
 		};
 
 		struct trace_visitor {
@@ -172,6 +246,26 @@ class TestConfig : public BasicTestConfig {
 				evt.detail(key.c_str(), value.str());
 			}
 			void operator()(Optional<std::vector<int>> const* val) const {
+				if (!val->present()) {
+					evt.detail(key.c_str(), *val);
+				} else {
+					(*this)(&(val->get()));
+				}
+			}
+			void operator()(std::vector<std::string> const* val) const {
+				if (val->empty()) {
+					evt.detail(key.c_str(), "[]");
+					return;
+				}
+				std::stringstream value;
+				value << "[" << val->at(0);
+				for (int i = 1; i < val->size(); ++i) {
+					value << "," << val->at(i);
+				}
+				value << "]";
+				evt.detail(key.c_str(), value.str());
+			}
+			void operator()(Optional<std::vector<std::string>> const* val) const {
 				if (!val->present()) {
 					evt.detail(key.c_str(), *val);
 				} else {
@@ -275,7 +369,8 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "storageEngineExcludeTypes") {
 				std::stringstream ss(value);
 				for (int i; ss >> i;) {
-					storageEngineExcludeTypes.push_back(i);
+					ASSERT(isValidSimulationStorageEngineValue(i));
+					storageEngineExcludeTypes.insert(static_cast<SimulationStorageEngine>(i));
 					if (ss.peek() == ',') {
 						ss.ignore();
 					}
@@ -293,8 +388,12 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "disableRemoteKVS") {
 				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "disableEncryption") {
-				disableEncryption = strcmp(value.c_str(), "true") == 0;
+			if (attrib == "encryptModes") {
+				std::stringstream ss(value);
+				std::string token;
+				while (std::getline(ss, token, ',')) {
+					encryptModes.push_back(token);
+				}
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
@@ -312,12 +411,36 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "blobGranulesEnabled") {
 				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "simHTTPServerEnabled") {
+				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "allowDefaultTenant") {
+				allowDefaultTenant = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "allowCreatingTenants") {
+				allowCreatingTenants = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "injectSSTargetedRestart") {
 				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
 			}
-
-			if (attrib == "injectSSDelay") {
-				injectSSDelay = strcmp(value.c_str(), "true") == 0;
+			if (attrib == "tenantModes") {
+				std::stringstream ss(value);
+				std::string token;
+				while (std::getline(ss, token, ',')) {
+					tenantModes.push_back(token);
+				}
+			}
+			if (attrib == "defaultTenant") {
+				defaultTenant = value;
+			}
+			if (attrib == "longRunningTest") {
+				longRunningTest = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "simulationNormalRunTestsTimeoutSeconds") {
+				sscanf(value.c_str(), "%d", &simulationNormalRunTestsTimeoutSeconds);
+			}
+			if (attrib == "simulationBuggifyRunTestsTimeoutSeconds") {
+				sscanf(value.c_str(), "%d", &simulationBuggifyRunTestsTimeoutSeconds);
 			}
 		}
 
@@ -331,6 +454,7 @@ public:
 	ISimulator::ExtraDatabaseMode extraDatabaseMode = ISimulator::ExtraDatabaseMode::Disabled;
 	// The number of extra database used if the database mode is MULTIPLE
 	int extraDatabaseCount = 1;
+	bool extraDatabaseBackupAgents = false;
 	int minimumReplication = 0;
 	int minimumRegions = 0;
 	bool configureLocked = false;
@@ -342,17 +466,19 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
-	// 7.2 cannot be downgraded to 7.1 or below after enabling encryption-at-rest.
-	bool disableEncryption = false;
+	// By default, encryption mode is set randomly (based on the tenant mode)
+	// If provided, set using EncryptionAtRestMode::fromString
+	std::vector<std::string> encryptModes;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
-	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-1-experimental"
+	//	2 = "memory-radixtree"
+	//	3 = "ssd-redwood-1"
 	//	4 = "ssd-rocksdb-v1"
 	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
-	std::vector<int> storageEngineExcludeTypes;
+	// See SimulationStorageEngine for more details
+	std::set<SimulationStorageEngine> storageEngineExcludeTypes;
 	Optional<int> datacenters, stderrSeverity, processesPerMachine;
 	// Set the maximum TLog version that can be selected for a test
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
@@ -361,16 +487,26 @@ public:
 
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
+	Optional<std::string> remoteConfig;
 	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
+	bool simHTTPServerEnabled = true;
 
 	bool allowDefaultTenant = true;
-	bool allowDisablingTenants = true;
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
+	// By default, tenant mode is set randomly
+	// If provided, set using TenantMode::fromString
+	// Ensure no '_experimental` suffix in the mode name
+	std::vector<std::string> tenantModes;
+	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
+
+	bool longRunningTest = false;
+	int simulationNormalRunTestsTimeoutSeconds = 5400;
+	int simulationBuggifyRunTestsTimeoutSeconds = 36000;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -402,6 +538,7 @@ public:
 		    .add("testPriority", &testPriority)
 		    .add("extraDatabaseMode", &extraDatabaseModeStr)
 		    .add("extraDatabaseCount", &extraDatabaseCount)
+		    .add("extraDatabaseBackupAgents", &extraDatabaseBackupAgents)
 		    .add("minimumReplication", &minimumReplication)
 		    .add("minimumRegions", &minimumRegions)
 		    .add("configureLocked", &configureLocked)
@@ -412,7 +549,7 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
-		    .add("disableEncryption", &disableEncryption)
+		    .add("encryptModes", &encryptModes)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -422,20 +559,27 @@ public:
 		    .add("resolverCount", &resolverCount)
 		    .add("storageEngineType", &storageEngineType)
 		    .add("config", &config)
+		    .add("remoteConfig", &remoteConfig)
 		    .add("buggify", &buggify)
 		    .add("StderrSeverity", &stderrSeverity)
 		    .add("machineCount", &machineCount)
+		    .add("asanMachineCount", &asanMachineCount)
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
+		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
-		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
-		    .add("injectSSDelay", &injectSSDelay);
+		    .add("injectSSDelay", &injectSSDelay)
+		    .add("tenantModes", &tenantModes)
+		    .add("defaultTenant", &defaultTenant)
+		    .add("longRunningTest", &longRunningTest)
+		    .add("simulationNormalRunTestsTimeoutSeconds", &simulationNormalRunTestsTimeoutSeconds)
+		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -472,6 +616,10 @@ public:
 				flushAndExit(0);
 			}
 		}
+	}
+
+	bool excludedStorageEngineType(SimulationStorageEngine storageEngineType) const {
+		return storageEngineExcludeTypes.contains(storageEngineType);
 	}
 
 	TestConfig() = default;
@@ -555,7 +703,37 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	throw internal_error();
 }
 
-enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
+ACTOR Future<Void> runSimHTTPServer() {
+	TraceEvent("SimHTTPServerStarting");
+	state Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
+	g_simulator->addSimHTTPProcess(context);
+
+	try {
+		wait(context->actors.getResult());
+	} catch (Error& e) {
+		TraceEvent("SimHTTPServerDied").errorUnsuppressed(e);
+		context->stop();
+		g_simulator->removeSimHTTPProcess();
+		throw e;
+	}
+	throw internal_error();
+}
+
+// enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
+// FIXME: could do this as bit flags of (fdbd) (backup agent) (http) etc... if the space gets more complicated
+enum ProcessMode { FDBDOnly = 0, BackupAgentOnly = 1, FDBDAndBackupAgent = 2, SimHTTPServer = 3 };
+
+bool processRunBackupAgent(ProcessMode mode) {
+	return mode == BackupAgentOnly || mode == FDBDAndBackupAgent;
+}
+
+bool processRunFDBD(ProcessMode mode) {
+	return mode == FDBDOnly || mode == FDBDAndBackupAgent;
+}
+
+bool processRunHTTPServer(ProcessMode mode) {
+	return mode == SimHTTPServer;
+}
 
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
@@ -571,11 +749,13 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
                                                          std::string* coordFolder,
                                                          std::string baseFolder,
                                                          ClusterConnectionString connStr,
+                                                         ClusterConnectionString otherConnStr,
                                                          bool useSeedFile,
-                                                         AgentMode runBackupAgents,
+                                                         ProcessMode processMode,
                                                          std::string whitelistBinPaths,
                                                          ProtocolVersion protocolVersion,
-                                                         ConfigDBType configDBType) {
+                                                         ConfigDBType configDBType,
+                                                         bool isDr) {
 	state ISimulator::ProcessInfo* simProcess = g_simulator->getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
@@ -595,7 +775,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		    .detail("Address", NetworkAddress(ip, port, true, false))
 		    .detail("ZoneId", localities.zoneId())
 		    .detail("WaitTime", waitTime)
-		    .detail("Port", port);
+		    .detail("Port", port)
+		    .detail("IsDr", isDr);
 
 		wait(delay(waitTime));
 
@@ -608,7 +789,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		                                                                 processClass,
 		                                                                 dataFolder->c_str(),
 		                                                                 coordFolder->c_str(),
-		                                                                 protocolVersion);
+		                                                                 protocolVersion,
+		                                                                 isDr);
 		wait(g_simulator->onProcess(
 		    process,
 		    TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
@@ -622,7 +804,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("DataHall", localities.dataHallId())
 			    .detail("Address", process->address.toString())
 			    .detail("Excluded", process->excluded)
-			    .detail("UsingSSL", sslEnabled);
+			    .detail("UsingSSL", sslEnabled)
+			    .detail("ProcessMode", processMode);
 			TraceEvent("ProgramStart")
 			    .detail("Cycles", cycles)
 			    .detail("RandomId", randomId)
@@ -640,10 +823,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			try {
 				// SOMEDAY: test lower memory limits, without making them too small and causing the database to stop
 				// making progress
-				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
-				                              1,
-				                              WLTOKEN_RESERVED_COUNT,
-				                              &allowList);
+				bool client = processClass == ProcessClass::TesterClass || processMode == BackupAgentOnly ||
+				              processMode == SimHTTPServer;
+				FlowTransport::createInstance(client, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 				for (const auto& p : g_simulator->authKeys) {
 					FlowTransport::transport().addPublicKey(p.first, p.second.toPublic());
 				}
@@ -654,7 +836,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
 				}
-				if (runBackupAgents != AgentOnly) {
+				if (processRunFDBD(processMode)) {
 					futures.push_back(fdbd(connRecord,
 					                       localities,
 					                       processClass,
@@ -669,12 +851,30 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					                       {},
 					                       configDBType));
 				}
-				if (runBackupAgents != AgentNone) {
+				if (processRunBackupAgent(processMode)) {
 					futures.push_back(runBackup(connRecord));
 					futures.push_back(runDr(connRecord));
 				}
+				if (processRunHTTPServer(processMode)) {
+					fmt::print("Process {0} run http server\n", ip.toString());
+					futures.push_back(runSimHTTPServer());
+				}
 
 				futures.push_back(success(onShutdown));
+				if (!g_simulator->globalHasSwitchedCluster() && g_simulator->hasSwitchedCluster(process->address)) {
+					// When switching machines between clusters, a simultaneous
+					// reboot followed by a reboot and switch can cause the
+					// reboot and switch to be ignored. Handle this case by
+					// sending the reboot and switch kill type when the process
+					// comes back online.
+					TraceEvent("RebootProcessAndSwitchLateReboot").detail("Address", process->address);
+					g_simulator->switchCluster(process->address);
+					process->shutdownSignal.send(ISimulator::KillType::RebootProcessAndSwitch);
+					// Need to set the rebooting flag to true to keep the same behavior as MachineAttrition
+					// Otherwise, a protected process, like a coordinator process can execute this code path but the
+					// rebooting flag is still false, which breaks the assertion in g_simulator->destroyProcess
+					process->rebooting = true;
+				}
 				wait(waitForAny(futures));
 			} catch (Error& e) {
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set
@@ -687,7 +887,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					    .backtrace();
 
 				if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
-					onShutdown = ISimulator::RebootProcess;
+					onShutdown = ISimulator::KillType::RebootProcess;
 				}
 
 				if (onShutdown.isReady() && onShutdown.isError())
@@ -711,10 +911,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("Address", process->address)
 			    .detail("Excluded", process->excluded)
 			    .detail("ZoneId", localities.zoneId())
-			    .detail("KillType", onShutdown.isReady() ? onShutdown.get() : ISimulator::None);
+			    .detail("KillType", onShutdown.isReady() ? onShutdown.get() : ISimulator::KillType::None);
 
 			if (!onShutdown.isReady())
-				onShutdown = ISimulator::InjectFaults;
+				onShutdown = ISimulator::KillType::InjectFaults;
 		} catch (Error& e) {
 			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError")
 			    .errorUnsuppressed(e)
@@ -727,7 +927,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 
 		if (!process->shutdownSignal.isSet() && !destructed) {
 			process->rebooting = true;
-			process->shutdownSignal.send(ISimulator::None);
+			process->shutdownSignal.send(ISimulator::KillType::None);
 		}
 		TraceEvent("SimulatedFDBDWait")
 		    .detail("Cycles", cycles)
@@ -752,7 +952,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		    .detail("ZoneId", localities.zoneId())
 		    .detail("KillType", shutdownResult);
 
-		if (shutdownResult < ISimulator::RebootProcessAndDelete) {
+		if (shutdownResult < ISimulator::KillType::RebootProcessAndDelete) {
 			TraceEvent("SimulatedFDBDLowerReboot")
 			    .detail("Cycles", cycles)
 			    .detail("RandomId", randomId)
@@ -763,7 +963,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			return onShutdown.get();
 		}
 
-		if (onShutdown.get() == ISimulator::RebootProcessAndDelete) {
+		if (onShutdown.get() == ISimulator::KillType::RebootProcessAndDelete) {
 			TraceEvent("SimulatedFDBDRebootAndDelete")
 			    .detail("Cycles", cycles)
 			    .detail("RandomId", randomId)
@@ -781,6 +981,24 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				connRecord =
 				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 			}
+		} else if (onShutdown.get() == ISimulator::KillType::RebootProcessAndSwitch) {
+			TraceEvent("SimulatedFDBDRebootAndSwitch")
+			    .detail("Cycles", cycles)
+			    .detail("RandomId", randomId)
+			    .detail("Address", process->address)
+			    .detail("ZoneId", localities.zoneId())
+			    .detail("KillType", shutdownResult)
+			    .detail("ConnectionString", connStr.toString())
+			    .detail("OtherConnectionString", otherConnStr.toString())
+			    .detail("SwitchingTo", g_simulator->hasSwitchedCluster(process->address))
+			    .detail("MachineId", process->machine->machineId);
+
+			// Handle the case where otherConnStr is '@'.
+			if (otherConnStr.toString().size() > 1) {
+				std::string newConnStr =
+				    g_simulator->hasSwitchedCluster(process->address) ? otherConnStr.toString() : connStr.toString();
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), newConnStr);
+			}
 		} else {
 			TraceEvent("SimulatedFDBDJustRepeat")
 			    .detail("Cycles", cycles)
@@ -797,6 +1015,7 @@ std::map<Optional<Standalone<StringRef>>, std::vector<std::vector<std::string>>>
 // process count is no longer needed because it is now the length of the vector of ip's, because it was one ip per
 // process
 ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
+                                    ClusterConnectionString otherConnStr,
                                     std::vector<IPAddress> ips,
                                     bool sslEnabled,
                                     LocalityData localities,
@@ -804,11 +1023,12 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
                                     std::string baseFolder,
                                     bool restarting,
                                     bool useSeedFile,
-                                    AgentMode runBackupAgents,
+                                    ProcessMode processMode,
                                     bool sslOnly,
                                     std::string whitelistBinPaths,
                                     ProtocolVersion protocolVersion,
-                                    ConfigDBType configDBType) {
+                                    ConfigDBType configDBType,
+                                    bool isDr) {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
@@ -848,8 +1068,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				myFolders.push_back(joinPath(baseFolder, thisFolder));
 				platform::createDirectory(myFolders[i]);
 
-				if (!useSeedFile)
+				if (!useSeedFile) {
 					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+				}
 			}
 		}
 
@@ -857,13 +1078,22 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
-				Reference<IClusterConnectionRecord> clusterFile(
-				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
-				                : new ClusterConnectionFile(path));
+				ProcessMode ipProcessMode =
+				    processMode == BackupAgentOnly ? (i == ips.size() - 1 ? BackupAgentOnly : FDBDOnly) : processMode;
+
+				// for some reason http servers are having issues with seed files which doesn't matter because they
+				// don't use the db
+				Reference<IClusterConnectionRecord> clusterFile;
+				if (ipProcessMode != SimHTTPServer) {
+					// Fall back to use seed string if fdb.cluster not present
+					// It can happen when a process failed before it persisted the connection string to disk
+					clusterFile = Reference<IClusterConnectionRecord>(
+					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
+					                                     : new ClusterConnectionFile(path));
+				}
 				const int listenPort = i * listenPerProcess + 1;
-				AgentMode agentMode =
-				    runBackupAgents == AgentOnly ? (i == ips.size() - 1 ? AgentOnly : AgentNone) : runBackupAgents;
-				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && agentMode == AgentNone) {
+
+				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && ipProcessMode == FDBDOnly) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
 					                                          ips[i],
 					                                          sslEnabled,
@@ -875,11 +1105,13 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          &coordFolders[i],
 					                                          baseFolder,
 					                                          connStr,
+					                                          otherConnStr,
 					                                          useSeedFile,
-					                                          agentMode,
+					                                          ipProcessMode,
 					                                          whitelistBinPaths,
 					                                          protocolVersion,
-					                                          configDBType));
+					                                          configDBType,
+					                                          isDr));
 					g_simulator->setDiffProtocol = true;
 				} else {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
@@ -893,11 +1125,13 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          &coordFolders[i],
 					                                          baseFolder,
 					                                          connStr,
+					                                          otherConnStr,
 					                                          useSeedFile,
-					                                          agentMode,
+					                                          ipProcessMode,
 					                                          whitelistBinPaths,
 					                                          g_network->protocolVersion(),
-					                                          configDBType));
+					                                          configDBType,
+					                                          isDr));
 				}
 				TraceEvent("SimulatedMachineProcess", randomId)
 				    .detail("Address", NetworkAddress(ips[i], listenPort, true, false))
@@ -908,7 +1142,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 
 			CODE_PROBE(bootCount >= 1, "Simulated machine rebooted");
 			CODE_PROBE(bootCount >= 2, "Simulated machine rebooted twice");
-			CODE_PROBE(bootCount >= 3, "Simulated machine rebooted three times");
+			CODE_PROBE(bootCount >= 3, "Simulated machine rebooted three times", probe::decoration::rare);
 			++bootCount;
 
 			TraceEvent("SimulatedMachineStart", randomId)
@@ -1030,7 +1264,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 
 			CODE_PROBE(true, "Simulated machine has been rebooted");
 
-			state bool swap = killType == ISimulator::Reboot && BUGGIFY_WITH_PROB(0.75) &&
+			state bool swap = killType == ISimulator::KillType::Reboot && BUGGIFY_WITH_PROB(0.75) &&
 			                  g_simulator->canSwapToMachine(localities.zoneId());
 			if (swap)
 				availableFolders[localities.dcId()].push_back(myFolders);
@@ -1056,7 +1290,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				avail.pop_back();
 
 				if (myFolders != toRebootFrom) {
-					CODE_PROBE(true, "Simulated machine swapped data folders");
+					CODE_PROBE(true, "Simulated machine swapped data folders", probe::decoration::rare);
 					TraceEvent("SimulatedMachineFolderSwap", randomId)
 					    .detail("OldFolder0", myFolders[0])
 					    .detail("NewFolder0", toRebootFrom[0])
@@ -1070,7 +1304,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 						}
 					}
 				}
-			} else if (killType == ISimulator::RebootAndDelete) {
+			} else if (killType == ISimulator::KillType::RebootAndDelete) {
 				for (int i = 0; i < ips.size(); i++) {
 					coordFolders[i] = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
 					myFolders[i] = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
@@ -1116,18 +1350,18 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
                                           int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
                                           Standalone<StringRef>* pStartingConfiguration,
-                                          TestConfig testConfig,
+                                          TestConfig* testConfig,
                                           std::string whitelistBinPaths,
                                           ProtocolVersion protocolVersion) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
 
-	auto configDBType = testConfig.getConfigDBType();
+	auto configDBType = testConfig->getConfigDBType();
 
 	// Randomly change data center id names to test that localities
 	// can be modified on cluster restart
-	bool renameZoneIds = testConfig.randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
+	bool renameZoneIds = testConfig->randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
 	CODE_PROBE(renameZoneIds, "Zone ID names altered in restart test");
 
 	// allows multiple ipAddr entries
@@ -1144,31 +1378,34 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		auto tssModeStr = ini.GetValue("META", "tssMode");
+		auto tenantMode = ini.GetValue("META", "tenantMode");
+		if (tenantMode != nullptr) {
+			CODE_PROBE(true, "Restarting test with tenant mode set");
+			testConfig->tenantModes.push_back(tenantMode);
+		}
+		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
+		if (!defaultTenant.empty()) {
+			CODE_PROBE(true, "Restarting test with default tenant set");
+			testConfig->defaultTenant = defaultTenant;
+		}
 		if (tssModeStr != nullptr) {
 			g_simulator->tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
 		}
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
-		if (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
+		if (testConfig->extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
 			g_simulator->extraDatabases.clear();
 			g_simulator->extraDatabases.push_back(conn.toString());
 		}
-		if (!testConfig.disableHostname) {
+		if (!testConfig->disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
 			if (mockDNSStr != nullptr) {
 				INetworkConnections::net()->parseMockDNSFromString(mockDNSStr);
 			}
 		}
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		if (testConfig.disableRemoteKVS) {
+		if (testConfig->disableRemoteKVS) {
 			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableRemoteKVS");
-		}
-		if (testConfig.disableEncryption) {
-			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
-			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
-			g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisableEncryption");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1254,6 +1491,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn,
+			                     ClusterConnectionString(),
 			                     ipAddrs,
 			                     usingSSL,
 			                     localities,
@@ -1261,11 +1499,12 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                     baseFolder,
 			                     true,
 			                     i == useSeedForMachine,
-			                     AgentAddition,
+			                     processClass == ProcessClass::SimHTTPServerClass ? SimHTTPServer : FDBDAndBackupAgent,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
 			                     protocolVersion,
-			                     configDBType),
+			                     configDBType,
+			                     false),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
@@ -1316,21 +1555,14 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 }
 
 // Configuration details compiled in a structure used when setting up a simulated cluster
-struct SimulationConfig {
+struct SimulationConfig : public BasicSimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	ISimulator::ExtraDatabaseMode extraDatabaseMode;
 	int extraDatabaseCount;
 	bool generateFearless;
 
-	DatabaseConfiguration db;
-
 	void set_config(std::string config);
 
-	// Simulation layout
-	int datacenters;
-	int replication_type;
-	int machine_count; // Total, not per DC.
-	int processes_per_machine;
 	int coordinators;
 
 private:
@@ -1338,6 +1570,8 @@ private:
 	void setSimpleConfig();
 	void setSpecificConfig(const TestConfig& testConfig);
 	void setDatacenters(const TestConfig& testConfig);
+	void setTenantMode(const TestConfig& testConfig);
+	void setEncryptionAtRestMode(const TestConfig& testConfig);
 	void setStorageEngine(const TestConfig& testConfig);
 	void setRegions(const TestConfig& testConfig);
 	void setReplicationType(const TestConfig& testConfig);
@@ -1445,66 +1679,197 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 	}
 }
 
-// Sets storage engine based on testConfig details
-void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	// Using [0, 4) to disable the RocksDB storage engine.
-	// TODO: Figure out what is broken with the RocksDB engine in simulation.
-	int storage_engine_type = deterministicRandom()->randomInt(0, 6);
-	if (testConfig.storageEngineType.present()) {
-		storage_engine_type = testConfig.storageEngineType.get();
+void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
+	TenantMode tenantMode = TenantMode::DISABLED;
+	if (testConfig.tenantModes.size() > 0) {
+		tenantMode = TenantMode::fromString(deterministicRandom()->randomChoice(testConfig.tenantModes));
+	} else if (testConfig.allowDefaultTenant && deterministicRandom()->coinflip()) {
+		tenantMode = deterministicRandom()->random01() < 0.9 ? TenantMode::REQUIRED : TenantMode::OPTIONAL_TENANT;
+	} else if (deterministicRandom()->coinflip()) {
+		tenantMode = TenantMode::OPTIONAL_TENANT;
+	}
+	set_config("tenant_mode=" + tenantMode.toString());
+}
+
+void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
+	std::vector<bool> available;
+	std::vector<double> probability;
+	if (!testConfig.encryptModes.empty()) {
+		// If encryptModes are specified explicitly, give them equal probability to be chosen.
+		available = std::vector<bool>(EncryptionAtRestMode::END, false);
+		probability = std::vector<double>(EncryptionAtRestMode::END, 0);
+		for (auto& mode : testConfig.encryptModes) {
+			available[EncryptionAtRestMode::fromString(mode).mode] = true;
+			probability[EncryptionAtRestMode::fromString(mode).mode] = 1.0 / testConfig.encryptModes.size();
+		}
 	} else {
-		// Continuously re-pick the storage engine type if it's the one we want to exclude
-		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
-		                 testConfig.storageEngineExcludeTypes.end(),
-		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 6);
+		// If encryptModes are not specified, give encryption higher chance to be enabled.
+		// The good thing is testing with encryption on doesn't loss test coverage for most of the other features.
+		available = std::vector<bool>(EncryptionAtRestMode::END, true);
+		// Enabling encryption require the use of Redwood storage engine, but we don't want to test with Redwood with
+		// high probability in simulation. Setting total probability of encryption being enabled to be close to 1/6,
+		// since we have 6 storage engine type currently.
+		probability = { 0.85, 0.1, 0.05 };
+		// Only Redwood support encryption. Disable encryption if Redwood is not available.
+		if ((testConfig.storageEngineType.present() &&
+		     testConfig.storageEngineType != SimulationStorageEngine::REDWOOD) ||
+		    testConfig.excludedStorageEngineType(SimulationStorageEngine::REDWOOD)) {
+			available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
+			available[(int)EncryptionAtRestMode::CLUSTER_AWARE] = false;
+		}
+	}
+	// domain_aware mode is supported only with required tenant mode.
+	if (db.tenantMode != TenantMode::REQUIRED) {
+		available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
+	}
+	int lastAvailableMode = EncryptionAtRestMode::END;
+	double totalProbability = 0;
+	for (int mode = 0; mode < (int)EncryptionAtRestMode::END; mode++) {
+		if (available[mode]) {
+			lastAvailableMode = mode;
+			totalProbability += probability[mode];
+		}
+	}
+	ASSERT(lastAvailableMode != EncryptionAtRestMode::END); // At least one mode available
+	double r = deterministicRandom()->random01() * totalProbability;
+	EncryptionAtRestMode encryptionMode;
+	for (int mode = 0;; mode++) {
+		if (available[mode] && (r < probability[mode] || mode == lastAvailableMode)) {
+			encryptionMode = (EncryptionAtRestMode::Mode)mode;
+			break;
+		}
+		r -= probability[mode];
+	}
+	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation");
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE, "Enabled cluster-aware encryption in simulation");
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE, "Enabled domain-aware encryption in simulation");
+	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
+}
+
+namespace {
+
+using StorageEngineConfigFunc = void (*)(SimulationConfig*);
+
+void ssdStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using ssd storage engine");
+	simCfg->set_config("ssd");
+}
+void memoryStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using default memory storage engine");
+	simCfg->set_config("memory");
+}
+
+void radixTreeStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using radix-tree storage engine");
+	simCfg->set_config("memory-radixtree");
+}
+
+void redwoodStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using redwood storage engine");
+	// The experimental suffix is still supported so test it randomly
+	simCfg->set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
+}
+
+void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::hasRocksDB);
+	simCfg->set_config("ssd-rocksdb-v1");
+	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+	// background threads.
+	TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
+	    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
+	noUnseed = true;
+}
+
+void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
+	CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
+	simCfg->set_config("encryption_at_rest_mode=disabled");
+	simCfg->set_config("ssd-sharded-rocksdb");
+	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+	// background threads.
+	TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
+	    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
+	noUnseed = true;
+}
+
+const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORAGE_ENGINE_CONFIG_MAPPER = {
+	{ SimulationStorageEngine::SSD, ssdStorageEngineConfig },
+	{ SimulationStorageEngine::MEMORY, memoryStorageEngineConfig },
+	{ SimulationStorageEngine::RADIX_TREE, radixTreeStorageEngineConfig },
+	{ SimulationStorageEngine::REDWOOD, redwoodStorageEngineConfig },
+	{ SimulationStorageEngine::ROCKSDB, rocksdbStorageEngineConfig },
+	{ SimulationStorageEngine::SHARDED_ROCKSDB, shardedRocksDBStorageEngineConfig }
+};
+
+// TODO: Figure out what is broken with the RocksDB engine in simulation.
+const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
+	SimulationStorageEngine::SSD,        SimulationStorageEngine::MEMORY,
+	SimulationStorageEngine::RADIX_TREE, SimulationStorageEngine::REDWOOD,
+#ifdef WITH_ROCKSDB
+	SimulationStorageEngine::ROCKSDB,    SimulationStorageEngine::SHARDED_ROCKSDB,
+#endif
+};
+
+std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStorageEngine>& excluded) {
+	std::string str;
+	for (const auto& e : excluded) {
+		str += std::to_string(static_cast<uint32_t>(e));
+		str += ',';
+	}
+	if (!excluded.empty())
+		str.pop_back();
+	return str;
+}
+
+SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig, const bool isEncryptionEnabled) {
+	StringRef reason;
+	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
+
+	if (testConfig.storageEngineType.present()) {
+		reason = "ConfigureSpecified"_sr;
+		result = testConfig.storageEngineType.get();
+		if (testConfig.excludedStorageEngineType(result) ||
+		    std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
+		        std::end(SIMULATION_STORAGE_ENGINE)) {
+
+			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
+			ASSERT(false);
+		}
+	} else {
+		constexpr auto NUM_RETRIES = 1000;
+		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
+			result = deterministicRandom()->randomChoice(SIMULATION_STORAGE_ENGINE);
+			if (!testConfig.excludedStorageEngineType(result)) {
+				reason = "RandomlyChosen"_sr;
+				break;
+			}
+		}
+		if (result == SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE) {
+			UNREACHABLE();
 		}
 	}
 
-	switch (storage_engine_type) {
-	case 0: {
-		CODE_PROBE(true, "Simulated cluster using ssd storage engine");
-		set_config("ssd");
-		break;
+	if (isEncryptionEnabled) {
+		// Only storage engine supporting encryption is Redwood.
+		reason = "EncryptionEnabled"_sr;
+		result = SimulationStorageEngine::REDWOOD;
 	}
-	case 1: {
-		CODE_PROBE(true, "Simulated cluster using default memory storage engine");
-		set_config("memory");
-		break;
-	}
-	case 2: {
-		CODE_PROBE(true, "Simulated cluster using radix-tree storage engine");
-		set_config("memory-radixtree-beta");
-		break;
-	}
-	case 3: {
-		CODE_PROBE(true, "Simulated cluster using redwood storage engine");
-		set_config("ssd-redwood-1-experimental");
-		break;
-	}
-	case 4: {
-		CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::hasRocksDB);
-		set_config("ssd-rocksdb-v1");
-		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-		// background threads.
-		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
-		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
-		noUnseed = true;
-		break;
-	}
-	case 5: {
-		CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
-		set_config("ssd-sharded-rocksdb");
-		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-		// background threads.
-		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
-		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
-		noUnseed = true;
-		break;
-	}
-	default:
-		ASSERT(false); // Programmer forgot to adjust cases.
-	}
+
+	TraceEvent(SevInfo, "SimulationStorageEngine")
+	    .detail("StorageEngine", static_cast<uint8_t>(result))
+	    .detail("Reason", reason)
+	    .detail("Excluded", getExcludedStorageEngineTypesInString(testConfig.storageEngineExcludeTypes))
+	    .detail("RocksDBEngineChoosable", hasRocksDB);
+
+	return result;
+}
+
+} // anonymous namespace
+
+// Sets storage engine based on testConfig details
+void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
+	auto storageEngineType = chooseSimulationStorageEngine(testConfig, db.encryptionAtRestMode.isEncryptionEnabled());
+	STORAGE_ENGINE_CONFIG_MAPPER.at(storageEngineType)(this);
 }
 
 // Sets replication type and TLogSpillType and Version
@@ -1673,34 +2038,38 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			db.usableRegions = 2;
 		}
 
-		int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
-		switch (remote_replication_type) {
-		case 0: {
-			// FIXME: implement
-			CODE_PROBE(true, "Simulated cluster using custom remote redundancy mode");
-			break;
-		}
-		case 1: {
-			CODE_PROBE(true, "Simulated cluster using default remote redundancy mode");
-			break;
-		}
-		case 2: {
-			CODE_PROBE(true, "Simulated cluster using single remote redundancy mode");
-			set_config("remote_single");
-			break;
-		}
-		case 3: {
-			CODE_PROBE(true, "Simulated cluster using double remote redundancy mode");
-			set_config("remote_double");
-			break;
-		}
-		case 4: {
-			CODE_PROBE(true, "Simulated cluster using triple remote redundancy mode");
-			set_config("remote_triple");
-			break;
-		}
-		default:
-			ASSERT(false); // Programmer forgot to adjust cases.
+		if (testConfig.remoteConfig.present()) {
+			set_config(testConfig.remoteConfig.get());
+		} else {
+			int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
+			switch (remote_replication_type) {
+			case 0: {
+				// FIXME: implement
+				CODE_PROBE(true, "Simulated cluster using custom remote redundancy mode");
+				break;
+			}
+			case 1: {
+				CODE_PROBE(true, "Simulated cluster using default remote redundancy mode");
+				break;
+			}
+			case 2: {
+				CODE_PROBE(true, "Simulated cluster using single remote redundancy mode");
+				set_config("remote_single");
+				break;
+			}
+			case 3: {
+				CODE_PROBE(true, "Simulated cluster using double remote redundancy mode");
+				set_config("remote_double");
+				break;
+			}
+			case 4: {
+				CODE_PROBE(true, "Simulated cluster using triple remote redundancy mode");
+				set_config("remote_triple");
+				break;
+			}
+			default:
+				ASSERT(false); // Programmer forgot to adjust cases.
+			}
 		}
 
 		if (deterministicRandom()->random01() < 0.25)
@@ -1783,6 +2152,11 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 	if (testConfig.machineCount.present()) {
 		machine_count = testConfig.machineCount.get();
+#ifdef ADDRESS_SANITIZER
+		if (testConfig.asanMachineCount.present()) {
+			machine_count = testConfig.asanMachineCount.get();
+		}
+#endif
 	} else if (generateFearless && testConfig.minimumReplication > 1) {
 		// low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that
 		// is down during failures).
@@ -1847,8 +2221,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 void SimulationConfig::setTss(const TestConfig& testConfig) {
 	int tssCount = 0;
 	// TODO: Support TSS in SHARD_ENCODE_LOCATION_METADATA mode.
-	if (!testConfig.simpleConfig && !testConfig.disableTss && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	    deterministicRandom()->random01() < 0.25) {
+	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
 	}
@@ -1899,10 +2272,12 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		setSimpleConfig();
 	}
 	setSpecificConfig(testConfig);
-
+	setTenantMode(testConfig);
+	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+	if (!testConfig.singleRegion &&
+	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
 	setMachineCount(testConfig);
@@ -1930,15 +2305,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string whitelistBinPaths,
                           TestConfig testConfig,
                           ProtocolVersion protocolVersion,
-                          TenantMode tenantMode) {
+                          Optional<TenantMode>* tenantMode) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
+	*tenantMode = simconfig.db.tenantMode;
+
+	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
+		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
+	}
+
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
-
-	simconfig.db.tenantMode = tenantMode;
-	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 
 	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
 
@@ -1947,46 +2326,21 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	if (testConfig.disableRemoteKVS) {
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
 	}
-	if (testConfig.disableEncryption) {
-		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisableEncryption");
-	}
 	auto configDBType = testConfig.getConfigDBType();
-	for (auto kv : startingConfigJSON) {
-		if ("tss_storage_engine" == kv.first) {
-			continue;
-		}
-		if ("perpetual_storage_wiggle_locality" == kv.first) {
-			if (deterministicRandom()->random01() < 0.25) {
-				int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
-				startingConfigString += " " + kv.first + "=" + "data_hall:" + std::to_string(dcId);
-			}
-			continue;
-		}
-		startingConfigString += " ";
-		if (kv.second.type() == json_spirit::int_type) {
-			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
-		} else if (kv.second.type() == json_spirit::str_type) {
-			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first ||
-			    "encryption_at_rest_mode" == kv.first) {
-				startingConfigString += kv.first + "=" + kv.second.get_str();
-			} else {
-				startingConfigString += kv.second.get_str();
-			}
-		} else if (kv.second.type() == json_spirit::array_type) {
-			startingConfigString += kv.first + "=" +
-			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
-			                                                  json_spirit::Output_options::none);
-		} else {
-			ASSERT(false);
+	startingConfigString += DatabaseConfiguration::configureStringFromJSON(startingConfigJSON);
+
+	// Set a random locality for the perpetual wiggle if any locality is set in the config
+	// This behavior is preserved in a refactor but it unclear why the source configuration JSON
+	// is translated to a random locality instead of something matching the source.
+	auto ipwLocality = startingConfigJSON.find("perpetual_storage_wiggle_locality");
+	if (ipwLocality != startingConfigJSON.end()) {
+		if (deterministicRandom()->random01() < 0.25) {
+			int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
+			startingConfigString += " " + ipwLocality->first + "=" + "data_hall:" + std::to_string(dcId);
 		}
 	}
 
@@ -2155,7 +2509,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	ASSERT(coordinatorAddresses.size() > 0);
 
 	// Mark a random majority of the coordinators as protected, so
-	// we won't accidently kill off a quorum and render the
+	// we won't accidentally kill off a quorum and render the
 	// cluster unrecoverable.
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 	for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
@@ -2169,6 +2523,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		}
 	}
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
+
+	for (const auto& coordinators : extraCoordinatorAddresses) {
+		for (int i = 0; i < (coordinators.size() / 2) + 1; i++) {
+			TraceEvent("ProtectCoordinator")
+			    .detail("Address", coordinators[i])
+			    .detail("Coordinators", describe(coordinators));
+			g_simulator->protectedAddresses.insert(
+			    NetworkAddress(coordinators[i].ip, coordinators[i].port, true, coordinators[i].isTLS()));
+			if (coordinators[i].port == 2) {
+				g_simulator->protectedAddresses.insert(NetworkAddress(coordinators[i].ip, 1, true, true));
+			}
+		}
+	}
 
 	ASSERT_EQ(coordinatorAddresses.size(), coordinatorCount);
 	ClusterConnectionString conn(coordinatorAddresses, "TestCluster:0"_sr);
@@ -2198,7 +2565,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("ConfigString", startingConfigString);
 
 	bool requiresExtraDBMachines = !g_simulator->extraDatabases.empty() && !useLocalDatabase;
-	int assignedMachines = 0, nonVersatileMachines = 0;
+	int assignedMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
@@ -2222,12 +2589,17 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		// TODO: caching disabled for this merge
 		int storageCacheMachines = dc == 0 ? 1 : 0;
 		int blobWorkerMachines = 0;
+		int simHTTPMachines = 0;
 		if (testConfig.blobGranulesEnabled) {
 			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
 			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}
+		if (testConfig.simHTTPServerEnabled) {
+			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
+			fmt::print("sim http machines = {0}\n", simHTTPMachines);
+		}
 
-		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
+		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -2252,33 +2624,34 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
-				if (processClass ==
-				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
-					nonVersatileMachines++;
-				}
+
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;
 				}
 			}
 
-			// FIXME: hack to add machines specifically to test storage cache and blob workers
-			// TODO: caching disabled for this merge
+			// FIXME: hack to add machines specifically to test storage cache and blob workers and http server
 			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
+			int processCount = processesPerMachine;
+			ProcessMode processMode = requiresExtraDBMachines ? BackupAgentOnly : FDBDAndBackupAgent;
 			if (machine >= machines) {
 				if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					storageCacheMachines--;
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
 					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					blobWorkerMachines--;
+				} else if (simHTTPMachines > 0) {
+					processClass = ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource);
+					processCount = 1;
+					processMode = SimHTTPServer;
+					simHTTPMachines--;
 				}
 			}
 
 			std::vector<IPAddress> ips;
 			ips.reserve(processesPerMachine);
-			for (int i = 0; i < processesPerMachine; i++) {
+			for (int i = 0; i < processCount; i++) {
 				ips.push_back(
 				    makeIPAddressForSim(useIPv6, { 2, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
 			}
@@ -2289,20 +2662,24 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// check the sslEnablementMap using only one ip
 			LocalityData localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set("data_hall"_sr, dcUID);
-			systemActors->push_back(reportErrors(simulatedMachine(conn,
-			                                                      ips,
-			                                                      sslEnabled,
-			                                                      localities,
-			                                                      processClass,
-			                                                      baseFolder,
-			                                                      false,
-			                                                      machine == useSeedForMachine,
-			                                                      requiresExtraDBMachines ? AgentOnly : AgentAddition,
-			                                                      sslOnly,
-			                                                      whitelistBinPaths,
-			                                                      protocolVersion,
-			                                                      configDBType),
-			                                     "SimulatedMachine"));
+			systemActors->push_back(reportErrors(
+			    simulatedMachine(conn,
+			                     requiresExtraDBMachines ? ClusterConnectionString(g_simulator->extraDatabases.at(0))
+			                                             : ClusterConnectionString(),
+			                     ips,
+			                     sslEnabled,
+			                     localities,
+			                     processClass,
+			                     baseFolder,
+			                     false,
+			                     machine == useSeedForMachine,
+			                     processMode,
+			                     sslOnly,
+			                     whitelistBinPaths,
+			                     protocolVersion,
+			                     configDBType,
+			                     false),
+			    "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
 				int cluster = 4;
@@ -2318,20 +2695,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 					localities.set("data_hall"_sr, dcUID);
-					systemActors->push_back(reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
-					                                                      extraIps,
-					                                                      sslEnabled,
-					                                                      localities,
-					                                                      processClass,
-					                                                      baseFolder,
-					                                                      false,
-					                                                      machine == useSeedForMachine,
-					                                                      AgentNone,
-					                                                      sslOnly,
-					                                                      whitelistBinPaths,
-					                                                      protocolVersion,
-					                                                      configDBType),
-					                                     "SimulatedMachine"));
+					systemActors->push_back(reportErrors(
+					    simulatedMachine(ClusterConnectionString(extraDatabase),
+					                     conn,
+					                     extraIps,
+					                     sslEnabled,
+					                     localities,
+					                     processClass,
+					                     baseFolder,
+					                     false,
+					                     machine == useSeedForMachine,
+					                     testConfig.extraDatabaseBackupAgents ? FDBDAndBackupAgent : FDBDOnly,
+					                     sslOnly,
+					                     whitelistBinPaths,
+					                     protocolVersion,
+					                     configDBType,
+					                     true),
+					    "SimulatedMachine"));
 					++cluster;
 				}
 			}
@@ -2365,6 +2745,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		    Optional<Standalone<StringRef>>(), newZoneId, newZoneId, Optional<Standalone<StringRef>>());
 		systemActors->push_back(
 		    reportErrors(simulatedMachine(conn,
+		                                  ClusterConnectionString(),
 		                                  ips,
 		                                  sslEnabled,
 		                                  localities,
@@ -2372,11 +2753,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		                                  baseFolder,
 		                                  false,
 		                                  i == useSeedForMachine,
-		                                  AgentNone,
+		                                  FDBDOnly,
 		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
-		                                  configDBType),
+		                                  configDBType,
+		                                  false),
 		                 "SimulatedTesterMachine"));
 	}
 
@@ -2390,6 +2772,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	g_simulator->connectionString = conn.toString();
 	g_simulator->testerCount = testerCount;
 	g_simulator->allowStorageMigrationTypeChange = gradualMigrationPossible;
+	g_simulator->willRestart = testConfig.isFirstTestInRestart;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
@@ -2404,22 +2787,16 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
-#if defined(SSD_ROCKSDB_EXPERIMENTAL)
-bool rocksDBEnabled = true;
-#else
-bool rocksDBEnabled = false;
-#endif
-
 // Populates the TestConfig fields according to what is found in the test file.
 [[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 } // namespace
 
-ACTOR void setupAndRun(std::string dataFolder,
-                       const char* testFile,
-                       bool rebooting,
-                       bool restoring,
-                       std::string whitelistBinPaths) {
+ACTOR void simulationSetupAndRun(std::string dataFolder,
+                                 const char* testFile,
+                                 bool rebooting,
+                                 bool restoring,
+                                 std::string whitelistBinPaths) {
 	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
@@ -2437,43 +2814,39 @@ ACTOR void setupAndRun(std::string dataFolder,
 		g_simulator->injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
 	}
 
+	if (deterministicRandom()->random01() < 0.25) {
+		g_simulator->injectTargetedBMRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
+	if (deterministicRandom()->random01() < 0.25) {
+		g_simulator->injectTargetedBWRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
 	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
-	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		testConfig.storageEngineExcludeTypes.push_back(5);
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	    // NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
+	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
+	    // override will not take effect until the test starts. Here, we do an additional check
+	    // for this special simulation test.
+	    std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
-	// snapshot of the storage engine without a snapshotting file system.
-	// https://github.com/apple/foundationdb/issues/5155
-	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
-
-		// Disable the default tenant in restarting tests for now
-		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
-		allowDefaultTenant = false;
-		allowCreatingTenants = false;
+	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
-	// possibly due to running the rocksdb in single thread in simulation.
-	// Re-enable the backup and restore related simulation tests when the tests are passing again.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
+	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
-	// in the build.
-	if (!rocksDBEnabled) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
+	if (std::string_view(testFile).find("ChangeFeed") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion();
@@ -2498,7 +2871,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                            ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                            "",
 	                            "",
-	                            currentProtocolVersion());
+	                            currentProtocolVersion(),
+	                            false);
 	testSystem->excludeFromRestarts = true;
 	wait(g_simulator->onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
@@ -2507,31 +2881,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
-	state TenantMode tenantMode = TenantMode::DISABLED;
-	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
-		defaultTenant = "SimulatedDefaultTenant"_sr;
-		tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-		if (deterministicRandom()->random01() < 0.9) {
-			tenantMode = TenantMode::REQUIRED;
-		} else {
-			tenantMode = TenantMode::OPTIONAL_TENANT;
-		}
-	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
-		tenantMode = TenantMode::OPTIONAL_TENANT;
-	}
-
-	if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
-		int numTenants = deterministicRandom()->randomInt(1, 6);
-		for (int i = 0; i < numTenants; ++i) {
-			tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
-			                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
-		}
-	}
-
-	TraceEvent("SimulatedClusterTenantMode")
-	    .detail("UsingTenant", defaultTenant)
-	    .detail("TenantRequired", tenantMode.toString())
-	    .detail("TotalTenants", tenantsToCreate.size());
+	state Optional<TenantMode> tenantMode;
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2541,7 +2891,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                                         &testerCount,
 			                                         &connectionString,
 			                                         &startingConfiguration,
-			                                         testConfig,
+			                                         &testConfig,
 			                                         whitelistBinPaths,
 			                                         protocolVersion),
 			                  100.0));
@@ -2559,9 +2909,48 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     whitelistBinPaths,
 			                     testConfig,
 			                     protocolVersion,
-			                     tenantMode);
+			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
+
+		// restartSimulatedSystem can adjust some testConfig params related to tenants
+		// so set/overwrite those options if necessary here
+		if (rebooting) {
+			if (testConfig.tenantModes.size()) {
+				tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
+			} else {
+				tenantMode = TenantMode::DISABLED;
+			}
+		}
+		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
+		ASSERT(tenantMode.present());
+		if (tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
+			// Default tenant set by testConfig or restarting data in restartInfo.ini
+			if (testConfig.defaultTenant.present()) {
+				defaultTenant = testConfig.defaultTenant.get();
+			} else if (!rebooting && (tenantMode == TenantMode::REQUIRED || deterministicRandom()->coinflip())) {
+				defaultTenant = "SimulatedDefaultTenant"_sr;
+			}
+		}
+		if (!rebooting) {
+			if (defaultTenant.present() && allowDefaultTenant) {
+				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+			}
+			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->coinflip()) {
+				int numTenants = deterministicRandom()->randomInt(1, 6);
+				for (int i = 0; i < numTenants; ++i) {
+					tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
+					                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
+				}
+			}
+		}
+
+		wait(HTTP::registerAlwaysFailHTTPHandler());
+
+		TraceEvent("SimulatedClusterTenantMode")
+		    .detail("UsingTenant", defaultTenant)
+		    .detail("TenantMode", tenantMode.get().toString())
+		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
@@ -2583,19 +2972,27 @@ ACTOR void setupAndRun(std::string dataFolder,
 				}
 			}
 		}
-		wait(timeoutError(runTests(connFile,
-		                           TEST_TYPE_FROM_FILE,
-		                           TEST_ON_TESTERS,
-		                           testerCount,
-		                           testFile,
-		                           startingConfiguration,
-		                           LocalityData(),
-		                           UnitTestParameters(),
-		                           defaultTenant,
-		                           tenantsToCreate,
-		                           rebooting),
-		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
+		Future<Void> runTestsF = runTests(connFile,
+		                                  TEST_TYPE_FROM_FILE,
+		                                  TEST_ON_TESTERS,
+		                                  testerCount,
+		                                  testFile,
+		                                  startingConfiguration,
+		                                  LocalityData(),
+		                                  UnitTestParameters(),
+		                                  defaultTenant,
+		                                  tenantsToCreate,
+		                                  rebooting);
+		wait(testConfig.longRunningTest ? runTestsF
+		                                : timeoutError(runTestsF,
+		                                               isBuggifyEnabled(BuggifyType::General)
+		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
+		auto timeoutVal = isBuggifyEnabled(BuggifyType::General) ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                                         : testConfig.simulationNormalRunTestsTimeoutSeconds;
+		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
+		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
@@ -2608,12 +3005,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	ASSERT(false);
 }
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
+BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
 	TestConfig config(testConfig);
-	if (!rocksDBEnabled) {
-		config.storageEngineExcludeTypes.push_back(4);
-		config.storageEngineExcludeTypes.push_back(5);
-	}
-	SimulationConfig simConf(config);
-	return simConf.db;
+	return SimulationConfig(config);
 }

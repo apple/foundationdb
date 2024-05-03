@@ -31,14 +31,18 @@ fdb.api_version(FDB_API_VERSION)
 
 
 class ResultSpecification(object):
-    def __init__(self, subspace, key_start_index=0, ordering_index=None, global_error_filter=None):
+    def __init__(
+        self, subspace, key_start_index=0, ordering_index=None, global_error_filter=None
+    ):
         self.subspace = subspace
         self.key_start_index = key_start_index
         self.ordering_index = ordering_index
 
         if global_error_filter is not None:
-            error_str = b'|'.join([b'%d' % e for e in global_error_filter])
-            self.error_regex = re.compile(rb'\x01+ERROR\x00\xff*\x01' + error_str + rb'\x00')
+            error_str = b"|".join([b"%d" % e for e in global_error_filter])
+            self.error_regex = re.compile(
+                rb"\x01+ERROR\x00\xff*\x01" + error_str + rb"\x00"
+            )
         else:
             self.error_regex = None
 
@@ -82,22 +86,24 @@ class Test(object):
         return []
 
     def versionstamp_key(self, raw_bytes, version_pos):
-        if hasattr(self, 'api_version') and self.api_version < 520:
-            return raw_bytes + struct.pack('<H', version_pos)
+        if hasattr(self, "api_version") and self.api_version < 520:
+            return raw_bytes + struct.pack("<H", version_pos)
         else:
-            return raw_bytes + struct.pack('<L', version_pos)
+            return raw_bytes + struct.pack("<L", version_pos)
 
     def versionstamp_value(self, raw_bytes, version_pos=0):
-        if hasattr(self, 'api_version') and self.api_version < 520:
+        if hasattr(self, "api_version") and self.api_version < 520:
             if version_pos != 0:
-                raise ValueError('unable to set non-zero version position before 520 in values')
+                raise ValueError(
+                    "unable to set non-zero version position before 520 in values"
+                )
             return raw_bytes
         else:
-            return raw_bytes + struct.pack('<L', version_pos)
+            return raw_bytes + struct.pack("<L", version_pos)
 
     @classmethod
     def create_test(cls, name, subspace):
-        target = 'bindingtester.tests.%s' % name
+        target = "bindingtester.tests.%s" % name
         test_class = [s for s in cls.__subclasses__() if s.__module__ == target]
         if len(test_class) == 0:
             return None
@@ -123,15 +129,15 @@ class Instruction(object):
 
 class PushInstruction(Instruction):
     def __init__(self, argument):
-        self.operation = 'PUSH'
+        self.operation = "PUSH"
         self.argument = argument
-        self.value = fdb.tuple.pack(('PUSH', argument))
+        self.value = fdb.tuple.pack(("PUSH", argument))
 
     def __str__(self):
-        return '%s %s' % (self.operation, self.argument)
+        return "%s %s" % (self.operation, self.argument)
 
     def __repr__(self):
-        return '%r %r' % (self.operation, self.argument)
+        return "%r %r" % (self.operation, self.argument)
 
 
 class TestInstructions(object):
@@ -173,11 +179,11 @@ class InstructionSet(TestInstructions, list):
         self.core_test_end = len(self)
 
     def core_instructions(self):
-        return self[self.core_test_begin: self.core_test_end]
+        return self[self.core_test_begin : self.core_test_end]
 
     @fdb.transactional
     def _insert_operations_transactional(self, tr, subspace, start, count):
-        for i, instruction in enumerate(self[start: start + count]):
+        for i, instruction in enumerate(self[start : start + count]):
             tr[subspace.pack((start + i,))] = instruction.to_value()
 
     def insert_operations(self, db, subspace):
@@ -207,7 +213,9 @@ class ThreadedInstructionSet(TestInstructions):
 
     def create_thread(self, subspace=None, thread_instructions=None):
         if subspace in self.threads:
-            raise 'An instruction set with the subspace %r has already been created' % util.subspace_to_tuple(subspace)
+            raise "An instruction set with the subspace %r has already been created" % util.subspace_to_tuple(
+                subspace
+            )
 
         if thread_instructions == None:
             thread_instructions = InstructionSet()
@@ -216,4 +224,4 @@ class ThreadedInstructionSet(TestInstructions):
         return thread_instructions
 
 
-util.import_subclasses(__file__, 'bindingtester.tests')
+util.import_subclasses(__file__, "bindingtester.tests")

@@ -27,7 +27,7 @@
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(Averaged);
+FDB_BOOLEAN_PARAM(Averaged);
 
 struct PerfMetric {
 	constexpr static FileIdentifier file_identifier = 5980618;

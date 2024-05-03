@@ -1,0 +1,8 @@
+[[knobs]]
+dd_max_shards_on_large_teams=0
+
+[[test]]
+testTitle = 'ExcludeIncludeStorageServers'
+
+    [[test.workload]]
+    testName = 'ExcludeIncludeStorageServers'

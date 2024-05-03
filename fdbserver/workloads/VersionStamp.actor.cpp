@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -29,6 +28,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct VersionStampWorkload : TestWorkload {
+	static constexpr auto NAME = "VersionStamp";
+
 	uint64_t nodeCount;
 	double testDuration;
 	double transactionsPerSecond;
@@ -57,8 +58,6 @@ struct VersionStampWorkload : TestWorkload {
 		validateExtraDB = getOption(options, "validateExtraDB"_sr, false);
 		soleOwnerOfMetadataVersionKey = getOption(options, "soleOwnerOfMetadataVersionKey"_sr, false);
 	}
-
-	std::string description() const override { return "VersionStamp"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -160,7 +159,7 @@ struct VersionStampWorkload : TestWorkload {
 			cx = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		}
 		state ReadYourWritesTransaction tr(cx);
-		// We specifically wish to grab the smalles read version that we can get and maintain it, to
+		// We specifically wish to grab the smallest read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
 		state Version readVersion;
 		loop {
@@ -452,4 +451,4 @@ struct VersionStampWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<VersionStampWorkload> VersionStampWorkloadFactory("VersionStamp");
+WorkloadFactory<VersionStampWorkload> VersionStampWorkloadFactory;

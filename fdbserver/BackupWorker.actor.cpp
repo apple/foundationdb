@@ -26,10 +26,11 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -49,8 +50,8 @@ struct VersionedMessage {
 	Arena decryptArena; // Arena used for decrypt buffer.
 	size_t bytes; // arena's size when inserted, which can grow afterwards
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
-	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
+	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a, size_t n)
+	  : version(v), message(m), tags(t), arena(a), bytes(n) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
@@ -105,9 +106,7 @@ struct VersionedMessage {
 			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 			MutationRef m;
 			reader >> m;
-			const BlobCipherEncryptHeader* header = m.encryptionHeader();
-			cipherDetails.insert(header->cipherTextDetails);
-			cipherDetails.insert(header->cipherHeaderDetails);
+			m.updateEncryptCipherDetails(cipherDetails);
 		}
 	}
 };
@@ -290,8 +289,8 @@ struct BackupData {
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
 		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
-		logger = traceCounters(
-		    "BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "BackupWorkerMetrics");
+		logger =
+		    cc.traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "BackupWorkerMetrics");
 	}
 
 	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }
@@ -373,10 +372,10 @@ struct BackupData {
 		}
 
 		// keep track of each arena and accumulate their sizes
-		int64_t bytes = 0;
-		for (int i = 0; i < num; i++) {
+		int64_t bytes = messages[0].bytes;
+		for (int i = 1; i < num; i++) {
 			const Arena& a = messages[i].arena;
-			const Arena& b = messages[i + 1].arena;
+			const Arena& b = messages[i - 1].arena;
 			if (!a.sameArena(b)) {
 				bytes += messages[i].bytes;
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", messages[i].bytes);
@@ -795,7 +794,8 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	// Fetch cipher keys if any of the messages are encrypted.
 	if (!cipherDetails.empty()) {
 		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-		    wait(getEncryptCipherKeys(self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+		        self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
 		cipherKeys = getCipherKeysResult;
 	}
 
@@ -806,7 +806,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 		if (!message.isCandidateBackupMessage(&m, cipherKeys))
 			continue;
 
-		DEBUG_MUTATION("addMutation", message.version.version, m)
+		DEBUG_MUTATION("addMutation", message.version.version, m, self->myId)
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 
@@ -878,25 +878,19 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		int lastVersionIndex = 0;
 		Version lastVersion = invalidVersion;
 
-		if (self->messages.empty()) {
-			// Even though messages is empty, we still want to advance popVersion.
-			if (!self->endVersion.present()) {
-				popVersion = std::max(popVersion, self->minKnownCommittedVersion);
+		for (auto& message : self->messages) {
+			// message may be prefetched in peek; uncommitted message should not be uploaded.
+			const Version version = message.getVersion();
+			if (version > self->maxPopVersion()) {
+				break;
 			}
-		} else {
-			for (auto& message : self->messages) {
-				// message may be prefetched in peek; uncommitted message should not be uploaded.
-				const Version version = message.getVersion();
-				if (version > self->maxPopVersion())
-					break;
-				if (version > popVersion) {
-					lastVersionIndex = numMsg;
-					lastVersion = popVersion;
-					popVersion = version;
-				}
-				message.collectCipherDetailIfEncrypted(cipherDetails);
-				numMsg++;
+			if (version > popVersion) {
+				lastVersionIndex = numMsg;
+				lastVersion = popVersion;
+				popVersion = version;
 			}
+			message.collectCipherDetailIfEncrypted(cipherDetails);
+			numMsg++;
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
@@ -938,7 +932,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (self->allMessageSaved()) {
-			self->eraseMessages(self->messages.size());
 			return Void();
 		}
 
@@ -962,10 +955,13 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+				break;
+			}
 			when(wait(logSystemChange)) {
 				if (self->logSystem.get()) {
-					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, self->tag);
+					r = self->logSystem.get()->peekLogRouter(
+					    self->myId, tagAt, self->tag, SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED);
 				} else {
 					r = Reference<ILogSystem::IPeekCursor>();
 				}
@@ -977,15 +973,17 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
+			state size_t takeBytes = 0;
 			if (!prev.sameArena(r->arena())) {
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 				    .detail("Take", r->arena().getSize())
 				    .detail("Current", self->lock->activePermits());
 
-				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
+				takeBytes = r->arena().getSize(); // more bytes can be allocated after the wait.
+				wait(self->lock->take(TaskPriority::DefaultYield, takeBytes));
 				prev = r->arena();
 			}
-			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
 			r->nextMessage();
 		}
 
@@ -1026,13 +1024,15 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			wait(self->pulledVersion.whenAtLeast(currentVersion));
 			pullFinished = Future<Void>(); // cancels pullAsyncData()
 			self->pulling = false;
-			TraceEvent("BackupWorkerPaused", self->myId).detail("Reson", "NoBackup");
+			TraceEvent("BackupWorkerPaused", self->myId).detail("Reason", "NoBackup");
 		} else {
 			// Backup key is not present, enter this NOOP POP mode.
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
 
 			loop choose {
-				when(wait(success(present))) { break; }
+				when(wait(success(present))) {
+					break;
+				}
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
 						self->popVersion =
@@ -1131,6 +1131,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present).detail("ExitEarly", self.exitEarly);
 
 		pull = self.exitEarly ? Void() : monitorBackupKeyOrPullData(&self, present);
+		addActor.send(pull);
 		done = self.exitEarly ? Void() : uploadData(&self);
 
 		loop choose {

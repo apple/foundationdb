@@ -27,6 +27,8 @@
 #include "flow/FastRef.h"
 #include "flow/Net2Packet.h"
 
+#include <boost/functional/hash.hpp>
+#include <fmt/format.h>
 #include <unordered_map>
 #include <utility>
 
@@ -38,6 +40,10 @@
 
 using RESTConnectionPoolKey = std::pair<std::string, std::string>;
 
+enum RESTLogSeverity { INFO = 1, DEBUG = 2, VERBOSE = 3 };
+
+class IConnection;
+
 class RESTConnectionPool : public ReferenceCounted<RESTConnectionPool> {
 public:
 	struct ReusableConnection {
@@ -47,12 +53,13 @@ public:
 
 	// Maximum number of connections cached in the connection-pool.
 	int maxConnPerConnectKey;
-	std::map<RESTConnectionPoolKey, std::queue<ReusableConnection>> connectionPoolMap;
+	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
+	    connectionPoolMap;
 
 	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 
 	// Routine is responsible to provide an usable TCP connection object; it reuses an active connection from
-	// connection-pool if availalbe, otherwise, establish a new TCP connection
+	// connection-pool if available, otherwise, establish a new TCP connection
 	Future<ReusableConnection> connect(RESTConnectionPoolKey connectKey, const bool isSecure, const int maxConnLife);
 	void returnConnection(RESTConnectionPoolKey connectKey, ReusableConnection& conn, const int maxConnections);
 
@@ -61,13 +68,31 @@ public:
 	}
 };
 
-// Util interface facilitating management and update for RESTClient knob parameters
-struct RESTClientKnobs {
-	int connection_pool_size, secure_connection, connect_timeout, connect_tries, max_connection_life, request_tries,
-	    request_timeout_secs;
+struct RESTConnectionType {
+	std::string protocol;
+	int secure;
 
 	constexpr static int SECURE_CONNECTION = 1;
 	constexpr static int NOT_SECURE_CONNECTION = 0;
+
+	RESTConnectionType() : protocol("https"), secure(RESTConnectionType::SECURE_CONNECTION) {}
+	explicit RESTConnectionType(const std::string& p, const int s) : protocol(p), secure(s) {}
+	std::string toString() const { return format("%s:%d", this->protocol.c_str(), this->secure); }
+
+	static const std::unordered_map<std::string, RESTConnectionType> supportedConnTypes;
+	static RESTConnectionType getConnectionType(const std::string&);
+	static bool isProtocolSupported(const std::string&);
+	static bool isSecure(const std::string&);
+};
+
+// Util interface facilitating management and update for RESTClient knob parameters
+struct RESTClientKnobs {
+	int connection_pool_size;
+	int connect_timeout;
+	int connect_tries;
+	int max_connection_life; // Note: this knob is not implemented yet in RESTClient
+	int request_tries;
+	int request_timeout_secs;
 
 	RESTClientKnobs();
 
@@ -78,7 +103,6 @@ struct RESTClientKnobs {
 	static std::vector<std::string> getKnobDescriptions() {
 		return {
 			"connection_pool_size (pz)             Maximum numbers of active connections in the connection-pool",
-			"secure_connection (or sc)             Set 1 for secure connection and 0 for insecure connection.",
 			"connect_tries (or ct)                 Number of times to try to connect for each request.",
 			"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 			"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
@@ -102,12 +126,21 @@ public:
 	std::string reqParameters;
 	// Request 'body' payload
 	std::string body;
+	// URL connection type
+	RESTConnectionType connType;
 
-	explicit RESTUrl(const std::string& fullUrl, const bool isSecure);
-	explicit RESTUrl(const std::string& fullUrl, const std::string& body, const bool isSecure);
+	explicit RESTUrl(const std::string& fullUrl);
+	explicit RESTUrl(const std::string& fullUrl, const std::string& body);
+
+	std::string toString() const {
+		return fmt::format(
+		    "Host {} Service {} Resource {} ReqParams {} Body {}", host, service, resource, reqParameters, body);
+	}
 
 private:
-	void parseUrl(const std::string& fullUrl, bool isSecure);
+	void parseUrl(const std::string& fullUrl);
 };
+
+double continuousTimeDecay(double initialValue, double decayRate, double time);
 
 #endif

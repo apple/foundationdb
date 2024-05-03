@@ -26,13 +26,12 @@
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
+#include "fdbserver/DDShardTracker.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
@@ -41,9 +40,9 @@ enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatu
 enum ReadBandwidthStatus { ReadBandwidthStatusNormal, ReadBandwidthStatusHigh };
 
 BandwidthStatus getBandwidthStatus(StorageMetrics const& metrics) {
-	if (metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)
+	if (metrics.bytesWrittenPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)
 		return BandwidthStatusHigh;
-	else if (metrics.bytesPerKSecond < SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC)
+	else if (metrics.bytesWrittenPerKSecond < SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC)
 		return BandwidthStatusLow;
 
 	return BandwidthStatusNormal;
@@ -75,91 +74,6 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 	}
 }
 
-struct DataDistributionTracker : public IDDShardTracker {
-	Reference<IDDTxnProcessor> db;
-	UID distributorId;
-
-	// At now, the lifetime of shards is guaranteed longer than DataDistributionTracker.
-	KeyRangeMap<ShardTrackedData>* shards = nullptr;
-	ActorCollection sizeChanges;
-
-	int64_t systemSizeEstimate = 0;
-	Reference<AsyncVar<int64_t>> dbSizeEstimate;
-	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
-	Future<Void> maxShardSizeUpdater;
-
-	// CapacityTracker
-	PromiseStream<RelocateShard> output;
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-
-	// PhysicalShard Tracker
-	Reference<PhysicalShardCollection> physicalShardCollection;
-
-	Promise<Void> readyToStart;
-	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
-
-	// Read hot detection
-	PromiseStream<KeyRange> readHotShard;
-
-	// The reference to trackerCancelled must be extracted by actors,
-	// because by the time (trackerCancelled == true) this memory cannot
-	// be accessed
-	bool* trackerCancelled = nullptr;
-
-	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
-	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
-	// object, we must guard against memory errors by using a GetTracker functor to access
-	// the DataDistributionTracker object.
-	class SafeAccessor {
-		bool const& trackerCancelled;
-		DataDistributionTracker& tracker;
-
-	public:
-		SafeAccessor(DataDistributionTracker* tracker)
-		  : trackerCancelled(*tracker->trackerCancelled), tracker(*tracker) {
-			ASSERT(!trackerCancelled);
-		}
-
-		DataDistributionTracker* operator()() {
-			if (trackerCancelled) {
-				CODE_PROBE(true, "Trying to access DataDistributionTracker after tracker has been cancelled");
-				throw dd_tracker_cancelled();
-			}
-			return &tracker;
-		}
-	};
-
-	Optional<Reference<TenantCache>> ddTenantCache;
-
-	DataDistributionTracker() = default;
-
-	DataDistributionTracker(Reference<IDDTxnProcessor> db,
-	                        UID distributorId,
-	                        Promise<Void> const& readyToStart,
-	                        PromiseStream<RelocateShard> const& output,
-	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-	                        Reference<PhysicalShardCollection> physicalShardCollection,
-	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
-	                        KeyRangeMap<ShardTrackedData>* shards,
-	                        bool* trackerCancelled,
-	                        Optional<Reference<TenantCache>> ddTenantCache)
-	  : IDDShardTracker(), db(db), distributorId(distributorId), shards(shards), sizeChanges(false),
-	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
-	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
-	    physicalShardCollection(physicalShardCollection), readyToStart(readyToStart),
-	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), ddTenantCache(ddTenantCache) {}
-
-	~DataDistributionTracker() override {
-		if (trackerCancelled) {
-			*trackerCancelled = true;
-		}
-		// Cancel all actors so they aren't waiting on sizeChanged broken promise
-		sizeChanges.clear(false);
-	}
-
-	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
-};
-
 void restartShardTrackers(DataDistributionTracker* self,
                           KeyRangeRef keys,
                           Optional<ShardMetrics> startingMetrics = Optional<ShardMetrics>(),
@@ -176,9 +90,10 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 		bounds.max.bytes = maxShardSize;
 	}
 
-	bounds.max.bytesPerKSecond = bounds.max.infinity;
+	bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+	bounds.max.opsReadPerKSecond = bounds.max.infinity;
 
 	// The first shard can have arbitrarily small size
 	if (shard.begin == allKeys.begin) {
@@ -187,57 +102,80 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 		bounds.min.bytes = maxShardSize / SERVER_KNOBS->SHARD_BYTES_RATIO;
 	}
 
-	bounds.min.bytesPerKSecond = 0;
+	bounds.min.bytesWrittenPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
 	bounds.min.bytesReadPerKSecond = 0;
+	bounds.min.opsReadPerKSecond = 0;
 
 	// The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last
 	// shard)
 	bounds.permittedError.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO / 3;
-	bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.bytesWrittenPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.opsReadPerKSecond = bounds.permittedError.infinity;
 
 	return bounds;
 }
 
 int64_t getMaxShardSize(double dbSizeEstimate) {
-	return std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
-	                                                     SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
-	                    SERVER_KNOBS->SHARD_BYTES_RATIO,
-	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
+	int64_t size = std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
+	                                                             SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
+	                            SERVER_KNOBS->SHARD_BYTES_RATIO,
+	                        (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
+	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
+		size = std::max(size, static_cast<int64_t>(SERVER_KNOBS->MAX_LARGE_SHARD_BYTES));
+	}
+
+	TraceEvent("MaxShardSize")
+	    .suppressFor(60.0)
+	    .detail("Bytes", size)
+	    .detail("EstimatedDbSize", dbSizeEstimate)
+	    .detail("SqrtBytes", SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES)
+	    .detail("AllowLargeShard", SERVER_KNOBS->ALLOW_LARGE_SHARD);
+	return size;
 }
 
-ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
-                                         const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
-                                         const BandwidthStatus& bandwidthStatus,
-                                         PromiseStream<KeyRange> readHotShard) {
-	ShardSizeBounds bounds;
+bool ddLargeTeamEnabled() {
+	return SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+}
+
+// Returns the shard size bounds as well as whether `keys` a read hot shard.
+std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
+    const KeyRange& keys,
+    const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
+    const BandwidthStatus& bandwidthStatus) {
+	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
+	bool readHotShard = false;
 	if (shardMetrics->get().present()) {
 		auto bytes = shardMetrics->get().get().metrics.bytes;
 		auto readBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get().metrics);
 
+		// 1. bytes bound
 		bounds.max.bytes = std::max(int64_t(bytes * 1.1), (int64_t)SERVER_KNOBS->MIN_SHARD_BYTES);
 		bounds.min.bytes = std::min(int64_t(bytes * 0.9),
 		                            std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0));
 		bounds.permittedError.bytes = bytes * 0.1;
+
+		// 2. bytes written bound
 		if (bandwidthStatus == BandwidthStatusNormal) { // Not high or low
-			bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
-			bounds.min.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
-			bounds.permittedError.bytesPerKSecond = bounds.min.bytesPerKSecond / 4;
+			bounds.max.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
+			bounds.min.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
+			bounds.permittedError.bytesWrittenPerKSecond = bounds.min.bytesWrittenPerKSecond / 4;
 		} else if (bandwidthStatus == BandwidthStatusHigh) { // > 10MB/sec for 100MB shard, proportionally lower
 			                                                 // for smaller shard, > 200KB/sec no matter what
-			bounds.max.bytesPerKSecond = bounds.max.infinity;
-			bounds.min.bytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
-			bounds.permittedError.bytesPerKSecond = bounds.min.bytesPerKSecond / 4;
+			bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
+			bounds.min.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
+			bounds.permittedError.bytesWrittenPerKSecond = bounds.min.bytesWrittenPerKSecond / 4;
 		} else if (bandwidthStatus == BandwidthStatusLow) { // < 10KB/sec
-			bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
-			bounds.min.bytesPerKSecond = 0;
-			bounds.permittedError.bytesPerKSecond = bounds.max.bytesPerKSecond / 4;
+			bounds.max.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
+			bounds.min.bytesWrittenPerKSecond = 0;
+			bounds.permittedError.bytesWrittenPerKSecond = bounds.max.bytesWrittenPerKSecond / 4;
 		} else {
 			ASSERT(false);
 		}
-		// handle read bandwidth status
+
+		// 3. read bandwidth bound
 		if (readBandwidthStatus == ReadBandwidthStatusNormal) {
 			bounds.max.bytesReadPerKSecond =
 			    std::max((int64_t)(SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
@@ -252,29 +190,24 @@ ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
 			                                 SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
 			                                 (1.0 - SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 			bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
-			// TraceEvent("RHDTriggerReadHotLoggingForShard")
-			//     .detail("ShardBegin", keys.begin.printable().c_str())
-			//     .detail("ShardEnd", keys.end.printable().c_str());
-			readHotShard.send(keys);
+
+			readHotShard = true;
 		} else {
 			ASSERT(false);
 		}
-	} else {
-		bounds.max.bytes = -1;
-		bounds.min.bytes = -1;
-		bounds.permittedError.bytes = -1;
-		bounds.max.bytesPerKSecond = bounds.max.infinity;
-		bounds.min.bytesPerKSecond = 0;
-		bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
-		bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-		bounds.min.bytesReadPerKSecond = 0;
-		bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
-	}
 
-	bounds.max.iosPerKSecond = bounds.max.infinity;
-	bounds.min.iosPerKSecond = 0;
-	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
-	return bounds;
+		// 4. read ops bound
+		if (shardMetrics->get()->metrics.opsReadPerKSecond > SERVER_KNOBS->SHARD_MAX_READ_OPS_PER_KSEC) {
+			readHotShard = true;
+		}
+		// update when the read ops changed drastically
+		int64_t currentReadOps = shardMetrics->get()->metrics.opsReadPerKSecond;
+		bounds.max.opsReadPerKSecond = currentReadOps + SERVER_KNOBS->SHARD_READ_OPS_CHANGE_THRESHOLD;
+		bounds.min.opsReadPerKSecond =
+		    std::max((int64_t)0, currentReadOps - SERVER_KNOBS->SHARD_READ_OPS_CHANGE_THRESHOLD);
+		bounds.permittedError.opsReadPerKSecond = currentReadOps * 0.25;
+	}
+	return { bounds, readHotShard };
 }
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
@@ -286,23 +219,26 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state double lastLowBandwidthStartTime =
 	    shardMetrics->get().present() ? shardMetrics->get().get().lastLowBandwidthStartTime : now();
 	state int shardCount = shardMetrics->get().present() ? shardMetrics->get().get().shardCount : 1;
-	state ReadBandwidthStatus readBandwidthStatus = shardMetrics->get().present()
-	                                                    ? getReadBandwidthStatus(shardMetrics->get().get().metrics)
-	                                                    : ReadBandwidthStatusNormal;
 	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
-	/*TraceEvent("TrackShardMetricsStarting")
-	    .detail("TrackerID", trackerID)
+	DisabledTraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
 	    .detail("Keys", keys)
 	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
-	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
-	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
+	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 	try {
 		loop {
 			state ShardSizeBounds bounds;
-			bounds = calculateShardSizeBounds(keys, shardMetrics, bandwidthStatus, self()->readHotShard);
+			bool readHotShard;
+			std::tie(bounds, readHotShard) = calculateShardSizeBounds(keys, shardMetrics, bandwidthStatus);
+
+			if (readHotShard) {
+				// TraceEvent("RHDTriggerReadHotLoggingForShard")
+				//     .detail("ShardBegin", keys.begin.printable().c_str())
+				//     .detail("ShardEnd", keys.end.printable().c_str());
+				self()->readHotShard.send(keys);
+			}
 
 			loop {
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
@@ -320,18 +256,20 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
-					/*TraceEvent("ShardSizeUpdate")
+					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
 					    .detail("Keys", keys)
-					    .detail("UpdatedSize", metrics.metrics.bytes)
-					    .detail("Bandwidth", metrics.metrics.bytesPerKSecond)
-					    .detail("BandwidthStatus", getBandwidthStatus(metrics))
+					    .detail("UpdatedSize", metrics.first.get().bytes)
+					    .detail("WriteBandwidth", metrics.first.get().bytesWrittenPerKSecond)
+					    .detail("BandwidthStatus", bandwidthStatus)
+					    .detail("ReadBandWidth", metrics.first.get().bytesReadPerKSecond)
+					    .detail("ReadOps", metrics.first.get().opsReadPerKSecond)
 					    .detail("BytesLower", bounds.min.bytes)
 					    .detail("BytesUpper", bounds.max.bytes)
-					    .detail("BandwidthLower", bounds.min.bytesPerKSecond)
-					    .detail("BandwidthUpper", bounds.max.bytesPerKSecond)
-					    .detail("ShardSizePresent", shardSize->get().present())
-					    .detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
-					    .detail("TrackerID", trackerID);*/
+					    .detail("WriteBandwidthLower", bounds.min.bytesWrittenPerKSecond)
+					    .detail("WriteBandwidthUpper", bounds.max.bytesWrittenPerKSecond)
+					    .detail("ShardSizePresent", shardMetrics->get().present())
+					    .detail("OldShardSize",
+					            shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 					if (shardMetrics->get().present()) {
 						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
@@ -344,6 +282,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
 							if (needToMove) {
 								// Do we need to update shardsAffectedByTeamFailure here?
+								// TODO(zhewu): move this to physical shard tracker that does shard split based on size.
 								self()->output.send(
 								    RelocateShard(keys,
 								                  DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
@@ -373,6 +312,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
+			DisabledTraceEvent(SevDebug, "TrackShardError", self()->distributorId).detail("Keys", keys);
 			// The above loop use Database cx, but those error should only be thrown in a code using transaction.
 			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
@@ -390,7 +330,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			for (const auto& keyRange : readHotRanges) {
 				TraceEvent("ReadHotRangeLog")
 				    .detail("ReadDensity", keyRange.density)
-				    .detail("ReadBandwidth", keyRange.readBandwidth)
+				    .detail("ReadBandwidth", keyRange.readBandwidthSec)
 				    .detail("ReadDensityThreshold", SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO)
 				    .detail("KeyRangeBegin", keyRange.keys.begin)
 				    .detail("KeyRangeEnd", keyRange.keys.end);
@@ -547,18 +487,22 @@ void executeShardSplit(DataDistributionTracker* self,
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
+			RelocateShard rs(r, DataMovementReason::SPLIT_SHARD, reason);
+			rs.setParentRange(keys);
+			self->output.send(rs);
 		}
 	}
 	for (int i = numShards - 1; i > skipRange; i--) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
+			RelocateShard rs(r, DataMovementReason::SPLIT_SHARD, reason);
+			rs.setParentRange(keys);
+			self->output.send(rs);
 		}
 	}
 
-	self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+	self->actors.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
 }
 
 struct RangeToSplit {
@@ -640,7 +584,9 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				result.emplace_back(shardContainingTenantEnd, faultLines);
 			}
 		} else {
-			CODE_PROBE(true, "Shards that contain tenant key range not split since shard stats are unavailable");
+			CODE_PROBE(true,
+			           "Shards that contain tenant key range not split since shard stats are unavailable",
+			           probe::decoration::rare);
 		}
 	}
 
@@ -896,10 +842,10 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
-	splitMetrics.bytesPerKSecond =
+	splitMetrics.bytesWrittenPerKSecond =
 	    keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
-	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidthSec
 
 	state Standalone<VectorRef<KeyRef>> splitKeys =
 	    wait(self->db->splitStorageMetrics(keys, splitMetrics, metrics, SERVER_KNOBS->MIN_SHARD_BYTES));
@@ -919,7 +865,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	            bandwidthStatus == BandwidthStatusHigh     ? "High"
 	            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
 	                                                       : "Low")
-	    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+	    .detail("BytesWrittenPerKSec", metrics.bytesWrittenPerKSecond)
 	    .detail("NumShards", numShards);
 
 	if (numShards > 1) {
@@ -943,11 +889,11 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 }
 
 static bool shardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef adjRange) {
-	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
-
-	if (!honorTenantKeyspaceBoundaries) {
+	if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
 		return true;
 	}
+
+	ASSERT(self->ddTenantCache.present());
 
 	Optional<Reference<TCTenantInfo>> tenantOwningRange = {};
 	Optional<Reference<TCTenantInfo>> tenantOwningAdjRange = {};
@@ -968,11 +914,19 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
+	if (self->userRangeConfig->rangeContaining(keys.begin)->range().end < nextRange.end) {
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, nextRange);
 }
 
 static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
 	if (keys.begin == allKeys.begin) {
+		return false;
+	}
+
+	if (self->userRangeConfig->rangeContaining(keys.begin)->range().begin > prevRange.begin) {
 		return false;
 	}
 
@@ -982,6 +936,8 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 Future<Void> shardMerger(DataDistributionTracker* self,
                          KeyRange const& keys,
                          Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
+	const UID actionId = deterministicRandom()->randomUniqueID();
+	const Severity stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
 	int64_t maxShardSize = self->maxShardSize->get().get();
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
@@ -1027,8 +983,19 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 			// If going forward, give up when the next shard's stats are not yet present, or if the
 			// the shard is already over the merge bounds.
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
-			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
+			const int newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
+			const int64_t newSize =
+			    newMetrics.present() ? (endingStats.bytes + newMetrics.get().metrics.bytes) : endingStats.bytes;
+			if (!newMetrics.present() || newCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT || newSize > maxShardSize) {
+				if (shardsMerged == 1) {
+					TraceEvent(stSev, "ShardMergeStopForward", self->distributorId)
+					    .detail("ActionID", actionId)
+					    .detail("Keys", keys)
+					    .detail("MetricsPresent", newMetrics.present())
+					    .detail("ShardCount", newCount)
+					    .detail("ShardSize", newSize)
+					    .detail("MaxShardSize", maxShardSize);
+				}
 				--nextIter;
 				forwardComplete = true;
 				continue;
@@ -1045,9 +1012,18 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			// If going backward, stop when the stats are not present or if the shard is already over the merge
 			//  bounds. If this check triggers right away (if we have not merged anything) then return a trigger
 			//  on the previous shard changing "size".
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
-			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
+			const int newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
+			const int64_t newSize =
+			    newMetrics.present() ? (endingStats.bytes + newMetrics.get().metrics.bytes) : endingStats.bytes;
+			if (!newMetrics.present() || newCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT || newSize > maxShardSize) {
 				if (shardsMerged == 1) {
+					TraceEvent(stSev, "ShardMergeStopBackward", self->distributorId)
+					    .detail("ActionID", actionId)
+					    .detail("Keys", keys)
+					    .detail("MetricsPresent", newMetrics.present())
+					    .detail("ShardCount", newCount)
+					    .detail("ShardSize", newSize)
+					    .detail("MaxShardSize", maxShardSize);
 					CODE_PROBE(true, "shardMerger cannot merge anything");
 					return brokenPromiseToReady(prevIter->value().stats->onChange());
 				}
@@ -1082,13 +1058,21 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			if (forwardComplete)
 				break;
 
+			shardsMerged--;
+			if (shardsMerged == 1) {
+				TraceEvent(stSev, "ShardMergeUndoForward", self->distributorId)
+				    .detail("ActionID", actionId)
+				    .detail("Keys", keys)
+				    .detail("ShardCount", shardCount)
+				    .detail("EndingMetrics", endingStats.toString())
+				    .detail("MaxShardSize", maxShardSize);
+			}
 			// If going forward, remove most recently added range
 			endingStats -= newMetrics.get().metrics;
 			shardCount -= newMetrics.get().shardCount;
 			if (nextIter->range().begin >= systemKeys.begin) {
 				systemBytes -= newMetrics.get().metrics.bytes;
 			}
-			shardsMerged--;
 			--nextIter;
 			merged = KeyRangeRef(prevIter->range().begin, nextIter->range().end);
 			forwardComplete = true;
@@ -1099,7 +1083,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		return brokenPromiseToReady(nextIter->value().stats->onChange());
 	}
 
-	// restarting shard tracker will derefenced values in the shard map, so make a copy
+	// restarting shard tracker will dereference values in the shard map, so make a copy
 	KeyRange mergeRange = merged;
 
 	// OldKeys: Shards in the key range are merged as one shard defined by NewKeys;
@@ -1138,7 +1122,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	Future<Void> onChange = shardSize->onChange() || yieldedFuture(self->maxShardSize->onChange());
 
 	// There are the bounds inside of which we are happy with the shard size.
-	// getShardSizeBounds() will allways have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
+	// getShardSizeBounds() will always have shardBounds.min.bytes == 0 for shards that start at allKeys.begin,
 	//  so will will never attempt to merge that shard with the one previous.
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
@@ -1189,7 +1173,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		RelocateReason reason = writeSplit ? RelocateReason::WRITE_SPLIT : RelocateReason::SIZE_SPLIT;
+		RelocateReason reason = sizeSplit ? RelocateReason::SIZE_SPLIT : RelocateReason::WRITE_SPLIT;
 		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
@@ -1220,7 +1204,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	    .detail("TrackerID", trackerID)
 	    .detail("MaxBytes", self()->maxShardSize->get().get())
 	    .detail("ShardSize", shardSize->get().get().bytes)
-	    .detail("BytesPerKSec", shardSize->get().get().bytesPerKSecond);*/
+	    .detail("BytesPerKSec", shardSize->get().get().bytesWrittenPerKSecond);*/
 
 	try {
 		loop {
@@ -1246,7 +1230,7 @@ void restartShardTrackers(DataDistributionTracker* self,
 	auto ranges = self->shards->getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
-			// When starting, key space will be full of "dummy" default contructed entries.
+			// When starting, key space will be full of "dummy" default constructed entries.
 			// This should happen when called from trackInitialShards()
 			ASSERT(!self->readyToStart.isSet());
 			continue;
@@ -1282,10 +1266,26 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	// SOMEDAY: Figure out what this priority should actually be
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
+	state std::vector<Key> customBoundaries;
+	for (auto it : self->userRangeConfig->ranges()) {
+		customBoundaries.push_back(it->range().begin);
+	}
+
 	state int s;
+	state int customBoundary = 0;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
-		restartShardTrackers(
-		    self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key), Optional<ShardMetrics>(), true);
+		Key beginKey = initData->shards[s].key;
+		Key endKey = initData->shards[s + 1].key;
+		while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] <= beginKey) {
+			customBoundary++;
+		}
+		while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] < endKey) {
+			restartShardTrackers(
+			    self, KeyRangeRef(beginKey, customBoundaries[customBoundary]), Optional<ShardMetrics>(), true);
+			beginKey = customBoundaries[customBoundary];
+			customBoundary++;
+		}
+		restartShardTrackers(self, KeyRangeRef(beginKey, endKey), Optional<ShardMetrics>(), true);
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
@@ -1302,7 +1302,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 	state std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics> returnMetrics;
 	// random pick a portion of shard
 	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
-		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
+		deterministicRandom()->randomShuffle(req.keys, 0, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
 	}
 	try {
 		loop {
@@ -1328,15 +1328,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
-				if (metrics.bytesReadPerKSecond > 0) {
-					if (minReadLoad == -1) {
-						minReadLoad = metrics.bytesReadPerKSecond;
-					} else {
-						minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
-					}
-					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
-					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
-					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+				auto readLoad = metrics.readLoadKSecond();
+				if (readLoad > 0) {
+					minReadLoad = std::min(readLoad, minReadLoad);
+					maxReadLoad = std::max(readLoad, maxReadLoad);
+					if (req.minReadLoadPerKSecond <= readLoad && readLoad <= req.maxReadLoadPerKSecond) {
 						returnMetrics.emplace_back(range, metrics);
 					}
 				}
@@ -1440,7 +1436,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 					break;
 				}
 				result.push_back_deep(result.arena(),
-				                      DDMetricsRef(stats->get().get().metrics.bytes, KeyRef(t.begin().toString())));
+				                      DDMetricsRef(stats->get().get().metrics.bytes,
+				                                   stats->get().get().metrics.bytesWrittenPerKSecond,
+				                                   KeyRef(t.begin().toString())));
 				++shardNum;
 				if (shardNum >= req.shardLimit) {
 					break;
@@ -1464,96 +1462,244 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			req.reply.sendError(timed_out());
+		}
 	}
 	return Void();
 }
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Reference<IDDTxnProcessor> db,
-                                           PromiseStream<RelocateShard> output,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           Reference<PhysicalShardCollection> physicalShardCollection,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
-                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId,
-                                           KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled,
-                                           Optional<Reference<TenantCache>> ddTenantCache) {
-	state DataDistributionTracker self(db,
-	                                   distributorId,
-	                                   readyToStart,
-	                                   output,
-	                                   shardsAffectedByTeamFailure,
-	                                   physicalShardCollection,
-	                                   zeroHealthyTeams,
-	                                   shards,
-	                                   trackerCancelled,
-	                                   ddTenantCache);
-	state Future<Void> loggingTrigger = Void();
-	state Future<Void> readHotDetect = readHotDetector(&self);
-	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
-	try {
-		wait(trackInitialShards(&self, initData));
-		initData.clear(); // we can release initData after initialization
+DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitParams const& params)
+  : IDDShardTracker(), db(params.db), distributorId(params.distributorId), shards(params.shards), actors(false),
+    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
+    output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
+    physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
+    anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
+    ddTenantCache(params.ddTenantCache) {}
 
-		state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
-		if (self.ddTenantCache.present()) {
-			tenantCreationSignal = self.ddTenantCache.get()->tenantCreationSignal;
+DataDistributionTracker::~DataDistributionTracker() {
+	if (trackerCancelled) {
+		*trackerCancelled = true;
+	}
+	// Cancel all actors so they aren't waiting on sizeChanged broken promise
+	actors.clear(false);
+}
+
+struct DataDistributionTrackerImpl {
+	ACTOR static Future<Void> run(DataDistributionTracker* self, Reference<InitialDataDistribution> initData) {
+		state Future<Void> loggingTrigger = Void();
+		state Future<Void> readHotDetect = readHotDetector(self);
+		state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
+
+		try {
+			wait(trackInitialShards(self, initData));
+			initData.clear(); // Release reference count.
+
+			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
+			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+				ASSERT(self->ddTenantCache.present());
+				tenantCreationSignal = self->ddTenantCache.get()->tenantCreationSignal;
+			}
+
+			loop choose {
+				when(Promise<int64_t> req = waitNext(self->averageShardBytes)) {
+					req.send(self->getAverageShardBytes());
+				}
+				when(wait(loggingTrigger)) {
+					TraceEvent("DDTrackerStats", self->distributorId)
+					    .detail("Shards", self->shards->size())
+					    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
+					    .detail("SystemSizeBytes", self->systemSizeEstimate)
+					    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
+
+					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+				}
+				when(GetMetricsRequest req = waitNext(self->getShardMetrics)) {
+					self->actors.add(fetchShardMetrics(self, req));
+				}
+				when(GetTopKMetricsRequest req = waitNext(self->getTopKMetrics)) {
+					self->actors.add(fetchTopKShardMetrics(self, req));
+				}
+				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
+					self->actors.add(fetchShardMetricsList(self, req));
+				}
+				when(ServerTeamInfo req = waitNext(self->triggerStorageQueueRebalance)) {
+					TraceEvent e("TriggerDataMoveStorageQueueRebalance", self->distributorId);
+					e.detail("Server", req.serverId);
+					e.detail("Teams", req.teams.size());
+					int64_t maxShardWriteTraffic = 0;
+					KeyRange shardToMove;
+					ShardsAffectedByTeamFailure::Team selectedTeam;
+					for (const auto& team : req.teams) {
+						for (auto const& shard : self->shardsAffectedByTeamFailure->getShardsFor(team)) {
+							for (auto it : self->shards->intersectingRanges(shard)) {
+								if (it->value().stats->get().present()) {
+									int64_t shardWriteTraffic =
+									    it->value().stats->get().get().metrics.bytesWrittenPerKSecond;
+									if (shardWriteTraffic > maxShardWriteTraffic &&
+									    (SERVER_KNOBS->DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD ||
+									     shardWriteTraffic >
+									         SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN)) {
+										shardToMove = it->range();
+										maxShardWriteTraffic = shardWriteTraffic;
+									}
+								}
+							}
+						}
+					}
+					if (!shardToMove.empty()) {
+						e.detail("TeamSelected", selectedTeam.servers);
+						e.detail("ShardSelected", shardToMove);
+						e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
+						RelocateShard rs(shardToMove,
+						                 SERVER_KNOBS->PRIORITY_REBALANCE_STORAGE_QUEUE,
+						                 RelocateReason::REBALANCE_WRITE);
+						self->output.send(rs);
+						TraceEvent("SendRelocateToDDQueue", self->distributorId)
+						    .detail("ServerPrimary", req.primary)
+						    .detail("ServerTeam", selectedTeam.servers)
+						    .detail("KeyBegin", rs.keys.begin)
+						    .detail("KeyEnd", rs.keys.end)
+						    .detail("Priority", rs.priority);
+					}
+				}
+				when(wait(self->actors.getResult())) {}
+				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
+					self->actors.add(tenantCreationHandling(self, newTenant));
+				}
+				when(KeyRange req = waitNext(self->shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
+					restartShardTrackers(self, req);
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent(SevError, "DataDistributionTrackerError", self->distributorId).error(e);
+			throw e;
 		}
+	}
+};
 
-		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) { req.send(self.getAverageShardBytes()); }
-			when(wait(loggingTrigger)) {
-				TraceEvent("DDTrackerStats", self.distributorId)
-				    .detail("Shards", self.shards->size())
-				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
-				    .detail("SystemSizeBytes", self.systemSizeEstimate)
-				    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
+Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> self,
+                                          const Reference<InitialDataDistribution>& initData,
+                                          const FutureStream<GetMetricsRequest>& getShardMetrics,
+                                          const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
+                                          const FutureStream<GetMetricsListRequest>& getShardMetricsList,
+                                          const FutureStream<Promise<int64_t>>& getAverageShardBytes,
+                                          const FutureStream<ServerTeamInfo>& triggerStorageQueueRebalance) {
+	self->getShardMetrics = getShardMetrics;
+	self->getTopKMetrics = getTopKMetrics;
+	self->getShardMetricsList = getShardMetricsList;
+	self->averageShardBytes = getAverageShardBytes;
+	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
+	self->userRangeConfig = initData->userRangeConfig;
+	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
+}
 
-				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
-			}
-			when(GetMetricsRequest req = waitNext(getShardMetrics.getFuture())) {
-				self.sizeChanges.add(fetchShardMetrics(&self, req));
-			}
-			when(GetTopKMetricsRequest req = waitNext(getTopKMetrics)) {
-				self.sizeChanges.add(fetchTopKShardMetrics(&self, req));
-			}
-			when(GetMetricsListRequest req = waitNext(getShardMetricsList.getFuture())) {
-				self.sizeChanges.add(fetchShardMetricsList(&self, req));
-			}
-			when(wait(self.sizeChanges.getResult())) {}
+// Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning
+// this key range. This function is similar to `trackShardMetrics()` and altered for physical shard. This meant to be
+// temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
+ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(
+    Reference<IDDTxnProcessor> db,
+    KeyRange keys,
+    Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics,
+    Reference<AsyncVar<Optional<StorageMetrics>>> physicalShardStats) {
+	state BandwidthStatus bandwidthStatus =
+	    shardMetrics->get().present() ? getBandwidthStatus(shardMetrics->get().get().metrics) : BandwidthStatusNormal;
+	state double lastLowBandwidthStartTime =
+	    shardMetrics->get().present() ? shardMetrics->get().get().lastLowBandwidthStartTime : now();
+	state int shardCount = shardMetrics->get().present() ? shardMetrics->get().get().shardCount : 1;
+	wait(delay(0, TaskPriority::DataDistribution));
 
-			when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
-				self.sizeChanges.add(tenantCreationHandling(&self, newTenant));
-			}
+	/*TraceEvent("trackKeyRangeInPhysicalShardMetricsStarting")
+	    .detail("Keys", keys)
+	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
+	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
+	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
 
-			when(KeyRange req = waitNext(self.shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
-				restartShardTrackers(&self, req);
+	loop {
+		state ShardSizeBounds bounds;
+		bool readHotShard;
+		std::tie(bounds, readHotShard) = calculateShardSizeBounds(keys, shardMetrics, bandwidthStatus);
+
+		loop {
+			// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
+			std::pair<Optional<StorageMetrics>, int> metrics =
+			    wait(db->waitStorageMetrics(keys,
+			                                bounds.min,
+			                                bounds.max,
+			                                bounds.permittedError,
+			                                CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+			                                shardCount));
+			if (metrics.first.present()) {
+				BandwidthStatus newBandwidthStatus = getBandwidthStatus(metrics.first.get());
+				if (newBandwidthStatus == BandwidthStatusLow && bandwidthStatus != BandwidthStatusLow) {
+					lastLowBandwidthStartTime = now();
+				}
+				bandwidthStatus = newBandwidthStatus;
+
+				// Update current physical shard aggregated stats;
+				if (!physicalShardStats->get().present()) {
+					physicalShardStats->set(metrics.first.get());
+				} else {
+					if (!shardMetrics->get().present()) {
+						// We collect key range stats for the first time.
+						physicalShardStats->set(physicalShardStats->get().get() + metrics.first.get());
+					} else {
+						physicalShardStats->set(physicalShardStats->get().get() - shardMetrics->get().get().metrics +
+						                        metrics.first.get());
+					}
+				}
+
+				shardMetrics->set(ShardMetrics(metrics.first.get(), lastLowBandwidthStartTime, shardCount));
+				break;
+			} else {
+				shardCount = metrics.second;
+				if (shardMetrics->get().present()) {
+					auto newShardMetrics = shardMetrics->get().get();
+					newShardMetrics.shardCount = shardCount;
+					shardMetrics->set(newShardMetrics);
+				}
 			}
 		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "DataDistributionTrackerError", self.distributorId).error(e);
-		throw e;
 	}
 }
 
-// Not used yet
-ACTOR Future<Void> dataDistributionTracker(Reference<DDSharedContext> context,
-                                           Reference<InitialDataDistribution> initData,
-                                           Database cx,
-                                           KeyRangeMap<ShardTrackedData>* shards);
+void PhysicalShardCollection::PhysicalShard::insertNewRangeData(const KeyRange& newRange) {
+	RangeData data;
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	data.trackMetrics = trackKeyRangeInPhysicalShardMetrics(txnProcessor, newRange, data.stats, stats);
+	auto it = rangeData.emplace(newRange, data);
+	ASSERT(it.second);
+}
 
-// Methods for PhysicalShardCollection
-FDB_DEFINE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
-FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
-FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
-FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
-FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
+void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
+	if (g_network->isSimulated()) {
+		// Test that new range must not overlap with any existing range in this shard.
+		for (const auto& [range, data] : rangeData) {
+			ASSERT(!range.intersects(newRange));
+		}
+	}
+
+	insertNewRangeData(newRange);
+}
+
+void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
+	std::vector<KeyRangeRef> updateRanges;
+	for (auto& [range, data] : rangeData) {
+		if (range.intersects(outRange)) {
+			updateRanges.push_back(range);
+		}
+	}
+
+	for (auto& range : updateRanges) {
+		std::vector<KeyRangeRef> remainingRanges = range - outRange;
+		for (auto& r : remainingRanges) {
+			ASSERT(r != range);
+			insertNewRangeData(r);
+		}
+		// Must erase last since `remainingRanges` uses data in `range`.
+		rangeData.erase(range);
+	}
+}
 
 // Decide whether a physical shard is available at the moment when the func is calling
 PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint64_t physicalShardID,
@@ -1600,24 +1746,79 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 	ASSERT(physicalShardID != anonymousShardId.first() && physicalShardID != UID().first());
 	ASSERT(physicalShardInstances.count(physicalShardID) == 0);
 	physicalShardInstances.insert(
-	    std::make_pair(physicalShardID, PhysicalShard(physicalShardID, metrics, teams, whenCreated)));
+	    std::make_pair(physicalShardID, PhysicalShard(txnProcessor, physicalShardID, metrics, teams, whenCreated)));
 	return;
 }
 
+// This method maintains the consistency between keyRangePhysicalShardIDMap and the RangeData in physicalShardInstances.
+// They are all updated in this method.
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
                                                                uint64_t debugID) {
 	ASSERT(physicalShardID != UID().first());
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	std::set<uint64_t> physicalShardIDSet;
+
+	// If there are any existing physical shards own `keyRange`, remove the overlapping ranges from existing physical
+	// shards.
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		physicalShardInstances[shardID].removeRange(keyRange);
+	}
+
+	// Insert `keyRange` to the new physical shard.
 	keyRangePhysicalShardIDMap.insert(keyRange, physicalShardID);
-	return;
+	ASSERT(physicalShardInstances.find(physicalShardID) != physicalShardInstances.end());
+	physicalShardInstances[physicalShardID].addRange(keyRange);
+
+	// KeyRange to physical shard mapping consistency sanity check.
+	checkKeyRangePhysicalShardMapping();
+}
+
+void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
+	if (!g_network->isSimulated()) {
+		return;
+	}
+
+	// Check the invariant that keyRangePhysicalShardIDMap and physicalShardInstances should be consistent.
+	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
+	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
+		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		bool exist = false;
+		for (const auto& [range, data] : physicalShardInstances[shardID].rangeData) {
+			if (range == keyRangePiece) {
+				exist = true;
+				break;
+			}
+		}
+		ASSERT(exist);
+	}
+
+	for (auto& [shardID, physicalShard] : physicalShardInstances) {
+		for (auto& [range, data] : physicalShard.rangeData) {
+			ASSERT(keyRangePhysicalShardIDMap[range.begin] == shardID);
+		}
+	}
 }
 
 // At beginning of the transition from the initial state without physical shard notion
 // to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
-Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
-                                                                               StorageMetrics const& moveInMetrics,
-                                                                               uint64_t debugID) {
+Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
+    ShardsAffectedByTeamFailure::Team team,
+    StorageMetrics const& moveInMetrics,
+    const std::unordered_set<uint64_t>& excludedPhysicalShards,
+    uint64_t debugID) {
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 	if (teamPhysicalShardIDs.count(team) == 0) {
@@ -1637,6 +1838,9 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(S
 		    .detail("Bytes", physicalShardInstances[physicalShardID].metrics.bytes)
 		    .detail("BelongTeam", team.toString())
 		    .detail("DebugID", debugID);*/
+		if (excludedPhysicalShards.find(physicalShardID) != excludedPhysicalShards.end()) {
+			continue;
+		}
 		if (!checkPhysicalShardAvailable(physicalShardID, moveInMetrics)) {
 			continue;
 		}
@@ -1765,26 +1969,8 @@ InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRa
 	return InOverSizePhysicalShard::False;
 }
 
-uint64_t PhysicalShardCollection::determinePhysicalShardIDGivenPrimaryTeam(
-    ShardsAffectedByTeamFailure::Team primaryTeam,
-    StorageMetrics const& metrics,
-    bool forceToUseNewPhysicalShard,
-    uint64_t debugID) {
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
-	ASSERT(primaryTeam.primary == true);
-	if (forceToUseNewPhysicalShard) {
-		return generateNewPhysicalShardID(debugID);
-	}
-	Optional<uint64_t> physicalShardIDFetch = trySelectAvailablePhysicalShardFor(primaryTeam, metrics, debugID);
-	if (!physicalShardIDFetch.present()) {
-		return generateNewPhysicalShardID(debugID);
-	}
-	return physicalShardIDFetch.get();
-}
-
 // May return a problematic remote team
-Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
+std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
     uint64_t inputPhysicalShardID,
     StorageMetrics const& moveInMetrics,
     uint64_t debugID) {
@@ -1792,10 +1978,10 @@ Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvail
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
 	if (physicalShardInstances.count(inputPhysicalShardID) == 0) {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
+		return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 	}
 	if (!checkPhysicalShardAvailable(inputPhysicalShardID, moveInMetrics)) {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
+		return { Optional<ShardsAffectedByTeamFailure::Team>(), false };
 	}
 	for (auto team : physicalShardInstances[inputPhysicalShardID].teams) {
 		if (team.primary == false) {
@@ -1805,10 +1991,12 @@ Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvail
 			    .detail("TeamSize", team.servers.size())
 			    .detail("PhysicalShardsOfTeam", convertIDsToString(teamPhysicalShardIDs[team]))
 			    .detail("DebugID", debugID);*/
-			return team;
+			return { team, true };
 		}
 	}
-	UNREACHABLE();
+	// In this case, the physical shard may not be populated in the remote region yet, e.g., we are making a
+	// configuration change to turn a single region cluster into HA mode.
+	return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 }
 
 // The update of PhysicalShardToTeams, Collection, keyRangePhysicalShardIDMap should be atomic
@@ -2079,6 +2267,10 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 		e.detail("MaxPhysicalShard", std::to_string(maxPhysicalShardID) + ":" + std::to_string(maxPhysicalShardBytes));
 		e.detail("MinPhysicalShard", std::to_string(minPhysicalShardID) + ":" + std::to_string(minPhysicalShardBytes));
 	}
+}
+
+bool PhysicalShardCollection::physicalShardExists(uint64_t physicalShardID) {
+	return physicalShardInstances.find(physicalShardID) != physicalShardInstances.end();
 }
 
 // FIXME: complete this test with non-empty range

@@ -22,8 +22,6 @@ package com.apple.foundationdb;
 
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -33,26 +31,21 @@ public class MappedKeyValue extends KeyValue {
 	private final byte[] rangeBegin;
 	private final byte[] rangeEnd;
 	private final List<KeyValue> rangeResult;
-	private final int boundaryAndExist;
 
-	// now it has 5 field, key, value, getRange.begin, getRange.end, boundaryAndExist
+	// now it has 4 fields, key, value, getRange.begin, getRange.end
 	// this needs to change if FDBMappedKeyValue definition is changed.
-	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 5;
+	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 4;
 
-	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult,
-	               int boundaryAndExist) {
+	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult) {
 		super(key, value);
 		this.rangeBegin = rangeBegin;
 		this.rangeEnd = rangeEnd;
 		this.rangeResult = rangeResult;
-		this.boundaryAndExist = boundaryAndExist;
 	}
 
 	public byte[] getRangeBegin() { return rangeBegin; }
 
 	public byte[] getRangeEnd() { return rangeEnd; }
-
-	public boolean getBoundaryAndExist() { return boundaryAndExist == 0 ? false : true; }
 
 	public List<KeyValue> getRangeResult() { return rangeResult; }
 
@@ -69,8 +62,6 @@ public class MappedKeyValue extends KeyValue {
 		byte[] value = takeBytes(offset, bytes, lengths);
 		byte[] rangeBegin = takeBytes(offset, bytes, lengths);
 		byte[] rangeEnd = takeBytes(offset, bytes, lengths);
-		byte[] boundaryAndExistBytes = takeBytes(offset, bytes, lengths);
-		int boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
 
 		if ((lengths.length - TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lengths!");
@@ -82,7 +73,7 @@ public class MappedKeyValue extends KeyValue {
 			byte[] v = takeBytes(offset, bytes, lengths);
 			rangeResult.add(new KeyValue(k, v));
 		}
-		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult, boundaryAndExist);
+		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
 	}
 
 	static class Offset {
@@ -109,26 +100,26 @@ public class MappedKeyValue extends KeyValue {
 			return false;
 
 		MappedKeyValue rhs = (MappedKeyValue) obj;
-		return Arrays.equals(rangeBegin, rhs.rangeBegin) 
-				&& Arrays.equals(rangeEnd, rhs.rangeEnd)
-				&& Objects.equals(rangeResult, rhs.rangeResult)
-				&& boundaryAndExist == rhs.boundaryAndExist;
+		return Arrays.equals(getKey(), rhs.getKey()) && Arrays.equals(getValue(), rhs.getValue())
+			&& Arrays.equals(rangeBegin, rhs.rangeBegin) && Arrays.equals(rangeEnd, rhs.rangeEnd)
+			&& Objects.equals(rangeResult, rhs.rangeResult);
 	}
 
 	@Override
 	public int hashCode() {
 		int hashForResult = rangeResult == null ? 0 : rangeResult.hashCode();
-		return 17 +
-		    (29 * hashForResult + boundaryAndExist + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
+		return 17 + (13 * Arrays.hashCode(getKey()) + 11 * Arrays.hashCode(getValue())
+			+ 29 * hashForResult + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
 	}
 
 	@Override
 	public String toString() {
 		final StringBuilder sb = new StringBuilder("MappedKeyValue{");
-		sb.append("rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
+		sb.append("key=").append(ByteArrayUtil.printable(getKey()));
+		sb.append(", value=").append(ByteArrayUtil.printable(getValue()));
+		sb.append(", rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
 		sb.append(", rangeEnd=").append(ByteArrayUtil.printable(rangeEnd));
 		sb.append(", rangeResult=").append(rangeResult);
-		sb.append(", boundaryAndExist=").append(boundaryAndExist);
 		sb.append('}');
 		return super.toString() + "->" + sb.toString();
 	}

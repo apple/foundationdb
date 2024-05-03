@@ -21,8 +21,7 @@
 
 set -eu;
 
-/create_cluster_file.bash
-FDB_CLUSTER_FILE="${FDB_CLUSTER_FILE:-/etc/foundationdb/fdb.cluster}"
+FDB_CLUSTER_FILE="fdb.cluster"
 
 # Attempt to connect. Configure the database if necessary.
 if ! /usr/bin/fdbcli -C $FDB_CLUSTER_FILE --exec status --timeout 3 ; then

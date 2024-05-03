@@ -515,7 +515,7 @@ public class AsyncUtil {
 	 *  The returned future will then be ready with the result of the
 	 *  handler's future (or an error if that future completes exceptionally).
 	 *  The handler will execute on the {@link com.apple.foundationdb.FDB#DEFAULT_EXECUTOR default executor}
-	 *  used for asychronous tasks.
+	 *  used for asynchronous tasks.
 	 *
 	 * @param future future to compose the handler onto
 	 * @param handler handler bi-function to compose onto the passed future

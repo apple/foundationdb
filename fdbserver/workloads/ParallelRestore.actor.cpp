@@ -19,7 +19,6 @@
  */
 
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -28,12 +27,12 @@
 
 // A workload which test the correctness of backup and restore process
 struct RunRestoreWorkerWorkload : TestWorkload {
+	static constexpr auto NAME = "RunRestoreWorkerWorkload";
+
 	Future<Void> worker;
 	RunRestoreWorkerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		TraceEvent("RunRestoreWorkerWorkloadMX").log();
 	}
-
-	std::string description() const override { return "RunRestoreWorkerWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -59,4 +58,4 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<RunRestoreWorkerWorkload> RunRestoreWorkerWorkloadFactory("RunRestoreWorkerWorkload");
+WorkloadFactory<RunRestoreWorkerWorkload> RunRestoreWorkerWorkloadFactory;

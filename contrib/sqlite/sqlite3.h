@@ -4623,17 +4623,17 @@ struct sqlite3_index_info {
 		unsigned char op; /* Constraint operator */
 		unsigned char usable; /* True if this constraint is usable */
 		int iTermOffset; /* Used internally - xBestIndex should ignore */
-	} * aConstraint; /* Table of WHERE clause constraints */
+	}* aConstraint; /* Table of WHERE clause constraints */
 	int nOrderBy; /* Number of terms in the ORDER BY clause */
 	struct sqlite3_index_orderby {
 		int iColumn; /* Column number */
 		unsigned char desc; /* True for DESC.  False for ASC. */
-	} * aOrderBy; /* The ORDER BY clause */
+	}* aOrderBy; /* The ORDER BY clause */
 	/* Outputs */
 	struct sqlite3_index_constraint_usage {
 		int argvIndex; /* if >0, constraint is part of argv to xFilter */
 		unsigned char omit; /* Do not code a test for this constraint */
-	} * aConstraintUsage;
+	}* aConstraintUsage;
 	int idxNum; /* Number used to identify the index */
 	char* idxStr; /* String, possibly obtained from sqlite3_malloc */
 	int needToFreeIdxStr; /* Free idxStr using sqlite3_free() if true */

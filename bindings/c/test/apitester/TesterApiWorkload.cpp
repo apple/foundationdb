@@ -70,10 +70,16 @@ void ApiWorkload::start() {
 	schedule([this]() {
 		// 1. Clear data
 		clearData([this]() {
-			// 2. Populate initial data
-			populateData([this]() {
-				// 3. Generate random workload
-				runTests();
+			// 2. Create tenants if necessary.
+			createTenantsIfNecessary([this] {
+				// 3. Workload setup.
+				setup([this]() {
+					// 4. Populate initial data
+					populateData([this]() {
+						// 5. Generate random workload
+						runTests();
+					});
+				});
 			});
 		});
 	});
@@ -149,6 +155,21 @@ fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tena
 	}
 }
 
+fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
+	fdb::KeyRange keyRange;
+	keyRange.beginKey = randomKeyName();
+	// avoid empty key range
+	do {
+		keyRange.endKey = randomKeyName();
+	} while (keyRange.beginKey == keyRange.endKey);
+
+	if (keyRange.beginKey > keyRange.endKey) {
+		std::swap(keyRange.beginKey, keyRange.endKey);
+	}
+	ASSERT(keyRange.beginKey < keyRange.endKey);
+	return keyRange;
+}
+
 std::optional<int> ApiWorkload::randomTenant() {
 	if (tenants.size() > 0) {
 		return Random::get().randomInt(0, tenants.size() - 1);
@@ -165,6 +186,7 @@ void ApiWorkload::populateDataTx(TTaskFct cont, std::optional<int> tenantId) {
 	}
 	execTransaction(
 	    [kvPairs](auto ctx) {
+		    ctx->makeSelfConflicting();
 		    for (const fdb::KeyValue& kv : *kvPairs) {
 			    ctx->tx().set(kv.key, kv.value);
 		    }
@@ -198,6 +220,10 @@ void ApiWorkload::clearTenantData(TTaskFct cont, std::optional<int> tenantId) {
 void ApiWorkload::clearData(TTaskFct cont) {
 	execTransaction(
 	    [this](auto ctx) {
+		    // Make this self-conflicting, so that if we're retrying on timeouts
+		    // once we get a successful commit all previous attempts are no
+		    // longer in-flight.
+		    ctx->makeSelfConflicting();
 		    ctx->tx().clearRange(keyPrefix, keyPrefix + fdb::Key(1, '\xff'));
 		    ctx->commit();
 	    },
@@ -236,12 +262,24 @@ void ApiWorkload::createTenants(TTaskFct cont) {
 	    [this, cont]() { schedule(cont); });
 }
 
+void ApiWorkload::createTenantsIfNecessary(TTaskFct cont) {
+	if (tenants.size() > 0) {
+		createTenants(cont);
+	} else {
+		schedule(cont);
+	}
+}
+
 void ApiWorkload::populateData(TTaskFct cont) {
 	if (tenants.size() > 0) {
-		createTenants([this, cont]() { populateTenantData(cont, std::make_optional(0)); });
+		populateTenantData(cont, std::make_optional(0));
 	} else {
 		populateTenantData(cont, {});
 	}
+}
+
+void ApiWorkload::setup(TTaskFct cont) {
+	schedule(cont);
 }
 
 void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {
@@ -252,6 +290,7 @@ void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {
 	}
 	execTransaction(
 	    [kvPairs](auto ctx) {
+		    ctx->makeSelfConflicting();
 		    for (const fdb::KeyValue& kv : *kvPairs) {
 			    ctx->tx().set(kv.key, kv.value);
 		    }
@@ -275,6 +314,7 @@ void ApiWorkload::randomClearOp(TTaskFct cont, std::optional<int> tenantId) {
 	execTransaction(
 	    [keys](auto ctx) {
 		    for (const auto& key : *keys) {
+			    ctx->makeSelfConflicting();
 			    ctx->tx().clear(key);
 		    }
 		    ctx->commit();
@@ -296,6 +336,7 @@ void ApiWorkload::randomClearRangeOp(TTaskFct cont, std::optional<int> tenantId)
 	}
 	execTransaction(
 	    [begin, end](auto ctx) {
+		    ctx->makeSelfConflicting();
 		    ctx->tx().clearRange(begin, end);
 		    ctx->commit();
 	    },
@@ -312,6 +353,56 @@ std::optional<fdb::BytesRef> ApiWorkload::getTenant(std::optional<int> tenantId)
 	} else {
 		return {};
 	}
+}
+
+std::string ApiWorkload::debugTenantStr(std::optional<int> tenantId) {
+	return tenantId.has_value() ? fmt::format("(tenant {0})", tenantId.value()) : "()";
+}
+
+// BlobGranule setup.
+// This blobbifies ['\x00', '\xff') per tenant or for the whole database if there are no tenants.
+void ApiWorkload::setupBlobGranules(TTaskFct cont) {
+	// This count is used to synchronize the # of tenant blobbifyRange() calls to ensure
+	// we only start the workload once blobbification has fully finished.
+	auto blobbifiedCount = std::make_shared<std::atomic<int>>(1);
+
+	if (tenants.empty()) {
+		blobbifiedCount->store(1);
+		blobbifyTenant({}, blobbifiedCount, cont);
+	} else {
+		blobbifiedCount->store(tenants.size());
+		for (int i = 0; i < tenants.size(); i++) {
+			schedule([=]() { blobbifyTenant(i, blobbifiedCount, cont); });
+		}
+	}
+}
+
+void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
+                                 std::shared_ptr<std::atomic<int>> blobbifiedCount,
+                                 TTaskFct cont) {
+	execOperation(
+	    [=](auto ctx) {
+		    fdb::Key begin(1, '\x00');
+		    fdb::Key end(1, '\xff');
+
+		    info(fmt::format("setup: blobbifying {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+
+		    // wait for blobbification before returning
+		    fdb::Future f = ctx->dbOps()->blobbifyRangeBlocking(begin, end).eraseType();
+		    ctx->continueAfter(f, [ctx, f]() {
+			    bool success = f.get<fdb::future_var::Bool>();
+			    ASSERT(success);
+			    ctx->done();
+		    });
+	    },
+	    [=]() {
+		    info(fmt::format("setup: blobbify done {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+		    if (blobbifiedCount->fetch_sub(1) == 1) {
+			    schedule(cont);
+		    }
+	    },
+	    /*tenant=*/getTenant(tenantId),
+	    /* failOnError = */ false);
 }
 
 } // namespace FdbApiTester

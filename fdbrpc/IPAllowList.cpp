@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/asio.hpp>
+
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbrpc/IPAllowList.h"
@@ -82,7 +84,7 @@ int AuthAllowedSubnet::netmaskWeight() const {
 AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) {
 	auto pos = addressString.find('/');
 	if (pos == std::string_view::npos) {
-		fmt::print("ERROR: {} is not a valid (use Network-Prefix/netmaskWeight syntax)\n");
+		fmt::print("ERROR: {} is not a valid (use Network-Prefix/netmaskWeight syntax)\n", addressString);
 		throw invalid_option();
 	}
 	auto address = addressString.substr(0, pos);
@@ -216,7 +218,7 @@ struct SubNetTest {
 			return IPAddress(arr[0]);
 		} else {
 			std::array<unsigned char, 16> res;
-			memcpy(res.data(), arr, 4);
+			memcpy(res.data(), arr, 16);
 			return IPAddress(res);
 		}
 	}

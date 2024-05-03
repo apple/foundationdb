@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDBalanceWorkload : TestWorkload {
+	static constexpr auto NAME = "DDBalance";
 	int actorsPerClient, nodesPerActor, moversPerClient, currentbin, binCount, writesPerTransaction,
 	    keySpaceDriftFactor;
 	double testDuration, warmingDelay, transactionsPerSecond;
@@ -32,10 +33,10 @@ struct DDBalanceWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter bin_shifts, operations, retries;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	DDBalanceWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies(2000) {
+	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		binCount = getOption(options, "binCount"_sr, 1000);
 		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 1);
@@ -52,8 +53,6 @@ struct DDBalanceWorkload : TestWorkload {
 
 		currentbin = deterministicRandom()->randomInt(0, binCount);
 	}
-
-	std::string description() const override { return "DDBalance"; }
 
 	Future<Void> setup(Database const& cx) override { return ddbalanceSetup(cx, this); }
 
@@ -259,4 +258,4 @@ struct DDBalanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<DDBalanceWorkload> DDBalanceWorkloadFactory("DDBalance");
+WorkloadFactory<DDBalanceWorkload> DDBalanceWorkloadFactory;

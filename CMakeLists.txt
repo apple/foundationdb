@@ -16,11 +16,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-if(WIN32)
-  cmake_minimum_required(VERSION 3.15)
-else()
-  cmake_minimum_required(VERSION 3.13)
-endif()
+cmake_minimum_required(VERSION 3.24.2)
 
 # silence deprecation warnings in newer versions of cmake
 if(POLICY CMP0135)
@@ -28,12 +24,13 @@ if(POLICY CMP0135)
 endif()
 
 project(foundationdb
-  VERSION 7.2.0
+  VERSION 7.4.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM)
+  LANGUAGES C CXX ASM Swift)
 
-set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
@@ -56,11 +53,20 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
+option(WITH_ACAC "Enable actor stack recording" OFF)
+if (WITH_ACAC)
+  message(STATUS "Build FoundationDB with AcAC support")
+  if (FDB_RELEASE OR FDB_RELEASE_CANDIDATE)
+	message(FATAL_ERROR "ACAC will cause severe slowdown of the system and SHOULD not be enabled in Release.")
+  endif()
+  add_compile_definitions(WITH_ACAC)
+endif()
+
 ################################################################################
 # Packages used for bindings
 ################################################################################
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 ################################################################################
 # Compiler configuration
@@ -69,7 +75,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 include(ConfigureCompiler)
 
 ################################################################################
-# Compiler configuration
+# Components configuration
 ################################################################################
 
 include(FDBComponents)
@@ -97,7 +103,10 @@ else()
     set(FDB_VERSION ${PROJECT_VERSION})
 endif()
 if (NOT FDB_RELEASE)
-    string(TIMESTAMP FDB_BUILDTIME %Y%m%d%H%M%S)
+    string(TIMESTAMP FDB_BUILD_TIMESTMAP %Y%m%d%H%M%S)
+    # Adding support to pass custom fdb_build timestamp,
+    # required to achieve uniform naming across different builds
+    set(FDB_BUILDTIME "${FDB_BUILD_TIMESTMAP}" CACHE STRING "A timestamp for packages")
     set(FDB_BUILDTIME_STRING ".${FDB_BUILDTIME}")
     set(PRERELEASE_TAG "prerelease")
 endif()
@@ -109,6 +118,12 @@ list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
+
+set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
+set(FDB_FUTURE_VERSION "7.5.0")
+set(FDB_PREV_RELEASE_VERSION "7.3.41")
+set(FDB_PREV2_RELEASE_VERSION "7.1.33")
+set(FDB_PREV3_RELEASE_VERSION "7.0.0")
 
 ################################################################################
 # Flow
@@ -181,18 +196,26 @@ add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
 if(NOT WIN32)
-  add_subdirectory(fdbmonitor)
+  if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+    add_subdirectory(fdbmonitor)
+  endif()
 else()
   add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
+add_subdirectory(metacluster)
 add_subdirectory(tests)
-add_subdirectory(flowbench EXCLUDE_FROM_ALL)
+if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+  add_subdirectory(flowbench EXCLUDE_FROM_ALL)
+endif()
 if(WITH_PYTHON AND WITH_C_BINDING)
-  add_subdirectory(bindings)
+  if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+    add_subdirectory(bindings)
+  endif()
 endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
+  add_dependencies(html CopyJavadoc)
 endif()
 
 if(WIN32)
@@ -212,11 +235,14 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
 	  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
-	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json -ninjatool ${CMAKE_MAKE_PROGRAM} ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
+
+  # A prebuild target ensures that all actors, Swift-generated headers, and Swift modules are built.
+  add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
 endif()
 
 ################################################################################
@@ -226,3 +252,5 @@ endif()
 print_components()
 
 message(STATUS "CPACK_COMPONENTS_ALL ${CPACK_COMPONENTS_ALL}")
+
+

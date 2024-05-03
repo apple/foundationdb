@@ -36,13 +36,11 @@ ACTOR Future<Standalone<StringRef>> readFile(Reference<BlobConnectionProvider> b
 		state Arena arena;
 		std::string fname = f.filename.toString();
 		state Reference<BackupContainerFileSystem> bstore = bstoreProvider->getForRead(fname);
-		// printf("Starting read of snapshot file %s\n", fname.c_str());
 		state Reference<IAsyncFile> reader = wait(bstore->readFile(fname));
-		// printf("Got snapshot file size %lld\n", size);
+
 		state uint8_t* data = new (arena) uint8_t[f.length];
-		// printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
+
 		int readSize = wait(reader->read(data, f.length, f.offset));
-		// printf("Read %lld bytes from snapshot file %s\n", readSize, filename.c_str());
 		ASSERT(f.length == readSize);
 
 		StringRef dataRef(data, f.length);
@@ -95,17 +93,19 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		}
 
 		state int numDeltaFiles = chunk.deltaFiles.size();
-		state StringRef* deltaData = new (arena) StringRef[numDeltaFiles];
+		state std::vector<StringRef> deltaData;
 		state int deltaIdx;
 
-		// for (Future<Standalone<StringRef>> deltaFuture : readDeltaFutures) {
+		deltaData.reserve(numDeltaFiles);
 		for (deltaIdx = 0; deltaIdx < numDeltaFiles; deltaIdx++) {
 			Standalone<StringRef> data = wait(readDeltaFutures[deltaIdx]);
-			deltaData[deltaIdx] = data;
+			deltaData.push_back(data);
 			arena.dependsOn(data.arena());
 		}
 
-		return materializeBlobGranule(chunk, keyRange, beginVersion, readVersion, snapshotData, deltaData);
+		// TODO do something useful with stats?
+		GranuleMaterializeStats stats;
+		return materializeBlobGranule(chunk, keyRange, beginVersion, readVersion, snapshotData, deltaData, stats);
 
 	} catch (Error& e) {
 		throw e;
@@ -140,7 +140,6 @@ bool isRangeFullyCovered(KeyRange range, Standalone<VectorRef<BlobGranuleChunkRe
 	for (const BlobGranuleChunkRef& chunk : blobChunks) {
 		blobRanges.push_back(chunk.keyRange);
 	}
-
 	return range.isCovered(blobRanges);
 }
 
@@ -192,7 +191,48 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		testAddChunkRange("key_a1"_sr, "key_a9"_sr, continuedChunks);
 		testAddChunkRange("key_a9"_sr, "key_b1"_sr, continuedChunks);
 		testAddChunkRange("key_b1"_sr, "key_b9"_sr, continuedChunks);
-		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks) == false);
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks));
 	}
+
+	// check functionality of isCovered()
+	{
+		std::vector<KeyRangeRef> ranges;
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_y"_sr));
+		ASSERT(KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_v"_sr, "key_y"_sr));
+		ASSERT(KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
+		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_ya"_sr));
+		ASSERT(KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
+		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_xb"_sr));
+		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
+		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_y"_sr));
+		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_y"_sr));
+		ASSERT(!KeyRangeRef("key_a"_sr, "key_y"_sr).isCovered(ranges));
+	}
+
 	return Void();
 }

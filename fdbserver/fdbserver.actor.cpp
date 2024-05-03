@@ -45,6 +45,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/IPAllowList.h"
@@ -65,7 +66,7 @@
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
@@ -84,6 +85,9 @@
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -104,7 +108,20 @@
 #include <Windows.h>
 #endif
 
+#if __has_include("SwiftModules/FDBServer")
+class MasterData;
+#include "SwiftModules/FDBServer"
+#define SWIFT_REVERSE_INTEROP_SUPPORTED
+#endif
+
+#if __has_include("SwiftModules/Flow")
+#include "SwiftModules/Flow"
+#endif
+
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// FIXME(swift): remove those
+extern "C" void swiftCallMeFuture(void* _Nonnull opaqueResultPromisePtr) noexcept;
 
 using namespace std::literals;
 
@@ -116,8 +133,8 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -215,9 +232,12 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
 	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
 	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
-	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
+	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",                                    SO_REQ_SEP },
+	{ OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION,  "--kms-rest-allow-not-secure-connection",      SO_NONE },
 	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
 	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-latest-encryption-keys-endpoint", SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -230,8 +250,6 @@ extern void pingtest();
 extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
-// FIXME: this really belongs in a header somewhere since it is actually used.
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
 
 extern const char* getSourceVersion();
 
@@ -361,7 +379,7 @@ ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simula
 	wait(trigger);
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
-		g_simulator->killProcess(m, ISimulator::KillInstantly);
+		g_simulator->killProcess(m, ISimulator::KillType::KillInstantly);
 	}
 }
 
@@ -369,6 +387,16 @@ void failAfter(Future<Void> trigger, Endpoint e) {
 	if (g_network == g_simulator)
 		failAfter(trigger, g_simulator->getProcess(e));
 }
+
+#ifdef WITH_SWIFT
+ACTOR void swiftTestRunner() {
+	auto p = PromiseVoid();
+	fdbserver_swift::swiftyTestRunner(p);
+	wait(p.getFuture());
+
+	flushAndExit(0);
+}
+#endif
 
 ACTOR Future<Void> histogramReport() {
 	loop {
@@ -507,9 +535,10 @@ void skipListTest();
 Future<Void> startSystemMonitor(std::string dataFolder,
                                 Optional<Standalone<StringRef>> dcId,
                                 Optional<Standalone<StringRef>> zoneId,
-                                Optional<Standalone<StringRef>> machineId) {
-	initializeSystemMonitorMachineState(
-	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
+                                Optional<Standalone<StringRef>> machineId,
+                                Optional<Standalone<StringRef>> datahallId) {
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(
+	    dataFolder, dcId, zoneId, machineId, datahallId, g_network->getLocalAddress().ip, FDB_VT_VERSION));
 
 	systemMonitor();
 	return recurring(&systemMonitor, SERVER_KNOBS->SYSTEM_MONITOR_FREQUENCY, TaskPriority::FlushTrace);
@@ -679,7 +708,8 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
-		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		                 " consistencycheck, consistencycheckurgent, kvfileintegritycheck, kvfilegeneratesums, "
+		                 "kvfiledump, unittests)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
@@ -892,7 +922,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
+				const IPAddress publicIP = connectionRecord.getConnectionString().determineLocalSourceIP();
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -1006,6 +1036,7 @@ namespace {
 enum class ServerRole {
 	ChangeClusterKey,
 	ConsistencyCheck,
+	ConsistencyCheckUrgent,
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
@@ -1103,13 +1134,13 @@ struct CLIOptions {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == ServerRole::ConsistencyCheck) {
+		if (role == ServerRole::ConsistencyCheck || role == ServerRole::ConsistencyCheckUrgent) {
 			if (!publicAddressStrs.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(name);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			auto publicIP = connectionFile->getConnectionString().determineLocalSourceIP();
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 	}
@@ -1291,6 +1322,8 @@ private:
 					role = ServerRole::KVFileDump;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
+				else if (!strcmp(sRole, "consistencycheckurgent"))
+					role = ServerRole::ConsistencyCheckUrgent;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
 				else if (!strcmp(sRole, "flowprocess"))
@@ -1612,9 +1645,9 @@ private:
 
 				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
 				if (blobCredsFromENV != nullptr) {
-					fprintf(stderr, "[WARNING] Set blob credetial via env variable is not tested yet\n");
+					fprintf(stderr, "[WARNING] Set blob credential via env variable is not tested yet\n");
 					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
-					    .detail("Reason", "Set blob credetial via env variable is not tested yet");
+					    .detail("Reason", "Set blob credential via env variable is not tested yet");
 					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 					do {
 						StringRef file = t.eat(":");
@@ -1691,12 +1724,20 @@ private:
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
+			case TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION:
+				tlsConfig.setDisablePlainTextConnection(true);
+				break;
 			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
-				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
+				knobs.emplace_back("rest_kms_connector_discover_kms_url_file", args.OptionArg());
 				break;
 			}
 			case OPT_KMS_CONNECTOR_TYPE: {
 				knobs.emplace_back("kms_connector_type", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION: {
+				TraceEvent(SevWarnAlways, "RESTKmsConnAllowNotSecureConnection");
+				knobs.emplace_back("rest_kms_allow_not_secure_connection", "true");
 				break;
 			}
 			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
@@ -1705,6 +1746,14 @@ private:
 			}
 			case OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT: {
 				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_latest_encryption_keys_endpoint", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_blob_metadata_endpoint", args.OptionArg());
 				break;
 			}
 			case OPT_NEW_CLUSTER_KEY: {
@@ -1736,7 +1785,7 @@ private:
 		try {
 			ProfilerConfig::instance().reset(profilerConfig);
 		} catch (ConfigError& e) {
-			printf("Error seting up profiler: %s", e.description.c_str());
+			printf("Error setting up profiler: %s", e.description.c_str());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1958,18 +2007,6 @@ int main(int argc, char* argv[]) {
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
-			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
 			if (SERVER_KNOBS->REMOTE_KV_STORE) {
 				fprintf(stderr,
 				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
@@ -2018,11 +2055,38 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
-			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+				// TODO (Swift): Make it TraceEvent
+				// printf("[%s:%d](%s) Installed Swift concurrency hooks: sim2 (g_network)\n",
+				//        __FILE_NAME__,
+				//        __LINE__,
+				//        __FUNCTION__);
+				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+			}
+
+			openTraceFile({}, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
+
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+				// TODO (Swift): Make it TraceEvent
+				// printf("[%s:%d](%s) Installed Swift concurrency hooks: net2 (g_network)\n",
+				//        __FILE_NAME__,
+				//        __LINE__,
+				//        __FUNCTION__);
+			}
+
+#if WITH_SWIFT
+			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
+				swiftTestRunner(); // spawns actor that will call Swift functions
+			}
+#endif
+
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
@@ -2037,8 +2101,16 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			openTraceFile(
-			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTraceFile(opts.publicAddresses.address,
+			              opts.rollsize,
+			              opts.maxLogsSize,
+			              opts.logFolder,
+			              "trace",
+			              opts.logGroup,
+			              /* identifier = */ "",
+			              /* tracePartialFileSuffix = */ "",
+			              InitializeTraceMetrics::True);
+
 			g_network->initTLS();
 			if (!opts.authzPublicKeyFile.empty()) {
 				try {
@@ -2050,6 +2122,8 @@ int main(int argc, char* argv[]) {
 			} else {
 				TraceEvent(SevInfo, "AuthzPublicKeyFileNotSet");
 			}
+			if (FLOW_KNOBS->ALLOW_TOKENLESS_TENANT_ACCESS)
+				TraceEvent(SevWarnAlways, "AuthzTokenlessAccessEnabled");
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
@@ -2080,7 +2154,6 @@ int main(int argc, char* argv[]) {
 			                              opts.fileSystemPath);
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
-			initTraceEventMetrics();
 		}
 
 		double start = timer(), startNow = now();
@@ -2144,7 +2217,7 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests", "fdbblob" };
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
@@ -2255,18 +2328,20 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("enable_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
-				g_knobs.setKnob("enable_tlog_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
-				g_knobs.setKnob("enable_storage_server_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableStorageServerEncryption", false)));
-				g_knobs.setKnob("enable_blob_granule_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_compression",
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
+				g_knobs.setKnob("encrypt_header_auth_token_enabled",
+				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				g_knobs.setKnob("encrypt_header_auth_token_algo",
+				                KnobValue::create((int)ini.GetLongValue(
+				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
+
+				g_knobs.setKnob(
+				    "shard_encode_location_metadata",
+				    KnobValue::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
-			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
+			simulationSetupAndRun(
+			    dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
@@ -2335,14 +2410,16 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::Test) {
 			TraceEvent("NonSimulationTest").detail("TestFile", opts.testFile);
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(
 			    opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == ServerRole::ConsistencyCheck) {
 			setupRunLoopProfiler();
 
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_CONSISTENCY_CHECK,
 			                       TEST_HERE,
@@ -2351,9 +2428,22 @@ int main(int argc, char* argv[]) {
 			                       StringRef(),
 			                       opts.localities));
 			g_network->run();
+		} else if (role == ServerRole::ConsistencyCheckUrgent) {
+			setupRunLoopProfiler();
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
+			f = stopAfter(runTests(opts.connectionFile,
+			                       TEST_TYPE_CONSISTENCY_CHECK_URGENT,
+			                       TEST_ON_TESTERS,
+			                       opts.minTesterCount,
+			                       opts.testFile,
+			                       StringRef(),
+			                       opts.localities));
+			g_network->run();
 		} else if (role == ServerRole::UnitTests) {
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,
@@ -2398,7 +2488,8 @@ int main(int argc, char* argv[]) {
 			// create the trace file with the correct process address
 			openTraceFile(
 			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
@@ -2431,7 +2522,7 @@ int main(int argc, char* argv[]) {
 			rc = FDB_EXIT_ERROR;
 		}
 
-		int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
+		int unseed = noUnseed ? -1 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime")
 		    .detail("SimTime", now() - startNow)
 		    .detail("RealTime", timer() - start)

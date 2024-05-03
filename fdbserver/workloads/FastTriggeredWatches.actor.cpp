@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -27,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
+	static constexpr auto NAME = "FastTriggeredWatches";
 	// Tests the time it takes for a watch to be fired after the value has changed in the storage server
 	int nodes, keyBytes;
 	double testDuration;
@@ -42,7 +42,11 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
 
-	std::string description() const override { return "Watches"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// This test asserts that watches fire within a certain version range. Attrition will make this assertion fail
+		// since it can cause recoveries which will bump the cluster version significantly
+		out.emplace("Attrition");
+	}
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0)
@@ -102,7 +106,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 			loop {
 				state double getDuration = 0;
 				state double watchEnd = 0;
-				state bool first = true;
+				state bool watchCommitted = false;
 				state Key setKey = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes));
 				state Optional<Value> setValue;
 				if (deterministicRandom()->random01() > 0.5)
@@ -110,12 +114,13 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				// Set the value at setKey to something random
 				state Future<Version> setFuture = self->setter(cx, setKey, setValue);
 				wait(delay(deterministicRandom()->random01()));
+				state Version watchCommitVersion = 0;
 				loop {
 					state ReadYourWritesTransaction tr(cx);
 
 					try {
 						Optional<Value> val = wait(tr.get(setKey));
-						if (!first) {
+						if (watchCommitted) {
 							getDuration = now() - watchEnd;
 						}
 						lastReadVersion = tr.getReadVersion().get();
@@ -124,25 +129,28 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 						// loop
 						if (val == setValue)
 							break;
-						ASSERT(first);
+						ASSERT(!watchCommitted);
+						tr.addWriteConflictRange(singleKeyRange(""_sr));
 						// set a watch and wait for it to be triggered (i.e for self->setter to set the value)
 						state Future<Void> watchFuture = tr.watch(setKey);
 						wait(tr.commit());
+						watchCommitVersion = tr.getCommittedVersion();
+
 						//TraceEvent("FTWStartWatch").detail("Key", printable(setKey));
 						wait(watchFuture);
 						watchEnd = now();
-						first = false;
+						watchCommitted = true;
 					} catch (Error& e) {
 						//TraceEvent("FTWWatchError").error(e).detail("Key", printable(setKey));
 						wait(tr.onError(e));
 					}
 				}
-				Version ver = wait(setFuture);
+				Version keySetVersion = wait(setFuture);
+				int64_t versionDelta = lastReadVersion - std::max(keySetVersion, watchCommitVersion);
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
 				// Assert that the time from setting the key to triggering the watch is no greater than 25s
-				// TODO: This assertion can cause flaky behaviour since sometimes a watch can take longer to fire
-				ASSERT(lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
-				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
+				ASSERT(!watchCommitted || versionDelta >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
+				       versionDelta < SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
 
 				if (now() - testStart > self->testDuration)
 					break;
@@ -182,4 +190,4 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<FastTriggeredWatchesWorkload> FastTriggeredWatchesWorkloadFactory("FastTriggeredWatches");
+WorkloadFactory<FastTriggeredWatchesWorkload> FastTriggeredWatchesWorkloadFactory;

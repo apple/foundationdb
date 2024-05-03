@@ -103,7 +103,7 @@ ACTOR Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database
 					return Void();
 				}
 
-				begin = kvs.readThrough.present() ? kvs.readThrough.get() : keyAfter(kvs.back().key);
+				begin = kvs.getReadThrough();
 
 				break;
 			} catch (Error& e) {

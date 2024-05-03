@@ -20,6 +20,7 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include "fdb_c_options.g.h"
 #include "fmt/core.h"
 #include "test/apitester/TesterScheduler.h"
 #include <cstdlib>
@@ -82,6 +83,8 @@ WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
     failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
+	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
+	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
@@ -114,8 +117,11 @@ void WorkloadBase::execTransaction(TOpStartFct startFct,
 }
 
 // Execute a non-transactional database operation within the workload
-void WorkloadBase::execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
-	doExecute(startFct, cont, {}, failOnError, false);
+void WorkloadBase::execOperation(TOpStartFct startFct,
+                                 TTaskFct cont,
+                                 std::optional<fdb::BytesRef> tenant,
+                                 bool failOnError) {
+	doExecute(startFct, cont, tenant, failOnError, false);
 }
 
 void WorkloadBase::doExecute(TOpStartFct startFct,
@@ -129,9 +135,15 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	}
 	tasksScheduled++;
 	numTxStarted++;
-	manager->txExecutor->execute(
-	    startFct,
-	    [this, startFct, cont, failOnError](fdb::Error err) {
+	manager->txExecutor->execute( //
+	    [this, transactional, cont, startFct](auto ctx) {
+		    if (transactional && maxTxTimeoutMs > 0) {
+			    int timeoutMs = Random::get().randomInt(minTxTimeoutMs, maxTxTimeoutMs);
+			    ctx->tx().setOption(FDB_TR_OPTION_TIMEOUT, timeoutMs);
+		    }
+		    startFct(ctx);
+	    },
+	    [this, cont, failOnError](fdb::Error err) {
 		    numTxCompleted++;
 		    if (err.code() == error_code_success) {
 			    cont();
@@ -148,7 +160,8 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 		    scheduledTaskDone();
 	    },
 	    tenant,
-	    transactional);
+	    transactional,
+	    maxTxTimeoutMs > 0);
 }
 
 void WorkloadBase::info(const std::string& msg) {
@@ -159,7 +172,7 @@ void WorkloadBase::error(const std::string& msg) {
 	fmt::print(stderr, "[{}] ERROR: {}\n", workloadId, msg);
 	numErrors++;
 	if (numErrors > maxErrors && !failed) {
-		fmt::print(stderr, "[{}] ERROR: Stopping workload after {} errors\n", workloadId, numErrors);
+		fmt::print(stderr, "[{}] ERROR: Stopping workload after {} errors\n", workloadId, numErrors.load());
 		failed = true;
 	}
 }
@@ -213,7 +226,7 @@ void WorkloadManager::run() {
 	if (failed()) {
 		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
 	} else {
-		fprintf(stderr, "All workloads succesfully completed\n");
+		fprintf(stderr, "All workloads successfully completed\n");
 	}
 }
 

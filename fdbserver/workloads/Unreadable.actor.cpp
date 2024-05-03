@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -27,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct UnreadableWorkload : TestWorkload {
+	static constexpr auto NAME = "Unreadable";
 	uint64_t nodeCount;
 	double testDuration;
 	std::vector<Future<Void>> clients;
@@ -35,8 +35,6 @@ struct UnreadableWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
 	}
-
-	std::string description() const override { return "Unreadable"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -168,13 +166,13 @@ struct UnreadableWorkload : TestWorkload {
 		if ((resolvedBegin.offset >= resolvedEnd.offset && resolvedBegin.getKey() >= resolvedEnd.getKey()) ||
 		    (resolvedBegin.offset >= end.offset && resolvedBegin.getKey() >= end.getKey()) ||
 		    (begin.offset >= resolvedEnd.offset && begin.getKey() >= resolvedEnd.getKey())) {
-			// RYW does not perfectly optimize this scenario, it should be readable but might unnecesarily return as
+			// RYW does not perfectly optimize this scenario, it should be readable but might unnecessarily return as
 			// unreadable
 			return;
 		}
 
 		if (resolvedEnd.getKey() == normalKeys.begin || resolvedBegin.getKey() == normalKeys.end) {
-			// RYW does not perfectly optimize this scenario, it should be readable but might unnecesarily return as
+			// RYW does not perfectly optimize this scenario, it should be readable but might unnecessarily return as
 			// unreadable
 			return;
 		}
@@ -476,4 +474,4 @@ struct UnreadableWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<UnreadableWorkload> UnreadableWorkloadFactory("Unreadable");
+WorkloadFactory<UnreadableWorkload> UnreadableWorkloadFactory;

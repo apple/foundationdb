@@ -23,6 +23,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -32,6 +33,8 @@ std::string describe(uint32_t const& item) {
 }
 
 struct RemoveServersSafelyWorkload : TestWorkload {
+	static constexpr auto NAME = "RemoveServersSafely";
+
 	bool enabled, killProcesses;
 	int minMachinesToKill, maxMachinesToKill, maxSafetyCheckRetries;
 	double minDelay, maxDelay;
@@ -58,7 +61,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "RemoveServersSafelyWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (!enabled)
 			return Void();
@@ -207,7 +209,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("ProcessAddrSize", processAddrs.size())
 		    .detail("NetAddrs", describe(netAddrs))
 		    .detail("ProcessAddrs", describe(processAddrs))
-		    .detail("Proceses", processes.size())
+		    .detail("Processes", processes.size())
 		    .detail("MachineProcesses", machineProcesses.size());
 
 		return processes;
@@ -306,8 +308,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			processesLeft.insert(processesLeft.end(), killProcArray.begin(), killProcArray.end());
 
 			// Check if we can kill the added process
-			bCanKillProcess =
-			    g_simulator->canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, nullptr);
+			bCanKillProcess = g_simulator->canKillProcesses(
+			    processesLeft, processesDead, ISimulator::KillType::KillInstantly, nullptr);
 
 			// Remove the added processes
 			processesLeft.resize(processesLeft.size() - killProcArray.size());
@@ -466,7 +468,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
 					    .detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
 				else if (removeViaClear) {
-					g_simulator->rebootProcess(killProcess, ISimulator::RebootProcessAndDelete);
+					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "Clear Process")
 					    .detail("Process", describe(*killProcess))
@@ -477,7 +479,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				}
 				/*
 				                else {
-				                    g_simulator->killProcess( killProcess, ISimulator::KillInstantly );
+				                    g_simulator->killProcess( killProcess, ISimulator::KillType::KillInstantly );
 				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
 				                }
 				*/
@@ -495,8 +497,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zones", zoneIds.size())
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
 			for (auto& zoneId : zoneIds) {
-				killedMachine = g_simulator->killZone(
-				    zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly);
+				killedMachine = g_simulator->killZone(zoneId,
+				                                      removeViaClear ? ISimulator::KillType::RebootAndDelete
+				                                                     : ISimulator::KillType::KillInstantly);
 				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill")
 				    .detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine")
 				    .detail("ZoneId", zoneId)
@@ -506,6 +509,45 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		return killProcArray;
+	}
+
+	// If a process is rebooted, it's processid will change. So we need to monitor
+	// such changes and re-issue the locality-based exclusion again.
+	ACTOR static Future<Void> checkLocalityChange(RemoveServersSafelyWorkload* self,
+	                                              Database cx,
+	                                              std::vector<AddressExclusion> toKillArray,
+	                                              std::unordered_set<std::string> origKillLocalities,
+	                                              bool markExcludeAsFailed) {
+		state std::unordered_set<std::string> killLocalities = origKillLocalities;
+
+		loop {
+			wait(delay(10.0));
+			wait(self->updateProcessIds(cx));
+			std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+			if (toKillLocalities == killLocalities) {
+				continue;
+			}
+
+			// The kill localities have changed.
+			TraceEvent("RemoveAndKill")
+			    .detail("Step", "localities changed")
+			    .detail("OrigKillLocalities", describe(origKillLocalities))
+			    .detail("KillLocalities", describe(killLocalities))
+			    .detail("ToKillLocalities", describe(toKillLocalities))
+			    .detail("Failed", markExcludeAsFailed);
+			killLocalities = toKillLocalities;
+
+			// Include back the localities that are no longer in the kill list
+			state bool failed = true;
+			wait(includeLocalities(cx, std::vector<std::string>(), failed, true));
+			wait(includeLocalities(cx, std::vector<std::string>(), !failed, true));
+
+			// Exclude the localities that are now in the kill list
+			wait(excludeLocalities(cx, killLocalities, markExcludeAsFailed));
+			TraceEvent("RemoveAndKill")
+			    .detail("Step", "new localities excluded")
+			    .detail("Localities", describe(killLocalities));
+		}
 	}
 
 	// Attempts to exclude a set of processes, and once the exclusion is successful it kills them.
@@ -633,10 +675,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
 
 		state bool excludeLocalitiesInsteadOfServers = deterministicRandom()->coinflip();
+		state std::unordered_set<std::string> toKillLocalitiesFailed;
 		if (markExcludeAsFailed) {
-			if (excludeLocalitiesInsteadOfServers) {
-				state std::unordered_set<std::string> toKillLocalitiesFailed =
-				    self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			toKillLocalitiesFailed = self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
 				    .detail("FailedAddressesSize", toKillMarkFailedArray.size())
@@ -655,8 +697,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 		}
 
-		if (excludeLocalitiesInsteadOfServers) {
-			state std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+		state std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+		if (excludeLocalitiesInsteadOfServers && toKillLocalities.size() > 0) {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Excluding localities without failed option")
 			    .detail("AddressesSize", toKillArray.size())
@@ -677,12 +719,19 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough
 		// servers left alive to do a coordinators auto (?)
 		if (toKill.size()) {
-			if (!excludeLocalitiesInsteadOfServers) {
-				// Wait for removal to be safe
-				TraceEvent("RemoveAndKill", functionId)
-				    .detail("Step", "Wait For Server Exclusion")
-				    .detail("Addresses", describe(toKill))
-				    .detail("ClusterAvailable", g_simulator->isAvailable());
+			// Wait for removal to be safe
+			TraceEvent("RemoveAndKill", functionId)
+			    .detail("Step", "Wait For Server Exclusion")
+			    .detail("Addresses", describe(toKill))
+			    .detail("ClusterAvailable", g_simulator->isAvailable());
+			if (excludeLocalitiesInsteadOfServers) {
+				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
+				     checkLocalityChange(self,
+				                         cx,
+				                         toKillArray,
+				                         toKillLocalities,
+				                         markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
+			} else {
 				wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
 			}
 
@@ -781,6 +830,24 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 		}
 
+		for (const auto& processInfo : processes) {
+			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
+			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
+				std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
+				bool found = false;
+				for (const auto& l : localityData) {
+					if (toKillLocalities.count(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
+					                           l.second)) {
+						found = true;
+						break;
+					}
+				}
+				if (!found) {
+					return std::unordered_set<std::string>();
+				}
+			}
+		}
+
 		return toKillLocalities;
 	}
 
@@ -807,4 +874,4 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RemoveServersSafelyWorkload> RemoveServersSafelyWorkloadFactory("RemoveServersSafely");
+WorkloadFactory<RemoveServersSafelyWorkload> RemoveServersSafelyWorkloadFactory;

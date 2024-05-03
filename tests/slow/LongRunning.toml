@@ -1,0 +1,15 @@
+[configuration]
+longRunningTest = true
+
+[[test]]
+testTitle = 'CycleTestWithKills'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10000.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    testDuration = 10000.0

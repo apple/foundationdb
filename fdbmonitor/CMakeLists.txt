@@ -5,9 +5,8 @@ get_target_property(fdbclient_target_includes fdbclient INCLUDE_DIRECTORIES)
 target_link_libraries(fdbmonitor PUBLIC SimpleOpt)
 target_include_directories(fdbmonitor PUBLIC "${fdbclient_target_includes}")
 strip_debug_symbols(fdbmonitor)
-assert_no_version_h(fdbmonitor)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(fdbmonitor PRIVATE rt)
+  target_link_libraries(fdbmonitor PRIVATE rt)
 endif()
 # FIXME: This include directory is an ugly hack. We probably want to fix this.
 # as soon as we get rid of the old build system
@@ -17,17 +16,17 @@ target_link_libraries(fdbmonitor PUBLIC Threads::Threads)
 # appears to change its behavior (it no longer seems to restart killed
 # processes). fdbmonitor is single-threaded anyway.
 get_target_property(fdbmonitor_options fdbmonitor COMPILE_OPTIONS)
-if (NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
+if(NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
   list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
   set_property(TARGET fdbmonitor PROPERTY COMPILE_OPTIONS ${fdbmonitor_options})
-endif ()
+endif()
 
 get_target_property(fdbmonitor_options fdbmonitor LINK_OPTIONS)
 
-if (NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
+if(NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
   list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
   set_property(TARGET fdbmonitor PROPERTY LINK_OPTIONS ${fdbmonitor_options})
-endif ()
+endif()
 
 if(GENERATE_DEBUG_PACKAGES)
   fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
@@ -51,7 +50,7 @@ add_custom_target(clean_sandbox
 
 add_custom_target(start_sandbox
   COMMAND ${CMAKE_BINARY_DIR}/bin/fdbmonitor --conffile ${CMAKE_BINARY_DIR}/sandbox/foundationdb.conf
-                                             --lockfile ${CMAKE_BINARY_DIR}/sandbox/fdbmonitor.lock)
+  --lockfile ${CMAKE_BINARY_DIR}/sandbox/fdbmonitor.lock)
 
 add_dependencies(start_sandbox fdbmonitor fdbserver)
 
@@ -61,6 +60,6 @@ if(NOT EXISTS ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh)
 endif()
 
 add_custom_target(generate_profile
-  COMMAND  ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh ${CMAKE_BINARY_DIR})
+  COMMAND ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh ${CMAKE_BINARY_DIR})
 
 add_dependencies(generate_profile fdbmonitor fdbserver mako fdbcli)

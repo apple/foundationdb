@@ -18,121 +18,78 @@
  * limitations under the License.
  */
 
-#pragma once
 #ifndef FDBRPC_TOKEN_SIGN_H
 #define FDBRPC_TOKEN_SIGN_H
+#pragma once
 
 #include "flow/network.h"
 #include "flow/Arena.h"
-#include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
-#include "fdbrpc/TenantInfo.h"
 #include "flow/PKey.h"
-
-namespace authz {
-
-enum class Algorithm : int {
-	RS256,
-	ES256,
-	UNKNOWN,
-};
-
-Algorithm algorithmFromString(StringRef s) noexcept;
-
-} // namespace authz
-
-namespace authz::flatbuffers {
-
-struct TokenRef {
-	static constexpr FileIdentifier file_identifier = 1523118;
-	double expiresAt;
-	VectorRef<StringRef> tenants;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, tenants);
-	}
-};
-
-struct SignedTokenRef {
-	static constexpr FileIdentifier file_identifier = 5916732;
-	StringRef token;
-	StringRef keyName;
-	StringRef signature;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, token, keyName, signature);
-	}
-
-	int expectedSize() const { return token.size() + keyName.size() + signature.size(); }
-};
-
-SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey);
-
-bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey);
-
-} // namespace authz::flatbuffers
+#include "fdbrpc/TokenSpec.h"
+#include <string>
+#include <vector>
 
 namespace authz::jwt {
 
-// Given T = concat(B64UrlEnc(headerJson), ".", B64UrlEnc(payloadJson)),
-// JWT is concat(T, ".", B64UrlEnc(sign(T, PrivateKey))).
-// Below we refer to T as "token part"
+namespace detail {
 
-// This struct is not meant to be flatbuffer-serialized
-// This is a parsed, flattened view of T and signature
-struct TokenRef {
-	// header part ("typ": "JWT" implicitly enforced)
-	Algorithm algorithm; // alg
-	StringRef keyId; // kid
-	// payload part
-	Optional<StringRef> issuer; // iss
-	Optional<StringRef> subject; // sub
-	Optional<VectorRef<StringRef>> audience; // aud
-	Optional<uint64_t> issuedAtUnixTime; // iat
-	Optional<uint64_t> expiresAtUnixTime; // exp
-	Optional<uint64_t> notBeforeUnixTime; // nbf
-	Optional<StringRef> tokenId; // jti
-	Optional<VectorRef<StringRef>> tenants; // tenants
-	// signature part
-	StringRef signature;
+// work around the fact that VectorRef takes more than one template parameter
+template <typename T>
+using VectorRefAlias = VectorRef<T>;
 
-	// print each non-signature field in non-JSON, human-readable format e.g. for trace
-	StringRef toStringRef(Arena& arena);
-};
+} // namespace detail
 
-// Make plain JSON token string with fields (except signature) from passed spec
-StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec);
+using TokenRef = BasicTokenSpec<StringRef, detail::VectorRefAlias, Optional>;
 
-// Generate plaintext signature of token part
-StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, PrivateKey privateKey);
+// print each non-signature field in non-JSON, human-readable format e.g. for trace
+StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec);
+
+StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec);
+
+// Sign the passed sign input
+StringRef signToken(Arena& arena, StringRef signInput, Algorithm algorithm, PrivateKey privateKey);
 
 // One-stop function to make JWT from spec
-StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey);
+StringRef signToken(Arena& arena, const TokenRef& tokenSpec, PrivateKey privateKey);
 
 // Parse passed b64url-encoded header part and materialize its contents into tokenOut,
 // using memory allocated from arena
-bool parseHeaderPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlHeaderIn);
+// Returns a non-empty optional containing an error message if parsing failed
+Optional<StringRef> parseHeaderPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlHeaderIn);
 
 // Parse passed b64url-encoded payload part and materialize its contents into tokenOut,
 // using memory allocated from arena
-bool parsePayloadPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlPayloadIn);
+// Returns a non-empty optional containing an error message if parsing failed
+Optional<StringRef> parsePayloadPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlPayloadIn);
 
 // Parse passed b64url-encoded signature part and materialize its contents into tokenOut,
 // using memory allocated from arena
-bool parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignatureIn);
+// Returns a non-empty optional containing an error message if parsing failed
+Optional<StringRef> parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignatureIn);
 
-// Returns the base64 encoded signature of the token
-StringRef signaturePart(StringRef token);
-
-// Parse passed token string and materialize its contents into tokenOut,
+// Parses passed token string and materialize its contents into tokenOut,
 // using memory allocated from arena
-// Return whether the signed token string is well-formed
-bool parseToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
+// Returns a non-empty optional containing an error message if parsing failed
+Optional<StringRef> parseToken(Arena& arena,
+                               StringRef signedTokenIn,
+                               TokenRef& parsedTokenOut,
+                               StringRef& signInputOut);
 
-// Verify only the signature part of signed token string against its token part, not its content
-bool verifyToken(StringRef signedToken, PublicKey publicKey);
+// Using the parsed token metadata and sign input, verify that the signature from parsedToken
+// is a result of signing sign input with a private key that matches the provided public key
+// Returns a tuple containing signature verification result,
+// and an optional containing verification error message if any occurred.
+// If the latter value is non-empty, the former value should not be used.
+// NOTE: This is more efficient than the other overload, as it re-uses
+//       the parsed and base64url-decoded token metadata and signature from parseToken() step
+std::pair<bool, Optional<StringRef>> verifyToken(StringRef signInput, const TokenRef& parsedToken, PublicKey publicKey);
+
+// Verifies only the signature part of signed token string against its token part, not its content
+// Returns a tuple containing signature verification result,
+// and an optional containing verification error message if any occurred.
+// If the latter value is non-empty, the former value should not be used.
+std::pair<bool, Optional<StringRef>> verifyToken(StringRef signedToken, PublicKey publicKey);
 
 } // namespace authz::jwt
 

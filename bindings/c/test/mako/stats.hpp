@@ -31,6 +31,7 @@
 #include <new>
 #include <ostream>
 #include <utility>
+#include "flow/Platform.h"
 #include "mako/mako.hpp"
 #include "operations.hpp"
 #include "time.hpp"
@@ -88,23 +89,29 @@ public:
 	}
 };
 
-class alignas(64) ThreadStatistics {
-	uint64_t conflicts;
-	uint64_t total_errors;
+class alignas(64) WorkflowStatistics {
+	uint64_t conflicts{ 0 };
+	uint64_t total_errors{ 0 };
+	uint64_t total_timeouts{ 0 };
 	std::array<uint64_t, MAX_OP> ops;
 	std::array<uint64_t, MAX_OP> errors;
+	std::array<uint64_t, MAX_OP> timeouts;
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
 	std::vector<DDSketchMako> sketches;
 
 public:
-	ThreadStatistics() noexcept {
-		memset(this, 0, sizeof(ThreadStatistics));
+	WorkflowStatistics() noexcept {
+		std::fill(ops.begin(), ops.end(), 0);
+		std::fill(errors.begin(), errors.end(), 0);
+		std::fill(timeouts.begin(), timeouts.end(), 0);
+		std::fill(latency_samples.begin(), latency_samples.end(), 0);
+		std::fill(latency_us_total.begin(), latency_us_total.end(), 0);
 		sketches.resize(MAX_OP);
 	}
 
-	ThreadStatistics(const ThreadStatistics& other) = default;
-	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
+	WorkflowStatistics(const WorkflowStatistics& other) = default;
+	WorkflowStatistics& operator=(const WorkflowStatistics& other) = default;
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -112,7 +119,11 @@ public:
 
 	uint64_t getErrorCount(int op) const noexcept { return errors[op]; }
 
+	uint64_t getTimeoutCount(int op) const noexcept { return timeouts[op]; }
+
 	uint64_t getTotalErrorCount() const noexcept { return total_errors; }
+
+	uint64_t getTotalTimeoutCount() const noexcept { return total_timeouts; }
 
 	uint64_t getLatencySampleCount(int op) const noexcept { return latency_samples[op]; }
 
@@ -127,13 +138,15 @@ public:
 	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
 
 	// with 'this' as final aggregation, factor in 'other'
-	void combine(const ThreadStatistics& other) {
+	void combine(const WorkflowStatistics& other) {
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
 			sketches[op].mergeWith(other.sketches[op]);
 			ops[op] += other.ops[op];
 			errors[op] += other.errors[op];
+			timeouts[op] += other.timeouts[op];
 			total_errors += other.errors[op];
+			total_timeouts += other.timeouts[op];
 			latency_samples[op] += other.latency_samples[op];
 			latency_us_total[op] += other.latency_us_total[op];
 		}
@@ -147,6 +160,11 @@ public:
 	void incrErrorCount(int op) noexcept {
 		total_errors++;
 		errors[op]++;
+	}
+
+	void incrTimeoutCount(int op) noexcept {
+		total_timeouts++;
+		timeouts[op]++;
 	}
 
 	void addLatency(int op, timediff_t diff) noexcept {
@@ -166,11 +184,11 @@ public:
 
 	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
 
-	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
-	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
+	friend std::ofstream& operator<<(std::ofstream& os, WorkflowStatistics& stats);
+	friend std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats);
 };
 
-inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
+inline std::ofstream& operator<<(std::ofstream& os, WorkflowStatistics& stats) {
 	rapidjson::StringBuffer ss;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
 	writer.StartObject();
@@ -178,6 +196,8 @@ inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	writer.Uint64(stats.conflicts);
 	writer.String("total_errors");
 	writer.Uint64(stats.total_errors);
+	writer.String("total_timeouts");
+	writer.Uint64(stats.total_timeouts);
 
 	writer.String("ops");
 	writer.StartArray();
@@ -190,6 +210,13 @@ inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	writer.StartArray();
 	for (auto op = 0; op < MAX_OP; op++) {
 		writer.Uint64(stats.errors[op]);
+	}
+	writer.EndArray();
+
+	writer.String("timeouts");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.timeouts[op]);
 	}
 	writer.EndArray();
 
@@ -228,21 +255,24 @@ inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
 	}
 }
 
-inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
+inline std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats) {
 	std::stringstream buffer;
 	buffer << is.rdbuf();
 	rapidjson::Document doc;
 	doc.Parse(buffer.str().c_str());
 	stats.conflicts = doc["conflicts"].GetUint64();
 	stats.total_errors = doc["total_errors"].GetUint64();
+	stats.total_timeouts = doc["total_timeouts"].GetUint64();
 
 	auto jsonOps = doc["ops"].GetArray();
 	auto jsonErrors = doc["errors"].GetArray();
+	auto jsonTimeouts = doc["timeouts"].GetArray();
 	auto jsonLatencySamples = doc["latency_samples"].GetArray();
 	auto jsonLatencyUsTotal = doc["latency_us_total"].GetArray();
 
 	populateArray(stats.ops, jsonOps);
 	populateArray(stats.errors, jsonErrors);
+	populateArray(stats.timeouts, jsonTimeouts);
 	populateArray(stats.latency_samples, jsonLatencySamples);
 	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
 	for (int op = 0; op < MAX_OP; op++) {
@@ -252,6 +282,69 @@ inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
 
 	return is;
 }
+
+enum TimerKind { THREAD, PROCESS };
+
+class CPUUtilizationTimer {
+	steady_clock::time_point timepoint_start;
+	steady_clock::time_point timepoint_end;
+	double cpu_time_start{ 0.0 };
+	double cpu_time_end{ 0.0 };
+	TimerKind kind;
+
+public:
+	CPUUtilizationTimer(TimerKind kind) : kind(kind) {}
+	void start() {
+		timepoint_start = steady_clock::now();
+		cpu_time_start = (kind == THREAD) ? getProcessorTimeThread() : getProcessorTimeProcess();
+	}
+	void end() {
+		timepoint_end = steady_clock::now();
+		cpu_time_end = (kind == THREAD) ? getProcessorTimeThread() : getProcessorTimeProcess();
+	}
+	double getCPUUtilization() const {
+		return (cpu_time_end - cpu_time_start) / toDoubleSeconds(timepoint_end - timepoint_start) * 100.;
+	}
+
+	double getCPUTime() const { return cpu_time_end - cpu_time_start; }
+
+	double getTotalDuration() const { return toDoubleSeconds(timepoint_end - timepoint_start); }
+};
+
+class alignas(64) ThreadStatistics {
+	CPUUtilizationTimer thread_timer;
+
+public:
+	ThreadStatistics() : thread_timer(THREAD) {}
+
+	void startThreadTimer() { thread_timer.start(); }
+	void endThreadTimer() { thread_timer.end(); }
+	double getThreadCPUUtilization() const { return thread_timer.getCPUUtilization(); }
+	double getCPUTime() const { return thread_timer.getCPUTime(); }
+	double getTotalDuration() const { return thread_timer.getTotalDuration(); }
+};
+
+class alignas(64) ProcessStatistics {
+	CPUUtilizationTimer process_timer;
+	CPUUtilizationTimer fdb_network_timer;
+
+public:
+	ProcessStatistics() : process_timer(PROCESS), fdb_network_timer(THREAD) {}
+	void startProcessTimer() { process_timer.start(); }
+	void endProcessTimer() { process_timer.end(); }
+
+	void startFDBNetworkTimer() { fdb_network_timer.start(); }
+	void endFDBNetworkTimer() { fdb_network_timer.end(); }
+
+	double getProcessCPUUtilization() const { return process_timer.getCPUUtilization(); }
+	double getFDBNetworkCPUUtilization() const { return fdb_network_timer.getCPUUtilization(); }
+
+	double getProcessCPUTime() const { return process_timer.getCPUTime(); }
+	double getFDBNetworkCPUTime() const { return fdb_network_timer.getCPUTime(); }
+
+	double getProcessTotalDuration() const { return process_timer.getTotalDuration(); }
+	double getFDBNetworkTotalDuration() const { return fdb_network_timer.getTotalDuration(); }
+};
 
 } // namespace mako
 

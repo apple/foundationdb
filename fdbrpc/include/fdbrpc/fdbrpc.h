@@ -23,14 +23,25 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/TaskPriority.h"
 #include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/simulator.h"
 
-struct FlowReceiver : public NetworkMessageReceiver {
-	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
+#ifdef WITH_SWIFT
+#include <swift/bridging>
+#endif /* WITH_SWIFT */
 
+// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
+class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
+	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
+	Endpoint endpoint;
+	bool m_isLocalEndpoint;
+	bool m_stream;
+
+protected:
 	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {}
 
 	FlowReceiver(Endpoint const& remoteEndpoint, bool stream)
@@ -46,8 +57,17 @@ struct FlowReceiver : public NetworkMessageReceiver {
 		}
 	}
 
-	bool isLocalEndpoint() { return m_isLocalEndpoint; }
-	bool isRemoteEndpoint() { return endpoint.isValid() && !m_isLocalEndpoint; }
+public:
+	bool isLocalEndpoint() const { return m_isLocalEndpoint; }
+	bool isRemoteEndpoint() const { return endpoint.isValid() && !m_isLocalEndpoint; }
+
+	void setRemoteEndpoint(Endpoint const& remoteEndpoint, bool stream) {
+		ASSERT(!m_isLocalEndpoint);
+		ASSERT(!endpoint.isValid());
+		endpoint = remoteEndpoint;
+		m_stream = stream;
+		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+	}
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
@@ -80,12 +100,6 @@ struct FlowReceiver : public NetworkMessageReceiver {
 	}
 
 	const Endpoint& getRawEndpoint() { return endpoint; }
-
-private:
-	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
-	Endpoint endpoint;
-	bool m_isLocalEndpoint;
-	bool m_stream;
 };
 
 template <class T>
@@ -121,18 +135,25 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
+    // Swift can't call method that takes in a universal references (U&&),
+    // so provide a callable `send` method that copies the value.
+    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
+        sav->send(valueCopy);
+    }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
+  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
-	bool isSet() { return sav->isSet(); }
+	bool isSet() const { return sav->isSet(); }
 	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
@@ -174,7 +195,7 @@ public:
 		sav = nullptr;
 		return ptr;
 	}
-	explicit ReplyPromise<T>(SAV<T>* ptr) : sav(ptr) {}
+	explicit ReplyPromise<T>(SAV<T>* ptr) : sav(static_cast<NetSAV<T>*>(ptr)) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
@@ -363,8 +384,9 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
-				acknowledgements = AcknowledgementReceiver(
-				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+				acknowledgements.setRemoteEndpoint(
+				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()),
+				    false);
 				if (onConnect.isValid() && onConnect.canBeSet()) {
 					onConnect.send(Void());
 				}
@@ -506,7 +528,7 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
-	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+	bool connected() const { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
 
 	Future<Void> onConnected() {
 		if (connected()) {
@@ -684,6 +706,10 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		if constexpr (IsPublic) {
 			if (!message.verify()) {
 				if constexpr (HasReply<T>) {
+					TraceEvent(SevWarnAlways, "UnauthorizedAccessPrevented"_audit)
+					    .detail("RequestType", typeid(T).name())
+					    .detail("ClientIP", FlowTransport::transport().currentDeliveryPeerAddress())
+					    .log();
 					message.reply.sendError(permission_denied());
 				}
 			} else {
@@ -725,6 +751,7 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) const {
+		// Ensure the same request isn't used multiple times
 		ASSERT(!getReplyPromise(value).getFuture().isReady());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value),
@@ -811,8 +838,8 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			// FIXME: buggify only in simulation/not during speed up simulation?
-			if (disc.isReady() || BUGGIFY_WITH_PROB(0.01)) {
+			if (disc.isReady() ||
+			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
 				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
 					p.sendError(unauthorized_attempt());
 				} else {
@@ -870,7 +897,7 @@ public:
 
 	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
 
-	FutureStream<T> getFuture() const {
+	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() const {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}

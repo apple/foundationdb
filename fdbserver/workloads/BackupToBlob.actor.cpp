@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/BlobStoreWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -33,7 +34,7 @@ struct BackupToBlobWorkload : TestWorkload {
 	int initSnapshotInterval = 0;
 	int snapshotInterval = 100000;
 
-	static constexpr const char* DESCRIPTION = "BackupToBlob";
+	static constexpr auto NAME = "BackupToBlob";
 
 	BackupToBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
@@ -47,8 +48,6 @@ struct BackupToBlobWorkload : TestWorkload {
 		}
 		backupURL = backupURLString;
 	}
-
-	std::string description() const override { return DESCRIPTION; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -66,7 +65,7 @@ struct BackupToBlobWorkload : TestWorkload {
 		                              self->snapshotInterval,
 		                              self->backupTag.toString(),
 		                              backupRanges,
-		                              false));
+		                              true));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), StopWhenDone::True));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();
@@ -79,4 +78,4 @@ struct BackupToBlobWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<BackupToBlobWorkload> BackupToBlobWorkloadFactory(BackupToBlobWorkload::DESCRIPTION);
+WorkloadFactory<BackupToBlobWorkload> BackupToBlobWorkloadFactory;

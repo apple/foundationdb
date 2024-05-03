@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
@@ -38,6 +39,7 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
@@ -149,7 +151,33 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				// Calculate file offsets for the read/write operation space
+				// Operation starts at a 1-based pageNumber and is of size pageLen
+				int64_t fileOffsetStart = (pageNumber - 1) * pageLen;
+				// End refers to the offset after the operation, not the last byte.
+				int64_t fileOffsetEnd = fileOffsetStart + pageLen;
+
+				// Convert the file offsets to potentially corrupt block numbers
+				// Corrupt block numbers are 0-based and 4096 bytes in length.
+				int64_t corruptBlockStart = fileOffsetStart / 4096;
+				// corrupt block end is the block number AFTER the operation
+				int64_t corruptBlockEnd = (fileOffsetEnd + 4095) / 4096;
+
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, corruptBlockStart));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename &&
+				    iter->second < corruptBlockEnd) {
+					severity = SevWarnAlways;
+				}
+				TraceEvent("CheckCorruption")
+				    .detail("Filename", filename)
+				    .detail("NextFile", iter->first)
+				    .detail("BlockStart", corruptBlockStart)
+				    .detail("BlockEnd", corruptBlockEnd)
+				    .detail("NextBlock", iter->second);
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
@@ -309,7 +337,17 @@ struct SQLiteDB : NonCopyable {
 			    db, 0, restart ? SQLITE_CHECKPOINT_RESTART : SQLITE_CHECKPOINT_FULL, &logSize, &checkpointCount);
 			if (!rc)
 				break;
-			if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
+
+			// In simulation, if the process is shutting down then do not wait/retry on a busy result because the wait
+			// or the retry could take too long to complete such that the virtual process is forcibly destroyed first,
+			// leaking all outstanding actors and their related states which would include references to the SQLite
+			// data files which would remain open.  This would cause the replacement virtual process to fail an assert
+			// when opening the SQLite files as they would already be in use.
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->shutdownSignal.isSet()) {
+				VFSAsyncFile::setInjectedError(rc);
+				checkError("checkpoint", rc);
+				ASSERT(false); // should never reach this point
+			} else if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
 				// printf("#");
 				// threadSleep(.010);
 				sqlite3_sleep(10);
@@ -696,7 +734,7 @@ struct IntKeyCursor {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 };
@@ -734,7 +772,7 @@ struct RawCursor {
 			} catch (...) {
 				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 	void moveFirst() {
@@ -804,7 +842,7 @@ struct RawCursor {
 			int valuePerFragment = kv.value.size();
 
 			// Figure out if we would benefit from fragmenting this kv pair.  The key size must be less than
-			// primary page usable size, and the value and key size together must exceeed the primary page usable size.
+			// primary page usable size, and the value and key size together must exceed the primary page usable size.
 			if ((kv.key.size() + kv.value.size()) > primaryPageUsable && kv.key.size() < primaryPageUsable) {
 
 				// Just the part of the value that would be in a partially-filled overflow page
@@ -1223,10 +1261,6 @@ struct RawCursor {
 			}
 		}
 		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		// AccumulatedBytes includes KeyValueRef overhead so subtract it
 		kvBytesRead += (accumulatedBytes - result.size() * sizeof(KeyValueRef));
 		return result;
@@ -1589,7 +1623,7 @@ public:
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override;
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override;
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
@@ -1610,6 +1644,10 @@ public:
 
 	Future<SpringCleaningWorkPerformed> doClean();
 	void startReadThreads();
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 
 private:
 	KeyValueStoreType type;
@@ -1885,14 +1923,11 @@ private:
 				readThreads[i].clear();
 		}
 		void checkFreePages() {
-			int iterations = 0;
-
 			int64_t freeListSize = freeListPages;
 			while (!freeTableEmpty && freeListSize < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT) {
 				int deletedPages = cursor->lazyDelete(SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				freeTableEmpty = (deletedPages != SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				springCleaningStats.lazyDeletePages += deletedPages;
-				++iterations;
 
 				freeListSize = conn.freePages();
 			}

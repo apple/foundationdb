@@ -232,7 +232,7 @@ public class Subspace {
 	}
 
 	/**
-	 * Gets a {@link Range} respresenting all keys strictly in the {@code Subspace}.
+	 * Gets a {@link Range} representing all keys strictly in the {@code Subspace}.
 	 *
 	 * @return the {@link Range} of keyspace corresponding to this {@code Subspace}
 	 */

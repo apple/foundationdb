@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PerformanceWorkload : TestWorkload {
+	static constexpr auto NAME = "Performance";
+
 	Value probeWorkload;
 	Standalone<VectorRef<KeyValueRef>> savedOptions;
 
@@ -50,7 +52,6 @@ struct PerformanceWorkload : TestWorkload {
 		printf("saved %d options\n", savedOptions.size());
 	}
 
-	std::string description() const override { return "PerformanceTestWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (!clientId)
 			return _setup(cx, this);
@@ -228,4 +229,4 @@ struct PerformanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<PerformanceWorkload> PerformanceWorkloadFactory("Performance");
+WorkloadFactory<PerformanceWorkload> PerformanceWorkloadFactory;

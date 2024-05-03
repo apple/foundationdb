@@ -25,11 +25,13 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -42,6 +44,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct DataLossRecoveryWorkload : TestWorkload {
+	static constexpr auto NAME = "DataLossRecovery";
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
@@ -59,11 +62,11 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "DataLossRecovery"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys", "Attrition" });
+	}
 
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
@@ -78,6 +81,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value oldValue = "TestValue"_sr;
 		state Value newValue = "TestNewValue"_sr;
 
+		TraceEvent("DataLossRecovery").detail("Phase", "Starting");
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 
 		TraceEvent("DataLossRecovery").detail("Phase", "InitialWrites");
@@ -115,7 +119,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				// add timeout to read so test fails faster if something goes wrong
+				state Optional<Value> res = wait(timeoutError(tr.get(key), 90.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
@@ -159,7 +164,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
 			try {
-				excludeServers(tr, servers, true);
+				wait(excludeServers(&tr, servers, true));
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -187,10 +192,23 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
 		state std::vector<UID> dest;
 		while (dest.empty()) {
-			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+			state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
-				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
+				state StorageServerInterface interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
 				if (g_simulator->protectedAddresses.count(interf.address()) == 0) {
+					// We need to avoid selecting a storage server that is already dead at this point, otherwise
+					// the test will hang. This is achieved by sending a GetStorageMetrics RPC. This is a necessary
+					// check for this test because DD has been disabled and the proper mechanism that removes bad
+					// storage servers are not taking place in the scope of this function.
+					state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = interf.getStorageMetrics.tryGetReply(
+					    GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
+
+					state ErrorOr<GetStorageMetricsReply> rep = wait(metricsRequest);
+					if (rep.isError()) {
+						// Delay 1s to avoid tight spin loop in case all options fail
+						wait(delay(1.0));
+						continue;
+					}
 					dest.push_back(interf.uniqueID);
 					addr = interf.address();
 				}
@@ -214,19 +232,45 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				moveKeysLock.myOwner = owner;
 
 				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
-				wait(moveKeys(cx,
-				              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-				                              keys,
-				                              dest,
-				                              dest,
-				                              moveKeysLock,
-				                              Promise<Void>(),
-				                              &self->startMoveKeysParallelismLock,
-				                              &self->finishMoveKeysParallelismLock,
-				                              false,
-				                              UID(), // for logging only
-				                              &ddEnabledState,
-				                              CancelConflictingDataMoves::True }));
+				std::unique_ptr<MoveKeysParams> params;
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+					                               AssignEmptyRange(false),
+					                               DataMoveType::PHYSICAL,
+					                               DataMovementReason::TEAM_HEALTHY,
+					                               UnassignShard(false));
+					params = std::make_unique<MoveKeysParams>(dataMoveId,
+					                                          std::vector<KeyRange>{ keys },
+					                                          dest,
+					                                          dest,
+					                                          moveKeysLock,
+					                                          Promise<Void>(),
+					                                          &self->startMoveKeysParallelismLock,
+					                                          &self->finishMoveKeysParallelismLock,
+					                                          false,
+					                                          UID(), // for logging only
+					                                          &ddEnabledState,
+					                                          CancelConflictingDataMoves::True);
+				} else {
+					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+					                               AssignEmptyRange(false),
+					                               DataMoveType::LOGICAL,
+					                               DataMovementReason::TEAM_HEALTHY,
+					                               UnassignShard(false));
+					params = std::make_unique<MoveKeysParams>(dataMoveId,
+					                                          keys,
+					                                          dest,
+					                                          dest,
+					                                          moveKeysLock,
+					                                          Promise<Void>(),
+					                                          &self->startMoveKeysParallelismLock,
+					                                          &self->finishMoveKeysParallelismLock,
+					                                          false,
+					                                          UID(), // for logging only
+					                                          &ddEnabledState,
+					                                          CancelConflictingDataMoves::True);
+				}
+				wait(moveKeys(cx, *params));
 				break;
 			} catch (Error& e) {
 				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");
@@ -260,7 +304,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	void killProcess(DataLossRecoveryWorkload* self, const NetworkAddress& addr) {
 		ISimulator::ProcessInfo* process = g_simulator->getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
-		g_simulator->killProcess(process, ISimulator::KillInstantly);
+		g_simulator->killProcess(process, ISimulator::KillType::KillInstantly);
 		TraceEvent("TestTeamKilled").detail("Address", addr);
 	}
 
@@ -269,4 +313,4 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory("DataLossRecovery");
+WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory;

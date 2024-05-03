@@ -21,6 +21,9 @@
 #include "flow/Arena.h"
 
 #include "flow/UnitTest.h"
+#include "flow/ScopeExit.h"
+
+#include "flow/config.h"
 
 // We don't align memory properly, and we need to tell lsan about that.
 extern "C" const char* __lsan_default_options(void) {
@@ -118,22 +121,20 @@ Arena::Arena(Arena&& r) noexcept = default;
 Arena& Arena::operator=(const Arena& r) = default;
 Arena& Arena::operator=(Arena&& r) noexcept = default;
 void Arena::dependsOn(const Arena& p) {
-	if (p.impl) {
+	// x.dependsOn(y) is a no-op if they refer to the same ArenaBlocks.
+	// They will already have the same lifetime.
+	if (p.impl && p.impl.getPtr() != impl.getPtr()) {
 		allowAccess(impl.getPtr());
 		allowAccess(p.impl.getPtr());
 		ArenaBlock::dependOn(impl, p.impl.getPtr());
 		disallowAccess(p.impl.getPtr());
-		if (p.impl.getPtr() != impl.getPtr()) {
-			disallowAccess(impl.getPtr());
-		}
+		disallowAccess(impl.getPtr());
 	}
 }
 
 void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
 }
-
-FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
 
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
@@ -176,6 +177,9 @@ void ArenaBlock::delref() {
 	}
 }
 
+bool ArenaBlock::isSecure() const {
+	return secure;
+}
 bool ArenaBlock::isTiny() const {
 	return tinySize != NOT_TINY;
 }
@@ -233,6 +237,15 @@ size_t ArenaBlock::estimatedTotalSize() const {
 		return size();
 	}
 	return totalSizeEstimate;
+}
+
+void ArenaBlock::wipeUsed() {
+	int dataOffset = isTiny() ? TINY_HEADER : sizeof(ArenaBlock);
+	void* dataBegin = (char*)getData() + dataOffset;
+	int dataSize = used() - dataOffset;
+	makeDefined(dataBegin, dataSize);
+	::memset(dataBegin, 0, dataSize);
+	makeNoAccess(dataBegin, dataSize);
 }
 
 // just for debugging:
@@ -298,10 +311,12 @@ void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
 
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 	other->addref();
-	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef))
+	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
 		create(SMALL, self)->makeReference(other);
-	else
+	} else {
+		ASSERT(self->getData() != other->getData());
 		self->makeReference(other);
+	}
 }
 
 void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size) {
@@ -312,7 +327,7 @@ void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t 
 	}
 }
 
-void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
+void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
 	ArenaBlock* b = self.getPtr();
 	allowAccess(b);
 	if (!self || self->unused() < bytes) {
@@ -322,6 +337,8 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	}
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
+	if (isSecure)
+		b->secure = 1;
 	disallowAccess(b);
 	makeUndefined(result, bytes);
 	return result;
@@ -330,6 +347,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
+	// all blocks are initialized with no-wipe by default. allocate() sets it, if needed.
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		static_assert(sizeof(ArenaBlock) <= 32); // Need to allocate at least sizeof(ArenaBlock) for an ArenaBlock*. See
 		                                         // https://github.com/apple/foundationdb/issues/6753
@@ -343,6 +361,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			INSTRUMENT_ALLOCATE("Arena64");
 		}
 		b->tinyUsed = TINY_HEADER;
+		b->secure = 0;
 
 	} else {
 		int reqSize = dataSize + sizeof(ArenaBlock);
@@ -367,38 +386,40 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)new uint8_t[512];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(512);
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)new uint8_t[1024];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(1024);
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)new uint8_t[2048];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(2048);
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)new uint8_t[4096];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(4096);
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)new uint8_t[8192];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(8192);
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
 			b->totalSizeEstimate = b->bigSize;
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
+			b->secure = 0;
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
 #endif
-			b = (ArenaBlock*)new uint8_t[reqSize];
+			b = (ArenaBlock*)allocateAndMaybeKeepalive(reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->totalSizeEstimate = b->bigSize;
 			b->bigUsed = sizeof(ArenaBlock);
+			b->secure = 0;
 
 #if !DEBUG_DETERMINISM
 			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
@@ -466,6 +487,9 @@ void ArenaBlock::destroy() {
 }
 
 void ArenaBlock::destroyLeaf() {
+	if (secure) {
+		wipeUsed();
+	}
 	if (isTiny()) {
 		if (tinySize <= 32) {
 			FastAllocator<32>::release(this);
@@ -482,26 +506,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 		}
 	}
 }
@@ -775,6 +799,16 @@ TEST_CASE("/flow/Arena/Size") {
 	return Void();
 }
 
+// Test that x.dependsOn(x) works, and is effectively a no-op.
+TEST_CASE("/flow/Arena/SelfRef") {
+	Arena a(4096);
+
+	// This should be a no-op.
+	a.dependsOn(a);
+
+	return Void();
+}
+
 TEST_CASE("flow/StringRef/eat") {
 	StringRef str = "test/case"_sr;
 	StringRef first = str.eat("/");
@@ -814,5 +848,194 @@ TEST_CASE("flow/StringRef/eat") {
 	ASSERT(first == "testcase"_sr);
 	ASSERT(str == ""_sr);
 
+	return Void();
+}
+
+struct TestOptionalMapClass {
+	StringRef value;
+	Optional<StringRef> optionalValue;
+
+	const StringRef constValue;
+	const Optional<StringRef> constOptionalValue;
+
+	StringRef getValue() const { return value; }
+	Optional<StringRef> getOptionalValue() const { return optionalValue; }
+
+	StringRef const& getValueRef() const { return value; }
+	Optional<StringRef> const& getOptionalValueRef() const { return optionalValue; }
+
+	StringRef sub(int x) const { return value.substr(x); }
+	Optional<StringRef> optionalSub(int x) const { return optionalValue.map<StringRef>(&StringRef::substr, (int)x); }
+
+	TestOptionalMapClass(StringRef value, bool setOptional)
+	  : value(value), constValue(value),
+	    optionalValue(setOptional ? Optional<StringRef>(value) : Optional<StringRef>()),
+	    constOptionalValue(setOptional ? Optional<StringRef>(value) : Optional<StringRef>()) {}
+};
+
+struct TestOptionalMapClassRef : public TestOptionalMapClass, public ReferenceCounted<TestOptionalMapClassRef> {
+	TestOptionalMapClassRef(StringRef value, bool setOptional) : TestOptionalMapClass(value, setOptional) {}
+};
+
+void checkResults(std::vector<Optional<StringRef>> const& results,
+                  StringRef value,
+                  bool shouldBeEmpty,
+                  std::string context) {
+	if (shouldBeEmpty) {
+		for (int i = 0; i < results.size(); ++i) {
+			if (results[i].present()) {
+				fmt::print("Unexpected result {} at index {} in {}\n", results[i].get().printable(), i, context);
+				ASSERT(false);
+			}
+		}
+	} else {
+		for (int i = 0; i < results.size(); ++i) {
+			if (!results[i].present()) {
+				fmt::print("Missing result {} at index {} in {}\n", value.printable(), i, context);
+				ASSERT(false);
+			}
+
+			if (i < results.size() - 1) {
+				if (results[i].get() != value) {
+					fmt::print("Incorrect result {} at index {} in {}: expected {}\n",
+					           results[i].get().printable(),
+					           i,
+					           context,
+					           value.printable());
+					ASSERT(false);
+				}
+			} else {
+				if (results[i].get() != value.substr(5)) {
+					fmt::print("Incorrect result {} at index {} in {}: expected {}\n",
+					           results[i].get().printable(),
+					           i,
+					           context,
+					           value.substr(5).printable());
+					ASSERT(false);
+				}
+			}
+		}
+	}
+}
+
+template <bool IsRef, class T>
+void checkOptional(Optional<T> val) {
+	StringRef value;
+	bool isEmpty = !val.present();
+	bool isFlatMapEmpty = isEmpty;
+	std::vector<Optional<StringRef>> mapResults;
+	std::vector<Optional<StringRef>> flatMapResults;
+
+	if constexpr (IsRef) {
+		isEmpty = isFlatMapEmpty = isEmpty || !val.get();
+		if (!isEmpty) {
+			value = val.get()->value;
+			isFlatMapEmpty = !val.get()->optionalValue.present();
+		}
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::value));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::constValue));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::getValue));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::getValueRef));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::sub, 5));
+
+		flatMapResults.push_back(val.flatMap([](auto t) { return t ? t->optionalValue : Optional<StringRef>(); }));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::optionalValue));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::constOptionalValue));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::getOptionalValue));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::getOptionalValueRef));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::optionalSub, 5));
+	} else {
+		if (!isEmpty) {
+			value = val.get().value;
+			isFlatMapEmpty = !val.get().optionalValue.present();
+		}
+		mapResults.push_back(val.map([](auto t) { return t.value; }));
+		mapResults.push_back(val.map(&TestOptionalMapClass::value));
+		mapResults.push_back(val.map(&TestOptionalMapClass::constValue));
+		mapResults.push_back(val.map(&TestOptionalMapClass::getValue));
+		mapResults.push_back(val.map(&TestOptionalMapClass::getValueRef));
+		mapResults.push_back(val.map(&TestOptionalMapClass::sub, 5));
+
+		flatMapResults.push_back(val.flatMap([](auto t) { return t.optionalValue; }));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::optionalValue));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::constOptionalValue));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::getOptionalValue));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::getOptionalValueRef));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::optionalSub, 5));
+	}
+
+	checkResults(mapResults, value, isEmpty, IsRef ? "ref map" : "non-ref map");
+	checkResults(flatMapResults, value, isFlatMapEmpty, IsRef ? "ref flat map" : "non-ref flat map");
+}
+
+TEST_CASE("/flow/Arena/OptionalMap") {
+	// Optional<T>
+	checkOptional<false>(Optional<TestOptionalMapClass>());
+	checkOptional<false>(Optional<TestOptionalMapClass>(TestOptionalMapClass("test_string"_sr, false)));
+	checkOptional<false>(Optional<TestOptionalMapClass>(TestOptionalMapClass("test_string"_sr, true)));
+
+	// Optional<Reference<T>>
+	checkOptional<true>(Optional<Reference<TestOptionalMapClassRef>>());
+	checkOptional<true>(Optional<Reference<TestOptionalMapClassRef>>(Reference<TestOptionalMapClassRef>()));
+	checkOptional<true>(
+	    Optional<Reference<TestOptionalMapClassRef>>(makeReference<TestOptionalMapClassRef>("test_string"_sr, false)));
+	checkOptional<true>(
+	    Optional<Reference<TestOptionalMapClassRef>>(makeReference<TestOptionalMapClassRef>("test_string"_sr, true)));
+
+	// Optional<T*>
+	checkOptional<true>(Optional<TestOptionalMapClass*>());
+	checkOptional<true>(Optional<TestOptionalMapClass*>(nullptr));
+
+	auto ptr = new TestOptionalMapClass("test_string"_sr, false);
+	checkOptional<true>(Optional<TestOptionalMapClass*>(ptr));
+	delete ptr;
+
+	ptr = new TestOptionalMapClass("test_string"_sr, true);
+	checkOptional<true>(Optional<TestOptionalMapClass*>(ptr));
+	delete ptr;
+
+	return Void();
+}
+
+TEST_CASE("/flow/Arena/Secure") {
+	auto& rng = *deterministicRandom();
+	auto sizes = std::vector<int>{ 1 };
+	for (auto i = 2; i <= ArenaBlock::LARGE * 2; i *= 2) {
+		sizes.push_back(i);
+		// randomly select one value between this pow2 and the next
+		sizes.push_back(rng.randomInt(sizes.back() + 1, sizes.back() * 2));
+	}
+	// temporarily disable allocation tracing: runs with hugeArenaSample seems to cause test to fail for some reason
+	g_allocation_tracing_disabled++;
+	auto reenableAllocTracingOnUnwind = ScopeExit([]() { g_allocation_tracing_disabled--; });
+	for (auto iter = 0; iter < 100; iter++) {
+		auto const allocsPerArena = rng.randomInt(1, 80);
+		std::vector<std::pair<uint8_t*, int>> buffers;
+		// below scope object keeps deallocated memory alive to test if wipe-after-use behaves correctly
+		auto keepaliveScope = keepalive_allocator::ActiveScope{};
+		{
+			Arena arena;
+			for (auto i = 0; i < allocsPerArena; i++) {
+				auto const len = sizes[rng.randomInt(0, sizes.size())];
+				auto const buf = new (arena, WipeAfterUse{}) uint8_t[len];
+				for (auto i = 0; i < len; i++)
+					buf[i] = rng.randomInt(1, 256);
+				buffers.push_back(std::make_pair(buf, len));
+			}
+		}
+		// make sure the buffers have been zeroed out
+		for (auto const& buffer : buffers) {
+			auto buf = buffer.first;
+			auto len = buffer.second;
+			makeDefined(buf, len);
+			auto poisonOnUnwind = ScopeExit([buf, len]() { makeNoAccess(buf, len); });
+			for (auto i = 0; i < len; i++) {
+				if (buf[i] != 0) {
+					fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
+					ASSERT(false);
+				}
+			}
+		}
+	}
 	return Void();
 }

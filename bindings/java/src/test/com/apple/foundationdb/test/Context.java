@@ -84,8 +84,8 @@ abstract class Context implements Runnable, AutoCloseable {
 		try {
 			executeOperations();
 		} catch(Throwable t) {
-			// EAT
 			t.printStackTrace();
+			System.exit(1);
 		}
 		while(children.size() > 0) {
 			//System.out.println("Shutting down...waiting on " + children.size() + " threads");
@@ -101,12 +101,14 @@ abstract class Context implements Runnable, AutoCloseable {
 		}
 	}
 
-	public synchronized void setTenant(Optional<byte[]> tenantName) {
+	public synchronized CompletableFuture<Long> setTenant(Optional<byte[]> tenantName) {
 		if (tenantName.isPresent()) {
 			tenant = Optional.of(tenantMap.computeIfAbsent(tenantName.get(), tn -> db.openTenant(tenantName.get())));
+			return tenant.get().getId();
 		}
 		else {
 			tenant = Optional.empty();
+			return CompletableFuture.completedFuture(-1L);
 		}
 	}
 
@@ -147,10 +149,11 @@ abstract class Context implements Runnable, AutoCloseable {
 	private static synchronized boolean newTransaction(Database db, Optional<Tenant> tenant, String trName, boolean allowReplace) {
 		TransactionState oldState = transactionMap.get(trName);
 		if (oldState != null) {
-			releaseTransaction(oldState.transaction);
-		}
-		else if (!allowReplace) {
-			return false;
+			if (allowReplace) {
+				releaseTransaction(oldState.transaction);
+			} else {
+				return false;
+			}
 		}
 
 		TransactionState newState = new TransactionState(createTransaction(db, tenant), tenant);

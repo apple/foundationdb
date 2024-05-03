@@ -25,6 +25,7 @@
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
 void forceLinkFlowTests();
+void forceLinkCoroTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
@@ -43,8 +44,21 @@ void forceLinkRESTUtilsTests();
 void forceLinkRESTKmsConnectorTest();
 void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
+void forceLinkIdempotencyIdTests();
+void forceLinkBlobConnectionProviderTests();
+void forceLinkArenaStringTests();
+void forceLinkActorCollectionTests();
+void forceLinkDDSketchTests();
+void forceLinkCommitProxyTests();
+void forceLinkWipedStringTests();
+void forceLinkRandomKeyValueUtilsTests();
+void forceLinkSimKmsVaultTests();
+void forceLinkRESTSimKmsVaultTest();
+void forceLinkActorFuzzUnitTests();
 
 struct UnitTestWorkload : TestWorkload {
+	static constexpr auto NAME = "UnitTests";
+
 	bool enabled;
 	std::string testPattern;
 	Optional<std::string> testsIgnored;
@@ -82,6 +96,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkIndexedSetTests();
 		forceLinkDequeTests();
 		forceLinkFlowTests();
+		forceLinkCoroTests();
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
@@ -100,9 +115,18 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRESTKmsConnectorTest();
 		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
+		forceLinkIdempotencyIdTests();
+		forceLinkBlobConnectionProviderTests();
+		forceLinkArenaStringTests();
+		forceLinkActorCollectionTests();
+		forceLinkDDSketchTests();
+		forceLinkWipedStringTests();
+		forceLinkRandomKeyValueUtilsTests();
+		forceLinkSimKmsVaultTests();
+		forceLinkRESTSimKmsVaultTest();
+		forceLinkActorFuzzUnitTests();
 	}
 
-	std::string description() const override { return "UnitTests"; }
 	Future<Void> setup(Database const& cx) override {
 		platform::eraseDirectoryRecursive(testParams.getDataDir());
 		return Void();
@@ -197,7 +221,7 @@ struct UnitTestWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
+WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory;
 
 TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
 	wait(delay(60));

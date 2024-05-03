@@ -2618,7 +2618,7 @@ public:
 			// This uses the Unicode reference implementation to do the
 			// conversion from UTF-8 to wchar_t. The required files are
 			// ConvertUTF.h and ConvertUTF.c which should be included in
-			// the distribution but are publically available from unicode.org
+			// the distribution but are publicly available from unicode.org
 			// at http://www.unicode.org/Public/PROGRAMS/CVTUTF/
 			ConversionResult retval;
 			const UTF8* pUtf8 = (const UTF8*)a_pInputData;
@@ -2691,7 +2691,7 @@ public:
 			// This uses the Unicode reference implementation to do the
 			// conversion from wchar_t to UTF-8. The required files are
 			// ConvertUTF.h and ConvertUTF.c which should be included in
-			// the distribution but are publically available from unicode.org
+			// the distribution but are publicly available from unicode.org
 			// at http://www.unicode.org/Public/PROGRAMS/CVTUTF/
 			ConversionResult retval;
 			UTF8* pUtf8 = (UTF8*)a_pOutputData;

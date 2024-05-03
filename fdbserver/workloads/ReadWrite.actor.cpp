@@ -22,7 +22,8 @@
 #include <utility>
 #include <vector>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -199,7 +200,7 @@ struct ReadWriteCommonImpl {
 		}
 	}
 	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
-	                                     ContinuousSample<double>* latencies,
+	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
@@ -219,7 +220,7 @@ struct ReadWriteCommonImpl {
 		return Void();
 	}
 	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
-	                                     ContinuousSample<double>* latencies,
+	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
@@ -363,6 +364,7 @@ static Future<Version> getInconsistentReadVersion(Database const& db) {
 }
 
 struct ReadWriteWorkload : ReadWriteCommon {
+	static constexpr auto NAME = "ReadWrite";
 	// use ReadWrite as a ramp up workload
 	bool rampUpLoad; // indicate this is a ramp up workload
 	int rampSweepCount; // how many times of ramp up
@@ -377,6 +379,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentReads; // keys are adjacent within a transaction
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
+	ReadType readType;
+	bool cacheResult;
 	Optional<Key> transactionTag;
 
 	int transactionsTagThrottled{ 0 };
@@ -399,6 +403,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		rampUpConcurrency = getOption(options, "rampUpConcurrency"_sr, false);
 		batchPriority = getOption(options, "batchPriority"_sr, false);
 		descriptionString = getOption(options, "description"_sr, "ReadWrite"_sr);
+		readType = static_cast<ReadType>(getOption(options, "readType"_sr, (int)ReadType::NORMAL));
+		cacheResult = getOption(options, "cacheResult"_sr, true);
 		if (hasOption(options, "transactionTag"_sr)) {
 			transactionTag = getOption(options, "transactionTag"_sr, ""_sr);
 		}
@@ -428,9 +434,28 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
-	}
 
-	std::string description() const override { return descriptionString.toString(); }
+		if (cacheResult) {
+			// Enabled is the default, but sometimes set it explicitly
+			if (BUGGIFY) {
+				tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE);
+			}
+		} else {
+			tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
+		}
+
+		// ReadTypes of LOW, NORMAL, and HIGH can be set through transaction options, so setOption for those
+		if (readType == ReadType::LOW) {
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
+		} else if (readType == ReadType::NORMAL) {
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_NORMAL);
+		} else if (readType == ReadType::HIGH) {
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_HIGH);
+		} else {
+			// Otherwise fall back to NativeAPI readOptions
+			tr.getTransaction().trState->readOptions.withDefault(ReadOptions()).type = readType;
+		}
+	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		ReadWriteCommon::getMetrics(m);
@@ -463,7 +488,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
 
 	ACTOR template <class Trans>
 	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {
@@ -503,7 +528,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
-
 			try {
 				self->setupTransaction(tr);
 				wait(self->readOp(&tr, keys, self, false));
@@ -773,4 +797,4 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 	return countInsertionRates;
 }
 
-WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory("ReadWrite");
+WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory;

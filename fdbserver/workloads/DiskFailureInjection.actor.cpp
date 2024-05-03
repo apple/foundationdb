@@ -23,12 +23,12 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "DiskFailureInjection";
 	bool enabled;
 	double testDuration = 60.0;
 	double startDelay = 0.0;
@@ -42,7 +42,6 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	double percentBitFlips = 10;
 	double periodicBroadcastInterval = 5.0;
 	std::vector<NetworkAddress> chosenWorkers;
-	std::vector<Future<Void>> clients;
 	// Verification Mode: We run the workload indefinitely in this mode.
 	// The idea is to keep going until we get a non-zero chaosMetric to ensure
 	// that we haven't lost the chaos event. testDuration is ignored in this mode
@@ -66,14 +65,10 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		periodicBroadcastInterval = getOption(options, "periodicBroadcastInterval"_sr, periodicBroadcastInterval);
 	}
 
-	void initFailureInjectionMode(DeterministicRandom& random) override { enabled = clientId == 0; }
+	// TODO: Currently this workload doesn't play well with MachineAttrition.
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
-	std::string description() const override {
-		if (g_simulator == g_network)
-			return "DiskFailureInjection";
-		else
-			return "NoSimDiskFailureInjection";
-	}
+	void initFailureInjectionMode(DeterministicRandom& random) override { enabled = clientId == 0; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -82,23 +77,20 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	// 2. Starting the actor that injects failures on chosen storage servers
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			clients.push_back(timeout(diskFailureInjectionClient<WorkerInterface>(cx, this), testDuration, Void()));
-			// In verification mode, we want to wait until periodicEventBroadcast actor returns which indicates that
-			// a non-zero chaosMetric was found.
+			auto result = diskFailureInjectionClient<WorkerInterface>(cx, this);
+			//  In verification mode, we want to wait until periodicEventBroadcast actor returns which indicates that
+			//  a non-zero chaosMetric was found.
 			if (verificationMode) {
-				clients.push_back(periodicEventBroadcast(this));
-			} else
+				return (periodicEventBroadcast(this) && delay(testDuration)) || result;
+			} else {
 				// Else we honor the testDuration
-				clients.push_back(timeout(periodicEventBroadcast(this), testDuration, Void()));
-			return waitForAll(clients);
+				return timeout(periodicEventBroadcast(this) && result, testDuration, Void());
+			}
 		} else
 			return Void();
 	}
 
-	Future<bool> check(Database const& cx) override {
-		clients.clear();
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -166,6 +158,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 			} catch (Error& e) {
 				// If we failed to get a complete list of storage servers, we can't inject failure events
 				// But don't throw the error in that case
+				TraceEvent("ChaosCouldNotGetStorages").error(e);
 				continue;
 			}
 			auto machine = deterministicRandom()->randomChoice(machines);
@@ -188,7 +181,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	// Resend the chaos event to previosuly chosen workers, in case some workers got restarted and lost their chaos
+	// Resend the chaos event to previously chosen workers, in case some workers got restarted and lost their chaos
 	// config
 	ACTOR static Future<Void> reSendChaos(DiskFailureInjectionWorkload* self) {
 		state int throttledWorkers = 0;
@@ -198,11 +191,20 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		for (auto worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
+		TraceEvent("ResendChaos")
+		    .detail("ChosenWorkersSize", self->chosenWorkers.size())
+		    .detail("FoundWorkers", workersMap.size())
+		    .detail(
+		        "ResendToNumber",
+		        std::count_if(self->chosenWorkers.begin(),
+		                      self->chosenWorkers.end(),
+		                      [&map = std::as_const(workersMap)](auto const& addr) { return map.count(addr) > 0; }));
 		for (auto& workerAddress : self->chosenWorkers) {
 			auto itr = workersMap.find(workerAddress);
 			if (itr != workersMap.end()) {
-				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
+				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle)) {
 					self->injectDiskDelays(itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
+				}
 				if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
 					if (g_simulator == g_network)
 						g_simulator->corruptWorkerMap[workerAddress] = true;
@@ -278,5 +280,5 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		}
 	}
 };
-WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory("DiskFailureInjection");
+WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory;
 FailureInjectorFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFailureInjectionFactory;

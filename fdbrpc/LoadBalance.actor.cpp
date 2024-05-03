@@ -22,9 +22,6 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(AtMostOnce);
-FDB_DEFINE_BOOLEAN_PARAM(TriedAllOptions);
-
 // Throwing all_alternatives_failed will cause the client to issue a GetKeyLocationRequest to the proxy, so this actor
 // attempts to limit the number of these errors thrown by a single client to prevent it from saturating the proxies with
 // these requests
@@ -50,7 +47,9 @@ ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
 
 	choose {
 		when(wait(okFuture)) {}
-		when(wait(::delayJittered(delay))) { throw all_alternatives_failed(); }
+		when(wait(::delayJittered(delay))) {
+			throw all_alternatives_failed();
+		}
 	}
 	return Void();
 }

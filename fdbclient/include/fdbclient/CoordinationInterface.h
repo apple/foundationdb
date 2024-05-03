@@ -88,6 +88,11 @@ public:
 
 	size_t getNumberOfCoordinators() const { return coords.size() + hostnames.size(); }
 
+	// Determine the local source IP used to connect to the cluster by connecting to the first available coordinator.
+	// Throw bind_failed() if no connection attempts were successful.
+	// This function blocks on connection attempts.
+	IPAddress determineLocalSourceIP() const;
+
 	bool operator==(const ClusterConnectionString& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}
@@ -104,7 +109,7 @@ public:
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+FDB_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 
 // A record that stores the connection string used to connect to a cluster. This record can be updated when a cluster
 // notifies a connected party that the connection string has changed.
@@ -129,10 +134,10 @@ public:
 	// the connection string stored in memory.
 	virtual Future<ClusterConnectionString> getStoredConnectionString() = 0;
 
-	// Checks whether the connection string in persisten storage matches the connection string stored in memory.
+	// Checks whether the connection string in persistent storage matches the connection string stored in memory.
 	Future<bool> upToDate();
 
-	// Checks whether the connection string in persisten storage matches the connection string stored in memory. The
+	// Checks whether the connection string in persistent storage matches the connection string stored in memory. The
 	// cluster string stored in persistent storage is returned via the reference parameter connectionString.
 	virtual Future<bool> upToDate(ClusterConnectionString& connectionString) = 0;
 
@@ -167,7 +172,7 @@ protected:
 	ClusterConnectionString cs;
 
 private:
-	// A flag that indicates whether this connection record needs to be persisted when it succesfully establishes a
+	// A flag that indicates whether this connection record needs to be persisted when it successfully establishes a
 	// connection.
 	bool connectionStringNeedsPersisted;
 };
@@ -184,7 +189,7 @@ struct LeaderInfo {
 	static const uint64_t changeIDMask = ~(uint64_t(0b1111111) << 57);
 	Value serializedInfo;
 	// If true, serializedInfo is a connection string instead!
-	// If true, it also means the receipient need to update their local cluster file
+	// If true, it also means the recipient need to update their local cluster file
 	// with the latest list of coordinators
 	bool forward;
 
@@ -265,6 +270,7 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+	bool internal{ true };
 
 	bool verify() const { return true; }
 
@@ -278,9 +284,12 @@ struct OpenDatabaseCoordRequest {
 		           clusterKey,
 		           coordinators,
 		           reply,
-		           hostnames);
+		           hostnames,
+		           internal);
 	}
 };
+
+extern template struct NetNotifiedQueue<OpenDatabaseCoordRequest, true>;
 
 class ClientCoordinators {
 public:
@@ -313,6 +322,9 @@ struct ProtocolInfoRequest {
 	constexpr static FileIdentifier file_identifier = 13261233;
 	ReplyPromise<ProtocolInfoReply> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
 		                                                            ProtocolVersion::withStableInterfaces() } };
+
+	bool verify() const noexcept { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);

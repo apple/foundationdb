@@ -82,7 +82,9 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
+#ifdef __linux__
 constexpr uint64_t DEFAULT_MEMORY_LIMIT = 8LL << 30;
+#endif
 constexpr double MEMORY_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__
@@ -599,6 +601,8 @@ public:
 
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
+		const std::string pid_s = std::to_string(getpid());
+
 		for (auto i : keys) {
 			// For "memory" option, despite they are handled by fdbmonitor, we still pass it to fdbserver.
 			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
@@ -614,9 +618,12 @@ public:
 			std::string opt = get_value_multi(ini, i.pItem, ssection.c_str(), section.c_str(), "general", nullptr);
 
 			std::size_t pos = 0;
-
 			while ((pos = opt.find("$ID", pos)) != opt.npos)
 				opt.replace(pos, 3, id_s, strlen(id_s));
+
+			pos = 0;
+			while ((pos = opt.find("$PID", pos)) != opt.npos)
+				opt.replace(pos, 4, pid_s);
 
 			const char* flagName = i.pItem + 5;
 			if ((strncmp("flag_", i.pItem, 5) == 0 || strncmp("flag-", i.pItem, 5) == 0) && strlen(flagName) > 0) {

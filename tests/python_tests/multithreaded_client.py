@@ -1,6 +1,9 @@
 #!/bin/env python2
 
 import argparse
+import sys
+import os
+import random
 
 parser = argparse.ArgumentParser("Run multithreaded client tests")
 
@@ -29,9 +32,11 @@ parser.add_argument(
     default="client-logs",
     help="Path to write client logs to.  The directory will be created if it does not exist.",
 )
+
 args = parser.parse_args()
 
-import sys
+sys.path.append(args.build_dir + "/bindings/python")
+import fdb
 
 ### sample usage (from inside your FDB build output directory):
 
@@ -44,12 +49,6 @@ import sys
 
 ## This fails (unsupported configuration):
 # ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster --threads 2 --skip-so-files'
-
-sys.path.append(args.build_dir + "/bindings/python")
-
-import fdb
-import os
-import random
 
 fdb.api_version(630)
 

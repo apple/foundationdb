@@ -20,6 +20,7 @@
 
 #ifndef FLOW_FLOW_H
 #define FLOW_FLOW_H
+#include "flow/ActorContext.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #pragma once
@@ -31,31 +32,44 @@
 #pragma warning(error : 4239)
 #endif
 
-#include <vector>
-#include <queue>
-#include <stack>
-#include <map>
-#include <unordered_map>
-#include <set>
-#include <functional>
-#include <iostream>
-#include <string>
-#include <string_view>
-#include <utility>
 #include <algorithm>
+#include <iosfwd>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <queue>
+#include <stack>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "flow/CodeProbe.h"
-#include "flow/Platform.h"
-#include "flow/FastAlloc.h"
-#include "flow/IRandom.h"
-#include "flow/serialize.h"
 #include "flow/Deque.h"
-#include "flow/ThreadPrimitives.h"
-#include "flow/network.h"
+#include "flow/Error.h"
+#include "flow/FastAlloc.h"
 #include "flow/FileIdentifier.h"
+#include "flow/IRandom.h"
+#include "flow/Platform.h"
+#include "flow/ThreadPrimitives.h"
 #include "flow/WriteOnlySet.h"
+#include "flow/network.h"
+#include "flow/serialize.h"
+
+#ifdef WITH_SWIFT
+#include <swift/bridging>
+
+// Flow_CheckedContinuation.h depends on this header, so we first parse it
+// without relying on any imported Swift types.
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#include "SwiftModules/Flow_CheckedContinuation.h"
+#endif /* SWIFT_HIDE_CHECKED_CONTINUATION */
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#endif /* WITH_SWIFT */
+
+#include "pthread.h"
 
 #include <boost/version.hpp>
 
@@ -88,6 +102,15 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION                                                                                           \
 	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
+namespace SwiftBridging {
+
+inline bool buggify(const char * _Nonnull filename, int line) {
+    // SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
+    return getSBVar(filename, line, BuggifyType::General) && deterministicRandom()->random01() < (P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)]);
+}
+
+} // namespace SwiftBridging
+
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
 extern std::string format(const char* form, ...);
@@ -99,6 +122,9 @@ extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
 extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);
 extern StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena);
+
+// Return the number of combinations to choose k items out of n choices
+int nChooseK(int n, int k);
 
 template <typename Iter>
 StringRef concatenate(Iter b, Iter const& e, Arena& arena) {
@@ -141,6 +167,8 @@ class ErrorOr : public ComposedIdentifier<T, 2> {
 	std::variant<Error, T> value;
 
 public:
+	using ValueType = T;
+
 	ErrorOr() : ErrorOr(default_error_or()) {}
 	ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
 
@@ -161,13 +189,143 @@ public:
 		return map<R>([](const T& v) { return (R)v; });
 	}
 
-	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) const& {
-		return present() ? ErrorOr<R>(f(get())) : ErrorOr<R>(getError());
+private:
+	template <class F>
+	using MapRet = std::decay_t<std::invoke_result_t<F, T>>;
+
+	template <class F>
+	using EnableIfNotMemberPointer =
+	    std::enable_if_t<!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>>;
+
+public:
+	// If the ErrorOr is set, calls the function f on the value and returns the value. Otherwise, returns an ErrorOr
+	// with the same error value as this ErrorOr.
+	template <class F, typename = EnableIfNotMemberPointer<F>>
+	ErrorOr<MapRet<F>> map(const F& f) const& {
+		return present() ? ErrorOr<MapRet<F>>(f(get())) : ErrorOr<MapRet<F>>(getError());
 	}
-	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) && {
-		return present() ? ErrorOr<R>(f(std::move(*this).get())) : ErrorOr<R>(getError());
+	template <class F, typename = EnableIfNotMemberPointer<F>>
+	ErrorOr<MapRet<F>> map(const F& f) && {
+		return present() ? ErrorOr<MapRet<F>>(f(std::move(*this).get())) : ErrorOr<MapRet<F>>(getError());
+	}
+
+	// Converts an ErrorOr<T> to an ErrorOr<R> of one of its value's members
+	//
+	// v.map(&T::member) is equivalent to v.map<R>([](T t) { return t.member; })
+	template <class R, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+		return present() ? ErrorOr<Rp>(get().*member) : ErrorOr<Rp>(getError());
+	}
+	template <class R, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
+		return present() ? ErrorOr<Rp>(std::move(*this).get().*member) : ErrorOr<Rp>(getError());
+	}
+
+	// Converts an ErrorOr<T> to an ErrorOr<R> of a value returned by a member function of T
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
+	// v.map<R>([](T t) { return t.memberFunc(arg1, arg2, ...); })
+	template <class R, class... Args, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) const& {
+		return present() ? ErrorOr<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : ErrorOr<Rp>(getError());
+	}
+	template <class R, class... Args, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) && {
+		return present() ? ErrorOr<Rp>((std::move(*this).get().*memberFunc)(std::forward<Args>(args)...))
+		                 : ErrorOr<Rp>(getError());
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an ErrorOr<T>
+	// to an ErrorOr<R> of one its value's members. If the value is present and false-like (null), then
+	// returns a default constructed ErrorOr<R>.
+	//
+	// v.mapRef(&P::member) is equivalent to ErrorOr<R>(v.get()->member) if v is present and non-null
+	template <class P, class R, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R P::*member) const& {
+
+		if (!present()) {
+			return ErrorOr<Rp>(getError());
+		} else if (!get()) {
+			return ErrorOr<Rp>();
+		}
+
+		P& p = *get();
+		return p.*member;
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an ErrorOr<T>
+	// to an ErrorOr<R> of a value returned by a member function of P. If the optional value is present and false-like
+	// (null), then returns a default constructed ErrorOr<R>.
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to ErrorOr<R>(v.get()->memberFunc(arg1, arg2, ...)) if v is
+	// present and non-null
+	template <class P, class R, class... Args, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
+	                                                                                 Args&&... args) const& {
+		if (!present()) {
+			return ErrorOr<Rp>(getError());
+		} else if (!get()) {
+			return ErrorOr<Rp>();
+		}
+
+		P& p = *get();
+		return (p.*memberFunc)(std::forward<Args>(args)...);
+	}
+
+	// Similar to map with a mapped type of ErrorOr<R>, but flattens the result. For example, if the mapped result is of
+	// type ErrorOr<R>, map will return ErrorOr<ErrorOr<R>> while flatMap will return ErrorOr<R>
+	template <class... Args>
+	auto flatMap(Args&&... args) const& {
+		auto val = map(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
+	}
+	template <class... Args>
+	auto flatMap(Args&&... args) && {
+		auto val = std::move(*this).map(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
+	}
+
+	// Similar to mapRef with a mapped type of ErrorOr<R>, but flattens the result. For example, if the mapped result is
+	// of type ErrorOr<R>, mapRef will return ErrorOr<ErrorOr<R>> while flatMapRef will return ErrorOr<R>
+	template <class... Args>
+	auto flatMapRef(Args&&... args) const& {
+		auto val = mapRef(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
+	}
+	template <class... Args>
+	auto flatMapRef(Args&&... args) && {
+		auto val = std::move(*this).mapRef(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
 	}
 
 	bool present() const { return std::holds_alternative<T>(value); }
@@ -392,7 +550,7 @@ struct Callback {
 			next->unwait();
 	}
 
-	int countCallbacks() {
+	int countCallbacks() const {
 		int count = 0;
 		for (Callback* c = next; c != this; c = c->next)
 			count++;
@@ -436,7 +594,7 @@ struct LineageProperties : LineagePropertiesBase {
 	// this has to be implemented by subclasses
 	// but can't be made virtual.
 	// A user should implement this for any type
-	// within the properies class.
+	// within the properties class.
 	template <class Value>
 	bool isSet(Value Derived::*member) const {
 		return true;
@@ -551,12 +709,12 @@ public:
 	}
 
 	void setActorName(const char* name) { actorName_ = name; }
-	const char* actorName() { return actorName_; }
+	const char* actorName() const { return actorName_; }
 	void allocate() {
 		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
 		allocated_ = true;
 	}
-	bool isAllocated() { return allocated_; }
+	bool isAllocated() const { return allocated_; }
 
 private:
 	// The actor name has to be a property of the LineageReference because all
@@ -651,6 +809,7 @@ public:
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
+
 		while (Callback<T>::next != this) {
 			Callback<T>::next->fire(this->value());
 		}
@@ -715,6 +874,20 @@ public:
 			destroy();
 	}
 
+	// this is only used for C++ coroutines
+	void finishSendErrorAndDelPromiseRef() {
+		if (promises == 1 && !futures) {
+			// No one is left to receive the value, so we can just die
+			destroy();
+			return;
+		}
+		while (Callback<T>::next != this)
+			Callback<T>::next->error(this->error_state);
+
+		if (!--promises && !futures)
+			destroy();
+	}
+
 	void addPromiseRef() { promises++; }
 	void addFutureRef() { futures++; }
 
@@ -758,6 +931,7 @@ public:
 		// we also need to add one (since futures is defined as being +1 if there are any callbacks), so net nothing
 		if (Callback<T>::next != this)
 			delFutureRef();
+
 		cb->insert(this);
 	}
 
@@ -766,6 +940,7 @@ public:
 		// chain rather than at the beginning
 		if (Callback<T>::next != this)
 			delFutureRef();
+
 		cb->insertBack(this);
 	}
 
@@ -782,13 +957,80 @@ public:
 template <class T>
 class Promise;
 
-template <class T>
-class Future {
+#ifdef WITH_SWIFT
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+using flow_swift::FlowCheckedContinuation;
+
+template<class T>
+class
+#ifdef WITH_SWIFT
+SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
+#endif
+FlowCallbackForSwiftContinuation : Callback<T> {
 public:
+	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
+	using AssociatedFuture = Future<T>;
+
+private:
+	SwiftCC continuationInstance;
+
+public:
+	FlowCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {}
+
+	void set(const void* _Nonnull pointerToContinuationInstance, Future<T> f, const void* _Nonnull thisPointer) {
+		// Verify Swift did not make a copy of the `self` value for this method
+		// call.
+		assert(this == thisPointer);
+
+		// FIXME: Propagate `SwiftCC` to Swift using forward
+		// interop, without relying on passing it via a `void *`
+		// here. That will let us avoid this hack.
+		const void* _Nonnull opaqueStorage = pointerToContinuationInstance;
+		static_assert(sizeof(SwiftCC) == sizeof(const void*));
+		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC*>(&opaqueStorage));
+		// Set the continuation instance.
+		continuationInstance.set(ccCopy);
+		// Add this callback to the future.
+		f.addCallbackAndClear(this);
+	}
+
+	void fire(const T& value) override {
+		Callback<T>::remove();
+		Callback<T>::next = nullptr;
+		continuationInstance.resume(value);
+	}
+	void error(Error error) override {
+		Callback<T>::remove();
+		Callback<T>::next = nullptr;
+		continuationInstance.resumeThrowing(error);
+	}
+	void unwait() override {
+		// TODO(swift): implement
+	}
+};
+#endif /* SWIFT_HIDE_CHECKED_CONTINUATION */
+#endif /* WITH_SWIFT*/
+
+template <class T>
+class SWIFT_SENDABLE
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifdef WITH_SWIFT
+SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowFutureOps)
+#endif
+#endif
+    Future {
+public:
+	using Element = T;
+#ifdef WITH_SWIFT
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+	using FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuation<T>;
+#endif
+#endif /* WITH_SWIFT */
+
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
 
-	bool isValid() const { return sav != 0; }
+	bool isValid() const { return sav != nullptr; }
 	bool isReady() const { return sav->isSet(); }
 	bool isError() const { return sav->isError(); }
 	// returns true if get can be called on this future (counterpart of canBeSet on Promises)
@@ -798,16 +1040,12 @@ public:
 		return sav->error_state;
 	}
 
-	Future() : sav(0) {}
+	Future() : sav(nullptr) {}
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
-		// if (sav->endpoint.isValid()) std::cout << "Future copied for " << sav->endpoint.key << std::endl;
 	}
-	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
-		rhs.sav = 0;
-		// if (sav->endpoint.isValid()) std::cout << "Future moved for " << sav->endpoint.key << std::endl;
-	}
+	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = nullptr; }
 	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
@@ -819,7 +1057,6 @@ public:
 #endif
 
 	~Future() {
-		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -835,7 +1072,7 @@ public:
 			if (sav)
 				sav->delFutureRef();
 			sav = rhs.sav;
-			rhs.sav = 0;
+			rhs.sav = nullptr;
 		}
 	}
 	bool operator==(const Future& rhs) { return rhs.sav == sav; }
@@ -846,27 +1083,25 @@ public:
 			sav->cancel();
 	}
 
-	void addCallbackAndClear(Callback<T>* cb) {
+	void addCallbackAndClear(Callback<T>* _Nonnull cb) {
 		sav->addCallbackAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
-	void addYieldedCallbackAndClear(Callback<T>* cb) {
+	void addYieldedCallbackAndClear(Callback<T>* _Nonnull cb) {
 		sav->addYieldedCallbackAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	void addCallbackChainAndClear(Callback<T>* cb) {
 		sav->addCallbackChainAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
-	explicit Future(SAV<T>* sav) : sav(sav) {
-		// if (sav->endpoint.isValid()) std::cout << "Future created for " << sav->endpoint.key << std::endl;
-	}
+	explicit Future(SAV<T>* sav) : sav(sav) {}
 
 private:
 	SAV<T>* sav;
@@ -883,7 +1118,7 @@ private:
 // Future<T> result = wait(x); // This is legal if wait() generates Futures, but it's probably wrong. It's a compilation
 // error if wait() generates StrictFutures.
 template <class T>
-class StrictFuture : public Future<T> {
+class SWIFT_SENDABLE StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
@@ -894,21 +1129,27 @@ private:
 };
 
 template <class T>
-class Promise final {
+class SWIFT_SENDABLE Promise final {
 public:
 	template <class U>
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
+
+	// Swift can't call method that takes in a universal references (U&&),
+	// so provide a callable `send` method that copies the value.
+	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
+
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
-	Future<T> getFuture() const {
+	SWIFT_CXX_IMPORT_UNSAFE Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
+
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }
 	bool isError() const { return sav->isError(); }
@@ -957,7 +1198,11 @@ private:
 };
 
 template <class T>
-struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+struct NotifiedQueue : private SingleCallback<T>
+#ifndef WITH_SWIFT
+   , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+#endif /* WITH_SWIFT */
+{
 	int promises; // one for each promise (and one for an active actor if this is an actor)
 	int futures; // one for each future and one more if there are any callbacks
 
@@ -1082,9 +1327,9 @@ protected:
 };
 
 template <class T>
-class FutureStream {
+class SWIFT_SENDABLE FutureStream {
 public:
-	bool isValid() const { return queue != 0; }
+	bool isValid() const { return queue != nullptr; }
 	bool isReady() const { return queue->isReady(); }
 	bool isError() const {
 		// This means that the next thing to be popped is an error - it will be false if there is an error in the stream
@@ -1093,7 +1338,7 @@ public:
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
-		queue = 0;
+		queue = nullptr;
 	}
 	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
@@ -1113,14 +1358,15 @@ public:
 			if (queue)
 				queue->delFutureRef();
 			queue = rhs.queue;
-			rhs.queue = 0;
+			rhs.queue = nullptr;
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
-	T pop() { return queue->pop(); }
-	Error getError() {
+	// FIXME: remove annotation after https://github.com/apple/swift/issues/64316 is fixed.
+	T pop() __attribute__((swift_attr("import_unsafe"))) { return queue->pop(); }
+	Error getError() const {
 		ASSERT(queue->isError());
 		return queue->error;
 	}
@@ -1144,7 +1390,7 @@ auto const& getReplyPromiseStream(Request const& r) {
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
 #define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
+// #define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
@@ -1162,12 +1408,13 @@ struct ReplyType<ReplyPromise<T>> {
 #endif
 
 template <class T>
-class PromiseStream {
+class SWIFT_SENDABLE PromiseStream {
 public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
 	void send(const T& value) { queue->send(value); }
+	void sendCopy(T value) { queue->send(value); }
 	void send(T&& value) { queue->send(std::move(value)); }
 	void sendError(const Error& error) { queue->sendError(error); }
 
@@ -1199,7 +1446,9 @@ public:
 		return getReply(reply);
 	}
 
-	FutureStream<T> getFuture() const {
+	// Not const, because this function gives mutable
+	// access to queue
+	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
@@ -1227,6 +1476,7 @@ public:
 	}
 
 	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool isReady() const { return queue->isReady(); }
 	bool isEmpty() const { return !queue->isReady(); }
 
 	Future<Void> onEmpty() {
@@ -1350,6 +1600,9 @@ inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::De
 inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->orderedDelay(seconds, taskID);
 }
+inline void _swiftEnqueue(void* task) {
+	return g_network->_swiftEnqueue(task);
+}
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);
 }
@@ -1367,5 +1620,10 @@ inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 
 void bindDeterministicRandomToOpenssl();
 
+#ifdef WITH_SWIFT
+#pragma clang diagnostic pop
+#endif
+
+#include "flow/Coroutines.h"
 #include "flow/genericactors.actor.h"
 #endif

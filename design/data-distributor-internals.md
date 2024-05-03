@@ -81,11 +81,22 @@ Actors are created to monitor the reasons of key movement:
 (3) `serverTeamRemover` and `machineTeamRemover` actors periodically evaluate if the number of server teams and machine teams is larger than the desired number. If so, they respectively pick a server team or a machine team to remove based on predefined criteria;
 (4) `teamTracker` actor monitors a team’s healthiness. When a server in the team becomes unhealthy, it issues the `RelocateShard` request to repair the replication factor. The less servers a team has, the higher priority the `RelocateShard` request will be.
 
+#### Movement Priority
+There are roughly 4 class of movement priorities
+* Healthy priority. The movement is for maintain the cluster healthy status, and the priority is depended on the healthy status of the source team.
+* Load balance priority. The movement is for balance cluster workload.
+* Boundary change priority. The movement will change current shard boundaries.
+* Others. Like resuming a in-flight movement.
+
+Each shard movement has a priority associating with the move attempt,  The explanation of each priority knob (`PRIORITY_<XXX>`) is in `ServerKnobs.h`.
+
+In `status json` output, please look at field `.data.team_tracker.state` for team priority state.
+
 ### How to move keys?
 
 A key range is a shard. A shard is the minimum unit of moving data. The storage server’s ownership of a shard -- which SS owns which shard -- is stored in the system keyspace *serverKeys* (`\xff/serverKeys/`) and *keyServers* (`\xff/keyServers/`). To simplify the explanation, we refer to the storage server’s ownership of a shard as a shard’s ownership.
 
-A shard’s ownership is used in transaction systems (commit proxy and tLogs) to route mutations to tLogs and storage servers. When a commit proxy receives a mutation, it uses the shard’s ownership to decide which *k* tLogs receive the mutation, assuming *k* is the replias factor. When a storage server pulls mutations from tLogs, it uses the shard’s ownership to decide which shards the SS is responsible for and which tLog the SS should pull the data from.
+A shard’s ownership is used in transaction systems (commit proxy and tLogs) to route mutations to tLogs and storage servers. When a commit proxy receives a mutation, it uses the shard’s ownership to decide which *k* tLogs receive the mutation, assuming *k* is the replicas factor. When a storage server pulls mutations from tLogs, it uses the shard’s ownership to decide which shards the SS is responsible for and which tLog the SS should pull the data from.
 
 A shard’s ownership must be consistent across transaction systems and SSes, so that mutations can be correctly routed to SSes. Moving keys from a SS to another requires changing the shard’s ownership under ACID property. The ACID property is achieved by using FDB transactions to change the *serverKeys *(`\xff/serverKeys/`) and *keyServers* (`\xff/keyServers/`). The mutation on the *serverKeys *and* keyServers *will be categorized as private mutations in transaction system. Compared to normal mutation, the private mutations will change the transaction state store (txnStateStore) that maintains the *serverKeys* and *keyServers* for transaction systems (commit proxy and tLog) when it arrives on each transaction component (e.g., tLog). Because mutations are processed in total order with the ACID guarantees, the change to the txnStateStore will be executed in total order on each node and the change on the shard’s ownership will also be consistent.
 
@@ -104,7 +115,7 @@ Before FDB 7.2, when the data distributor wants to rebalance shard, it only cons
 The data distributor will periodically check whether the read rebalance is needed. The conditions of rebalancing are 
 * the **worst CPU usage of source team >= 0.15** , which means the source team is somewhat busy;
 * the ongoing relocation is less than the parallelism budget. `queuedRelocation[ priority ] < countLimit (default 50)`;
-* the source team is not throttled to be a data movement source team. `( now() - The last time the source team was selected ) * time volumn (default 20) > read sample interval (2 min default)`;
+* the source team is not throttled to be a data movement source team. `( now() - The last time the source team was selected ) * time volume (default 20) > read sample interval (2 min default)`;
 * the read load difference between source team and destination team is larger than 30% of the source team load;
 
 ## Metrics definition
@@ -152,11 +163,11 @@ CPU utilization. This metric is in a positive relationship with “FinishedQueri
 * Read-aware DD will balance the read workload under the read-skew scenario. Starting from an imbalance `STD(FinishedQueries per minute)=16k`,the best result it can achieve is `STD(FinishedQueries per minute) = 2k`.
 * The typical movement size under a read-skew scenario is 100M ~ 600M under default KNOB value `READ_REBALANCE_MAX_SHARD_FRAC=0.2, READ_REBALANCE_SRC_PARALLELISM = 20`. Increasing those knobs may accelerate the converge speed with the risk of data movement churn, which overwhelms the destination and over-cold the source.
 * The upper bound of `READ_REBALANCE_MAX_SHARD_FRAC` is 0.5. Any value larger than 0.5 can result in hot server switching.
-* When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper_New`, and `BgDDValleyFiller_New` trace events are where to go.
+* When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper`, and `BgDDValleyFiller` trace events are where to go.
 
 ## Data Distribution Diagnosis Q&A
 * Why Read-aware DD hasn't been triggered when there's a read imbalance? 
-  * Check `BgDDMountainChopper_New`, `BgDDValleyFiller_New` `SkipReason` field.
+  * Check `BgDDMountainChopper`, `BgDDValleyFiller` `SkipReason` field.
 * The Read-aware DD is triggered, and some data movement happened, but it doesn't help the read balance. Why? 
   * Need to figure out which server is selected as the source and destination. The information is in `BgDDMountainChopper*`, `BgDDValleyFiller*`  `DestTeam` and `SourceTeam` field.
   * Also, the `DDQueueServerCounter` event tells how many times a server being a source or destination (defined in 

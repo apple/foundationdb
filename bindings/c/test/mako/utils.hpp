@@ -35,6 +35,16 @@
 
 namespace mako {
 
+inline uint64_t byteswapHelper(uint64_t input) {
+	uint64_t output = 0;
+	for (int i = 0; i < 8; ++i) {
+		output <<= 8;
+		output += input & 0xFF;
+		input >>= 8;
+	}
+	return output;
+}
+
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
 force_inline int urand(int low, int high) {
@@ -51,6 +61,21 @@ force_inline int nextKey(Arguments const& args) {
 
 force_inline int intSize(std::string_view sv) {
 	return static_cast<int>(sv.size());
+}
+
+template <typename Char>
+inline void randomAlphanumString(Char* str, int len) {
+	constexpr auto chars_per_alpha = 26;
+	constexpr auto range = chars_per_alpha * 2 + 10; // uppercase, lowercase, digits
+	for (auto i = 0; i < len; i++) {
+		auto value = urand(0, range - 1);
+		if (value < chars_per_alpha)
+			str[i] = 'a' + value;
+		else if (value < 2 * chars_per_alpha)
+			str[i] = 'A' + value - chars_per_alpha;
+		else
+			str[i] = '0' + value - 2 * chars_per_alpha;
+	}
 }
 
 /* random string */
@@ -72,13 +97,13 @@ force_inline int insertBegin(int rows, int p_idx, int t_idx, int total_p, int to
 	return (int)(round(interval * ((p_idx * total_t) + t_idx)));
 }
 
-/* similar to insertBegin, insertEnd returns the last row numer */
+/* similar to insertBegin, insertEnd returns the last row number */
 force_inline int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t) {
 	double interval = (double)rows / total_p / total_t;
 	return (int)(round(interval * ((p_idx * total_t) + t_idx + 1) - 1));
 }
 
-/* devide a value equally among threads */
+/* divide a value equally among threads */
 int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t);
 
 /* similar to insertBegin/end, computeThreadTps computes
@@ -87,7 +112,7 @@ int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t
 #define computeThreadTps(val, p_idx, t_idx, total_p, total_t) computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
 
 /* similar to computeThreadTps,
- * computeThreadIters computs the number of iterations.
+ * computeThreadIters computes the number of iterations.
  */
 #define computeThreadIters(val, p_idx, t_idx, total_p, total_t)                                                        \
 	computeThreadPortion(val, p_idx, t_idx, total_p, total_t)

@@ -4,13 +4,18 @@ This package provides a launcher program for running FoundationDB in Kubernetes.
 
 ## Testing
 
-To test this, run the following commands from the root of the FoundationDB
-repository:
+### Unit tests
+
+You can run the unit tests by running `go test ./...` from this directory.
+
+### Manual testing
+
+To test this, run the following commands from the root of the FoundationDB repository:
 
 ```bash
 mkdir -p website
-docker build -t foundationdb/foundationdb-kubernetes:7.1.5-local --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.5 --build-arg FDB_LIBRARY_VERSIONS="7.1.5 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
-docker build -t foundationdb/foundationdb-kubernetes:7.1.6-local --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.6 --build-arg FDB_LIBRARY_VERSIONS="7.1.6 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
+docker build -t foundationdb/fdb-kubernetes-monitor:7.1.5 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.5 --build-arg FDB_LIBRARY_VERSIONS="7.1.5 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
+docker build -t foundationdb/fdb-kubernetes-monitor:7.1.6 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.6 --build-arg FDB_LIBRARY_VERSIONS="7.1.6 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
 kubectl apply -f packaging/docker/kubernetes/test_config.yaml
 # Wait for the pods to become ready
 kubectl rollout status sts/fdb-kubernetes-example
@@ -50,11 +55,11 @@ The following steps assume that you already have a [local development](https://g
 ```bash
 mkdir -p website
 # Change this version if you want to create a cluster with a different version
-docker build -t foundationdb/foundationdb-kubernetes:7.1.11-local --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.11 --build-arg FDB_LIBRARY_VERSIONS="7.1.11 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
+docker build -t foundationdb/fdb-kubernetes-monitor:7.1.11 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.11 --build-arg FDB_LIBRARY_VERSIONS="7.1.11 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
 ```
 
-Depending on the local Kubernetes setup you use you might have to push the newly build image to a local registry.
-Now you should change to the directoy that contains the [fdb-kubernetes-operator](https://github.com/FoundationDB/fdb-kubernetes-operator) repository.
+Depending on the Kubernetes setup you use you might have to push the newly build image to a local registry.
+Now you should change to the directory that contains the [fdb-kubernetes-operator](https://github.com/FoundationDB/fdb-kubernetes-operator) repository.
 In the top directory run:
 
 ```bash

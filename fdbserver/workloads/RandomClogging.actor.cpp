@@ -20,12 +20,15 @@
 
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomCloggingWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "RandomClogging";
+
 	bool enabled;
 	double testDuration = 10.0;
 	double scale = 1.0, clogginess = 1.0;
@@ -57,12 +60,6 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 		iterate = random.random01() < 0.5;
 	}
 
-	std::string description() const override {
-		if (g_simulator == g_network)
-			return "RandomClogging";
-		else
-			return "NoRC";
-	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (g_network->isSimulated() && enabled) {
@@ -139,12 +136,11 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			for (int i = 0; i < 10; i++)
 				self->clogRandomPair(t);
 
-			std::vector<Future<Void>> cloggers;
 			for (int i = 0; i < swizzled.size(); i++)
 				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}
 	}
 };
 
-WorkloadFactory<RandomCloggingWorkload> RandomCloggingWorkloadFactory("RandomClogging");
+WorkloadFactory<RandomCloggingWorkload> RandomCloggingWorkloadFactory;
 FailureInjectorFactory<RandomCloggingWorkload> RandomCloggingFailureInjectionFactory;

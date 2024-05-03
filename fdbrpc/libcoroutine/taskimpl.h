@@ -14,7 +14,7 @@
 #endif
 #endif
 
-//#define USE_UCONTEXT 1
+// #define USE_UCONTEXT 1
 
 #if defined(__OpenBSD__)
 #undef USE_UCONTEXT
@@ -45,7 +45,7 @@
 #endif
 #include <sys/utsname.h>
 #include <inttypes.h>
-//#include "task.h"
+// #include "task.h"
 
 #define nil ((void*)0)
 #define nelem(x) (sizeof(x) / sizeof((x)[0]))

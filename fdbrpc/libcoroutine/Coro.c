@@ -13,7 +13,7 @@
     Fibers support by Jonas Eschenburg
     Ucontext arg support by Olivier Ansaldi
     Ucontext x86-64 support by James Burgess and Jonathan Wright
-    Russ Cox for the newer portable ucontext implementions.
+    Russ Cox for the newer portable ucontext implementations.
 
  Notes
 
@@ -25,7 +25,7 @@
     If you're adding a new platform, look in the setjmp.h for PC and SP members
     of the stack structure
 
-    If you don't see those members, Kentaro suggests writting a simple
+    If you don't see those members, Kentaro suggests writing a simple
     test app that calls setjmp and dumps out the contents of the jmp_buf.
     (The PC and SP should be in jmp_buf->__jmpbuf).
 
@@ -315,12 +315,12 @@ void Coro_setup(Coro* self, void* arg) {
 	 * it didn't. I don't know why.
 	 * - Bryce Schroeder, 16 December 2006
 	 *
-	 *   Explaination of `magic' numbers: 6 is the stack pointer
+	 *   Explanation of `magic' numbers: 6 is the stack pointer
 	 *   (RSP, the 64 bit equivalent of ESP), 7 is the program counter.
 	 *   This information came from this file on my Gentoo linux
 	 *   amd64 computer:
 	 *   /usr/include/gento-multilib/amd64/bits/setjmp.h
-	 *   Which was ultimatly included from setjmp.h in /usr/include. */
+	 *   Which was ultimately included from setjmp.h in /usr/include. */
 	self->env[0].__jmpbuf[6] = ((unsigned long)(Coro_stack(self)));
 	self->env[0].__jmpbuf[7] = ((long)Coro_Start);
 }

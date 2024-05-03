@@ -18,9 +18,15 @@
  * limitations under the License.
  */
 
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include <boost/asio.hpp>
 #include <boost/range.hpp>
 #include <thread>
@@ -30,6 +36,7 @@
 #include "flow/Platform.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace boost::asio;
@@ -144,10 +151,12 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
 		while (iter != end) {
 			auto endpoint = iter->endpoint();
 			auto addr = endpoint.address();
+			// register the endpoint as public so that if it does happen to be an fdb process, we can connect to it
+			// successfully
 			if (addr.is_v6()) {
-				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port(), true, false);
 			} else {
-				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port(), true, false);
 			}
 			++iter;
 		}
@@ -217,8 +226,8 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 		// Wait until server is ready
 		threadSleep(0.01);
 	}
-	state Standalone<StringRef> data =
-	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
+	state Standalone<StringRef> data(
+	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1)));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
 	wait(externalConn->onWritable());

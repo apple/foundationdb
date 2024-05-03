@@ -23,9 +23,18 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 
 	"github.com/go-logr/logr"
 )
+
+const (
+	libraryTestDirectoryEnv = "TEST_LIBRARY_DIRECTORY"
+	binaryTestDirectoryEnv  = "TEST_BINARY_DIRECTORY"
+)
+
+// versionRegex represents the regex to parse the compact version string.
+var versionRegex = regexp.MustCompile(`^(\d+)\.(\d+)`)
 
 // copyFile copies a file into the output directory.
 func copyFile(logger logr.Logger, inputPath string, outputPath string, required bool) error {
@@ -44,23 +53,16 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 	}
 
 	if required && inputInfo.Size() == 0 {
-		return fmt.Errorf("File %s is empty", inputPath)
+		return fmt.Errorf("file %s is empty", inputPath)
 	}
 
-	outputDir := path.Dir(outputPath)
-
-	tempFile, err := os.CreateTemp(outputDir, "")
+	tempFile, err := os.CreateTemp(path.Dir(outputPath), "")
 	if err != nil {
 		return err
 	}
 	defer tempFile.Close()
 
 	_, err = tempFile.ReadFrom(inputFile)
-	if err != nil {
-		return err
-	}
-
-	err = tempFile.Close()
 	if err != nil {
 		return err
 	}
@@ -90,11 +92,91 @@ func CopyFiles(logger logr.Logger, outputDir string, copyDetails map[string]stri
 			return err
 		}
 
-		required := requiredCopies[inputPath]
-		err = copyFile(logger, inputPath, outputPath, required)
+		err = copyFile(logger, inputPath, outputPath, requiredCopies[inputPath])
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
+}
+
+// getCompactVersion will return the compact version representation for the input version. The compact version consists
+// of the major and minor version.
+func getCompactVersion(version string) (string, error) {
+	matches := versionRegex.FindStringSubmatch(version)
+	if matches == nil {
+		return "", fmt.Errorf("could not parse FDB compact version from %s", version)
+	}
+
+	return matches[0], nil
+}
+
+// getBinaryDirectory returns the directory where the binaries are located. This will return `/usr/bin` if the env
+// variable TEST_BINARY_DIRECTORY is unset.
+func getBinaryDirectory() string {
+	binaryDirectory, ok := os.LookupEnv(binaryTestDirectoryEnv)
+	if ok {
+		return binaryDirectory
+	}
+
+	return "/usr/bin"
+}
+
+// getLibraryPath returns the library where the binaries are located. This will return `/usr/lib/fdb/multiversion` if the env
+// variable TEST_LIBRARY_DIRECTORY is unset.
+func getLibraryPath() string {
+	libraryDirectory, ok := os.LookupEnv(libraryTestDirectoryEnv)
+	if ok {
+		return libraryDirectory
+	}
+
+	return "/usr/lib/fdb/multiversion"
+}
+
+// getCopyDetails will generate the details for all the files that should be copied.
+func getCopyDetails(inputDir string, copyPrimaryLibrary string, binaryOutputDirectory string, copyFiles []string, copyBinaries []string, copyLibraries []string, requiredCopyFiles []string, currentContainerVersion string) (map[string]string, map[string]bool, error) {
+	copyDetails := make(map[string]string, len(copyFiles)+len(copyBinaries))
+
+	for _, filePath := range copyFiles {
+		copyDetails[path.Join(inputDir, filePath)] = ""
+	}
+
+	if len(copyBinaries) > 0 {
+		if binaryOutputDirectory == "" {
+			compactVersion, err := getCompactVersion(currentContainerVersion)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			binaryOutputDirectory = compactVersion
+		}
+
+		binaryDirectory := getBinaryDirectory()
+		for _, copyBinary := range copyBinaries {
+			copyDetails[path.Join(binaryDirectory, copyBinary)] = path.Join(binaryOutputDirectory, copyBinary)
+		}
+	}
+
+	libraryPath := getLibraryPath()
+	for _, library := range copyLibraries {
+		libraryName := fmt.Sprintf("libfdb_c_%s.so", library)
+		copyDetails[path.Join(libraryPath, libraryName)] = libraryName
+	}
+
+	if copyPrimaryLibrary != "" {
+		copyDetails[path.Join(libraryPath, fmt.Sprintf("libfdb_c_%s.so", copyPrimaryLibrary))] = "libfdb_c.so"
+	}
+
+	requiredCopyMap := make(map[string]bool, len(requiredCopyFiles))
+	for _, filePath := range requiredCopyFiles {
+		fullFilePath := path.Join(inputDir, filePath)
+		_, present := copyDetails[fullFilePath]
+		if !present {
+			return nil, nil, fmt.Errorf("file %s is required, but is not in the --copy-file list", filePath)
+		}
+		requiredCopyMap[fullFilePath] = true
+	}
+
+	return copyDetails, requiredCopyMap, nil
 }

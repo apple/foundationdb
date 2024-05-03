@@ -28,17 +28,17 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Subspace.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 
 class FutureBucket;
 class TaskFuture;
 
-FDB_DECLARE_BOOLEAN_PARAM(AccessSystemKeys);
-FDB_DECLARE_BOOLEAN_PARAM(PriorityBatch);
-FDB_DECLARE_BOOLEAN_PARAM(VerifyTask);
-FDB_DECLARE_BOOLEAN_PARAM(UpdateParams);
+FDB_BOOLEAN_PARAM(AccessSystemKeys);
+FDB_BOOLEAN_PARAM(PriorityBatch);
+FDB_BOOLEAN_PARAM(VerifyTask);
+FDB_BOOLEAN_PARAM(UpdateParams);
 
 // A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
 // The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved
@@ -115,7 +115,7 @@ public:
 };
 
 struct ReservedTaskParams {
-	static TaskParam<Version> scheduledVersion() { return LiteralStringRef(__FUNCTION__); }
+	static TaskParam<Version> scheduledVersion() { return __FUNCTION__sr; }
 };
 
 class FutureBucket;
@@ -274,6 +274,7 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	UID dbgid;
 	CounterCollection cc;
 
 	Counter dispatchSlotChecksStarted;
@@ -281,7 +282,6 @@ public:
 	Counter dispatchDoTasks;
 	Counter dispatchEmptyTasks;
 	Counter dispatchSlotChecksComplete;
-	UID dbgid;
 
 	double getTimeoutSeconds() const { return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND; }
 
@@ -480,7 +480,8 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 };
 #define REGISTER_TASKFUNC(TaskFunc) REGISTER_FACTORY(TaskFuncBase, TaskFunc, name)
 #define REGISTER_TASKFUNC_ALIAS(TaskFunc, Alias)                                                                       \
-	REGISTER_DISPATCHED_ALIAS(TaskFunc, Alias, TaskFunc::name, LiteralStringRef(#Alias))
+	REGISTER_DISPATCHED_ALIAS(                                                                                         \
+	    TaskFunc, Alias, TaskFunc::name, StringRef(reinterpret_cast<const uint8_t*>(#Alias), sizeof(#Alias) - 1))
 
 struct TaskCompletionKey {
 	Future<Key> get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket);

@@ -26,12 +26,13 @@
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
+#include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
-#include "fdbclient/ConsistencyScanInterface.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -50,7 +51,7 @@ struct ServerDBInfo {
 	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
 	Optional<BlobManagerInterface> blobManager;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
+	Optional<BlobMigratorInterface> blobMigrator;
 	Optional<ConsistencyScanInterface> consistencyScan;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
@@ -84,7 +85,7 @@ struct ServerDBInfo {
 		           master,
 		           ratekeeper,
 		           blobManager,
-		           encryptKeyProxy,
+		           blobMigrator,
 		           consistencyScan,
 		           resolvers,
 		           recoveryCount,
@@ -96,6 +97,7 @@ struct ServerDBInfo {
 		           infoGeneration);
 	}
 };
+using AsyncVar_ServerDBInfo = AsyncVar<ServerDBInfo>;
 
 struct UpdateServerDBInfoRequest {
 	constexpr static FileIdentifier file_identifier = 9467438;
@@ -119,6 +121,11 @@ struct GetServerDBInfoRequest {
 		serializer(ar, knownServerInfoID, reply);
 	}
 };
+
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<GetServerDBInfoRequest, false>;
+extern template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
+extern template class GetEncryptCipherKeys<ServerDBInfo>;
 
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
 

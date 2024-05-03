@@ -302,7 +302,9 @@ struct MovableCoordinatedStateImpl {
 		ASSERT(self->lastValue.present() && self->lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
 		choose {
-			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
+			when(wait(creationTimeout)) {
+				throw new_coordinators_timed_out();
+			}
 			when(Value ncInitialValue = wait(nccs.read())) {
 				ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
 			}
@@ -310,7 +312,9 @@ struct MovableCoordinatedStateImpl {
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
 
 		choose {
-			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
+			when(wait(creationTimeout)) {
+				throw new_coordinators_timed_out();
+			}
 			when(wait(nccs.setExclusive(
 			    BinaryWriter::toValue(MovableValue(self->lastValue.get(),
 			                                       MovableValue::MovingFrom,
@@ -323,7 +327,8 @@ struct MovableCoordinatedStateImpl {
 
 		Value oldQuorumState = wait(cs.read());
 		if (oldQuorumState != self->lastCSValue.get()) {
-			CODE_PROBE(true, "Quorum change aborted by concurrent write to old coordination state");
+			CODE_PROBE(
+			    true, "Quorum change aborted by concurrent write to old coordination state", probe::decoration::rare);
 			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}

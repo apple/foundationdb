@@ -27,8 +27,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/Trace.h"
 
-#include "fdbclient/BackupContainer.h"
-
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
  * Inheritors must only defined methods for writing, reading, deleting, sizing, and listing files.
  *
@@ -83,7 +81,8 @@ public:
 	// TODO: refactor this to separate out the "deal with blob store" stuff from the backup business logic
 	static Reference<BackupContainerFileSystem> openContainerFS(const std::string& url,
 	                                                            const Optional<std::string>& proxy,
-	                                                            const Optional<std::string>& encryptionKeyFileName);
+	                                                            const Optional<std::string>& encryptionKeyFileName,
+	                                                            bool isBackup = true);
 
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
@@ -97,6 +96,9 @@ public:
 
 	// Open a file for write by fileName
 	virtual Future<Reference<IBackupFile>> writeFile(const std::string& fileName) = 0;
+
+	// write entire file
+	virtual Future<Void> writeEntireFile(const std::string& fileName, const std::string& contents) = 0;
 
 	// Delete a file
 	virtual Future<Void> deleteFile(const std::string& fileName) = 0;
@@ -123,7 +125,8 @@ public:
 
 	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
-	                                       int64_t totalBytes) final;
+	                                       int64_t totalBytes,
+	                                       IncludeKeyRangeMap IncludeKeyRangeMap) final;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
@@ -152,10 +155,9 @@ public:
 	                        ExpireProgress* progress,
 	                        Version restorableBeginVersion) final;
 
-	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Optional<Database> cx) final;
+	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) final;
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                  Optional<Database> cx,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
 	                                                  Version beginVersion) final;
@@ -165,6 +167,8 @@ protected:
 	bool usesEncryption() const;
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
 	Future<Void> encryptionSetupComplete() const;
+
+	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
 
 private:
 	struct VersionProperty {
@@ -177,7 +181,7 @@ private:
 		Future<Void> clear();
 	};
 
-	// To avoid the need to scan the underyling filesystem in many cases, some important version boundaries are stored
+	// To avoid the need to scan the underlying filesystem in many cases, some important version boundaries are stored
 	// in named files. These versions also indicate what version ranges are known to be deleted or partially deleted.
 	//
 	// The values below describe version ranges as follows:

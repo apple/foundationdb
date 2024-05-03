@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SelectorCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "SelectorCorrectness";
+
 	int minOperationsPerTransaction, maxOperationsPerTransaction, maxKeySpace, maxOffset;
 	bool testReadYourWrites;
 	double testDuration;
@@ -42,8 +44,6 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		testReadYourWrites = getOption(options, "testReadYourWrites"_sr, true);
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
-
-	std::string description() const override { return "SelectorCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { return SelectorCorrectnessSetup(cx->clone(), this); }
 
@@ -245,4 +245,4 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SelectorCorrectnessWorkload> SelectorCorrectnessWorkloadFactory("SelectorCorrectness");
+WorkloadFactory<SelectorCorrectnessWorkload> SelectorCorrectnessWorkloadFactory;

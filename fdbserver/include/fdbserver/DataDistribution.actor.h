@@ -28,13 +28,15 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TCInfo.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -52,6 +54,7 @@ public:
 		OTHER = 0,
 		REBALANCE_DISK,
 		REBALANCE_READ,
+		REBALANCE_WRITE,
 		MERGE_SHARD,
 		SIZE_SPLIT,
 		WRITE_SPLIT,
@@ -68,6 +71,8 @@ public:
 			return "RebalanceDisk";
 		case REBALANCE_READ:
 			return "RebalanceRead";
+		case REBALANCE_WRITE:
+			return "RebalanceWrite";
 		case MERGE_SHARD:
 			return "MergeShard";
 		case SIZE_SPLIT:
@@ -83,33 +88,12 @@ public:
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
+	bool operator<(const RelocateReason& reason) { return (int)value < (int)reason.value; }
 
 private:
 	Value value;
 };
 
-// One-to-one relationship to the priority knobs
-enum class DataMovementReason {
-	INVALID,
-	RECOVER_MOVE,
-	REBALANCE_UNDERUTILIZED_TEAM,
-	REBALANCE_OVERUTILIZED_TEAM,
-	REBALANCE_READ_OVERUTIL_TEAM,
-	REBALANCE_READ_UNDERUTIL_TEAM,
-	PERPETUAL_STORAGE_WIGGLE,
-	TEAM_HEALTHY,
-	TEAM_CONTAINS_UNDESIRED_SERVER,
-	TEAM_REDUNDANT,
-	MERGE_SHARD,
-	POPULATE_REGION,
-	TEAM_UNHEALTHY,
-	TEAM_2_LEFT,
-	TEAM_1_LEFT,
-	TEAM_FAILED,
-	TEAM_0_LEFT,
-	SPLIT_SHARD,
-	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD
-};
 extern int dataMovementPriority(DataMovementReason moveReason);
 extern DataMovementReason priorityToDataMovementReason(int priority);
 
@@ -161,7 +145,13 @@ struct RelocateShard {
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 
+	void setParentRange(KeyRange const& parent);
+	Optional<KeyRange> getParentRange() const;
+
 private:
+	// If this rs comes from a splitting, parent range is the original range.
+	Optional<KeyRange> parent_range;
+
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
@@ -194,15 +184,15 @@ private:
 public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
-	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
 	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                      int topK = 1,
-	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minBytesReadPerKSecond = 0)
-	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+	                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                      double minReadLoadPerKSecond = 0)
+	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
+	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
 	}
 
@@ -218,8 +208,8 @@ private:
 	// larger read density means higher score
 	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
 	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
-		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
-		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+		return a.metrics.readLoadKSecond() / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.readLoadKSecond() / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
 };
 
@@ -240,52 +230,97 @@ struct GetMetricsListRequest {
 // For each shard (key-range) move, PhysicalShardCollection decides which physical shard and corresponding team(s) to
 // move The current design of PhysicalShardCollection assumes that there exists at most two teamCollections
 // TODO: unit test needed
-FDB_DECLARE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
-FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
-FDB_DECLARE_BOOLEAN_PARAM(InOverSizePhysicalShard);
-FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardAvailable);
-FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
+FDB_BOOLEAN_PARAM(InAnonymousPhysicalShard);
+FDB_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
+FDB_BOOLEAN_PARAM(InOverSizePhysicalShard);
+FDB_BOOLEAN_PARAM(PhysicalShardAvailable);
+FDB_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
+
+struct ShardMetrics {
+	StorageMetrics metrics;
+	double lastLowBandwidthStartTime;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
+
+	bool operator==(ShardMetrics const& rhs) const {
+		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
+		       shardCount == rhs.shardCount;
+	}
+
+	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
+	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
+};
+
+struct ShardTrackedData {
+	Future<Void> trackShard;
+	Future<Void> trackBytes;
+	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+};
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
 	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
+	PhysicalShardCollection(Reference<IDDTxnProcessor> db)
+	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
 	struct PhysicalShard {
 		PhysicalShard() : id(UID().first()) {}
 
-		PhysicalShard(uint64_t id,
+		PhysicalShard(Reference<IDDTxnProcessor> txnProcessor,
+		              uint64_t id,
 		              StorageMetrics const& metrics,
 		              std::vector<ShardsAffectedByTeamFailure::Team> teams,
 		              PhysicalShardCreationTime whenCreated)
-		  : id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
+		  : txnProcessor(txnProcessor), id(id), metrics(metrics),
+		    stats(makeReference<AsyncVar<Optional<StorageMetrics>>>()), teams(teams), whenCreated(whenCreated) {}
+
+		// Adds `newRange` to this physical shard and starts monitoring the shard.
+		void addRange(const KeyRange& newRange);
+
+		// Removes `outRange` from this physical shard and updates monitored shards.
+		void removeRange(const KeyRange& outRange);
 
 		std::string toString() const { return fmt::format("{}", std::to_string(id)); }
 
+		Reference<IDDTxnProcessor> txnProcessor;
 		uint64_t id; // physical shard id (never changed)
 		StorageMetrics metrics; // current metrics, updated by shardTracker
+		// todo(zhewu): combine above metrics with stats. They are redundant.
+		Reference<AsyncVar<Optional<StorageMetrics>>> stats; // Stats of this physical shard.
 		std::vector<ShardsAffectedByTeamFailure::Team> teams; // which team owns this physical shard (never changed)
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
+
+		struct RangeData {
+			Future<Void> trackMetrics;
+			Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+		};
+		std::unordered_map<KeyRange, RangeData> rangeData;
+
+	private:
+		// Inserts a new key range into this physical shard. `newRange` must not exist in this shard already.
+		void insertNewRangeData(const KeyRange& newRange);
 	};
 
-	// Two-step team selection
-	// Usage: getting primary dest team and remote dest team in dataDistributionRelocator()
-	// The overall process has two steps:
-	// Step 1: get a physical shard id given the input primary team
-	// Return a new physical shard id if the input primary team is new or the team has no available physical shard
-	// checkPhysicalShardAvailable() defines whether a physical shard is available
-	uint64_t determinePhysicalShardIDGivenPrimaryTeam(ShardsAffectedByTeamFailure::Team primaryTeam,
-	                                                  StorageMetrics const& metrics,
-	                                                  bool forceToUseNewPhysicalShard,
-	                                                  uint64_t debugID);
+	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
+	uint64_t generateNewPhysicalShardID(uint64_t debugID);
 
-	// Step 2: get a remote team which has the input physical shard
-	// Return empty if no such remote team
-	// May return a problematic remote team, and re-selection is required for this case
-	Optional<ShardsAffectedByTeamFailure::Team> tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID,
-	                                                                          StorageMetrics const& moveInMetrics,
-	                                                                          uint64_t debugID);
+	// If the input team has any available physical shard, return an available physical shard from the input team and
+	// not in `excludedPhysicalShards`. This method is used for two-step team selection The overall process has two
+	// steps: Step 1: get a physical shard id given the input primary team Return a new physical shard id if the input
+	// primary team is new or the team has no available physical shard checkPhysicalShardAvailable() defines whether a
+	// physical shard is available
+	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
+	                                                      StorageMetrics const& metrics,
+	                                                      const std::unordered_set<uint64_t>& excludedPhysicalShards,
+	                                                      uint64_t debugID);
+
+	// Step 2: get a remote team which has the input physical shard.
+	// Second field in the returned pair indicates whether this physical shard is available or not.
+	// Return empty if no such remote team.
+	// May return a problematic remote team, and re-selection is required for this case.
+	std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool>
+	tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID, StorageMetrics const& moveInMetrics, uint64_t debugID);
 	// Invariant:
 	// (1) If forceToUseNewPhysicalShard is set, use the bestTeams selected by getTeam(), and create a new physical
 	// shard for the teams
@@ -322,6 +357,9 @@ public:
 	// Log physicalShard
 	void logPhysicalShardCollection();
 
+	// Checks if a physical shard exists.
+	bool physicalShardExists(uint64_t physicalShardID);
+
 private:
 	// Track physicalShard metrics by tracking keyRange metrics
 	void updatePhysicalShardMetricsByKeyRange(KeyRange keyRange,
@@ -341,19 +379,11 @@ private:
 	// Note that if the physical shard only contains the keyRange, always return FALSE
 	InOverSizePhysicalShard isInOverSizePhysicalShard(KeyRange keyRange);
 
-	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
-	uint64_t generateNewPhysicalShardID(uint64_t debugID);
-
 	// Check whether the input physical shard is available
 	// A physical shard is available if the current metric + moveInMetrics <= a threshold
 	PhysicalShardAvailable checkPhysicalShardAvailable(uint64_t physicalShardID, StorageMetrics const& moveInMetrics);
 
-	// If the input team has any available physical shard, return an available physical shard of the input team
-	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
-	                                                      StorageMetrics const& metrics,
-	                                                      uint64_t debugID);
-
-	// Reduce the metics of input physical shard by the input metrics
+	// Reduce the metrics of input physical shard by the input metrics
 	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
 
 	// Add the input metrics to the metrics of input physical shard
@@ -374,7 +404,10 @@ private:
 	// In keyRangePhysicalShardIDMap, set the input physical shard id to the input key range
 	void updatekeyRangePhysicalShardIDMap(KeyRange keyRange, uint64_t physicalShardID, uint64_t debugID);
 
-	// Return a string concating the input IDs interleaving with " "
+	// Checks the consistency between the mapping of physical shards and key ranges.
+	void checkKeyRangePhysicalShardMapping();
+
+	// Return a string concatenating the input IDs interleaving with " "
 	std::string convertIDsToString(std::set<uint64_t> ids);
 
 	// Reset TransitionStartTime
@@ -403,6 +436,8 @@ private:
 
 	inline bool requireTransitionCheck() { return requireTransition; }
 
+	Reference<IDDTxnProcessor> txnProcessor;
+
 	// Core data structures
 	// Physical shard instances indexed by physical shard id
 	std::unordered_map<uint64_t, PhysicalShard> physicalShardInstances;
@@ -412,6 +447,16 @@ private:
 	std::map<ShardsAffectedByTeamFailure::Team, std::set<uint64_t>> teamPhysicalShardIDs;
 	bool requireTransition;
 	double lastTransitionStartTime;
+};
+
+struct ServerTeamInfo {
+	UID serverId;
+	std::vector<ShardsAffectedByTeamFailure::Team> teams;
+	bool primary;
+
+	ServerTeamInfo() {}
+	ServerTeamInfo(UID serverId, const std::vector<ShardsAffectedByTeamFailure::Team>& teams, bool primary)
+	  : serverId(serverId), teams(teams), primary(primary) {}
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
@@ -431,7 +476,9 @@ struct DDShardInfo {
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
-	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
+	InitialDataDistribution()
+	  : dataMoveMap(std::make_shared<DataMove>()),
+	    userRangeConfig(makeReference<DDConfiguration::RangeConfigMapSnapshot>(allKeys.begin, allKeys.end)) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
@@ -440,28 +487,11 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
+	std::vector<UID> toCleanDataMoveTombstone;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
-};
-
-struct ShardMetrics {
-	StorageMetrics metrics;
-	double lastLowBandwidthStartTime;
-	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
-
-	bool operator==(ShardMetrics const& rhs) const {
-		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
-		       shardCount == rhs.shardCount;
-	}
-
-	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
-	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
-};
-
-struct ShardTrackedData {
-	Future<Void> trackShard;
-	Future<Void> trackBytes;
-	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+	std::vector<AuditStorageState> auditStates;
+	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
 
 // Holds the permitted size and IO Bounds for a shard
@@ -473,6 +503,8 @@ struct ShardSizeBounds {
 	bool operator==(ShardSizeBounds const& rhs) const {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
 	}
+
+	static ShardSizeBounds shardSizeBoundsBeforeTrack();
 };
 
 // Gets the permitted size and IO bounds for a shard
@@ -481,57 +513,11 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
 
-struct StorageQuotaInfo {
-	std::map<Key, uint64_t> quotaMap;
-};
-
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
-
-// FIXME(xwang): Delete Old DD Actors once the refactoring is done
-/////////////////////////////// Old DD Actors //////////////////////////////////////
-#ifndef __INTEL_COMPILER
-#pragma region Old DD Actors
-#endif
+bool ddLargeTeamEnabled();
 
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
-
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Reference<IDDTxnProcessor> db,
-                                           PromiseStream<RelocateShard> output,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           Reference<PhysicalShardCollection> physicalShardCollection,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
-                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId,
-                                           KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled,
-                                           Optional<Reference<TenantCache>> ddTenantCache);
-
-ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollections,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         Reference<PhysicalShardCollection> physicalShardCollection,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         const DDEnabledState* ddEnabledState);
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
@@ -540,105 +526,18 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 #ifndef __INTEL_COMPILER
 #pragma region Perpetual Storage Wiggle
 #endif
+struct DDTeamCollectionInitParams;
 class DDTeamCollection;
-
-struct StorageWiggleMetrics {
-	constexpr static FileIdentifier file_identifier = 4728961;
-
-	// round statistics
-	// One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are
-	// wiggled
-	// Start and finish are in epoch seconds
-	double last_round_start = 0;
-	double last_round_finish = 0;
-	TimerSmoother smoothed_round_duration;
-	int finished_round = 0; // finished round since storage wiggle is open
-
-	// step statistics
-	// 1 wiggle step as 1 storage server is wiggled in the current round
-	// Start and finish are in epoch seconds
-	double last_wiggle_start = 0;
-	double last_wiggle_finish = 0;
-	TimerSmoother smoothed_wiggle_duration;
-	int finished_wiggle = 0; // finished step since storage wiggle is open
-
-	StorageWiggleMetrics() : smoothed_round_duration(20.0 * 60), smoothed_wiggle_duration(10.0 * 60) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		double step_total, round_total;
-		if (!ar.isDeserializing) {
-			step_total = smoothed_wiggle_duration.getTotal();
-			round_total = smoothed_round_duration.getTotal();
-		}
-		serializer(ar,
-		           last_wiggle_start,
-		           last_wiggle_finish,
-		           step_total,
-		           finished_wiggle,
-		           last_round_start,
-		           last_round_finish,
-		           round_total,
-		           finished_round);
-		if (ar.isDeserializing) {
-			smoothed_round_duration.reset(round_total);
-			smoothed_wiggle_duration.reset(step_total);
-		}
-	}
-
-	static Future<Void> runSetTransaction(Reference<ReadYourWritesTransaction> tr,
-	                                      bool primary,
-	                                      StorageWiggleMetrics metrics) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
-		        ObjectWriter::toValue(metrics, IncludeVersion()));
-		return Void();
-	}
-
-	static Future<Void> runSetTransaction(Database cx, bool primary, StorageWiggleMetrics metrics) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			return runSetTransaction(tr, primary, metrics);
-		});
-	}
-
-	static Future<Optional<Value>> runGetTransaction(Reference<ReadYourWritesTransaction> tr, bool primary) {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
-	}
-
-	static Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			return runGetTransaction(tr, primary);
-		});
-	}
-
-	StatusObject toJSON() const {
-		StatusObject result;
-		result["last_round_start_datetime"] = epochsToGMTString(last_round_start);
-		result["last_round_finish_datetime"] = epochsToGMTString(last_round_finish);
-		result["last_round_start_timestamp"] = last_round_start;
-		result["last_round_finish_timestamp"] = last_round_finish;
-		result["smoothed_round_seconds"] = smoothed_round_duration.smoothTotal();
-		result["finished_round"] = finished_round;
-
-		result["last_wiggle_start_datetime"] = epochsToGMTString(last_wiggle_start);
-		result["last_wiggle_finish_datetime"] = epochsToGMTString(last_wiggle_finish);
-		result["last_wiggle_start_timestamp"] = last_wiggle_start;
-		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
-		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.smoothTotal();
-		result["finished_wiggle"] = finished_wiggle;
-		return result;
-	}
-};
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 
 	DDTeamCollection const* teamCollection;
+	StorageWiggleData wiggleData; // the wiggle related data persistent in database
+
 	StorageWiggleMetrics metrics;
+	AsyncVar<bool> stopWiggleSignal;
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
 	// min-heap
@@ -649,7 +548,10 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true){};
+	// wiggle related actors will quit when this signal is set to true
+	void setStopSignal(bool value) { stopWiggleSignal.set(value); }
+	bool isStopped() const { return stopWiggleSignal.get(); }
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue

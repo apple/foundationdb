@@ -460,7 +460,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
-	                                             int matchIndex, boolean reverse, StreamingMode mode);
+	                                             boolean reverse, StreamingMode mode);
 
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.
@@ -498,6 +498,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param begin the beginning of the range (inclusive)
 	 * @param end the end of the range (exclusive)
+	 * @param chunkSize -- undocumented
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -508,6 +509,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * Note: the returned split points contain the start key and end key of the given range.
 	 *
 	 * @param range the range of the keys
+	 * @param chunkSize -- undocumented
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -519,6 +521,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param begin beginning of the range (inclusive)
 	 * @param end end of the range (exclusive)
+	 * @param rowLimit the limit on the number of returned rows
 
 	 * @return list of blob granules in the given range. May not be all.
 	 */

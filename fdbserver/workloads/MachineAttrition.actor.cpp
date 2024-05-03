@@ -28,6 +28,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/FaultInjection.h"
 #include "flow/DeterministicRandom.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
@@ -62,6 +63,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 }
 
 struct MachineAttritionWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "Attrition";
 	bool enabled;
 	int machinesToKill = 2, machinesToLeave = 1, workersToKill = 2, workersToLeave = 1;
 	double testDuration = 10.0, suspendDuration = 1.0, liveDuration = 5.0;
@@ -73,6 +75,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool killProcess = false;
 	bool killZone = false;
 	bool killSelf = false;
+	bool killAll = false;
 	std::vector<std::string> targetIds;
 	bool replacement = false;
 	bool waitForVersion = false;
@@ -106,6 +109,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		killProcess = getOption(options, "killProcess"_sr, killProcess);
 		killZone = getOption(options, "killZone"_sr, killZone);
 		killSelf = getOption(options, "killSelf"_sr, killSelf);
+		killAll =
+		    getOption(options,
+		              "killAll"_sr,
+		              g_network->isSimulated() && !g_simulator->extraDatabases.empty() && BUGGIFY_WITH_PROB(0.01));
 		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
 		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
 		waitForVersion = getOption(options, "waitForVersion"_sr, waitForVersion);
@@ -115,6 +122,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool shouldInject(DeterministicRandom& random,
 	                  const WorkloadRequest& work,
 	                  const unsigned alreadyAdded) const override {
+		if (g_network->isSimulated() && !g_simulator->extraDatabases.empty()) {
+			// Remove this as soon as we track extra databases properly
+			return false;
+		}
 		return work.useDatabase && random.random01() < 1.0 / (2.0 + alreadyAdded);
 	}
 
@@ -155,7 +166,6 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		return machines;
 	}
 
-	std::string description() const override { return "MachineAttritionWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
@@ -327,17 +337,17 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				ASSERT(self->machines.size());
 				Optional<Standalone<StringRef>> target = self->machines.back().dcId();
 
-				ISimulator::KillType kt = ISimulator::Reboot;
+				ISimulator::KillType kt = ISimulator::KillType::Reboot;
 				if (!self->reboot) {
 					int killType = deterministicRandom()->randomInt(0, 3); // FIXME: enable disk stalls
 					if (killType == 0)
-						kt = ISimulator::KillInstantly;
+						kt = ISimulator::KillType::KillInstantly;
 					else if (killType == 1)
-						kt = ISimulator::InjectFaults;
+						kt = ISimulator::KillType::InjectFaults;
 					else if (killType == 2)
-						kt = ISimulator::RebootAndDelete;
+						kt = ISimulator::KillType::RebootAndDelete;
 					else
-						kt = ISimulator::FailDisk;
+						kt = ISimulator::KillType::FailDisk;
 				}
 				TraceEvent("Assassination")
 				    .detail("TargetDatacenter", target)
@@ -353,10 +363,18 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				ASSERT(self->targetIds.size() == 1);
 				auto target = self->targetIds.front();
 
-				auto kt = ISimulator::KillInstantly;
+				auto kt = ISimulator::KillType::KillInstantly;
 				TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
 
 				g_simulator->killDataHall(target, kt);
+			} else if (self->killAll) {
+				state ISimulator::KillType kt = ISimulator::KillType::RebootProcessAndSwitch;
+				TraceEvent("Assassination").detail("KillType", kt);
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
+				wait(delay(self->testDuration / 2));
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
 			} else {
 				state int killedMachines = 0;
 				while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
@@ -391,7 +409,9 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 						wait(success(
 						    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
-					} else if (BUGGIFY_WITH_PROB(0.005)) {
+					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
+						// don't do this in restarting test, since test could exit before it is unset, and restarted
+						// test would never unset it
 						CODE_PROBE(true, "Disable DD for all storage server failures");
 						self->ignoreSSFailures =
 						    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
@@ -411,7 +431,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						if (deterministicRandom()->random01() > 0.5) {
 							g_simulator->rebootProcess(targetMachine.zoneId(), deterministicRandom()->random01() > 0.5);
 						} else {
-							g_simulator->killZone(targetMachine.zoneId(), ISimulator::Reboot);
+							g_simulator->killZone(targetMachine.zoneId(), ISimulator::KillType::Reboot);
 						}
 					} else {
 						auto randomDouble = deterministicRandom()->random01();
@@ -420,19 +440,19 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						    .detail("RandomValue", randomDouble);
 						if (randomDouble < 0.33) {
 							TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
-							g_simulator->killZone(targetMachine.zoneId(), ISimulator::RebootAndDelete);
+							g_simulator->killZone(targetMachine.zoneId(), ISimulator::KillType::RebootAndDelete);
 						} else {
-							auto kt = ISimulator::KillInstantly;
+							auto kt = ISimulator::KillType::KillInstantly;
 							if (self->allowFaultInjection) {
 								if (randomDouble < 0.50) {
-									kt = ISimulator::InjectFaults;
+									kt = ISimulator::KillType::InjectFaults;
 								}
 								// FIXME: enable disk stalls
 								/*
 								if( randomDouble < 0.56 ) {
-								    kt = ISimulator::InjectFaults;
+								    kt = ISimulator::KillType::InjectFaults;
 								} else if( randomDouble < 0.66 ) {
-								    kt = ISimulator::FailDisk;
+								    kt = ISimulator::KillType::FailDisk;
 								}
 								*/
 							}
@@ -468,5 +488,5 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	}
 };
 
-WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory("Attrition");
+WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory;
 FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;

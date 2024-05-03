@@ -31,6 +31,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
+	static constexpr auto NAME = "WriteDuringRead";
+
 	double testDuration, slowModeStart;
 	int numOps;
 	bool rarelyCommit, adjacentKeys;
@@ -112,8 +114,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    .detail("ValueSizeMax", valueSizeRange.second)
 			    .detail("MaxClearSize", maxClearSize);
 	}
-
-	std::string description() const override { return "WriteDuringRead"; }
 
 	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload* self, Database cx) {
 		// If we are operating in the default tenant but enable raw access, we should only write keys
@@ -565,8 +565,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 			self->finished.trigger();
 			self->dataWritten += txnSize;
 
-			if (readYourWritesDisabled)
-				tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			// It's not legal to set readYourWritesDisabled after performing
+			// reads on a transaction, even if all those reads have completed
+			// and there are none in-flight.
+			// if (readYourWritesDisabled)
+			// 	tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+
 			if (snapshotRYWDisabled)
 				tr->setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 			if (readAheadDisabled)
@@ -1053,7 +1057,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
 						//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
 						wait(operations[waitOp]);
-						wait(delay(0.000001)); // to ensure errors have propgated from reads to commits
+						wait(delay(0.000001)); // to ensure errors have propagated from reads to commits
 						waitLocation = operations.size();
 					}
 				}
@@ -1101,4 +1105,4 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<WriteDuringReadWorkload> WriteDuringReadWorkloadFactory("WriteDuringRead");
+WorkloadFactory<WriteDuringReadWorkload> WriteDuringReadWorkloadFactory;

@@ -302,6 +302,7 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``locality-dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
 * ``locality-data-hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
 * ``io-trust-seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
+* ``parentpid``: Die if the process ID of its parent differs from the one given.  The argument should always be ``$PID``, which will be substituted with the process ID of fdbmonitor.  Using this parameter will cause all fdbserver processes started by fdbmonitor to die if fdbmonitor is killed.
 
 .. note:: In addition to the options above, TLS settings as described for the :ref:`TLS plugin <configuring-tls>` can be specified in the [fdbserver] section.
 
@@ -707,7 +708,7 @@ The ``usable_regions`` configuration option determines the number of regions whi
 
 .. warning:: In release 6.0, ``usable_regions`` can only be configured to the values of ``1`` or ``2``, and a maximum of 2 regions can be defined in the ``regions`` json object.
 
-Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will immediately drop the replicas in the remote region. During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
+Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will drop the replicas in the remote region (on data distributor noticing the configuration change and marking the remote region's replicas as "undesired"). During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
 
 Changing the log routers configuration
 --------------------------------------

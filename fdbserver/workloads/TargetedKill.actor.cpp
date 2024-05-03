@@ -30,6 +30,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TargetedKillWorkload : TestWorkload {
+	static constexpr auto NAME = "TargetedKill";
+
 	std::string machineToKill;
 	bool enabled, killAllMachineProcesses;
 	int numKillStorages;
@@ -47,7 +49,6 @@ struct TargetedKillWorkload : TestWorkload {
 		numKillStorages = getOption(options, "numKillStorages"_sr, 1);
 	}
 
-	std::string description() const override { return "TargetedKillWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -62,7 +63,7 @@ struct TargetedKillWorkload : TestWorkload {
 	                          Database cx,
 	                          TargetedKillWorkload* self) {
 		if (g_simulator == g_network) {
-			g_simulator->killInterface(address, ISimulator::KillInstantly);
+			g_simulator->killInterface(address, ISimulator::KillType::KillInstantly);
 			return Void();
 		}
 
@@ -162,4 +163,4 @@ struct TargetedKillWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<TargetedKillWorkload> TargetedKillWorkloadFactory("TargetedKill");
+WorkloadFactory<TargetedKillWorkload> TargetedKillWorkloadFactory;

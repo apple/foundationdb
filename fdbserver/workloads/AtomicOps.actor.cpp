@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -26,10 +25,11 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevAtomicOpDebug SevInfo
+// #define SevAtomicOpDebug SevInfo
 #define SevAtomicOpDebug SevVerbose
 
 struct AtomicOpsWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicOps";
 	int opNum, actorCount, nodeCount;
 	uint32_t opType;
 	bool apiVersion500 = false;
@@ -106,8 +106,6 @@ struct AtomicOpsWorkload : TestWorkload {
 		}
 		TraceEvent("AtomicWorkload").detail("OpType", opType);
 	}
-
-	std::string description() const override { return "AtomicOps"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (apiVersion500)
@@ -438,4 +436,4 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AtomicOpsWorkload> AtomicOpsWorkloadFactory("AtomicOps");
+WorkloadFactory<AtomicOpsWorkload> AtomicOpsWorkloadFactory;

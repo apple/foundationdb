@@ -33,13 +33,16 @@ struct BlobConnectionProvider : NonCopyable, ReferenceCounted<BlobConnectionProv
 	// something returned from createForWrite
 	virtual Reference<BackupContainerFileSystem> getForRead(std::string filePath) = 0;
 
+	virtual bool isExpired() const = 0;
+	virtual bool needsRefresh() const = 0;
+	virtual void update(Standalone<BlobMetadataDetailsRef> newBlobMetadata) = 0;
+
 	virtual ~BlobConnectionProvider() {}
 
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(std::string blobUrl);
 
+	// FIXME: make this function dedupe location connections/providers across location ids
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(Standalone<BlobMetadataDetailsRef> blobMetadata);
-
-	// TODO add update impl
 };
 
 #endif

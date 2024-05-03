@@ -28,9 +28,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WorkerErrorsWorkload : TestWorkload {
+	static constexpr auto NAME = "WorkerErrors";
+
 	WorkerErrorsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
-	std::string description() const override { return "WorkerErrorsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -65,4 +66,4 @@ struct WorkerErrorsWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 };
 
-WorkloadFactory<WorkerErrorsWorkload> WorkerErrorsWorkloadFactory("WorkerErrors");
+WorkloadFactory<WorkerErrorsWorkload> WorkerErrorsWorkloadFactory;

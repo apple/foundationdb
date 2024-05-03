@@ -1,0 +1,13 @@
+[[knobs]]
+enable_accumulative_checksum=false
+
+[[test]]
+testTitle='StorefrontTest'
+runSetup=false
+
+    [[test.workload]]
+    testName='Storefront'
+    actorsPerClient=20
+    transactionsPerSecond=200
+    itemCount=20000
+    maxOrderSize=4

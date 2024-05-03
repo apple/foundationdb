@@ -1,0 +1,9 @@
+[configuration]
+storageEngineExcludeTypes=[5]
+
+[[test]]
+testTitle = 'TransactionCostTest'
+
+    [[test.workload]]
+    testName = 'TransactionCost'
+    iterations = 1000

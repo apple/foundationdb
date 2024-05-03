@@ -102,11 +102,11 @@ If <secret> is not specified, it will be looked up in :ref:`blob credential sour
 
 An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups``.
 
-Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive.  The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service.
+Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive. A parameter is applied individually on each ``backup_agent``, meaning that a global restriction should be calculated based on the number of agent running. The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service. 
 
 Here is a complete list of valid parameters:
 
- *secure_connection* (or *sc*) - Set 1 for secure connection and 0 for unsecure connection. Defaults to secure connection.
+ *secure_connection* (or *sc*) - Set 1 for secure connection and 0 for insecure connection. Defaults to secure connection.
 
  *connect_tries* (or *ct*) - Number of times to try to connect for each request.
 
@@ -142,6 +142,8 @@ Here is a complete list of valid parameters:
 
  *multipart_min_part_size* (or *minps*) - Min part size for multipart uploads.
 
+ *enable_read_cache* (or *erc*) - Whether to enable read block cache.
+
  *read_block_size* (or *rbs*) - Block size in bytes to be used for reads.
 
  *read_ahead_blocks* (or *rab*) - Number of blocks to read ahead of requested offset.
@@ -151,6 +153,10 @@ Here is a complete list of valid parameters:
  *max_send_bytes_per_second* (or *sbps*) - Max send bytes per second for all requests combined.
 
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined.
+
+ *max_delay_retryable_error (or *dre*) - Max seconds to delay before retry again when seeing an retryable error.
+
+ *max_delay_connection_failed (or *dcf*) - Max seconds to delay before retry again when seeing an connection failure.
 
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
 
@@ -523,6 +529,12 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``--inconsistent-snapshot-only``
   Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.
+
+``--user-data``
+  Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.
+
+``--system-metadata``
+  Restore only the relevant system keyspace. This option should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.
 
 .. program:: fdbrestore abort
 

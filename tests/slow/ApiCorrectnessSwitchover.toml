@@ -1,5 +1,8 @@
 [configuration]
 extraDatabaseMode = 'Single'
+# required tenant mode is not supported for Disaster Recovery yet
+tenantModes = ['disabled', 'optional']
+storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'ApiCorrectnessTest'
@@ -30,3 +33,7 @@ runSetup = true
 
     [[test.workload]]
     testName = 'AtomicSwitchover'
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 30.0

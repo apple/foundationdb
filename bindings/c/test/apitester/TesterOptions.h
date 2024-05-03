@@ -51,12 +51,12 @@ public:
 	int numClients;
 	int numTenants = -1;
 	int statsIntervalMs = 0;
-	std::vector<std::pair<std::string, std::string>> knobs;
 	TestSpec testSpec;
 	std::string bgBasePath;
 	std::string tlsCertFile;
 	std::string tlsKeyFile;
 	std::string tlsCaFile;
+	bool retainClientLibCopies = false;
 };
 
 } // namespace FdbApiTester

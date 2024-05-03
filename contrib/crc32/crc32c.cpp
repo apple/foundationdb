@@ -178,7 +178,7 @@ static inline uint32_t shift_crc(uint32_t shift_table[][256], uint32_t crc) {
 }
 
 /* Compute CRC-32C using the hardware instruction. */
-#if (defined(__clang__) || defined(__GNUG__) && !defined(__aarch64__) && !defined(__powerpc64__))
+#if ((defined(__clang__) || defined(__GNUG__)) && !defined(__aarch64__) && !defined(__powerpc64__))
 /* Enable SSE CEC instructions on Intel processor */
 __attribute__((target("sse4.2")))
 #endif

@@ -230,9 +230,7 @@ public:
 	}
 
 	Span& addAttribute(const StringRef& key, const StringRef& value) {
-		if (FLOW_KNOBS->TRACING_SPAN_ATTRIBUTES_ENABLED) {
-			attributes.push_back_deep(arena, KeyValueRef(key, value));
-		}
+		attributes.push_back_deep(arena, KeyValueRef(key, value));
 		return *this;
 	}
 
@@ -274,16 +272,3 @@ struct ITracer {
 };
 
 void openTracer(TracerType type);
-
-template <class T>
-struct SpannedDeque : Deque<T> {
-	Span span;
-	explicit SpannedDeque(Location loc) : span(loc) {}
-	SpannedDeque(SpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
-	SpannedDeque(SpannedDeque const&) = delete;
-	SpannedDeque& operator=(SpannedDeque const&) = delete;
-	SpannedDeque& operator=(SpannedDeque&& other) {
-		*static_cast<Deque<T>*>(this) = std::move(other);
-		span = std::move(other.span);
-	}
-};

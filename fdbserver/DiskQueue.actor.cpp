@@ -31,8 +31,6 @@
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
 
-FDB_DEFINE_BOOLEAN_PARAM(CheckHashes);
-
 // 0 -> 0
 // 1 -> 4k
 // 4k -> 4k
@@ -55,7 +53,7 @@ struct StringBuffer {
 	StringBuffer(UID fromFileID) : reserved(0), id(fromFileID) {}
 
 	int size() const { return str.size(); }
-	StringRef& ref() { return str; }
+	Standalone<StringRef> get() { return str; }
 	void clear() {
 		str = Standalone<StringRef>();
 		reserved = 0;
@@ -63,19 +61,19 @@ struct StringBuffer {
 	void clearReserve(int size) {
 		str = Standalone<StringRef>();
 		reserved = size;
-		ref() = StringRef(new (str.arena()) uint8_t[size], 0);
+		str.contents() = StringRef(new (str.arena()) uint8_t[size], 0);
 	}
 	void append(StringRef x) { memcpy(append(x.size()), x.begin(), x.size()); }
 	void* append(int bytes) {
 		ASSERT(str.size() + bytes <= reserved);
 		void* p = const_cast<uint8_t*>(str.end());
-		ref() = StringRef(str.begin(), str.size() + bytes);
+		str.contents() = StringRef(str.begin(), str.size() + bytes);
 		return p;
 	}
 	StringRef pop_front(int bytes) {
 		ASSERT(bytes <= str.size());
 		StringRef result = str.substr(0, bytes);
-		ref() = str.substr(bytes);
+		str.contents() = str.substr(bytes);
 		return result;
 	}
 	void alignReserve(int alignment, int size) {
@@ -101,7 +99,7 @@ struct StringBuffer {
 			if (str.size() > 0) {
 				memcpy(p, str.begin(), str.size());
 			}
-			ref() = StringRef(p, str.size());
+			str.contents() = StringRef(p, str.size());
 		}
 	}
 };
@@ -196,7 +194,7 @@ public:
 		stallCount.init("RawDiskQueue.StallCount"_sr);
 	}
 
-	Future<Void> pushAndCommit(StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
+	Future<Void> pushAndCommit(Standalone<StringRef> pageData, StringBuffer* pageMem, uint64_t poppedPages) {
 		return pushAndCommit(this, pageData, pageMem, poppedPages);
 	}
 
@@ -332,13 +330,13 @@ public:
 	}
 #endif
 
-	Future<Future<Void>> push(StringRef pageData, std::vector<Reference<SyncQueue>>* toSync) {
+	Future<Future<Void>> push(Standalone<StringRef> pageData, std::vector<Reference<SyncQueue>>* toSync) {
 		return push(this, pageData, toSync);
 	}
 
-	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
-	                                       StringRef pageData,
-	                                       std::vector<Reference<SyncQueue>>* toSync) {
+	ACTOR static UNCANCELLABLE Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
+	                                                     Standalone<StringRef> pageData,
+	                                                     std::vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT(self->readingFile == 2);
@@ -357,8 +355,9 @@ public:
 					toSync->push_back(self->files[1].syncQueue);
 					/*TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
 					    .detail("WritingPos", self->writingPos).detail("WritingBytes", p);*/
-					waitfor.push_back(self->files[1].f->write(pageData.begin(), p, self->writingPos));
-					pageData = pageData.substr(p);
+					waitfor.push_back(uncancellable(
+					    holdWhile(pageData, self->files[1].f->write(pageData.begin(), p, self->writingPos))));
+					pageData.contents() = pageData.substr(p);
 				}
 
 				self->dbg_file0BeginSeq += self->files[0].size;
@@ -426,16 +425,17 @@ public:
 		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());*/
 		self->files[1].size = std::max(self->files[1].size, self->writingPos + pageData.size());
 		toSync->push_back(self->files[1].syncQueue);
-		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
+		waitfor.push_back(uncancellable(
+		    holdWhile(pageData, self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos))));
 		self->writingPos += pageData.size();
 
-		return waitForAll(waitfor);
+		return waitForAllReadyThenThrow(waitfor);
 	}
 
 	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem)
 	// that hold the pageData
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self,
-	                                                      StringRef pageData,
+	                                                      Standalone<StringRef> pageData,
 	                                                      StringBuffer* pageMem,
 	                                                      uint64_t poppedPages) {
 		state Promise<Void> pushing, committed;
@@ -655,7 +655,7 @@ public:
 			for (int i = 0; i < 2; i++)
 				if (self->files[i].size > 0)
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
-			wait(waitForAll(reads));
+			wait(waitForAllReadyThenThrow(reads));
 
 			// Determine which file comes first
 			if (compare(self->firstPages[1], self->firstPages[0])) {
@@ -743,7 +743,10 @@ public:
 	}
 
 	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
-	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self,
+	                                                              int file,
+	                                                              int pageOffset,
+	                                                              int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
@@ -875,7 +878,6 @@ public:
 
 class DiskQueue final : public IDiskQueue, public Tracked<DiskQueue> {
 public:
-	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue(std::string basename,
 	          std::string fileExtension,
 	          UID dbgid,
@@ -883,7 +885,7 @@ public:
 	          int64_t fileSizeWarningLimit)
 	  : rawQueue(new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit)), dbgid(dbgid),
 	    diskQueueVersion(diskQueueVersion), anyPopped(false), warnAlwaysForMemory(true), nextPageSeq(0), poppedSeq(0),
-	    lastPoppedSeq(0), lastCommittedSeq(-1), pushed_page_buffer(nullptr), recovered(false), initialized(false),
+	    lastPoppedSeq(0), lastCommittedSeq(0), pushed_page_buffer(nullptr), recovered(false), initialized(false),
 	    nextReadLocation(-1), readBufPage(nullptr), readBufPos(0) {}
 
 	location push(StringRef contents) override {
@@ -978,9 +980,11 @@ public:
 		   rawQueue->files[1].size).detail("WritingPos", rawQueue->writingPos) .detail("RawFile0Name",
 		   rawQueue->files[0].dbgFilename);*/
 
-		lastCommittedSeq = backPage().endSeq();
+		// Since we only commit entire pages, round the last
+		// committed location up to the next page.
+		lastCommittedSeq = pageCeiling(backPage().endSeq());
 		auto f = rawQueue->pushAndCommit(
-		    pushed_page_buffer->ref(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
+		    pushed_page_buffer->get(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
 		lastPoppedSeq = poppedSeq;
 		pushed_page_buffer = 0;
 		return f;
@@ -994,10 +998,6 @@ public:
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
 	// to be changed to understand the new intiailizeRecovery protocol.
 	location getNextReadLocation() const override { return nextReadLocation; }
-	location getNextCommitLocation() const override {
-		ASSERT(initialized);
-		return lastCommittedSeq + sizeof(Page);
-	}
 	location getNextPushLocation() const override {
 		ASSERT(initialized);
 		return endLocation();
@@ -1061,7 +1061,7 @@ private:
 		};
 		uint64_t seq; // seq is the index of the virtually infinite disk queue file. Its unit is bytes.
 		uint64_t popped;
-		int payloadSize;
+		int32_t payloadSize;
 	};
 	// The on disk format depends on the size of PageHeader.
 	static_assert(sizeof(PageHeader) == 36, "PageHeader must be 36 bytes");
@@ -1176,7 +1176,7 @@ private:
 			Standalone<StringRef> pagedData = wait(readPages(self, start, end));
 			const int startOffset = start % _PAGE_SIZE;
 			const int dataLen = end - start;
-			ASSERT(pagedData.substr(startOffset, dataLen).compare(buffer->ref().substr(0, dataLen)) == 0);
+			ASSERT(pagedData.substr(startOffset, dataLen).compare(buffer->get().substr(0, dataLen)) == 0);
 		} catch (Error& e) {
 			if (e.code() != error_code_io_error) {
 				delete buffer;
@@ -1543,9 +1543,9 @@ private:
 	StringBuffer* pushed_page_buffer;
 	Page& backPage() {
 		ASSERT(pushedPageCount());
-		return ((Page*)pushed_page_buffer->ref().end())[-1];
+		return ((Page*)pushed_page_buffer->get().end())[-1];
 	}
-	Page const& backPage() const { return ((Page*)pushed_page_buffer->ref().end())[-1]; }
+	Page const& backPage() const { return ((Page*)pushed_page_buffer->get().end())[-1]; }
 	int pushedPageCount() const { return pushed_page_buffer ? pushed_page_buffer->size() / sizeof(Page) : 0; }
 
 	// Recovery state
@@ -1557,10 +1557,15 @@ private:
 	int readBufPos;
 };
 
-// A class wrapping DiskQueue which durably allows uncommitted data to be popped.
-// This works by performing two commits when uncommitted data is popped:
+// A class wrapping DiskQueue which prevents uncommitted data from being popped.
+//
+// Once upon a time, it was intended to allow popping uncommitted data
+// by performing two commits when uncommitted data is popped:
 //	Commit 1 - pop only previously committed data and push new data (i.e., commit uncommitted data)
-//  Commit 2 - finish pop into uncommitted data
+//      Commit 2 - finish pop into uncommitted data
+//
+// Now, instead, we only use this to catch errors in tlog logic where
+// we attempt to pop too much.
 class DiskQueue_PopUncommitted final : public IDiskQueue {
 
 public:
@@ -1593,7 +1598,6 @@ public:
 	Future<Standalone<StringRef>> read(location start, location end, CheckHashes ch) override {
 		return queue->read(start, end, ch);
 	}
-	location getNextCommitLocation() const override { return queue->getNextCommitLocation(); }
 	location getNextPushLocation() const override { return queue->getNextPushLocation(); }
 
 	location push(StringRef contents) override {
@@ -1618,7 +1622,10 @@ public:
 		Future<Void> commitFuture = queue->commit();
 
 		bool updatePop = popLocation > committed;
-		committed = pushLocation;
+
+		// Since we only commit entire pages, round the last
+		// committed location up to the next page.
+		committed = location(pushLocation.hi, pageCeiling(pushLocation.lo));
 
 		if (updatePop) {
 			ASSERT_WE_THINK(false);
@@ -1658,4 +1665,44 @@ IDiskQueue* openDiskQueue(std::string basename,
                           DiskQueueVersion dqv,
                           int64_t fileSizeWarningLimit) {
 	return new DiskQueue_PopUncommitted(basename, ext, dbgid, dqv, fileSizeWarningLimit);
+}
+
+TEST_CASE("performance/fdbserver/DiskQueue") {
+	state IDiskQueue* queue =
+	    openDiskQueue("test-", "fdq", deterministicRandom()->randomUniqueID(), DiskQueueVersion::V2);
+	state std::string valueString = std::string(10e6, '.');
+	state StringRef valueStr((uint8_t*)valueString.c_str(), 10e6);
+	state std::deque<IDiskQueue::location> locations;
+	state int loopCount = 0;
+	state Future<Void> lastCommit = Void();
+	bool fullyRecovered = wait(queue->initializeRecovery(0));
+	if (!fullyRecovered) {
+		loop {
+			Standalone<StringRef> h = wait(queue->readNext(1e6));
+			if (h.size() < 1e6) {
+				break;
+			}
+		}
+	}
+	while (loopCount < 4000) {
+		if (loopCount % 100 == 0) {
+			printf("loop count: %d\n", loopCount);
+		}
+		if (++loopCount % 2 == 0) {
+			state IDiskQueue::location frontLocation = locations.front();
+			locations.pop_front();
+			if (locations.size() > 10) {
+				Standalone<StringRef> r = wait(queue->read(frontLocation, locations.front(), CheckHashes::True));
+			}
+			queue->pop(frontLocation);
+		}
+		wait(delay(0.001));
+		locations.push_back(queue->push(valueStr));
+		Future<Void> prevCommit = lastCommit;
+		lastCommit = queue->commit();
+		wait(prevCommit);
+	}
+	queue->dispose();
+	wait(queue->onClosed());
+	return Void();
 }

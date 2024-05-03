@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/Knobs.h"
@@ -29,6 +30,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicRestore";
 	double startAfter, restoreAfter;
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -73,8 +75,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		ASSERT(removePrefix.size() == 0);
 	}
 
-	std::string description() const override { return "AtomicRestore"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -104,7 +104,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
-			                              false,
+			                              true,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -146,4 +146,4 @@ struct AtomicRestoreWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AtomicRestoreWorkload> AtomicRestoreWorkloadFactory("AtomicRestore");
+WorkloadFactory<AtomicRestoreWorkload> AtomicRestoreWorkloadFactory;

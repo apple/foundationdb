@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StreamingReadWorkload : TestWorkload {
+	static constexpr auto NAME = "StreamingRead";
+
 	int actorCount, keyBytes, valueBytes, readsPerTransaction, nodeCount;
 	int rangesPerTransaction;
 	bool readSequentially;
@@ -35,11 +37,11 @@ struct StreamingReadWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, readKeys;
 	PerfIntCounter readValueBytes;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	StreamingReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), readKeys("Keys Read"), readValueBytes("Value Bytes Read"),
-	    latencies(2000) {
+	    latencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorCount = getOption(options, "actorCount"_sr, 20);
 		readsPerTransaction = getOption(options, "readsPerTransaction"_sr, 10);
@@ -52,8 +54,6 @@ struct StreamingReadWorkload : TestWorkload {
 		constantValue = Value(format(valueFormat.c_str(), 42));
 		readSequentially = getOption(options, "readSequentially"_sr, false);
 	}
-
-	std::string description() const override { return "StreamingRead"; }
 
 	Future<Void> setup(Database const& cx) override {
 		return bulkSetup(cx, this, nodeCount, Promise<double>(), true, warmingDelay);
@@ -150,4 +150,4 @@ struct StreamingReadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StreamingReadWorkload> StreamingReadWorkloadFactory("StreamingRead");
+WorkloadFactory<StreamingReadWorkload> StreamingReadWorkloadFactory;

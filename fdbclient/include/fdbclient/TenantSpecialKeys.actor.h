@@ -44,6 +44,7 @@ private:
 		if (range.end.startsWith(prefix)) {
 			end = range.end.removePrefix(prefix);
 		} else {
+			CODE_PROBE(true, "Tenant special keys remove prefix clamped to end", probe::decoration::rare);
 			end = defaultEnd;
 		}
 
@@ -70,7 +71,7 @@ private:
 	                                        RangeResult* results,
 	                                        GetRangeLimits limitsHint) {
 		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
+		    wait(TenantAPI::listTenantMetadataTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
 			std::string jsonString = tenant.second.toJson();
@@ -110,11 +111,10 @@ private:
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state TenantMapEntry tenantEntry;
-		tenantEntry.setId(tenantId);
-		tenantEntry.encrypted = ryw->getTransactionState()->cx->clientInfo->get().isEncryptionEnabled;
+		state TenantMapEntry tenantEntry(tenantId, tenantName);
 
 		for (auto const& [name, value] : configMutations) {
+			CODE_PROBE(true, "Special keys create tenant with configuration parameters");
 			tenantEntry.configure(name, value);
 		}
 
@@ -123,7 +123,7 @@ private:
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
-		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantEntry));
 
 		return entry.second;
 	}
@@ -136,13 +136,18 @@ private:
 		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		state int64_t nextId = _nextId;
+		ASSERT(nextId >= 0);
 
 		state std::vector<Future<bool>> createFutures;
+		int itrCount = 0;
 		for (auto const& [tenant, config] : tenants) {
-			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
+			createFutures.push_back(createTenant(ryw, tenant, config, nextId, tenantGroupNetTenantDelta));
+			if (++itrCount < tenants.size()) {
+				nextId = TenantAPI::computeNextTenantId(nextId, 1);
+			}
 		}
 
-		TenantMetadata::lastTenantId().set(&ryw->getTransaction(), nextId - 1);
+		TenantMetadata::lastTenantId().set(&ryw->getTransaction(), nextId);
 		wait(waitForAll(createFutures));
 
 		state int numCreatedTenants = 0;
@@ -152,9 +157,13 @@ private:
 			}
 		}
 
+		CODE_PROBE(numCreatedTenants > 1, "Special keys create multiple tenants simultaneously");
+		CODE_PROBE(numCreatedTenants < createFutures.size(), "Special keys some tenants not created");
+
 		// Check the tenant count here rather than rely on the createTenantTransaction check because we don't have RYW
 		int64_t tenantCount = wait(tenantCountFuture);
 		if (tenantCount + numCreatedTenants > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+			CODE_PROBE(true, "Special keys create tenants no capacity");
 			throw cluster_no_capacity();
 		}
 
@@ -169,6 +178,7 @@ private:
 		TenantMapEntry originalEntry = wait(TenantAPI::getTenantTransaction(&ryw->getTransaction(), tenantName));
 		TenantMapEntry updatedEntry = originalEntry;
 		for (auto const& [name, value] : configEntries) {
+			CODE_PROBE(true, "Special keys change tenant config");
 			updatedEntry.configure(name, value);
 		}
 
@@ -181,17 +191,19 @@ private:
 			}
 		}
 
-		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, originalEntry, updatedEntry));
+		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), originalEntry, updatedEntry));
 		return Void();
 	}
 
 	ACTOR static Future<Void> deleteSingleTenant(ReadYourWritesTransaction* ryw,
 	                                             TenantName tenantName,
 	                                             std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
+		CODE_PROBE(true, "Special keys delete tenant");
+
 		state Optional<TenantMapEntry> tenantEntry =
 		    wait(TenantAPI::tryGetTenantTransaction(&ryw->getTransaction(), tenantName));
 		if (tenantEntry.present()) {
-			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantEntry.get().id));
 			if (tenantEntry.get().tenantGroup.present()) {
 				(*tenantGroupNetTenantDelta)[tenantEntry.get().tenantGroup.get()]--;
 			}
@@ -204,7 +216,7 @@ private:
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant,
 	                                            std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(
+		state std::vector<std::pair<TenantName, int64_t>> tenants = wait(
 		    TenantAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
 		if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
@@ -218,11 +230,10 @@ private:
 
 		std::vector<Future<Void>> deleteFutures;
 		for (auto tenant : tenants) {
-			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-			if (tenant.second.tenantGroup.present()) {
-				(*tenantGroupNetTenantDelta)[tenant.second.tenantGroup.get()]--;
-			}
+			deleteFutures.push_back(deleteSingleTenant(ryw, tenant.first, tenantGroupNetTenantDelta));
 		}
+
+		CODE_PROBE(deleteFutures.size() > 1, "Special keys delete multiple tenants simultaneously");
 
 		wait(waitForAll(deleteFutures));
 		return Void();
@@ -243,6 +254,7 @@ private:
 
 		ASSERT(tenantsInGroup.results.size() >= removedTenants);
 		if (tenantsInGroup.results.size() == removedTenants) {
+			CODE_PROBE(true, "Special keys tenant modifications removed tenant");
 			TenantMetadata::tenantGroupMap().erase(&ryw->getTransaction(), tenantGroup);
 		}
 
@@ -308,6 +320,7 @@ public:
 					configMutations[tuple.getString(0)].push_back(
 					    std::make_pair(tuple.getString(1), range.value().second));
 				} catch (Error& e) {
+					CODE_PROBE(true, "Special keys invalid tenant configuration key");
 					TraceEvent(SevWarn, "InvalidTenantConfigurationKey").error(e).detail("Key", adjustedRange.begin);
 					ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
 					    false, "configure tenant", "invalid tenant configuration key"));
@@ -319,6 +332,7 @@ public:
 				// Do not allow overlapping renames in the same commit
 				// e.g. A->B + B->C, D->D
 				if (renameSet.count(oldName) || renameSet.count(newName) || oldName == newName) {
+					CODE_PROBE(true, "Special keys tenant rename conflict");
 					ryw->setSpecialKeySpaceErrorMsg(
 					    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
 					throw special_keys_api_failure();
@@ -334,6 +348,9 @@ public:
 			TenantNameRef tenantName = mapMutation.first.begin;
 			auto set_iter = renameSet.lower_bound(tenantName);
 			if (set_iter != renameSet.end() && mapMutation.first.contains(*set_iter)) {
+				CODE_PROBE(true,
+				           "Special keys tenant rename conflicts with tenant creation/deletion",
+				           probe::decoration::rare);
 				ryw->setSpecialKeySpaceErrorMsg(
 				    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
 				throw special_keys_api_failure();
@@ -349,6 +366,7 @@ public:
 			} else {
 				// For a single key clear, just issue the delete
 				if (mapMutation.first.singleKeyRange()) {
+					CODE_PROBE(true, "Special keys single key tenant deletion");
 					tenantManagementFutures.push_back(deleteSingleTenant(ryw, tenantName, &tenantGroupNetTenantDelta));
 
 					// Configuration changes made to a deleted tenant are discarded
@@ -364,11 +382,18 @@ public:
 			}
 		}
 
+		CODE_PROBE(!mapMutations.empty() && !configMutations.empty(),
+		           "Special keys simultaneous tenant create/delete and config changes",
+		           probe::decoration::rare);
+
 		if (!tenantsToCreate.empty()) {
 			tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate, &tenantGroupNetTenantDelta));
 		}
 		for (auto configMutation : configMutations) {
 			if (renameSet.count(configMutation.first)) {
+				CODE_PROBE(true,
+				           "Special keys tenant rename conflicts with tenant configuration change",
+				           probe::decoration::rare);
 				ryw->setSpecialKeySpaceErrorMsg(
 				    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
 				throw special_keys_api_failure();

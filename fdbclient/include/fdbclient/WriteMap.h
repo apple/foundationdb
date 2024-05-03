@@ -90,6 +90,8 @@ struct WriteMapEntry {
 
 	int compare(ExtStringRef const& r) const { return -r.compare(key); }
 
+	int compare(WriteMapEntry const& r) const { return key.compare(r.key); }
+
 	std::string toString() const { return printable(key); }
 };
 

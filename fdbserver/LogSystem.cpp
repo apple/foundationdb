@@ -209,7 +209,7 @@ void LogSet::updateLocalitySet(std::vector<LocalityData> const& localities) {
 bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
 	resultEntries.clear();
 
-	// Run the policy, assert if unable to satify
+	// Run the policy, assert if unable to satisfy
 	bool result = logServerSet->selectReplicas(tLogPolicy, locations, resultEntries);
 	ASSERT(result);
 
@@ -258,7 +258,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 		alsoServers.push_back(logEntryArray[location]);
 	}
 
-	// Run the policy, assert if unable to satify
+	// Run the policy, assert if unable to satisfy
 	bool result = logServerSet->selectReplicas(tLogPolicy, alsoServers, resultEntries);
 	ASSERT(result);
 
@@ -321,7 +321,7 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	}
 }
 
-std::vector<Standalone<StringRef>> LogPushData::getAllMessages() {
+std::vector<Standalone<StringRef>> LogPushData::getAllMessages() const {
 	std::vector<Standalone<StringRef>> results;
 	results.reserve(messagesWriter.size());
 	for (int loc = 0; loc < messagesWriter.size(); loc++) {

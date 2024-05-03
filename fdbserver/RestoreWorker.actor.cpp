@@ -39,6 +39,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbserver/RestoreWorker.actor.h"
 #include "fdbserver/RestoreController.actor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

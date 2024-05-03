@@ -28,7 +28,7 @@ class TransactionTagCounter {
 	PImpl<class TransactionTagCounterImpl> impl;
 
 public:
-	TransactionTagCounter(UID thisServerID);
+	TransactionTagCounter(UID thisServerID, int maxTagsTracked, double minRateTracked);
 	~TransactionTagCounter();
 
 	// Update counters tracking the busyness of each tag in the current interval
@@ -38,5 +38,5 @@ public:
 	void startNewInterval();
 
 	// Returns the set of busiest tags as of the end of the last interval
-	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const;
+	std::vector<BusyTagInfo> const& getBusiestTags() const;
 };

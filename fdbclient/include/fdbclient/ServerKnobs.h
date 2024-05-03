@@ -22,6 +22,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
+#include "flow/swift_support.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ClientKnobs.h"
@@ -29,7 +30,7 @@
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public KnobsImpl<ServerKnobs> {
+class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
@@ -81,6 +82,7 @@ public:
 	double DESIRED_GET_MORE_DELAY;
 	int CONCURRENT_LOG_ROUTER_READS;
 	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
+	double LOG_ROUTER_PEEK_SWITCH_DC_TIME;
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
@@ -110,12 +112,15 @@ public:
 	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
+	double POP_FROM_LOG_DELAY;
+	double TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
 	double BEST_TEAM_STUCK_DELAY;
 	double DEST_OVERLOADED_DELAY;
 	double BG_REBALANCE_POLLING_INTERVAL;
+	double BG_REBALANCE_MAX_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
@@ -123,8 +128,11 @@ public:
 	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
 	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
 	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
+	double WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER; // take effects when pertual wiggle priority is larger
+	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	double MERGE_RELOCATION_PARALLELISM_PER_TEAM;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -139,31 +147,83 @@ public:
 	//   is possible within but not between priority groups; fewer priority groups
 	//   mean better worst case time bounds
 	// Maximum allowable priority is 999.
+	// Update the status json .data.team_tracker.state field when necessary
+	//
+	// Priority for movement resume from previous unfinished in-flight movement when a new DD
+	// start
 	int PRIORITY_RECOVER_MOVE;
+	// A load-balance priority for disk valley filler
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	// A load-balance priority disk mountain chopper
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	// A load-balance priority read valley filler
 	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+	// A load-balance priority read mountain chopper
 	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
+	// A load-balance priority storage queue too long
+	int PRIORITY_REBALANCE_STORAGE_QUEUE;
+	// A team healthy priority for wiggle a storage server
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+	// A team healthy priority when all servers in a team are healthy. When a team changes from any unhealthy states to
+	// healthy, the unfinished relocations will be overridden to healthy priority
 	int PRIORITY_TEAM_HEALTHY;
+	// A team healthy priority when there's undesired servers in the team. (ex. same ip
+	// address as other SS process, or SS is lagging too far ...)
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+	// A team healthy priority for removing redundant team to make the team count within a good range
 	int PRIORITY_TEAM_REDUNDANT;
+	// A shard boundary priority for merge small and write cold shard.
 	int PRIORITY_MERGE_SHARD;
+	// A team healthy priority for populate remote region
 	int PRIORITY_POPULATE_REGION;
+	// A team healthy priority when the replica > 3 and there's at least one unhealthy server in a team.
+	// Or when the team contains a server with wrong configuration (ex. storage engine,
+	// locality, excluded ...)
 	int PRIORITY_TEAM_UNHEALTHY;
+	// A team healthy priority when there should be >= 3 replicas and there's 2 healthy servers in a team
 	int PRIORITY_TEAM_2_LEFT;
+	// A team healthy priority when there should be >= 2 replicas and there's 1 healthy server in a team
 	int PRIORITY_TEAM_1_LEFT;
-	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
+	// A team healthy priority when a server in the team is excluded as failed
+	int PRIORITY_TEAM_FAILED;
+	// A team healthy priority when there's no healthy server in a team
 	int PRIORITY_TEAM_0_LEFT;
+	// A shard boundary priority for split large or write hot shard.
 	int PRIORITY_SPLIT_SHARD;
-	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
+	// Priority when a physical shard is oversize or anonymous. When DD enable physical shard, the shard created before
+	// it are default to be 'anonymous' for compatibility.
+	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
+
+	// Data fetching rate is throttled if its priority is STRICTLY LOWER than this value. The rate limit is set as
+	// STORAGE_FETCH_KEYS_RATE_LIMIT.
+	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
 
 	// Data distribution
+	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
+	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
+	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
+	// has available space ratio < pivotAvailableSpaceRatio.
+	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
+	// team count. DD won't move shard to teams that has CPU > pivot CPU.
+	double CPU_PIVOT_RATIO;
+	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
+	double MAX_DEST_CPU_PERCENT;
+	// The constant interval DD update pivot values for team selection. It should be >=
+	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
+	double DD_TEAM_PIVOT_UPDATE_DELAY;
+
+	bool ALLOW_LARGE_SHARD;
+	int MAX_LARGE_SHARD_BYTES;
+
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
+	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
+	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
+	bool PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING;
 
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
@@ -171,6 +231,8 @@ public:
 	double
 	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
 	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
+	double
+	    READ_REBALANCE_MIN_READ_BYTES_KS; // only move shard whose readLoad > min(MIN_READ_BYTES_KS, shard avg traffic);
 
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
@@ -178,6 +240,13 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
+	                                     // be considered hot
+	// When the sampled read operations changes more than this threshold, the
+	// shard metrics will update immediately
+	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
+	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // Experimental. Enable to enforce shard split when write traffic is high
+
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
@@ -185,14 +254,26 @@ public:
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
-	double CHECK_TEAM_DELAY;
-	double PERPETUAL_WIGGLE_DELAY;
-	bool PERPETUAL_WIGGLE_DISABLE_REMOVER;
+	double CHECK_TEAM_DELAY; // Perpetual wiggle check cluster team healthy
+	double PERPETUAL_WIGGLE_SMALL_LOAD_RATIO; // If the average load of storage server is less than this ratio * average
+	                                          // shard bytes, the perpetual wiggle won't consider the available space
+	                                          // load balance in the cluster
+	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
+	                                                 // before perpetual wiggle will start the next wiggle
+	int PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO; // Maximum number of storage servers that can have the load bytes
+	                                                // less than PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO before
+	                                                // perpetual wiggle will start the next wiggle.
+	                                                // Used to speed up wiggling rather than waiting for every SS to get
+	                                                // balanced/filledup before starting the next wiggle.
+	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
+	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
 	int BEST_OF_AMT;
 	double SERVER_LIST_DELAY;
+	double RATEKEEPER_MONITOR_SS_DELAY;
+	int RATEKEEPER_MONITOR_SS_THRESHOLD;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
 	bool TSS_HACK_IDENTITY_MAPPING;
@@ -236,7 +317,30 @@ public:
 	int64_t
 	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
+	bool STORAGE_QUOTA_ENABLED; // Whether storage quota enforcement for tenant groups and all the relevant storage
+	                            // usage / quota monitors are enabled.
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
+	int TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL; // How often the storage bytes used by each tenant is refreshed
+	                                                 // in the TenantCache
+	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
+	                                                 // refreshed in the TenantCache
+	int TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL; // The minimum interval between consecutive trace events logging the
+	                                               // storage bytes used by a tenant group
+	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
+	                                                  // distributor to fetch the list of tenants over storage quota
+	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // Experimental! Enable to avoid moving data to a team which has a
+	                                                // long storage queue
+	double DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE; // p% amount teams which have longer queues (team queue size
+	                                                       // = max SSes queue size)
+	bool ENABLE_REBALANCE_STORAGE_QUEUE; // Experimental! Enable to trigger data moves to rebalance storage queues when
+	                                     // a queue is significantly longer than others
+	int64_t REBALANCE_STORAGE_QUEUE_LONG_BYTES; // Lower bound of length indicating the storage queue is too long
+	int64_t REBALANCE_STORAGE_QUEUE_SHORT_BYTES; // Upper bound of length indicating the storage queue is back to short
+	double DD_LONG_STORAGE_QUEUE_TIMESPAN;
+	double DD_REBALANCE_STORAGE_QUEUE_TIME_INTERVAL;
+	int64_t REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN;
+	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
+	                                                               // light-traffic shards out of the overloading server
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -247,14 +351,32 @@ public:
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
 	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
 	                                          // ensure it runs after machineTeamRemover
+	double TR_REDUNDANT_TEAM_PERCENTAGE_THRESHOLD; // serverTeamRemover will only remove teams if existing team number
+	                                               // is p% more than the desired team number.
 
 	// Remove wrong storage engines
 	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
+	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	bool DD_REMOVE_MAINTENANCE_ON_FAILURE; // If set to true DD will remove the maintenance mode if another SS fails
+	                                       // outside of the maintenance zone.
+	int DD_SHARD_TRACKING_LOG_SEVERITY;
+	bool ENFORCE_SHARD_COUNT_PER_TEAM; // Whether data movement selects dst team not exceeding
+	                                   // DESIRED_MAX_SHARDS_PER_TEAM.
+	int DESIRED_MAX_SHARDS_PER_TEAM; // When ENFORCE_SHARD_COUNT_PER_TEAM is true, this is the desired, but not strictly
+	                                 // enforced, max shard count per team.
 
-	// Run storage enginee on a child process on the same machine with storage process
+	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
+	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
+	                                   // without yielding
+	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
+	                            // requested
+	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
+	                                    // under replicated shards
+
+	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
 	// A delay to avoid race on file resources after seeing lock_file_failure
 	double REBOOT_KV_STORE_DELAY;
@@ -302,20 +424,35 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	bool ROCKSDB_SET_READ_TIMEOUT;
 	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	bool ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
+	int ROCKSDB_READER_THREAD_PRIORITY;
+	int ROCKSDB_WRITER_THREAD_PRIORITY;
+	int ROCKSDB_COMPACTION_THREAD_PRIORITY;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
+	int ROCKSDB_CHECKPOINT_READER_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
+	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
+	bool ROCKSDB_MUTE_LOGS;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
+	double ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO;
+	int ROCKSDB_BLOOM_BITS_PER_KEY;
+	bool ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
+	int ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
+	double ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
+	bool ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	double ROCKSDB_METRICS_DELAY;
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
 	double ROCKSDB_READ_RANGE_TIMEOUT;
+	double ROCKSDB_READ_CHECKPOINT_TIMEOUT;
+	int64_t ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
 	double ROCKSDB_READ_QUEUE_WAIT;
 	int ROCKSDB_READ_QUEUE_SOFT_MAX;
 	int ROCKSDB_READ_QUEUE_HARD_MAX;
@@ -326,27 +463,111 @@ public:
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
+	bool SHARDED_ROCKSDB_REUSE_ITERATORS;
+	bool ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS;
+	int ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	int ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
+	bool ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
 	double ROCKSDB_METRICS_SAMPLE_INTERVAL;
 	int ROCKSDB_MAX_SUBCOMPACTIONS;
 	int64_t ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
 	int64_t ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	int64_t SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	int64_t SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
 	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
-	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
+	int ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT;
+	bool ROCKSDB_PARANOID_FILE_CHECKS;
+	double ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+	int64_t ROCKSDB_WAL_TTL_SECONDS;
+	int64_t ROCKSDB_WAL_SIZE_LIMIT_MB;
+	bool ROCKSDB_LOG_LEVEL_DEBUG;
+	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
+	int ROCKSDB_SINGLEKEY_DELETES_MAX;
+	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
+	bool ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE;
+	bool ROCKSDB_ENABLE_COMPACT_ON_DELETION;
+	int64_t ROCKSDB_CDCF_SLIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
+	int64_t ROCKSDB_CDCF_DELETION_TRIGGER; // CDCF: CompactOnDeletionCollectorFactory
+	double ROCKSDB_CDCF_DELETION_RATIO; // CDCF: CompactOnDeletionCollectorFactory
+	int ROCKSDB_STATS_LEVEL;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
 	int64_t ROCKSDB_WRITE_BUFFER_SIZE;
-	int64_t ROCKSDB_CF_WRITE_BUFFER_SIZE;
+	int ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
+	int ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE;
+	int ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
+	int ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
+	int ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 	int64_t ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
 	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
+	bool ROCKSDB_EMPTY_RANGE_CHECK;
+	int ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX;
+	bool ROCKSDB_ATOMIC_FLUSH;
+	bool ROCKSDB_IMPORT_MOVE_FILES;
+	bool ROCKSDB_CHECKPOINT_REPLAY_MARKER;
+	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE; // Conduct block-level checksum when rocksdb injecting data
+	bool ROCKSDB_ENABLE_CHECKPOINT_VALIDATION;
+	bool ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT;
+	int ROCKSDB_COMPACTION_PRI;
+	int ROCKSDB_WAL_RECOVERY_MODE;
+	int ROCKSDB_TARGET_FILE_SIZE_BASE;
+	int ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	bool ROCKSDB_USE_DIRECT_READS;
+	bool ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
+	int ROCKSDB_MAX_OPEN_FILES;
+	bool ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS;
+	int ROCKSDB_CF_RANGE_DELETION_LIMIT;
+	int ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
+	bool ROCKSDB_WAIT_ON_CF_FLUSH;
+	bool ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
+	double ROCKSDB_CF_METRICS_DELAY;
+	int ROCKSDB_MAX_LOG_FILE_SIZE;
+	int ROCKSDB_KEEP_LOG_FILE_NUM;
+	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
+	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
+	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
+	                                // verify_file_checksum when ingesting (for physical shard move).
+	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
+	                                // checksum). The block-level checksum does not cover the corruption such as wrong
+	                                // sst file or file move/copy.
+	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
+	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
+	int SHARD_METADATA_SCAN_BYTES_LIMIT;
+	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
+	int SHARDED_ROCKSDB_AVERAGE_FILE_SIZE;
+	double SHARDED_ROCKSDB_COMPACTION_PERIOD;
+	double SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY;
+	int SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT;
+	int64_t SHARDED_ROCKSDB_WRITE_BUFFER_SIZE;
+	int64_t SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE;
+	int64_t SHARDED_ROCKSDB_MEMTABLE_BUDGET;
+	int64_t SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
+	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
+	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
+	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
+	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	int64_t SHARDED_ROCKSDB_RATE_LIMITER_MODE;
+	int SHARDED_ROCKSDB_BACKGROUND_PARALLELISM;
+	int SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
+	int SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
+	int SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
+	int SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
+	bool SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE;
+	int SHARDED_ROCKSDB_MAX_OPEN_FILES;
+	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -358,7 +579,7 @@ public:
 	double POLLING_FREQUENCY;
 	double HEARTBEAT_FREQUENCY;
 
-	// Commit CommitProxy
+	// Commit Proxy and GRV Proxy
 	double START_TRANSACTION_BATCH_INTERVAL_MIN;
 	double START_TRANSACTION_BATCH_INTERVAL_MAX;
 	double START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
@@ -367,10 +588,15 @@ public:
 	double START_TRANSACTION_MAX_TRANSACTIONS_TO_START;
 	int START_TRANSACTION_MAX_REQUESTS_TO_START;
 	double START_TRANSACTION_RATE_WINDOW;
+	double TAG_THROTTLE_RATE_WINDOW;
 	double START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET;
+	double TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
+	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
+	int BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE;
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
+	double COMMIT_PROXY_MAX_LIVENESS_TIMEOUT;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -385,6 +611,7 @@ public:
 	int64_t COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
+	double COMMIT_TRIGGER_DELAY;
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
@@ -405,6 +632,10 @@ public:
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
 	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
+	bool BURSTINESS_METRICS_ENABLED;
+	// Interval on which to emit burstiness metrics on the commit proxy (in
+	// seconds).
+	double BURSTINESS_METRICS_LOG_INTERVAL;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -467,7 +698,7 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
-	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The intial delay in a new Cluster Controller just started to refresh
+	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The initial delay in a new Cluster Controller just started to refresh
 	                                           // the info of remote DC, such as remote DC health, and whether we need
 	                                           // to take remote DC health info when making failover decision.
 	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
@@ -475,6 +706,7 @@ public:
 	double RATEKEEPER_FAILURE_TIME;
 	double CONSISTENCYSCAN_FAILURE_TIME;
 	double BLOB_MANAGER_FAILURE_TIME;
+	double BLOB_MIGRATOR_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
@@ -511,6 +743,8 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
+	                                             // router is degraded and may use trigger recovery to recover from it.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -528,6 +762,8 @@ public:
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
 	double SINGLETON_RECRUIT_BME_DELAY;
+	bool RECORD_RECOVER_AT_IN_CSTATE;
+	bool TRACK_TLOG_RECOVERY;
 
 	// Move Keys
 	double SHARD_READY_DELAY;
@@ -555,6 +791,7 @@ public:
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
 	double METRIC_UPDATE_RATE;
+	// The interval of detailed HealthMetric is pushed to GRV proxies
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 	double RATEKEEPER_DEFAULT_LIMIT;
@@ -568,6 +805,7 @@ public:
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
 	int64_t AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
+	int64_t AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER;
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER_BATCH;
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
@@ -578,6 +816,11 @@ public:
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
+	double STORAGE_FETCH_KEYS_DELAY;
+	bool STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET;
+	int64_t STORAGE_FETCH_KEYS_RATE_LIMIT; // Unit: MB/s
+	double STORAGE_ROCKSDB_LOG_CLEAN_UP_DELAY;
+	double STORAGE_ROCKSDB_LOG_TTL;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -612,20 +855,56 @@ public:
 	bool GLOBAL_TAG_THROTTLING;
 	// Enforce tag throttling on proxies rather than on clients
 	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
-	// Minimum number of transactions per second that the global tag throttler must allow for each tag
+	// Minimum number of transactions per second that the global tag throttler must allow for each tag.
+	// When the measured tps for a tag gets too low, the denominator in the
+	// average cost calculation gets small, resulting in an unstable calculation.
+	// To protect against this, we do not compute the average cost when the
+	// measured tps drops below this threshold
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
-	// Used by global tag throttling counters
-	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	// Cost multiplier for writes (because write operations are more expensive than reads)
-	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
+	// until some existing tags expire
+	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
+	// Global tag throttler forgets about throughput from a tag once no new transactions from that
+	// tag have been received for this duration (in seconds):
+	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
+	// Interval at which latency bands are logged for each tag on grv proxy
+	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
+	// Interval at which ratekeeper logs statistics for each tag:
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// If this knob is set to true, the global tag throttler will still
+	// compute rates, but these rates won't be sent to GRV proxies for
+	// enforcement.
+	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
+	// Below this throughput threshold (in bytes/second), ratekeeper will forget about the
+	// throughput of a particular tag on a particular storage server
+	int64_t GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD;
+	// If a tag's throughput on a particular storage server exceeds this threshold,
+	// this storage server's throttling ratio will contribute the calculation of the
+	// throttlingId's limiting transaction rate
+	double GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD;
+
+	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
+
+	bool HOT_SHARD_THROTTLING_ENABLED;
+	double HOT_SHARD_THROTTLING_EXPIRE_AFTER;
+	int64_t HOT_SHARD_THROTTLING_TRACKED;
+	double HOT_SHARD_MONITOR_FREQUENCY;
+
+	// allow generating synthetic data for test clusters
+	bool GENERATE_DATA_ENABLED;
+	// maximum number of synthetic mutations per transaction
+	int GENERATE_DATA_PER_VERSION_MAX;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
 	int64_t MIN_AVAILABLE_SPACE;
+	// DD won't move data to a team that has available space ratio < MIN_AVAILABLE_SPACE_RATIO
 	double MIN_AVAILABLE_SPACE_RATIO;
 	double MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	double TARGET_AVAILABLE_SPACE_RATIO;
-	double AVAILABLE_SPACE_UPDATE_DELAY;
 
 	double MAX_TL_SS_VERSION_DIFFERENCE; // spring starts at half this value
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
@@ -677,12 +956,17 @@ public:
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
-	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
+	int64_t BYTES_WRITTEN_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t OPS_READ_UNITS_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
 	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
 	bool READ_SAMPLING_ENABLED;
+	bool DD_PREFER_LOW_READ_UTIL_TEAM;
+	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
+	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
+	int64_t MOVING_WINDOW_SAMPLE_SIZE;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -695,19 +979,36 @@ public:
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
-	int FETCH_KEYS_PARALLELISM_FULL;
+	int FETCH_KEYS_PARALLELISM_CHANGE_FEED;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
-	int CHANGE_FEED_DISK_READS_PARALLELISM;
+	int SERVE_AUDIT_STORAGE_PARALLELISM;
+	int PERSIST_FINISH_AUDIT_COUNT; // Num of persist complete/failed audits for each type
+	int AUDIT_RETRY_COUNT_MAX;
+	int CONCURRENT_AUDIT_TASK_COUNT_MAX;
+	bool AUDIT_DATAMOVE_PRE_CHECK;
+	bool AUDIT_DATAMOVE_POST_CHECK;
+	int AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX;
+	int AUDIT_STORAGE_RATE_PER_SERVER_MAX;
+	bool ENABLE_AUDIT_VERBOSE_TRACE;
+	bool LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT;
+	double LOGGING_COMPLETE_STORAGE_COMMIT_PROBABILITY;
+	int LOGGING_RECENT_STORAGE_COMMIT_SIZE;
+	bool LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT;
+	double LOGGING_ROCKSDB_BG_WORK_PROBABILITY;
+	double LOGGING_ROCKSDB_BG_WORK_PERIOD_SEC;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
 	int STORAGE_FETCH_BYTES;
+	int STORAGE_ROCKSDB_FETCH_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
+	double MIN_BYTE_SAMPLING_PROBABILITY; // Adjustable only for test of PhysicalShardMove. Should always be 0 for other
+	                                      // cases
 	int MAX_STORAGE_SERVER_WATCH_BYTES;
 	int MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE;
 	double LONG_BYTE_SAMPLE_RECOVERY_DELAY;
@@ -718,10 +1019,15 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
+	// Minimum read throughput (in pages/second) that a tag must register
+	// on a storage server in order for tag throughput statistics to be
+	// emitted to ratekeeper.
 	int64_t MIN_TAG_READ_PAGES_RATE;
+	// Minimum write throughput (in pages/second, multiplied by fungibility ratio)
+	// that a tag must register on a storage server in order for ratekeeper to
+	// track the write throughput of this tag on the storage server.
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
-	int64_t READ_COST_BYTE_FACTOR;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
 	bool REPORT_DD_METRICS;
 	double DD_METRICS_REPORT_INTERVAL;
@@ -733,11 +1039,21 @@ public:
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	bool STRICTLY_ENFORCE_BYTE_LIMIT;
+	double FRACTION_INDEX_BYTELIMIT_PREFETCH;
 	int MAX_PARALLEL_QUICK_GET_VALUE;
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	int STORAGE_FEED_QUERY_HARD_LIMIT;
+	std::string STORAGESERVER_READ_PRIORITIES;
+	int STORAGE_SERVER_READ_CONCURRENCY;
+	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
+	int SPLIT_METRICS_MAX_ROWS;
+	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;
+	int PHYSICAL_SHARD_MOVE_LOG_SEVERITY;
+	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
+	int FETCH_SHARD_UPDATES_BYTE_LIMIT;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -771,12 +1087,17 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING; // When enabled, health monitor will try to detect any gray
+	                                                   // failure during tlog recovery during the recovery process.
 	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
 	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
 	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,
 	                                          // Enabling this can reduce toil of manually restarting the SS.
 	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
 	                                          // want to restart the SS, which increases risk of data corruption.
+	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
+	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
+	double WORKER_START_STORAGE_DELAY;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -867,9 +1188,15 @@ public:
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
-	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
-	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
+	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page before extending it
+	double REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION; // When rebuilding pages, use this ratio of slack distribution
+	                                                // between the rightmost (new) page and the previous page. Defaults
+	                                                // to .5 (50%) so that slack is evenly distributed between the
+	                                                // pages. A value close to 0 indicates most slack to remain in the
+	                                                // old page, where a value close to 1 causes the new page to have
+	                                                // most of the slack. Immutable workloads with an increasing key
+	                                                // pattern benefit from setting this to a value close to 1.
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the
@@ -885,22 +1212,22 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
+	int REDWOOD_NODE_MAX_UNBALANCE; // Maximum imbalance in a node before it should be rebuilt instead of updated
+
+	std::string REDWOOD_IO_PRIORITIES;
 
 	// Server request latency measurement
-	int LATENCY_SAMPLE_SIZE;
+	double LATENCY_SKETCH_ACCURACY;
+	double FILE_LATENCY_SKETCH_ACCURACY;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
 	// Encryption
-	bool ENABLE_ENCRYPTION;
-	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
-	bool ENABLE_TLOG_ENCRYPTION;
-	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
-	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
+	double ENCRYPTION_LOGGING_INTERVAL;
 
 	// Compression
 	bool ENABLE_BLOB_GRANULE_COMPRESSION;
@@ -916,6 +1243,8 @@ public:
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
+	bool BG_USE_BLOB_RANGE_CHANGE_LOG;
+
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
@@ -930,42 +1259,96 @@ public:
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	bool BG_ENABLE_SPLIT_TRUNCATED;
+	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
+	int BG_RDC_BYTES_FACTOR;
+	int BG_RDC_READ_FACTOR;
+	bool BG_WRITE_MULTIPART;
+	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
+	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
+	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+	int BLOB_WORKER_RDC_PARALLELISM;
+	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
+	// next release
+	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
+	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+	double BLOB_WORKER_EMPTY_GRV_INTERVAL;
+	int BLOB_WORKER_GRV_HISTORY_MAX_SIZE;
+	int64_t BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY;
 	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
 	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
 	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+	bool BLOB_WORKER_DISK_ENABLED;
+	int BLOB_WORKER_STORE_TYPE;
+	double BLOB_WORKER_REJOIN_TIME;
 
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
 	int BLOB_MANAGER_CONCURRENT_MERGE_CHECKS;
+	bool BLOB_MANAGER_ENABLE_MEDIAN_ASSIGNMENT_LIMITING;
+	double BLOB_MANAGER_MEDIAN_ASSIGNMENT_ALLOWANCE;
+	int BLOB_MANAGER_MEDIAN_ASSIGNMENT_MIN_SAMPLES_PER_WORKER;
+	int BLOB_MANAGER_MEDIAN_ASSIGNMENT_MAX_SAMPLES_PER_WORKER;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
 	bool BLOB_MANIFEST_BACKUP;
-	bool BLOB_FULL_RESTORE_MODE;
+	double BLOB_MANIFEST_BACKUP_INTERVAL;
+	double BLOB_MIGRATOR_CHECK_INTERVAL;
+	int BLOB_MANIFEST_RW_ROWS;
+	int BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION;
+	int BLOB_MANIFEST_RETRY_INTERVAL;
+	int BLOB_MIGRATOR_ERROR_RETRIES;
+	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
+	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
+	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
+	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	int BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
+	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
+	bool BLOB_RESTORE_SKIP_EMPTY_RANGES;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
-	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// HTTP KMS Connector
 	std::string REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE;
 	std::string REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS;
+	bool ENABLE_REST_KMS_COMMUNICATION;
+	bool REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE;
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
+	std::string REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT;
+	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
+	int REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
+	int REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION;
+	int REST_KMS_CURRENT_CIPHER_REQUEST_VERSION;
+	int REST_KMS_MAX_CIPHER_REQUEST_VERSION;
+	std::string REST_SIM_KMS_VAULT_DIR;
+	double REST_KMS_STABILITY_CHECK_INTERVAL;
+
+	double CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO;
+
+	// Idempotency ids
+	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
+	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
+
+	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
+	bool FLOW_WITH_SWIFT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

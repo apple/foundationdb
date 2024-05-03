@@ -20,7 +20,9 @@
 
 #include <ctime>
 #include <cinttypes>
+#include "fdbclient/FDBTypes.h"
 #include "fmt/format.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -196,6 +198,7 @@ ACTOR Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, Per
 Future<Void> testKVStore(struct KVStoreTestWorkload* const&);
 
 struct KVStoreTestWorkload : TestWorkload {
+	static constexpr auto NAME = "KVStoreTest";
 	bool enabled, saturation;
 	double testDuration, operationsPerSecond;
 	double commitFraction, setFraction;
@@ -205,7 +208,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	PerfIntCounter reads, sets, commits;
 	TestHistogram<float> readLatency, commitLatency;
 	double setupTook;
-	std::string storeType;
+	KeyValueStoreType storeType;
 
 	KVStoreTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), reads("Reads"), sets("Sets"), commits("Commits"), setupTook(0) {
@@ -222,9 +225,8 @@ struct KVStoreTestWorkload : TestWorkload {
 		doCount = getOption(options, "count"_sr, false);
 		filename = getOption(options, "filename"_sr, Value()).toString();
 		saturation = getOption(options, "saturation"_sr, false);
-		storeType = getOption(options, "storeType"_sr, "ssd"_sr).toString();
+		storeType = KeyValueStoreType::fromString(getOption(options, "storeType"_sr, "ssd"_sr).toString());
 	}
-	std::string description() const override { return "KVStoreTest"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -251,7 +253,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory("KVStoreTest");
+WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory;
 
 ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 	state KVTest& test = *ptest;
@@ -279,7 +281,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		}
 		double elapsed = timer() - cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		fmt::print("Counted: {0} in {1:01.f}s\n");
+		fmt::print("Counted: {0} in {1:0.1f}s\n", count, elapsed);
 	}
 
 	if (workload->doSetup) {
@@ -378,25 +380,24 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 
 	UID id = deterministicRandom()->randomUniqueID();
 	std::string fn = workload->filename.size() ? workload->filename : id.toString();
-	if (workload->storeType == "ssd")
+	if (workload->storeType == KeyValueStoreType::SSD_BTREE_V2) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V2);
-	else if (workload->storeType == "ssd-1")
+	} else if (workload->storeType == KeyValueStoreType::SSD_BTREE_V1) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V1);
-	else if (workload->storeType == "ssd-2")
-		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
-	else if (workload->storeType == "ssd-redwood-1-experimental")
+	} else if (workload->storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 		test.store = keyValueStoreRedwoodV1(fn, id);
-	else if (workload->storeType == "ssd-rocksdb-v1")
+	} else if (workload->storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 		test.store = keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);
-	else if (workload->storeType == "ssd-sharded-rocksdb")
+	} else if (workload->storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 		test.store = keyValueStoreRocksDB(
 		    fn, id, KeyValueStoreType::SSD_SHARDED_ROCKSDB); // TODO: to replace the KVS in the future
-	else if (workload->storeType == "memory")
+	} else if (workload->storeType == KeyValueStoreType::MEMORY) {
 		test.store = keyValueStoreMemory(fn, id, 500e6);
-	else if (workload->storeType == "memory-radixtree-beta")
+	} else if (workload->storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		test.store = keyValueStoreMemory(fn, id, 500e6, "fdr", KeyValueStoreType::MEMORY_RADIXTREE);
-	else
+	} else {
 		ASSERT(false);
+	}
 
 	wait(test.store->init());
 
@@ -404,7 +405,9 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	try {
 		choose {
 			when(wait(main)) {}
-			when(wait(test.store->getError())) { ASSERT(false); }
+			when(wait(test.store->getError())) {
+				ASSERT(false);
+			}
 		}
 	} catch (Error& e) {
 		err = e;

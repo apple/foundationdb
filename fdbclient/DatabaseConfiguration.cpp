@@ -22,6 +22,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ITrace.h"
+#include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
@@ -37,6 +38,7 @@ void DatabaseConfiguration::resetInternal() {
 	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
+	perpetualStoreType = KeyValueStoreType::NONE;
 	desiredTSSCount = 0;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
@@ -304,52 +306,12 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["log_version"] = (int)tLogVersion;
 	}
 
-	if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V1 &&
-	    storageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
-		result["storage_engine"] = "ssd-1";
-	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
-	           storageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
-		result["storage_engine"] = "ssd-2";
-	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
-	           storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-		result["storage_engine"] = "ssd-redwood-1-experimental";
-	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
-	           storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-		result["storage_engine"] = "ssd-rocksdb-v1";
-	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
-	           storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
-		result["storage_engine"] = "ssd-sharded-rocksdb";
-	} else if (tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY) {
-		result["storage_engine"] = "memory-1";
-	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
-	           storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
-		result["storage_engine"] = "memory-radixtree-beta";
-	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
-	           storageServerStoreType == KeyValueStoreType::MEMORY) {
-		result["storage_engine"] = "memory-2";
-	} else {
-		result["storage_engine"] = "custom";
-	}
+	result["log_engine"] = tLogDataStoreType.toString();
+	result["storage_engine"] = storageServerStoreType.toString();
 
 	if (desiredTSSCount > 0) {
 		result["tss_count"] = desiredTSSCount;
-		if (testingStorageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
-			result["tss_storage_engine"] = "ssd-1";
-		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
-			result["tss_storage_engine"] = "ssd-2";
-		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-			result["tss_storage_engine"] = "ssd-redwood-1-experimental";
-		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-			result["tss_storage_engine"] = "ssd-rocksdb-v1";
-		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
-			result["tss_storage_engine"] = "ssd-sharded-rocksdb";
-		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
-			result["tss_storage_engine"] = "memory-radixtree-beta";
-		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY) {
-			result["tss_storage_engine"] = "memory-2";
-		} else {
-			result["tss_storage_engine"] = "custom";
-		}
+		result["tss_storage_engine"] = testingStorageServerStoreType.toString();
 	}
 
 	result["log_spill"] = (int)tLogSpillType;
@@ -423,10 +385,73 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
+	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
+		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
+	}
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
+	return result;
+}
+
+std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& json) {
+	std::string result;
+
+	for (auto kv : json) {
+		// These JSON properties are ignored for some reason.  This behavior is being maintained in a refactor
+		// of this code and the old code gave no reasoning.
+		static std::set<std::string> ignore = { "tss_storage_engine", "perpetual_storage_wiggle_locality" };
+		if (ignore.contains(kv.first)) {
+			continue;
+		}
+
+		result += " ";
+		// All integers are assumed to be actual DatabaseConfig keys and are set with
+		// the hidden "<name>:=<intValue>" syntax of the configure command.
+		if (kv.second.type() == json_spirit::int_type) {
+			result += kv.first + ":=" + format("%d", kv.second.get_int());
+		} else if (kv.second.type() == json_spirit::str_type) {
+			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
+			// Such properties are listed here:
+			static std::set<std::string> directSet = {
+				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode",
+				"storage_engine",         "log_engine",  "perpetual_storage_wiggle_engine"
+			};
+
+			if (directSet.contains(kv.first)) {
+				result += kv.first + "=" + kv.second.get_str();
+			} else {
+				// For the rest, it is assumed that the property name is meaningless and the value string
+				// is a standalone 'configure' command which has the identical effect.
+				// TODO:  Fix this terrible legacy behavior which probably isn't compatible with
+				// some of the more recently added configuration and options.
+				result += kv.second.get_str();
+			}
+		} else if (kv.second.type() == json_spirit::array_type) {
+			// Array properties convert to <name>=<json_array>
+			result += kv.first + "=" +
+			          json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
+			                                    json_spirit::Output_options::none);
+		} else {
+			throw invalid_config_db_key();
+		}
+	}
+
+	// The log_engine setting requires some special handling because it was not included in the JSON form of a
+	// DatabaseConfiguration until FDB 7.3.  This means that configuring a new database using a JSON config object from
+	// an older version will now fail because it lacks an explicit log_engine setting.  Previously, the log_engine would
+	// be set indirectly because the "storage_engine=<engine_name>" property from JSON would convert to a standalone
+	// "<engine_name>" command in the output, and each engine name exists as a command which sets both the
+	// log and storage engines, with the log engine normally being ssd-2.
+	// The storage_engine and log_engine JSON properties now explicitly indicate their engine types and map to configure
+	// commands of the same name.  So, to support configuring a new database with an older JSON config without an
+	// explicit log_engine we simply add " log_engine=ssd-2" to the output string if the input JSON did not contain a
+	// log_engine.
+	if (!json.contains("log_engine")) {
+		result += " log_engine=ssd-2";
+	}
+
 	return result;
 }
 
@@ -594,12 +619,10 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "log_engine"_sr) {
 		parse((&type), value);
 		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
-		// TODO:  Remove this once Redwood works as a log engine
-		if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
-		}
-		// TODO:  Remove this once memroy radix tree works as a log engine
-		if (tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
+		// It makes no sense to use a memory based engine to spill data that doesn't fit in memory
+		// so change these to an ssd-2
+		if (tLogDataStoreType == KeyValueStoreType::MEMORY ||
+		    tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
 		}
 	} else if (ck == "log_spill"_sr) {
@@ -647,6 +670,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 			return false;
 		}
 		perpetualStorageWiggleLocality = value.toString();
+	} else if (ck == "perpetual_storage_wiggle_engine"_sr) {
+		parse((&type), value);
+		perpetualStoreType = (KeyValueStoreType::StoreType)type;
 	} else if (ck == "storage_migration_type"_sr) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
@@ -658,7 +684,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse((&type), value);
 		blobGranulesEnabled = (type != 0);
 	} else if (ck == "encryption_at_rest_mode"_sr) {
-		encryptionAtRestMode = EncryptionAtRestMode::fromValue(value);
+		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
+	} else if (ck.startsWith("excluded/"_sr)) {
+		// excluded servers: don't keep the state internally
 	} else {
 		return false;
 	}
@@ -718,7 +746,7 @@ Optional<ValueRef> DatabaseConfiguration::get(KeyRef key) const {
 	}
 }
 
-bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a) const {
+bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a, const LocalityData& locality) const {
 	return get(encodeExcludedServersKey(AddressExclusion(a.address.ip, a.address.port))).present() ||
 	       get(encodeExcludedServersKey(AddressExclusion(a.address.ip))).present() ||
 	       get(encodeFailedServersKey(AddressExclusion(a.address.ip, a.address.port))).present() ||
@@ -729,7 +757,8 @@ bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a) const {
 	         get(encodeExcludedServersKey(AddressExclusion(a.secondaryAddress.get().ip))).present() ||
 	         get(encodeFailedServersKey(AddressExclusion(a.secondaryAddress.get().ip, a.secondaryAddress.get().port)))
 	             .present() ||
-	         get(encodeFailedServersKey(AddressExclusion(a.secondaryAddress.get().ip))).present()));
+	         get(encodeFailedServersKey(AddressExclusion(a.secondaryAddress.get().ip))).present())) ||
+	       isExcludedLocality(locality);
 }
 std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
@@ -763,20 +792,6 @@ bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) con
 		        .present()) {
 			return true;
 		}
-	}
-
-	return false;
-}
-
-// checks if this machineid of given locality is excluded.
-bool DatabaseConfiguration::isMachineExcluded(const LocalityData& locality) const {
-	if (locality.machineId().present()) {
-		return get(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
-		                                     locality.machineId().get().toString()))
-		           .present() ||
-		       get(encodeFailedLocalityKey(LocalityData::ExcludeLocalityKeyMachineIdPrefix.toString() +
-		                                   locality.machineId().get().toString()))
-		           .present();
 	}
 
 	return false;

@@ -25,12 +25,15 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MoveKeysWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "RandomMoveKeys";
+
 	bool enabled;
 	double testDuration = 10.0, meanDelay = 0.05;
 	double maxKeyspace = 0.1;
@@ -47,7 +50,6 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		maxKeyspace = getOption(options, "maxKeyspace"_sr, maxKeyspace);
 	}
 
-	std::string description() const override { return "MoveKeysWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -154,19 +156,45 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		try {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
-			wait(moveKeys(cx,
-			              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-			                              keys,
-			                              destinationTeamIDs,
-			                              destinationTeamIDs,
-			                              lock,
-			                              signal,
-			                              &fl1,
-			                              &fl2,
-			                              false,
-			                              relocateShardInterval.pairID,
-			                              &ddEnabledState,
-			                              CancelConflictingDataMoves::True }));
+			std::unique_ptr<MoveKeysParams> params;
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+				                               AssignEmptyRange(false),
+				                               DataMoveType::PHYSICAL,
+				                               DataMovementReason::TEAM_HEALTHY,
+				                               UnassignShard(false));
+				params = std::make_unique<MoveKeysParams>(dataMoveId,
+				                                          std::vector<KeyRange>{ keys },
+				                                          destinationTeamIDs,
+				                                          destinationTeamIDs,
+				                                          lock,
+				                                          signal,
+				                                          &fl1,
+				                                          &fl2,
+				                                          false,
+				                                          relocateShardInterval.pairID,
+				                                          &ddEnabledState,
+				                                          CancelConflictingDataMoves::True);
+			} else {
+				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+				                               AssignEmptyRange(false),
+				                               DataMoveType::LOGICAL,
+				                               DataMovementReason::TEAM_HEALTHY,
+				                               UnassignShard(false));
+				params = std::make_unique<MoveKeysParams>(dataMoveId,
+				                                          keys,
+				                                          destinationTeamIDs,
+				                                          destinationTeamIDs,
+				                                          lock,
+				                                          signal,
+				                                          &fl1,
+				                                          &fl2,
+				                                          false,
+				                                          relocateShardInterval.pairID,
+				                                          &ddEnabledState,
+				                                          CancelConflictingDataMoves::True);
+			}
+			wait(moveKeys(cx, *params));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {
@@ -193,7 +221,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	ACTOR Future<Void> forceMasterFailure(Database cx, MoveKeysWorkload* self) {
 		ASSERT(g_network->isSimulated());
 		loop {
-			if (g_simulator->killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
+			if (g_simulator->killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::KillType::Reboot, true))
 				return Void();
 			wait(delay(1.0));
 		}
@@ -243,5 +271,5 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	}
 };
 
-WorkloadFactory<MoveKeysWorkload> MoveKeysWorkloadFactory("RandomMoveKeys");
+WorkloadFactory<MoveKeysWorkload> MoveKeysWorkloadFactory;
 FailureInjectorFactory<MoveKeysWorkload> MoveKeysFailureInjectionFactory;

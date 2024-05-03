@@ -37,6 +37,51 @@
                "finished_wiggle": 1
             }
        },
+      "consistency_scan" : {
+         "configuration" : {
+            "enabled" : true,
+            "max_rate_bytes_per_second" : 50000000,
+            "min_interval_seconds" : 2592000,
+            "min_start_version" : 0,
+            "round_history_days" : 90,
+            "target_interval_seconds" : 2592000
+         },
+         "current_round" : {
+            "complete" : false,
+            "end_datetime" : "1970-01-01 00:00:00.000 +0000",
+            "end_timestamp" : 0,
+            "end_version" : 0,
+            "errors" : 0,
+            "last_end_key" : "",
+            "logical_bytes_scanned" : 0,
+            "replicated_bytes_scanned" : 0,
+            "skippedRanges" : 0,
+            "start_datetime" : "1970-01-01 00:00:00.000 +0000",
+            "start_timestamp" : 0,
+            "start_version" : 0
+         },
+         "lifetime_stats" : {
+            "errors" : 0,
+            "logical_bytes_scanned" : 0,
+            "replicated_bytes_scanned" : 0
+         },
+         "previous_rounds" : [
+            {
+               "complete" : false,
+               "end_datetime" : "1970-01-01 00:00:00.000 +0000",
+               "end_timestamp" : 0,
+               "end_version" : 0,
+               "errors" : 0,
+               "last_end_key" : "",
+               "logical_bytes_scanned" : 0,
+               "replicated_bytes_scanned" : 0,
+               "skippedRanges" : 0,
+               "start_datetime" : "1970-01-01 00:00:00.000 +0000",
+               "start_timestamp" : 0,
+               "start_version" : 0
+            }
+         ]
+      },
       "layers":{
          "_valid":true,
          "_error":"some error description"
@@ -111,6 +156,36 @@
                         "router",
                         "coordinator"
                      ]
+                  },
+                  "tss":false,
+                  "storage_metadata":{
+                     "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
+                     "created_time_timestamp": 0,
+                     "storage_engine":{
+                     "$enum":[
+                     "ssd",
+                     "ssd-1",
+                     "ssd-2",
+                     "ssd-redwood-1",
+                     "ssd-rocksdb-v1",
+                     "ssd-sharded-rocksdb",
+                     "memory",
+                     "memory-1",
+                     "memory-2",
+                     "memory-radixtree",
+                     "unknown"
+                     ]}
+                  },
+                  "rocksdb_metrics":{
+                     "block_cache_hits":12341234,
+                     "block_cache_misses":12341234,
+                     "pending_compaction_bytes":12341234,
+                     "memtable_bytes":12341234,
+                     "sst_reader_bytes":12341234,
+                     "block_cache_usage":12341234,
+                     "block_cache_limit":12341234,
+                     "throttled_commits":12341234,
+                     "write_stall_microseconds":12341234
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -449,6 +524,14 @@
          "seconds":1.0,
          "versions":1000000
       },
+      "logserver_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
+      "storageserver_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
       "active_tss_count":0,
       "degraded_processes":0,
       "database_available":true,
@@ -528,7 +611,9 @@
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
-                  "fetch_storage_wiggler_stats_timeout"
+                  "fetch_storage_wiggler_stats_timeout",
+                  "fetch_consistency_scan_status_timeout",
+                  "metacluster_metrics_missing"
                ]
             },
             "issues":[
@@ -733,20 +818,32 @@
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2, // this field will be absent if a value has not been explicitly set
          "log_version":2,
-         "log_engine":1,
+         "log_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree"
+         ]},
          "log_spill":1,
          "storage_engine":{
          "$enum":[
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
-             "memory-radixtree-beta"
+             "memory-radixtree"
          ]},
          "tss_count":1,
          "tss_storage_engine":{
@@ -754,13 +851,13 @@
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
-             "memory-radixtree-beta"
+             "memory-radixtree"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -779,6 +876,20 @@
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle": 0,
          "perpetual_storage_wiggle_locality":"0",
+         "perpetual_storage_wiggle_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta",
+             "none"
+         ]},
          "storage_migration_type":{
          "$enum":[
              "disabled",
@@ -889,8 +1000,29 @@
             }
          }
       },
-      "tenants":{
-         "num_tenants":0
+      "metacluster" : {
+         "cluster_type" : "management",         // management, data, or standalone
+         "metacluster_name" : "metacluster1",
+         "metacluster_id" : 12345,
+         "data_cluster_name" : "data_cluster1", // data cluster only
+         "data_cluster_id" : 12346,             // data cluster only
+         "num_data_clusters": 10                // management cluster only
+      },
+      "tenants" : {
+         "num_tenants" : 1, // on data cluster, local count; on management cluster, total metacluster count
+         "num_tenant_groups" : 10,
+         "tenant_group_capacity" : 20,
+      },
+      "idempotency_ids" : {
+         "size_bytes" : 0, // An estimate of the current number of bytes used in the database to store idempotency ids.
+         "expired_version" : 0, // The commit status of a transaction whose commit version could be <= expired_version can no longer be determined.
+         "expired_age" : 0, // The age in seconds of expired_version.
+         "oldest_id_version" : 0, // The version of the oldest idempotency id still stored in the database.
+         "oldest_id_age" : 0 // The age in seconds of the oldest_id_version.
+      },
+      "version_epoch":{
+         "enabled": true,
+         "epoch": 0 // The version epoch, as an offset from the Unix epoch. This field will be excluded if enabled is false.
       }
    },
    "client":{

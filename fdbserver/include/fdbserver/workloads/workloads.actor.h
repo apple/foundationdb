@@ -47,6 +47,9 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
 std::vector<std::string> getOption(VectorRef<KeyValueRef> options,
                                    Key key,
                                    std::vector<std::string> defaultValue); // comma-separated strings
+std::vector<int> getOption(VectorRef<KeyValueRef> options,
+                           Key key,
+                           std::vector<int> defaultValue = {}); // comma-separated integers
 bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
@@ -56,6 +59,7 @@ struct WorkloadContext {
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Reference<IClusterConnectionRecord> ccr;
 	Optional<TenantName> defaultTenant;
+	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
@@ -64,6 +68,8 @@ struct WorkloadContext {
 };
 
 struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkload> {
+	// Implementations of TestWorkload need to provide their name by defining a static member variable called name:
+	// static constexpr const char* name = "WorkloadName";
 	int phases;
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
@@ -75,6 +81,8 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 	}
 	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
+	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
+	// the workload factory. Instead, provide a static member variable called name.
 	virtual std::string description() const = 0;
 	virtual void disableFailureInjectionWorkloads(std::set<std::string>& out) const;
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
@@ -94,10 +102,25 @@ private:
 	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
 };
 
+struct NoOptions {};
+
+template <class Workload, bool isFailureInjectionWorkload = false>
+struct TestWorkloadImpl : Workload {
+	static_assert(std::is_convertible_v<Workload&, TestWorkload&>);
+	static_assert(std::is_convertible_v<decltype(Workload::NAME), std::string>,
+	              "Workload must have a static member `name` which is convertible to string");
+	static_assert(std::is_same_v<decltype(&TestWorkload::description), decltype(&Workload::description)>,
+	              "Workload must not override TestWorkload::description");
+
+	TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
+	template <bool E = isFailureInjectionWorkload>
+	TestWorkloadImpl(WorkloadContext const& wcx, std::enable_if_t<E, NoOptions> o) : Workload(wcx, o) {}
+
+	std::string description() const override { return Workload::NAME; }
+};
+
 struct CompoundWorkload;
 class DeterministicRandom;
-
-struct NoOptions {};
 
 struct FailureInjectionWorkload : TestWorkload {
 	FailureInjectionWorkload(WorkloadContext const&);
@@ -126,12 +149,11 @@ struct FailureInjectorFactory : IFailureInjectorFactory {
 		IFailureInjectorFactory::factories().push_back(Reference<IFailureInjectorFactory>::addRef(this));
 	}
 	Reference<FailureInjectionWorkload> create(WorkloadContext const& wcx) override {
-		return makeReference<W>(wcx, NoOptions());
+		return makeReference<TestWorkloadImpl<W, true>>(wcx, NoOptions());
 	}
 };
 
 struct CompoundWorkload : TestWorkload {
-	bool runFailureWorkloads = true;
 	std::vector<Reference<TestWorkload>> workloads;
 	std::vector<Reference<FailureInjectionWorkload>> failureInjection;
 
@@ -213,14 +235,20 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
-template <class WorkloadType>
+FDB_BOOLEAN_PARAM(UntrustedMode);
+
+template <class Workload>
 struct WorkloadFactory : IWorkloadFactory {
-	bool asClient;
-	WorkloadFactory(const char* name, bool asClient = false) : asClient(asClient) {
-		factories()[name] = Reference<IWorkloadFactory>::addRef(this);
+	static_assert(std::is_convertible_v<decltype(Workload::NAME), std::string>,
+	              "Each workload must have a Workload::NAME member");
+	using WorkloadType = TestWorkloadImpl<Workload>;
+	bool runInUntrustedClient;
+	WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
+	  : runInUntrustedClient(runInUntrustedClient) {
+		factories()[WorkloadType::NAME] = Reference<IWorkloadFactory>::addRef(this);
 	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
-		if (g_network->isSimulated() && asClient) {
+		if (g_network->isSimulated() && runInUntrustedClient) {
 			return makeReference<ClientWorkload>(
 			    [](WorkloadContext const& wcx) { return makeReference<WorkloadType>(wcx); }, wcx);
 		}
@@ -228,7 +256,7 @@ struct WorkloadFactory : IWorkloadFactory {
 	}
 };
 
-#define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory(#classname)
+#define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory
 
 struct DistributedTestResults {
 	std::vector<PerfMetric> metrics;
@@ -311,6 +339,7 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 
 	KnobKeyValuePairs overrideKnobs;
+	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
@@ -360,6 +389,10 @@ Future<Void> testExpectedError(Future<Void> test,
                                UID id = UID());
 
 std::string getTestEncryptionFileName();
+
+// This should become a BehaviorInjectionWorkload or perhaps ConfigInjectionWorkload which should be a new class that
+// should represent non-failure behaviors that can be randomly injected into any test run.
+ACTOR Future<Void> customShardConfigWorkload(Database cx);
 
 #include "flow/unactorcompiler.h"
 

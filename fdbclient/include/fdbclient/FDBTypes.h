@@ -22,9 +22,12 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include <algorithm>
+#include <array>
 #include <cinttypes>
+#include <regex>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
@@ -33,6 +36,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "fdbclient/Status.h"
+#include "fdbrpc/Locality.h"
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -42,6 +46,11 @@ typedef StringRef ValueRef;
 typedef int64_t Generation;
 typedef UID SpanID;
 typedef uint64_t CoordinatorsHash;
+
+// invalidKey is intentionally far beyond the system space.  It is meant to be used as a safe initial value for a key
+// before it is set to something meaningful to avoid mistakes where a default constructed key is written to instead of
+// the intended target.
+static const KeyRef invalidKey = "\xff\xff\xff\xff\xff\xff\xff\xff"_sr;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
@@ -149,11 +158,6 @@ static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
 
-const int MATCH_INDEX_ALL = 0;
-const int MATCH_INDEX_NONE = 1;
-const int MATCH_INDEX_MATCHED_ONLY = 2;
-const int MATCH_INDEX_UNMATCHED_ONLY = 3;
-
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
@@ -164,7 +168,7 @@ struct TagsAndMessage {
 	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
-	// its begining position to allow the caller to rewind if needed.
+	// its beginning position to allow the caller to rewind if needed.
 	// T can be ArenaReader or BinaryReader.
 	template <class T>
 	void loadFromArena(T* rd, uint32_t* messageVersionSub) {
@@ -209,6 +213,10 @@ inline std::string describe(const Tag item) {
 
 inline std::string describe(const int item) {
 	return format("%d", item);
+}
+
+inline std::string describe(const Version item) {
+	return format("%ld", item);
 }
 
 // Allows describeList to work on a vector of std::string
@@ -337,11 +345,15 @@ struct KeyRangeRef {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
 		for (auto r : ranges) {
-			if (begin < r.begin)
+			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin
-			if (end <= r.end)
+			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (end > r.begin)
+			// If a range of ranges is totally at the left of clone,
+			// clone needs not update
+			// If a range of ranges is partially at the left of clone,
+			// clone = clone - the overlap
+			if (clone.end > r.end && r.end > clone.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -398,7 +410,7 @@ struct KeyRangeRef {
 		}
 	};
 
-	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
+	std::string toString() const { return "{ begin=" + begin.printable() + "  end=" + end.printable() + " }"; }
 };
 
 template <>
@@ -422,6 +434,22 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	if (e < b)
 		return KeyRangeRef();
 	return KeyRangeRef(b, e);
+}
+
+// Calculates the complement of `lhs` from `rhs`.
+inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+	if ((lhs & rhs).empty()) {
+		return { lhs };
+	}
+
+	std::vector<KeyRangeRef> result;
+	if (lhs.begin < rhs.begin) {
+		result.push_back(KeyRangeRef(lhs.begin, rhs.begin));
+	}
+	if (lhs.end > rhs.end) {
+		result.push_back(KeyRangeRef(rhs.end, lhs.end));
+	}
+	return result;
 }
 
 struct KeyValueRef {
@@ -543,37 +571,43 @@ struct hash<KeyRange> {
 };
 } // namespace std
 
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+enum {
+	invalidVersion = -1,
+	latestVersion = -2,
+	earliestVersion = -3,
+	MAX_VERSION = std::numeric_limits<int64_t>::max()
+};
 
-inline Key keyAfter(const KeyRef& key) {
-	if (key == "\xff\xff"_sr)
-		return key;
-
-	Standalone<StringRef> r;
-	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
-	if (key.size() > 0) {
-		memcpy(s, key.begin(), key.size());
-	}
-	s[key.size()] = 0;
-	((StringRef&)r) = StringRef(s, key.size() + 1);
-	return r;
-}
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == "\xff\xff"_sr)
-		return key;
+	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
+	static const auto allKeysEnd = "\xff\xff"_sr;
+	if (key == allKeysEnd) {
+		return allKeysEnd;
+	}
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRef(t, key.size() + 1);
 }
-inline KeyRange singleKeyRange(const KeyRef& a) {
-	return KeyRangeRef(a, keyAfter(a));
+inline Key keyAfter(const KeyRef& key) {
+	Key result;
+	result.contents() = keyAfter(key, result.arena());
+	return result;
 }
 inline KeyRangeRef singleKeyRange(KeyRef const& key, Arena& arena) {
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRangeRef(KeyRef(t, key.size()), KeyRef(t, key.size() + 1));
+}
+inline KeyRange singleKeyRange(const KeyRef& a) {
+	KeyRange result;
+	result.contents() = singleKeyRange(a, result.arena());
+	return result;
 }
 inline KeyRange prefixRange(KeyRef prefix) {
 	Standalone<KeyRangeRef> range;
@@ -588,6 +622,11 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // the shortest key exceeds that limit, then the end key is returned.
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
+
+// Returns a randomKey between keys. If it's impossible, return keys.end.
+Key randomKeyBetween(const KeyRangeRef& keys);
+
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix);
 
 struct KeySelectorRef {
 private:
@@ -702,15 +741,15 @@ struct GetRangeLimits {
 	void decrement(MappedKeyValueRef const& data);
 
 	// True if either the row or byte limit has been reached
-	bool isReached();
+	bool isReached() const;
 
 	// True if data would cause the row or byte limit to be reached
-	bool reachedBy(VectorRef<KeyValueRef> const& data);
+	bool reachedBy(VectorRef<KeyValueRef> const& data) const;
 
-	bool hasByteLimit();
-	bool hasRowLimit();
+	bool hasByteLimit() const;
+	bool hasRowLimit() const;
 
-	bool hasSatisfiedMinRows();
+	bool hasSatisfiedMinRows() const;
 	bool isValid() const {
 		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
 		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
@@ -719,11 +758,62 @@ struct GetRangeLimits {
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;
-	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
-	           // limits requested) False implies that no such values remain
-	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
-	                              // beginning if reverse) of the range which was read to produce these results. This is
-	                              // guaranteed to be less than the requested range.
+
+	// True if the range may have more keys in it (possibly beyond the specified limits).
+	// 'more' can be true even if there are no keys left in the range, e.g. if a shard boundary is hit, it may or may
+	// not have more keys left, but 'more' will be set to true in that case.
+	// Additionally, 'getRangeStream()' always sets 'more' to true and uses the 'end_of_stream' error to indicate that a
+	// range is exhausted.
+	// If 'more' is false, the range is guaranteed to have been exhausted.
+	bool more;
+
+	// Only present when 'more' is true, for example, when the read reaches the shard boundary, 'readThrough' is set to
+	// the shard boundary and the client's next range read should start with the 'readThrough'.
+	// But 'more' is true does not necessarily guarantee 'readThrough' is present, for example, when the read reaches
+	// size limit, 'readThrough' might not be set, the next read should just start from the keyAfter of the current
+	// query result's last key.
+	// In both cases, please use the getter function 'getReadThrough()' instead, which represents the end (or beginning
+	// if reverse) of the range which was read.
+	Optional<KeyRef> readThrough;
+
+	// return the value represents the end of the range which was read. If 'reverse' is true, returns the last key, as
+	// it should be used as the new "end" of the next query and the end key should be non-inclusive.
+	Key getReadThrough(bool reverse = false) const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return readThrough.get();
+		}
+		ASSERT(size() > 0);
+		return reverse ? back().key : keyAfter(back().key);
+	}
+
+	// Helper function to get the next range scan's BeginKeySelector, use it when the range read is non-reverse,
+	// otherwise, please use nextEndKeySelector().
+	KeySelectorRef nextBeginKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterThan(back().key);
+	}
+
+	// Helper function to get the next range scan's EndKeySelector, use it when the range read is reverse.
+	KeySelectorRef nextEndKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterOrEqual(back().key);
+	}
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
+
 	bool readToBegin;
 	bool readThroughEnd;
 
@@ -743,7 +833,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
-	int logicalSize() const {
+	int64_t logicalSize() const {
 		return VectorRef<KeyValueRef>::expectedSize() - VectorRef<KeyValueRef>::size() * sizeof(KeyValueRef);
 	}
 
@@ -807,18 +897,9 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
-	// boundary KVs are always returned so that caller can use it as a continuation,
-	// for non-boundary KV, it is always false.
-	// for boundary KV, it is true only when the secondary query succeeds(return non-empty).
-	// Note: only MATCH_INDEX_MATCHED_ONLY and MATCH_INDEX_UNMATCHED_ONLY modes can make use of it,
-	// to decide whether the boudnary is a match/unmatch.
-	// In the case of MATCH_INDEX_ALL and MATCH_INDEX_NONE, caller should not care if boundary has a match or not.
-	bool boundaryAndExist;
-
 	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
-		boundaryAndExist = copyFrom.boundaryAndExist;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -832,7 +913,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRef& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult && boundaryAndExist == rhs.boundaryAndExist;
+		       reqAndResult == rhs.reqAndResult;
 	}
 	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
 
@@ -842,7 +923,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult, boundaryAndExist);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
 	}
 };
 
@@ -852,6 +933,12 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	Optional<KeyRef> readThrough;
 	bool readToBegin;
 	bool readThroughEnd;
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
 
 	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
 	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)
@@ -891,6 +978,7 @@ struct KeyValueStoreType {
 		MEMORY_RADIXTREE = 4,
 		SSD_ROCKSDB_V1 = 5,
 		SSD_SHARDED_ROCKSDB = 6,
+		NONE = 7,
 		END
 	};
 
@@ -907,27 +995,17 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	static std::string getStoreTypeStr(const StoreType& storeType) {
-		switch (storeType) {
-		case SSD_BTREE_V1:
-			return "ssd-1";
-		case SSD_BTREE_V2:
-			return "ssd-2";
-		case SSD_REDWOOD_V1:
-			return "ssd-redwood-1-experimental";
-		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-v1";
-		case SSD_SHARDED_ROCKSDB:
-			return "ssd-sharded-rocksdb";
-		case MEMORY:
-			return "memory";
-		case MEMORY_RADIXTREE:
-			return "memory-radixtree-beta";
-		default:
-			return "unknown";
-		}
-	}
+	// Get string representation of engine type.  Each enum has one canonical string
+	// representation, but the reverse is not true (see fromString() below)
+	static std::string getStoreTypeStr(const StoreType& storeType);
+
+	// Convert a string to a KeyValueStoreType
+	// This is a many-to-one mapping as there are aliases for some storage engines
+	static KeyValueStoreType fromString(const std::string& str);
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
+
+	// Whether the storage type is a valid storage type.
+	bool isValid() const { return type != NONE && type != END; }
 
 private:
 	uint32_t type;
@@ -1049,9 +1127,9 @@ struct StorageBytes {
 	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
-	// Total space on the filesystem
+	// Total capacity on the filesystem usable by non-privileged users.
 	int64_t total;
-	// Used by *this* store, not total - free
+	// Total size of all files owned by *this* storage instance, not total - free
 	int64_t used;
 	// Amount of space available for use by the store, which includes free space on the filesystem
 	// and internal free space within the store data that is immediately reusable.
@@ -1119,45 +1197,6 @@ struct LogMessageVersion {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, sub);
-	}
-};
-
-struct AddressExclusion {
-	IPAddress ip;
-	int port;
-
-	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
-
-	bool operator<(AddressExclusion const& r) const {
-		if (ip != r.ip)
-			return ip < r.ip;
-		return port < r.port;
-	}
-	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
-
-	bool isWholeMachine() const { return port == 0; }
-	bool isValid() const { return ip.isValid() || port != 0; }
-
-	bool excludes(NetworkAddress const& addr) const {
-		if (isWholeMachine())
-			return ip == addr.ip;
-		return ip == addr.ip && port == addr.port;
-	}
-
-	// This is for debugging and IS NOT to be used for serialization to persistant state
-	std::string toString() const {
-		if (!isWholeMachine())
-			return formatIpPort(ip, port);
-		return ip.toString();
-	}
-
-	static AddressExclusion parse(StringRef const&);
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ip, port);
 	}
 };
 
@@ -1294,16 +1333,19 @@ struct HealthMetrics {
 
 struct DDMetricsRef {
 	int64_t shardBytes;
+	int64_t shardBytesPerKSecond;
 	KeyRef beginKey;
 
-	DDMetricsRef() : shardBytes(0) {}
-	DDMetricsRef(int64_t bytes, KeyRef begin) : shardBytes(bytes), beginKey(begin) {}
+	DDMetricsRef() : shardBytes(0), shardBytesPerKSecond(0) {}
+	DDMetricsRef(int64_t bytes, int64_t bytesPerKSecond, KeyRef begin)
+	  : shardBytes(bytes), shardBytesPerKSecond(bytesPerKSecond), beginKey(begin) {}
 	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
-	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey) {}
+	  : shardBytes(copyFrom.shardBytes), shardBytesPerKSecond(copyFrom.shardBytesPerKSecond),
+	    beginKey(a, copyFrom.beginKey) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, shardBytes, beginKey);
+		serializer(ar, shardBytes, beginKey, shardBytesPerKSecond);
 	}
 };
 
@@ -1402,6 +1444,25 @@ struct TenantMode {
 		serializer(ar, mode);
 	}
 
+	// This does not go back-and-forth cleanly with toString
+	// The '_experimental' suffix, if present, needs to be removed in order to be parsed.
+	static TenantMode fromString(std::string mode) {
+		if (mode.find("_experimental") != std::string::npos) {
+			mode.replace(mode.find("_experimental"), std::string::npos, "");
+		}
+		if (mode == "disabled") {
+			return TenantMode::DISABLED;
+		} else if (mode == "optional") {
+			return TenantMode::OPTIONAL_TENANT;
+		} else if (mode == "required") {
+			return TenantMode::REQUIRED;
+		} else {
+			TraceEvent(SevError, "UnknownTenantMode").detail("TenantMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	std::string toString() const {
 		switch (mode) {
 		case DISABLED:
@@ -1435,10 +1496,15 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+template <>
+struct Traceable<TenantMode> : std::true_type {
+	static std::string toString(const TenantMode& value) { return value.toString(); }
+};
+
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+	enum Mode { DISABLED = 0, DOMAIN_AWARE = 1, CLUSTER_AWARE = 2, END = 3 };
 
 	EncryptionAtRestMode() : mode(DISABLED) {}
 	EncryptionAtRestMode(Mode mode) : mode(mode) {
@@ -1457,17 +1523,42 @@ struct EncryptionAtRestMode {
 		switch (mode) {
 		case DISABLED:
 			return "disabled";
-		case AES_256_CTR:
-			return "aes_256_ctr";
+		case DOMAIN_AWARE:
+			return "domain_aware";
+		case CLUSTER_AWARE:
+			return "cluster_aware";
 		default:
 			ASSERT(false);
 		}
 		return "";
 	}
 
+	static EncryptionAtRestMode fromString(std::string mode) {
+		if (mode == "disabled") {
+			return EncryptionAtRestMode::DISABLED;
+		} else if (mode == "cluster_aware") {
+			return EncryptionAtRestMode::CLUSTER_AWARE;
+		} else if (mode == "domain_aware") {
+			return EncryptionAtRestMode::DOMAIN_AWARE;
+		} else {
+			TraceEvent(SevError, "UnknownEncryptMode").detail("EncryptMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
 
-	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+	bool isEquals(const EncryptionAtRestMode& e) const { return this->mode == e.mode; }
+
+	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
+	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+	bool operator==(Mode m) const { return mode == m; }
+	bool operator!=(Mode m) const { return mode != m; }
+
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
+
+	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
 		}
@@ -1481,7 +1572,20 @@ struct EncryptionAtRestMode {
 		return static_cast<Mode>(num);
 	}
 
+	static EncryptionAtRestMode fromValue(Optional<Value> val) {
+		if (!val.present()) {
+			return EncryptionAtRestMode();
+		}
+
+		return EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(val.get().contents()));
+	}
+
 	uint32_t mode;
+};
+
+template <>
+struct Traceable<EncryptionAtRestMode> : std::true_type {
+	static std::string toString(const EncryptionAtRestMode& mode) { return mode.toString(); }
 };
 
 typedef StringRef ClusterNameRef;
@@ -1513,11 +1617,22 @@ struct DatabaseSharedState {
 	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
+const static std::regex wiggleLocalityValidation("([\\w_]+:[\\w\\-_\\.0-9]+)(;[\\w_]+:[\\w\\-_\\.0-9]+)*");
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
-	int pos = locality.find(':');
-	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
-	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
+	if (locality == "0") {
+		return true;
+	}
+	return std::regex_match(locality, wiggleLocalityValidation);
 }
+
+// Parses `perpetual_storage_wiggle_locality` database option.
+std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
+    const std::string& localityKeyValues);
+
+// Whether the locality matches any locality filter in `localityKeyValues` (which is supposed to be parsed from
+// ParsePerpetualStorageWiggleLocality).
+bool localityMatchInList(const std::vector<std::pair<Optional<Value>, Optional<Value>>>& localityKeyValues,
+                         const LocalityData& locality);
 
 // matches what's in fdb_c.h
 struct ReadBlobGranuleContext {
@@ -1546,7 +1661,8 @@ struct ReadBlobGranuleContext {
 	int granuleParallelism = 1;
 };
 
-// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
+// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage
+// wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
@@ -1607,15 +1723,9 @@ struct StorageWiggleValue {
 	}
 };
 
-enum class ReadType {
-	EAGER,
-	FETCH,
-	LOW,
-	NORMAL,
-	HIGH,
-};
+enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
-FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+FDB_BOOLEAN_PARAM(CacheResult);
 
 // store options for storage engine read
 // ReadType describes the usage and priority of the read
@@ -1626,20 +1736,21 @@ struct ReadOptions {
 	ReadType type;
 	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
+	bool lockAware = false;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
-
-	ReadOptions(Optional<UID> debugID,
+	ReadOptions(Optional<UID> debugID = Optional<UID>(),
 	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::False,
+	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
 
+	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion, lockAware);
 	}
 };
 
@@ -1652,6 +1763,66 @@ template <typename T>
 struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
 
 template <typename T>
+struct transaction_creator_traits<Reference<T>> : transaction_creator_traits<T> {};
+
+template <typename T>
 constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
+
+struct Versionstamp {
+	Version version = invalidVersion;
+	uint16_t batchNumber = 0;
+
+	bool operator==(const Versionstamp& r) const { return version == r.version && batchNumber == r.batchNumber; }
+	bool operator!=(const Versionstamp& r) const { return !(*this == r); }
+	bool operator<(const Versionstamp& r) const {
+		return version < r.version || (version == r.version && batchNumber < r.batchNumber);
+	}
+	bool operator>(const Versionstamp& r) const { return r < *this; }
+	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
+	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
+
+	Versionstamp() {}
+	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
+	Versionstamp(Standalone<StringRef> str) {
+		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));
+		version = bigEndian64(*reinterpret_cast<const Version*>(str.begin()));
+		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));
+	}
+
+	std::string toString() const { return fmt::format("{}.{}", version, batchNumber); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		int64_t beVersion;
+		int16_t beBatch;
+
+		if constexpr (!Ar::isDeserializing) {
+			beVersion = bigEndian64(version);
+			beBatch = bigEndian16(batchNumber);
+		}
+
+		serializer(ar, beVersion, beBatch);
+
+		if constexpr (Ar::isDeserializing) {
+			version = bigEndian64(beVersion);
+			batchNumber = bigEndian16(beBatch);
+		}
+	}
+};
+
+template <class Ar>
+inline void save(Ar& ar, const Versionstamp& value) {
+	return const_cast<Versionstamp&>(value).serialize(ar);
+}
+
+template <class Ar>
+inline void load(Ar& ar, Versionstamp& value) {
+	value.serialize(ar);
+}
+
+template <>
+struct Traceable<Versionstamp> : std::true_type {
+	static std::string toString(const Versionstamp& v) { return v.toString(); }
+};
 
 #endif

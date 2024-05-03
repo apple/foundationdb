@@ -19,8 +19,29 @@
  */
 
 #include "flow/Hostname.h"
+
+#include <regex>
+
+#include "flow/IConnection.h"
 #include "flow/UnitTest.h"
+
 #include "flow/actorcompiler.h" // has to be last include
+
+namespace {
+
+const static std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
+const static std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
+
+} // anonymous namespace
+
+bool Hostname::isHostname(const std::string& str) {
+	try {
+		return !std::regex_match(str, ipv4Validation) && std::regex_match(str, validation);
+	} catch (std::exception e) {
+		TraceEvent(SevWarn, "AddressParseError").detail("StdException", e.what()).detail("String", str);
+		throw address_parse_error();
+	}
+}
 
 Hostname Hostname::parse(const std::string& s) {
 	if (s.empty() || !Hostname::isHostname(s)) {
@@ -39,7 +60,7 @@ Hostname Hostname::parse(const std::string& s) {
 	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
 }
 
-ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
+ACTOR Future<Optional<NetworkAddress>> resolveImpl(const Hostname* self) {
 	try {
 		std::vector<NetworkAddress> addresses =
 		    wait(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service));
@@ -55,7 +76,7 @@ ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
 	}
 }
 
-ACTOR Future<NetworkAddress> resolveWithRetryImpl(Hostname* self) {
+ACTOR Future<NetworkAddress> resolveWithRetryImpl(const Hostname* self) {
 	state double resolveInterval = FLOW_KNOBS->HOSTNAME_RESOLVE_INIT_INTERVAL;
 	loop {
 		try {
@@ -76,11 +97,11 @@ Future<Optional<NetworkAddress>> Hostname::resolve() {
 	return resolveImpl(this);
 }
 
-Future<NetworkAddress> Hostname::resolveWithRetry() {
+Future<NetworkAddress> Hostname::resolveWithRetry() const {
 	return resolveWithRetryImpl(this);
 }
 
-Optional<NetworkAddress> Hostname::resolveBlocking() {
+Optional<NetworkAddress> Hostname::resolveBlocking() const {
 	try {
 		std::vector<NetworkAddress> addresses =
 		    INetworkConnections::net()->resolveTCPEndpointBlockingWithDNSCache(host, service);

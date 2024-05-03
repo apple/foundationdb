@@ -41,9 +41,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, 1e6);
 			limits.minRows = 0;
 			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
-			if (!rep.more) {
-				rep.readThrough = keys.end;
-			}
+
 			results.send(rep);
 
 			if (!rep.more) {
@@ -51,11 +49,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 				return Void();
 			}
 
-			if (rep.readThrough.present()) {
-				begin = firstGreaterOrEqual(rep.readThrough.get());
-			} else {
-				begin = firstGreaterThan(rep.end()[-1].key);
-			}
+			begin = rep.nextBeginKeySelector();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -84,6 +78,7 @@ ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream
 }
 
 struct StreamingRangeReadWorkload : KVWorkload {
+	static constexpr auto NAME = "StreamingRangeRead";
 	double testDuration;
 	std::string valueString;
 	Future<Void> client;
@@ -100,7 +95,6 @@ struct StreamingRangeReadWorkload : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
-	std::string description() const override { return "StreamingRangeReadWorkload"; }
 	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
 	Future<Void> start(Database const& cx) override {
 		client = timeout(streamingClient(cx->clone(), this), testDuration, Void());
@@ -174,4 +168,4 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<StreamingRangeReadWorkload> StreamingRangeReadWorkloadFactory("StreamingRangeRead");
+WorkloadFactory<StreamingRangeReadWorkload> StreamingRangeReadWorkloadFactory;

@@ -4,7 +4,9 @@ set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are
 # jemalloc
 ################################################################################
 
-include(Jemalloc)
+if(USE_JEMALLOC)
+  find_package(jemalloc 5.3.0 REQUIRED)
+endif()
 
 ################################################################################
 # Valgrind
@@ -18,38 +20,28 @@ endif()
 # SSL
 ################################################################################
 
-include(CheckSymbolExists)
+set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+# Statically link OpenSSL to FDB, see
+#    https://cmake.org/cmake/help/v3.24/module/FindOpenSSL.html
+# Without the flags, OpenSSL is dynamically linked.
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+if (WIN32)
+  set(OPENSSL_MSVC_STATIC_RT ON)
+endif()
+find_package(OpenSSL REQUIRED)
+add_compile_options(-DHAVE_OPENSSL)
 
-set(USE_WOLFSSL OFF CACHE BOOL "Build against WolfSSL instead of OpenSSL")
-set(USE_OPENSSL ON CACHE BOOL "Build against OpenSSL")
-if(USE_WOLFSSL)
-  set(WOLFSSL_USE_STATIC_LIBS TRUE)
-  find_package(WolfSSL)
-  if(WOLFSSL_FOUND)
-    set(CMAKE_REQUIRED_INCLUDES ${WOLFSSL_INCLUDE_DIR})
-    add_compile_options(-DHAVE_OPENSSL)
-    add_compile_options(-DHAVE_WOLFSSL)
-  else()
-    message(STATUS "WolfSSL was not found - Will compile without TLS Support")
-    message(STATUS "You can set WOLFSSL_ROOT_DIR to help cmake find it")
-    message(FATAL_ERROR "Unable to find WolfSSL")
-  endif()
-elseif(USE_OPENSSL)
-  set(OPENSSL_USE_STATIC_LIBS TRUE)
-  if(WIN32)
-    set(OPENSSL_MSVC_STATIC_RT ON)
-  endif()
-  find_package(OpenSSL)
-  if(OPENSSL_FOUND)
-    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
-    add_compile_options(-DHAVE_OPENSSL)
-  else()
-    message(STATUS "OpenSSL was not found - Will compile without TLS Support")
-    message(STATUS "You can set OPENSSL_ROOT_DIR to help cmake find it")
-    message(FATAL_ERROR "Unable to find OpenSSL")
-  endif()
+################################################################################
+# Swift Support
+################################################################################
+
+if (WITH_SWIFT)
+  message(DEBUG "Building with Swift")
+  add_definitions(-DWITH_SWIFT)
+  set(WITH_SWIFT ON)
 else()
-  message(FATAL_ERROR "Must set USE_WOLFSSL or USE_OPENSSL")
+  message(DEBUG "Not building with Swift")
+  set(WITH_SWIFT OFF)
 endif()
 
 ################################################################################
@@ -137,7 +129,7 @@ endif()
 if(NOT BUILD_GO_BINDING OR NOT BUILD_C_BINDING)
   set(WITH_GO_BINDING OFF)
 else()
-  find_program(GO_EXECUTABLE go)
+  find_program(GO_EXECUTABLE go HINTS /usr/local/go/bin/)
   # building the go binaries is currently not supported on Windows
   if(GO_EXECUTABLE AND NOT WIN32 AND WITH_C_BINDING)
     set(WITH_GO_BINDING ON)
@@ -173,16 +165,12 @@ endif()
 # RocksDB
 ################################################################################
 
-set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
-set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
+set(WITH_ROCKSDB ON CACHE BOOL "Build with experimental RocksDB support")
+ # PORTABLE flag for RockdDB changed as of this PR (with v8.3.2 and after): https://github.com/facebook/rocksdb/pull/11419
+ # https://github.com/facebook/rocksdb/blob/v8.6.7/CMakeLists.txt#L256
+set(PORTABLE_ROCKSDB 1 CACHE STRING "Minimum CPU arch to support (i.e. skylake, haswell, etc., or 0 = current CPU, 1 = baseline CPU)")
+set(ROCKSDB_TOOLS OFF CACHE BOOL "Compile RocksDB tools")
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
-# RocksDB is currently enabled by default for GCC but does not build with the latest
-# Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL AND NOT WIN32)
-  set(WITH_ROCKSDB_EXPERIMENTAL ON)
-else()
-  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
-endif()
 
 ################################################################################
 # TOML11
@@ -232,12 +220,7 @@ set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine imple
 
 set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
 if (BUILD_AWS_BACKUP)
-  if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    set(WITH_AWS_BACKUP ON)
-  else()
-    message(WARNING "BUILD_AWS_BACKUP set but ignored ${CMAKE_SYSTEM_PROCESSOR} is not supported yet")
-    set(WITH_AWS_BACKUP OFF)
-  endif()
+  set(WITH_AWS_BACKUP ON)
 else()
   set(WITH_AWS_BACKUP OFF)
 endif()
@@ -257,10 +240,11 @@ function(print_components)
   message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
   message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
   message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
+  message(STATUS "Build Swift (depends on Swift):       ${WITH_SWIFT}")
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
-  message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
+  message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB}")
   message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
   message(STATUS "=========================================")
 endfunction()

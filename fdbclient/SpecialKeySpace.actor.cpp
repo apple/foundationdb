@@ -137,6 +137,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 
 	// Throw error if module doesn't support tenants and we have a tenant
 	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
+		CODE_PROBE(true, "Illegal tenant access to special keys module");
 		throw illegal_tenant_access();
 	}
 
@@ -304,7 +305,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
 		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
 			return result;
 		}
-		when(wait(ryw->resetFuture())) { throw internal_error(); }
+		when(wait(ryw->resetFuture())) {
+			throw internal_error();
+		}
 	}
 }
 
@@ -370,6 +373,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				continue;
 			}
 			if (!iter->value()->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant access to special keys module");
 				throw illegal_tenant_access();
 			}
 		}
@@ -501,6 +505,7 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		throw special_keys_no_write_module_found();
 	}
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant write to special keys module");
 		throw illegal_tenant_access();
 	}
 	return impl->set(ryw, key, value);
@@ -521,6 +526,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		throw special_keys_no_write_module_found();
 	}
 	if (!begin->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear range to special keys module");
 		throw illegal_tenant_access();
 	}
 	return begin->clear(ryw, range);
@@ -533,6 +539,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear to special keys module", probe::decoration::rare);
 		throw illegal_tenant_access();
 	}
 	return impl->clear(ryw, key);
@@ -627,6 +634,7 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 	if (ryw->getTenant().present()) {
 		for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 			if (!(*it)->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant commit to special keys module", probe::decoration::rare);
 				throw illegal_tenant_access();
 			}
 		}
@@ -739,6 +747,7 @@ ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
 				// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
 				json_spirit::mObject statsObj;
 				statsObj["shard_bytes"] = ddMetricsRef.shardBytes;
+				statsObj["shard_bytes_per_ksecond"] = ddMetricsRef.shardBytesPerKSecond;
 				std::string statsString =
 				    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 				ValueRef bytes(result.arena(), statsString);
@@ -971,9 +980,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 	}
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
-	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+	    "ERROR: Could not calculate the impact of this exclude on the total available space in the cluster.\n"
 	    "Please try the exclude again in 30 seconds.\n"
-	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking free "
+	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking available "
 	    "space.\n";
 
 	StatusObjectReader statusObj(status);
@@ -993,10 +1002,15 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int ssTotalCount = 0;
 	state int ssExcludedCount = 0;
 
-	state std::unordered_set<std::string> diskLocalities();
+	state std::unordered_set<std::string> diskLocalities;
 	state int64_t totalKvStoreFreeBytes = 0;
+	state int64_t totalKvStoreFreeBytesNotExcluded = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
-	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
+	state int64_t totalKvStoreUsedBytesNotExcluded = 0;
+	state int64_t totalKvStoreAvailableBytes = 0;
+	// Keep track if we exclude any storage process with the provided addresses
+	state bool excludedAddressesContainsStorageRole = false;
+
 	try {
 		for (auto proc : processesMap.obj()) {
 			StatusObjectReader process(proc.second);
@@ -1006,8 +1020,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 				return false;
 			}
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
-			bool excluded =
-			    (process.has("excluded") && process.last().get_bool()) || addressExcluded(*exclusions, addr);
+			bool includedInExclusion = addressExcluded(*exclusions, addr);
+			bool excluded = (process.has("excluded") && process.last().get_bool()) || includedInExclusion;
 
 			StatusObjectReader localityObj;
 			std::string disk_id;
@@ -1019,6 +1033,15 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+					if (excluded) {
+						ssExcludedCount++;
+					}
+
+					// Check if we are excluding a process that serves the storage role. We only have to check the free
+					// capacity if we are excluding at least one process that serves the storage role.
+					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
+						excludedAddressesContainsStorageRole = true;
+					}
 
 					int64_t used_bytes;
 					if (!role.get("kvstore_used_bytes", used_bytes)) {
@@ -1034,22 +1057,27 @@ ACTOR Future<bool> checkExclusion(Database db,
 						return false;
 					}
 
+					int64_t available_bytes;
+					if (!role.get("kvstore_available_bytes", available_bytes)) {
+						*msg = ManagementAPIError::toJsonString(
+						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						return false;
+					}
+
 					totalKvStoreUsedBytes += used_bytes;
+					totalKvStoreFreeBytes += free_bytes;
+					totalKvStoreAvailableBytes += available_bytes;
 
 					if (!excluded) {
-						totalKvStoreUsedBytesNonExcluded += used_bytes;
+						totalKvStoreUsedBytesNotExcluded += used_bytes;
 
 						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
-							totalKvStoreFreeBytes += free_bytes;
+							totalKvStoreFreeBytesNotExcluded += free_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);
 							}
 						}
 					}
-				}
-
-				if (excluded) {
-					ssExcludedCount++;
 				}
 			}
 		}
@@ -1059,11 +1087,33 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
-	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
+	// check in order to not block those exclusions.
+	if (!excludedAddressesContainsStorageRole) {
+		return true;
+	}
+
+	// The numerator is the total space in use by FDB that is not immediately reusable.
+	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
+	// The denominator is the total capacity usable by FDB (either used or unused currently) on non-excluded servers.
+	double finalUnavailableRatio =
+	    (double)(totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
+	    std::max((double)(totalKvStoreUsedBytesNotExcluded + totalKvStoreFreeBytesNotExcluded), (double)1);
+
+	TraceEvent(SevInfo, "CheckExclusionDetails")
+	    .detail("SsTotalCount", ssTotalCount)
+	    .detail("SsExcludedCount", ssExcludedCount)
+	    .detail("FinalUnavailableRatio", finalUnavailableRatio)
+	    .detail("TotalKvStoreUsedBytes", totalKvStoreUsedBytes)
+	    .detail("TotalKvStoreFreeBytes", totalKvStoreFreeBytes)
+	    .detail("TotalKvStoreAvailableBytes", totalKvStoreAvailableBytes)
+	    .detail("TotalKvStoreUsedBytesNotExcluded", totalKvStoreUsedBytesNotExcluded)
+	    .detail("TotalKvStoreFreeBytesNotExcluded", totalKvStoreFreeBytesNotExcluded);
+
+	if (ssExcludedCount == ssTotalCount || finalUnavailableRatio > 0.9) {
+		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"
 		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
+		                   "checking available space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
@@ -1080,7 +1130,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 	// CAUSAL_WRITE_RISKY
 	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-	// for exluded servers
+	// for excluded servers
 	auto ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManagementApiCommandRange("exclude"));
 	auto iter = ranges.begin();
@@ -1124,7 +1174,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 		if (!safe)
 			return result;
 	}
-	excludeServers(ryw->getTransaction(), addresses, failed);
+	wait(excludeServers(&(ryw->getTransaction()), addresses, failed));
 	includeServers(ryw);
 
 	return result;
@@ -1169,7 +1219,12 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state std::vector<AddressExclusion> excl = wait((getExcludedServers(&tr)));
+	state Future<std::vector<AddressExclusion>> fExclusions = getAllExcludedServers(&tr);
+	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(&tr);
+
+	wait(success(fExclusions) && success(fExcludedLocalities));
+
+	state std::vector<AddressExclusion> excl = fExclusions.get();
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
@@ -1177,18 +1232,48 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
+	// We have to make use of the localities here to verify if a server is still in the server list,
+	// even if it might be missing in the workers as the server is not running anymore.
+	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+	// Decode the excluded localities to check if any server is excluded by locality.
+	state std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+	for (auto& excludedLocality : excludedLocalities) {
+		decodedExcludedLocalities.push_back(decodeLocality(excludedLocality));
+	}
+
 	for (auto& s : serverList) {
-		auto addresses = decodeServerListValue(s.value).getKeyValues.getEndpoint().addresses;
+		auto decodedServer = decodeServerListValue(s.value);
+		auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
 		if (addressExcluded(exclusions, addresses.address)) {
 			inProgressExclusion.insert(addresses.address);
 		}
+
 		if (addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get())) {
 			inProgressExclusion.insert(addresses.secondaryAddress.get());
+		}
+
+		// Check if the server is excluded based on a locality.
+		for (auto& excludedLocality : decodedExcludedLocalities) {
+			if (!decodedServer.locality.isPresent(excludedLocality.first)) {
+				continue;
+			}
+
+			if (decodedServer.locality.get(excludedLocality.first) != excludedLocality.second) {
+				continue;
+			}
+
+			inProgressExclusion.insert(addresses.address);
+			if (addresses.secondaryAddress.present()) {
+				inProgressExclusion.insert(addresses.secondaryAddress.get());
+			}
 		}
 	}
 
 	Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
 	ASSERT(value.present());
+	// TODO(jscheuermann): The logs key range doesn't hold any information about localities. This is a limitation
+	// for locality based exclusions. The problematic edge case here is a log server that still has mutation on it
+	// but is currently not part of the worker list, e.g. because it was shutdown or is partitioned.
 	auto logs = decodeLogsValue(value.get());
 	for (auto const& log : logs.first) {
 		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
@@ -1214,6 +1299,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 			result.arena().dependsOn(addrKey.arena());
 		}
 	}
+
 	return result;
 }
 
@@ -1233,9 +1319,15 @@ ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, K
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
-		// exclude :tls in keys even the network addresss is TLS
+		// exclude :tls in keys even the network address is TLS
 		KeyRef k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port), result.arena()));
 		if (kr.contains(k)) {
 			ValueRef v(result.arena(), w.processClass.toString());
@@ -1350,9 +1442,15 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
-		// exclude :tls in keys even the network addresss is TLS
+		// exclude :tls in keys even the network address is TLS
 		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
 		if (kr.contains(k)) {
 			Value v(w.processClass.sourceString());
@@ -1673,12 +1771,12 @@ ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* r
 	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
 	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
 	RangeResult result;
-	Key cluster_decription_key = prefix.withSuffix("cluster_description"_sr);
-	if (kr.contains(cluster_decription_key)) {
-		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
+	Key cluster_description_key = prefix.withSuffix("cluster_description"_sr);
+	if (kr.contains(cluster_description_key)) {
+		result.push_back_deep(result.arena(), KeyValueRef(cluster_description_key, cs.clusterKeyName()));
 	}
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
-	// include :tls in keys if the network addresss is TLS
+	// include :tls in keys if the network address is TLS
 	std::sort(coordinator_processes.begin(),
 	          coordinator_processes.end(),
 	          [](const NetworkAddress& lhs, const NetworkAddress& rhs) { return lhs.toString() < rhs.toString(); });
@@ -1750,8 +1848,8 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 
 	std::string newName;
 	// check update for cluster_description
-	Key cluster_decription_key = "cluster_description"_sr.withPrefix(kr.begin);
-	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
+	Key cluster_description_key = "cluster_description"_sr.withPrefix(kr.begin);
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_description_key];
 	if (entry.first) {
 		// check valid description [a-zA-Z0-9_]+
 		if (entry.second.present() && isAlphaNumeric(entry.second.get().toString())) {
@@ -2565,7 +2663,7 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 				try {
 					int mode = boost::lexical_cast<int>(iter->value().second.get().toString());
 					Value modeVal = BinaryWriter::toValue(mode, Unversioned());
-					if (mode == 0 || mode == 1) {
+					if (mode == 0 || mode == 1 || mode == 2) {
 						// Whenever configuration changes or DD related system keyspace is changed,
 						// actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey.
 						// This prevents concurrent write to the same system keyspace.
@@ -2720,7 +2818,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), localities, failed);
+	wait(excludeLocalities(&ryw->getTransaction(), localities, failed));
 	includeLocalities(ryw);
 
 	return result;
@@ -2842,6 +2940,29 @@ Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTrans
 	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
+ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
+
+ACTOR static Future<RangeResult> FaultToleranceMetricsImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	state RangeResult res;
+	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+		Optional<Value> val = wait(getJSON(ryw->getDatabase(), "fault_tolerance"));
+		if (val.present()) {
+			res.push_back_deep(res.arena(), KeyValueRef(kr.begin, val.get()));
+		}
+	}
+	return res;
+}
+
+FaultToleranceMetricsImpl::FaultToleranceMetricsImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+Future<RangeResult> FaultToleranceMetricsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                        KeyRangeRef kr,
+                                                        GetRangeLimits limitsHint) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	return FaultToleranceMetricsImplActor(ryw, kr);
+}
+
 ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
                                                KeySelector begin,
                                                KeySelector end,
@@ -2904,7 +3025,7 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	// Test
 	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse));
 	if (testResult != expectedResult) {
-		fmt::print("Reverse: {}\n", reverse);
+		fmt::print("Reverse: {}\n", static_cast<bool>(reverse));
 		fmt::print("Original range: [{}, {})\n", begin.toString(), end.toString());
 		fmt::print("Original result:\n");
 		for (const auto& kr : result) {

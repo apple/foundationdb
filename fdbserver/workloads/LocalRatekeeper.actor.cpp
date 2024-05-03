@@ -45,6 +45,7 @@ ACTOR Future<StorageServerInterface> getRandomStorage(Database cx) {
 }
 
 struct LocalRatekeeperWorkload : TestWorkload {
+	static constexpr auto NAME = "LocalRatekeeper";
 
 	double startAfter = 0.0;
 	double blockWritesFor;
@@ -55,7 +56,6 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		blockWritesFor = getOption(
 		    options, "blockWritesFor"_sr, double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
-	std::string description() const override { return "LocalRatekeeperWorkload"; }
 
 	ACTOR static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
 		state Transaction tr(cx);
@@ -148,4 +148,4 @@ struct LocalRatekeeperWorkload : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<LocalRatekeeperWorkload> LocalRatekeeperWorkloadFactory("LocalRatekeeper");
+WorkloadFactory<LocalRatekeeperWorkload> LocalRatekeeperWorkloadFactory;

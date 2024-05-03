@@ -30,31 +30,34 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "flow/IAsyncFile.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include <ctime>
 #include <climits>
 #include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-FDB_DECLARE_BOOLEAN_PARAM(LockDB);
-FDB_DECLARE_BOOLEAN_PARAM(UnlockDB);
-FDB_DECLARE_BOOLEAN_PARAM(StopWhenDone);
-FDB_DECLARE_BOOLEAN_PARAM(Verbose);
-FDB_DECLARE_BOOLEAN_PARAM(WaitForComplete);
-FDB_DECLARE_BOOLEAN_PARAM(ForceAction);
-FDB_DECLARE_BOOLEAN_PARAM(Terminator);
-FDB_DECLARE_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_DECLARE_BOOLEAN_PARAM(UsePartitionedLog);
-FDB_DECLARE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
-FDB_DECLARE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
-FDB_DECLARE_BOOLEAN_PARAM(ShowErrors);
-FDB_DECLARE_BOOLEAN_PARAM(AbortOldBackup);
-FDB_DECLARE_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
-FDB_DECLARE_BOOLEAN_PARAM(WaitForDestUID);
-FDB_DECLARE_BOOLEAN_PARAM(CheckBackupUID);
-FDB_DECLARE_BOOLEAN_PARAM(DeleteData);
-FDB_DECLARE_BOOLEAN_PARAM(SetValidation);
-FDB_DECLARE_BOOLEAN_PARAM(PartialBackup);
+FDB_BOOLEAN_PARAM(LockDB);
+FDB_BOOLEAN_PARAM(UnlockDB);
+FDB_BOOLEAN_PARAM(StopWhenDone);
+FDB_BOOLEAN_PARAM(Verbose);
+FDB_BOOLEAN_PARAM(WaitForComplete);
+FDB_BOOLEAN_PARAM(ForceAction);
+FDB_BOOLEAN_PARAM(Terminator);
+FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
+FDB_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
+FDB_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
+FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+FDB_BOOLEAN_PARAM(ShowErrors);
+FDB_BOOLEAN_PARAM(AbortOldBackup);
+FDB_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
+FDB_BOOLEAN_PARAM(WaitForDestUID);
+FDB_BOOLEAN_PARAM(CheckBackupUID);
+FDB_BOOLEAN_PARAM(DeleteData);
+FDB_BOOLEAN_PARAM(SetValidation);
+FDB_BOOLEAN_PARAM(PartialBackup);
+
+extern Optional<std::string> fileBackupAgentProxy;
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -143,7 +146,7 @@ public:
 		futureBucket = std::move(r.futureBucket);
 	}
 
-	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(__FUNCTION__sr); }
 
 	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
@@ -155,7 +158,7 @@ public:
 
 	/** RESTORE **/
 
-	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
+	enum ERestoreState { UNINITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
 	static Key getPauseKey();
 
@@ -190,32 +193,56 @@ public:
 	                        Key url,
 	                        Optional<std::string> proxy,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
+	                        Standalone<VectorRef<Version>> beginVersions,
 	                        WaitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
 	                        Verbose = Verbose::True,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        LockDB = LockDB::True,
+	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<std::string> blobManifestUrl = {});
+
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
 	                        Optional<std::string> proxy,
-	                        WaitForComplete waitForComplete = WaitForComplete::True,
+	                        WaitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
-	                        Verbose verbose = Verbose::True,
+	                        Verbose = Verbose::True,
 	                        KeyRange range = KeyRange(),
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
+	                        LockDB = LockDB::True,
+	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<std::string> blobManifestUrl = {});
+
+	Future<Version> restore(Database cx,
+	                        Optional<Database> cxOrig,
+	                        Key tagName,
+	                        Key url,
+	                        Optional<std::string> proxy,
+	                        Standalone<VectorRef<KeyRangeRef>> ranges,
+	                        WaitForComplete waitForComplete = WaitForComplete::True,
+	                        Version targetVersion = ::invalidVersion,
+	                        Verbose verbose = Verbose::True,
+	                        Key addPrefix = Key(),
+	                        Key removePrefix = Key(),
 	                        LockDB lockDB = LockDB::True,
+	                        UnlockDB unlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<std::string> blobManifestUrl = {});
+
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
 	                              Standalone<VectorRef<KeyRangeRef>> ranges,
@@ -254,7 +281,8 @@ public:
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {});
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          Optional<std::string> const& blobManifestUrl = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          Optional<std::string> proxy,
@@ -266,7 +294,8 @@ public:
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {}) {
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          Optional<std::string> const& blobManifestUrl = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -279,7 +308,8 @@ public:
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
-			                    encryptionKeyFileName);
+			                    encryptionKeyFileName,
+			                    blobManifestUrl);
 		});
 	}
 
@@ -523,7 +553,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           CheckBackupUID = CheckBackupUID::False,
                           Version backupUid = 0);
 Key getApplyKey(Version version, Key backupUid);
-Key getLogKey(Version version, Key backupUid);
+Key getLogKey(Version version, Key backupUid, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Version getLogKeyVersion(Key key);
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
@@ -553,7 +583,9 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Version* endVersion,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion);
+                                  Reference<KeyRangeMap<Version>> keyVersion,
+                                  std::map<int64_t, TenantName>* tenantMap,
+                                  bool provisionalProxy);
 ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;
@@ -612,34 +644,39 @@ public:
 	Key prefix;
 };
 
-static inline KeyBackedTag makeRestoreTag(std::string tagName) {
-	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
-}
+class KeyBackedTaskConfig : public KeyBackedClass {
+protected:
+	UID uid;
+	Subspace configSpace;
 
-static inline KeyBackedTag makeBackupTag(std::string tagName) {
-	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
-}
-
-static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
-                                                                  Snapshot snapshot = Snapshot::False) {
-	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
-}
-
-static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
-                                                                 Snapshot snapshot = Snapshot::False) {
-	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
-}
-
-class KeyBackedConfig {
 public:
 	static struct {
-		static TaskParam<UID> uid() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<UID> uid() { return __FUNCTION__sr; }
 	} TaskParams;
 
-	KeyBackedConfig(StringRef prefix, UID uid = UID())
-	  : uid(uid), prefix(prefix), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
+	KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
+	  : KeyBackedClass(prefix), uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
 
-	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
+	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task)
+	  : KeyBackedTaskConfig(prefix, TaskParams.uid().get(task)) {}
+
+	KeyBackedProperty<std::string> tag() { return configSpace.pack(__FUNCTION__sr); }
+
+	UID getUid() { return uid; }
+
+	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
+
+	template <class TrType>
+	void clear(TrType tr) {
+		tr->clear(configSpace.range());
+	}
+
+	// lastError is a pair of error message and timestamp expressed as an int64_t
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() { return configSpace.pack(__FUNCTION__sr); }
+
+	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
+		return configSpace.pack(__FUNCTION__sr);
+	}
 
 	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<Task> task,
@@ -655,32 +692,15 @@ public:
 		// restore uid. Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the
 		// validation key which TaskBucket will check, and its value must be this restore config's uid.
 		UID u = uid; // 'this' could be invalid in lambda
-		Key p = prefix;
+		Key p = subspace.key();
 		return map(tag().get(tr), [u, p, task](Optional<std::string> const& tag) -> Void {
 			if (!tag.present())
 				throw restore_error();
-			// Validation contition is that the uidPair key must be exactly {u, false}
+			// Validation condition is that the uidPair key must be exactly {u, false}
 			TaskBucket::setValidationCondition(
 			    task, KeyBackedTag(tag.get(), p).key, TupleCodec<UidAndAbortedFlagT>::pack({ u, false }));
 			return Void();
 		});
-	}
-
-	KeyBackedProperty<std::string> tag() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-
-	UID getUid() { return uid; }
-
-	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
-
-	void clear(Reference<ReadYourWritesTransaction> tr) { tr->clear(configSpace.range()); }
-
-	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-
-	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
 	// Updates the error per type map and the last error property
@@ -699,12 +719,25 @@ public:
 			});
 		});
 	}
-
-protected:
-	UID uid;
-	Key prefix;
-	Subspace configSpace;
 };
+
+static inline KeyBackedTag makeRestoreTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
+}
+
+static inline KeyBackedTag makeBackupTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
+                                                                  Snapshot snapshot = Snapshot::False) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
+                                                                 Snapshot snapshot = Snapshot::False) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
+}
 
 template <>
 inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
@@ -744,10 +777,10 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 }
 
-class BackupConfig : public KeyBackedConfig {
+class BackupConfig : public KeyBackedTaskConfig {
 public:
-	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
-	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
+	BackupConfig(UID uid = UID()) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, uid) {}
+	BackupConfig(Reference<Task> task) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, task) {}
 
 	// rangeFileMap maps a keyrange file's End to its Begin and Filename
 	struct RangeSlice {
@@ -769,47 +802,41 @@ public:
 
 	// Map of range end boundaries to info about the backup file written for that range.
 	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
-	RangeFileMapT snapshotRangeFileMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	RangeFileMapT snapshotRangeFileMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Number of kv range files that were both committed to persistent storage AND inserted into
 	// the snapshotRangeFileMap.  Note that since insertions could replace 1 or more existing
 	// map entries this is not necessarily the number of entries currently in the map.
 	// This value exists to help with sizing of kv range folders for BackupContainers that
 	// require it.
-	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Coalesced set of ranges already dispatched for writing.
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
-	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Interval to use for the first (initial) snapshot.
-	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Interval to use for determining the target end version for new snapshots
-	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(__FUNCTION__sr); }
 
 	// When the current snapshot began
-	KeyBackedProperty<Version> snapshotBeginVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> snapshotBeginVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// When the current snapshot is desired to end.
 	// This can be changed at runtime to speed up or slow down a snapshot
-	KeyBackedProperty<Version> snapshotTargetEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> snapshotTargetEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<int64_t> snapshotBatchSize() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<int64_t> snapshotBatchSize() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Key> snapshotBatchFuture() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> snapshotBatchFuture() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Key> snapshotBatchDispatchDoneKey() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> snapshotBatchDispatchDoneKey() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<int64_t> snapshotDispatchLastShardsBehind() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<int64_t> snapshotDispatchLastShardsBehind() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Version> snapshotDispatchLastVersion() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Version> snapshotDispatchLastVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<Void> initNewSnapshot(Reference<ReadYourWritesTransaction> tr, int64_t intervalSeconds = -1) {
 		BackupConfig& copy = *this; // Capture this by value instead of this ptr
@@ -843,56 +870,50 @@ public:
 		});
 	}
 
-	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedBinaryValue<int64_t> logBytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> logBytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<EBackupState> stateEnum() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<EBackupState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true when all backup workers for saving mutation logs have been started.
-	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Each backup worker adds its (epoch, tag.id) to this property.
 	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+		return configSpace.pack(__FUNCTION__sr);
 	}
 
 	// Set to true if backup worker is enabled.
-	KeyBackedProperty<bool> backupWorkerEnabled() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> backupWorkerEnabled() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
-	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true if only requesting incremental backup without base snapshot.
-	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Latest version for which all prior versions have saved by backup workers.
-	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	// Stop differntial logging if already started or don't start after completing KV ranges
-	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	// Stop differential logging if already started or don't start after completing KV ranges
+	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Enable snapshot backup file encryption
-	KeyBackedProperty<bool> enableSnapshotBackupEncryption() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<bool> enableSnapshotBackupEncryption() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Latest version for which all prior versions have had their log copy tasks completed
-	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// The end version of the last complete snapshot
-	KeyBackedProperty<Version> latestSnapshotEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> latestSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// The end version of the first complete snapshot
-	KeyBackedProperty<Version> firstSnapshotEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> firstSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -923,7 +944,7 @@ public:
 		           });
 	}
 
-	KeyBackedProperty<std::vector<KeyRange>> backupRanges() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<std::vector<KeyRange>> backupRanges() { return configSpace.pack(__FUNCTION__sr); }
 
 	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange, Key destUidValue) {
 		Key mutationLogsDestKey = destUidValue.withPrefix(backupLogKeys.begin);
@@ -947,6 +968,8 @@ public:
 
 		return updateErrorInfo(cx, e, details);
 	}
+
+	KeyBackedProperty<bool> blobBackupEnabled() { return configSpace.pack(__FUNCTION__sr); }
 };
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
@@ -989,10 +1012,14 @@ struct StringRefReader {
 };
 
 namespace fileBackup {
+Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf);
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
-                                                                      Optional<Database> cx);
+                                                                      Database cx);
+
+Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,

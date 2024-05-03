@@ -22,6 +22,7 @@
 #define FLOW_TRACE_H
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <stdarg.h>
 #include <stdint.h>
@@ -30,13 +31,16 @@
 #include <map>
 #include <set>
 #include <type_traits>
+#include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/ITrace.h"
+#include "flow/Traceable.h"
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
-#define PRINTABLE_COMPRESS_NULLS 0
+
+FDB_BOOLEAN_PARAM(InitializeTraceMetrics);
 
 inline int fastrand() {
 	static int g_seed = 0;
@@ -50,6 +54,7 @@ inline static bool TRACE_SAMPLE() {
 }
 
 extern thread_local int g_allocation_tracing_disabled;
+extern bool g_traceProcessEvents;
 
 // Each major level of severity has 10 levels of minor levels, which are not all
 // used. when the numbers of severity events in each level are counted, they are
@@ -119,9 +124,13 @@ public:
 	const Field& operator[](int index) const;
 	bool tryGetValue(std::string key, std::string& outValue) const;
 	std::string getValue(std::string key) const;
+	bool tryGetInt(std::string key, int& outVal, bool permissive = false) const;
 	int getInt(std::string key, bool permissive = false) const;
+	bool tryGetInt64(std::string key, int64_t& outVal, bool permissive = false) const;
 	int64_t getInt64(std::string key, bool permissive = false) const;
+	bool tryGetUint64(std::string key, uint64_t& outVal, bool permissive = false) const;
 	uint64_t getUint64(std::string key, bool permissive = false) const;
+	bool tryGetDouble(std::string key, double& outVal, bool permissive = false) const;
 	double getDouble(std::string key, bool permissive = false) const;
 
 	Field& mutate(int index);
@@ -171,7 +180,7 @@ public:
 private:
 	struct EventInfo {
 		TraceEventFields fields;
-		EventInfo(double time, const char* name, uint64_t id, const char* location);
+		EventInfo(double time, double monotonicTime, const char* name, uint64_t id, const char* location);
 	};
 
 	struct AttachInfo {
@@ -192,215 +201,6 @@ private:
 
 struct DynamicEventMetric;
 
-template <class IntType>
-char base16Char(IntType c) {
-	switch ((c % 16 + 16) % 16) {
-	case 0:
-		return '0';
-	case 1:
-		return '1';
-	case 2:
-		return '2';
-	case 3:
-		return '3';
-	case 4:
-		return '4';
-	case 5:
-		return '5';
-	case 6:
-		return '6';
-	case 7:
-		return '7';
-	case 8:
-		return '8';
-	case 9:
-		return '9';
-	case 10:
-		return 'a';
-	case 11:
-		return 'b';
-	case 12:
-		return 'c';
-	case 13:
-		return 'd';
-	case 14:
-		return 'e';
-	case 15:
-		return 'f';
-	default:
-		UNSTOPPABLE_ASSERT(false);
-	}
-}
-
-// forward declare format from flow.h as we
-// can't include flow.h here
-std::string format(const char* form, ...);
-
-template <class T>
-struct Traceable : std::false_type {};
-
-#define FORMAT_TRACEABLE(type, fmt)                                                                                    \
-	template <>                                                                                                        \
-	struct Traceable<type> : std::true_type {                                                                          \
-		static std::string toString(type value) { return format(fmt, value); }                                         \
-	}
-
-FORMAT_TRACEABLE(bool, "%d");
-FORMAT_TRACEABLE(signed char, "%d");
-FORMAT_TRACEABLE(unsigned char, "%d");
-FORMAT_TRACEABLE(short, "%d");
-FORMAT_TRACEABLE(unsigned short, "%d");
-FORMAT_TRACEABLE(int, "%d");
-FORMAT_TRACEABLE(unsigned, "%u");
-FORMAT_TRACEABLE(long int, "%ld");
-FORMAT_TRACEABLE(unsigned long int, "%lu");
-FORMAT_TRACEABLE(long long int, "%lld");
-FORMAT_TRACEABLE(unsigned long long int, "%llu");
-FORMAT_TRACEABLE(float, "%g");
-FORMAT_TRACEABLE(double, "%g");
-FORMAT_TRACEABLE(void*, "%p");
-FORMAT_TRACEABLE(volatile long, "%ld");
-FORMAT_TRACEABLE(volatile unsigned long, "%lu");
-FORMAT_TRACEABLE(volatile long long, "%lld");
-FORMAT_TRACEABLE(volatile unsigned long long, "%llu");
-FORMAT_TRACEABLE(volatile double, "%g");
-
-template <>
-struct Traceable<UID> : std::true_type {
-	static std::string toString(const UID& value) { return format("%016llx", value.first()); }
-};
-
-template <class Str>
-struct TraceableString {
-	static auto begin(const Str& value) -> decltype(value.begin()) { return value.begin(); }
-
-	static bool atEnd(const Str& value, decltype(value.begin()) iter) { return iter == value.end(); }
-
-	static std::string toString(const Str& value) { return value.toString(); }
-};
-
-template <>
-struct TraceableString<std::string> {
-	static auto begin(const std::string& value) -> decltype(value.begin()) { return value.begin(); }
-
-	static bool atEnd(const std::string& value, decltype(value.begin()) iter) { return iter == value.end(); }
-
-	template <class S>
-	static std::string toString(S&& value) {
-		return std::forward<S>(value);
-	}
-};
-
-template <>
-struct TraceableString<std::string_view> {
-	static auto begin(const std::string_view& value) -> decltype(value.begin()) { return value.begin(); }
-
-	static bool atEnd(const std::string_view& value, decltype(value.begin()) iter) { return iter == value.end(); }
-
-	static std::string toString(const std::string_view& value) { return std::string(value); }
-};
-
-template <>
-struct TraceableString<const char*> {
-	static const char* begin(const char* value) { return value; }
-
-	static bool atEnd(const char* value, const char* iter) { return *iter == '\0'; }
-
-	static std::string toString(const char* value) { return std::string(value); }
-};
-
-std::string traceableStringToString(const char* value, size_t S);
-
-template <size_t S>
-struct TraceableString<char[S]> {
-	static_assert(S > 0, "Only string literals are supported.");
-	static const char* begin(const char* value) { return value; }
-
-	static bool atEnd(const char* value, const char* iter) {
-		return iter - value == S - 1; // Exclude trailing \0 byte
-	}
-
-	static std::string toString(const char* value) { return traceableStringToString(value, S); }
-};
-
-template <>
-struct TraceableString<char*> {
-	static const char* begin(char* value) { return value; }
-
-	static bool atEnd(char* value, const char* iter) { return *iter == '\0'; }
-
-	static std::string toString(char* value) { return std::string(value); }
-};
-
-template <class T>
-struct TraceableStringImpl : std::true_type {
-	static constexpr bool isPrintable(char c) { return 32 <= c && c <= 126; }
-
-	template <class Str>
-	static std::string toString(Str&& value) {
-		// if all characters are printable ascii, we simply return the string
-		int nonPrintables = 0;
-		int numBackslashes = 0;
-		int size = 0;
-		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
-			++size;
-			if (!isPrintable(char(*iter))) {
-				++nonPrintables;
-			} else if (*iter == '\\') {
-				++numBackslashes;
-			}
-		}
-		if (nonPrintables == 0 && numBackslashes == 0) {
-			return TraceableString<T>::toString(std::forward<Str>(value));
-		}
-		std::string result;
-		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
-		int numNull = 0;
-		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
-			if (*iter == '\\') {
-				if (numNull > 0) {
-					result += format("[%d]", numNull);
-					numNull = 0;
-				}
-				result.push_back('\\');
-				result.push_back('\\');
-			} else if (isPrintable(*iter)) {
-				if (numNull > 0) {
-					result += format("[%d]", numNull);
-					numNull = 0;
-				}
-				result.push_back(*iter);
-			} else {
-				const uint8_t byte = *iter;
-				if (PRINTABLE_COMPRESS_NULLS && byte == 0) {
-					numNull++;
-				} else {
-					result.push_back('\\');
-					result.push_back('x');
-					result.push_back(base16Char(byte / 16));
-					result.push_back(base16Char(byte));
-				}
-			}
-		}
-		if (numNull > 0) {
-			result += format("[%d]", numNull);
-			numNull = 0;
-		}
-		return result;
-	}
-};
-
-template <>
-struct Traceable<const char*> : TraceableStringImpl<const char*> {};
-template <>
-struct Traceable<char*> : TraceableStringImpl<char*> {};
-template <size_t S>
-struct Traceable<char[S]> : TraceableStringImpl<char[S]> {};
-template <>
-struct Traceable<std::string> : TraceableStringImpl<std::string> {};
-template <>
-struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
-
 template <class T>
 struct SpecialTraceMetricType
   : std::conditional<std::is_integral<T>::value || std::is_enum<T>::value, std::true_type, std::false_type>::type {
@@ -415,13 +215,57 @@ struct SpecialTraceMetricType
 
 TRACE_METRIC_TYPE(double, double);
 
+class AuditedEvent;
+
+inline constexpr AuditedEvent operator""_audit(const char*, size_t) noexcept;
+
+class AuditedEvent {
+	// special TraceEvents that may bypass throttling or suppression
+	static constexpr std::string_view auditTopics[]{
+		"AttemptedRPCToPrivatePrevented",
+		"AuditTokenUsed",
+		"AuthzPublicKeySetApply",
+		"AuthzPublicKeySetRefreshError",
+		"IncomingConnection",
+		"InvalidToken",
+		"N2_ConnectHandshakeError",
+		"N2_ConnectHandshakeUnknownError",
+		"N2_AcceptHandshakeError",
+		"N2_AcceptHandshakeUnknownError",
+		"UnauthorizedAccessPrevented",
+	};
+	const char* eventType;
+	int len;
+	bool valid;
+	explicit constexpr AuditedEvent(const char* type, int len) noexcept
+	  : eventType(type), len(len),
+	    valid(std::find(std::begin(auditTopics), std::end(auditTopics), std::string_view(type, len)) !=
+	          std::end(auditTopics)) // whitelist looked up during compile time
+	{}
+
+	friend constexpr AuditedEvent operator""_audit(const char*, size_t) noexcept;
+
+public:
+	constexpr const char* type() const noexcept { return eventType; }
+
+	constexpr std::string_view typeSv() const noexcept { return std::string_view(eventType, len); }
+
+	explicit constexpr operator bool() const noexcept { return valid; }
+};
+
+// This, along with private AuditedEvent constructor, guarantees that AuditedEvent is always created with a string
+// literal
+inline constexpr AuditedEvent operator""_audit(const char* eventType, size_t len) noexcept {
+	return AuditedEvent(eventType, len);
+}
+
 // The BaseTraceEvent class is the parent class of TraceEvent and provides all functionality on the TraceEvent except
 // for the functionality that can be used to suppress the trace event.
 //
 // This class is not intended to be used directly. Instead, this type is returned from most calls on trace events
 // (e.g. detail). This is done to disallow calling suppression functions anywhere but first in a chained sequence of
 // trace event function calls.
-struct BaseTraceEvent {
+struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 	BaseTraceEvent(BaseTraceEvent&& ev);
 	BaseTraceEvent& operator=(BaseTraceEvent&& ev);
 
@@ -432,7 +276,8 @@ struct BaseTraceEvent {
 	static std::string printRealTime(double time);
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value, BaseTraceEvent&>::type detail(std::string&& key, const T& value) {
+	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(std::string&& key,
+	                                                                                                 const T& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
@@ -442,7 +287,8 @@ struct BaseTraceEvent {
 	}
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value, BaseTraceEvent&>::type detail(const char* key, const T& value) {
+	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(const char* key,
+	                                                                                                 const T& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key, value, s);
@@ -461,6 +307,52 @@ struct BaseTraceEvent {
 	BaseTraceEvent& detailf(std::string key, const char* valueFormat, ...);
 
 protected:
+	class State {
+		enum class Type {
+			DISABLED = 0,
+			ENABLED,
+			FORCED,
+		};
+		Type value;
+
+	public:
+		constexpr State() noexcept : value(Type::DISABLED) {}
+		State(Severity severity) noexcept;
+		State(Severity severity, AuditedEvent) noexcept : State(severity) {
+			if (*this)
+				value = Type::FORCED;
+		}
+
+		State(const State& other) noexcept = default;
+		State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
+		State& operator=(const State& other) noexcept = default;
+		State& operator=(State&& other) noexcept {
+			if (this != &other) {
+				value = other.value;
+				other.value = Type::DISABLED;
+			}
+			return *this;
+		}
+		bool operator==(const State& other) const noexcept = default;
+		bool operator!=(const State& other) const noexcept = default;
+
+		explicit operator bool() const noexcept { return value == Type::ENABLED || value == Type::FORCED; }
+
+		void suppress() noexcept {
+			if (value == Type::ENABLED)
+				value = Type::DISABLED;
+		}
+
+		bool isSuppressible() const noexcept { return value == Type::ENABLED; }
+
+		void promoteToForcedIfEnabled() noexcept {
+			if (value == Type::ENABLED)
+				value = Type::FORCED;
+		}
+
+		static constexpr State disabled() noexcept { return State(); }
+	};
+
 	BaseTraceEvent();
 	BaseTraceEvent(Severity, const char* type, UID id = UID());
 
@@ -506,15 +398,16 @@ public:
 
 	BaseTraceEvent& GetLastError();
 
-	bool isEnabled() const { return enabled; }
+	bool isEnabled() const { return static_cast<bool>(enabled); }
 
+	BaseTraceEvent& errorUnsuppressed(const class Error& e);
 	BaseTraceEvent& setErrorKind(ErrorKind errorKind);
 
-	explicit operator bool() const { return enabled; }
+	explicit operator bool() const { return static_cast<bool>(enabled); }
 
 	void log();
 
-	void disable() { enabled = false; } // Disables the trace event so it doesn't get logged
+	void disable() { enabled.suppress(); } // Disables the trace event so it doesn't get logged
 
 	virtual ~BaseTraceEvent(); // Actually logs the event
 
@@ -524,10 +417,26 @@ public:
 	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
 
 	const TraceEventFields& getFields() const { return fields; }
+	Severity getSeverity() const { return severity; }
+
+	template <class Object>
+	void moveTo(Object& obj) {
+		obj.debugTrace(std::move(*this));
+	}
+
+	template <class Object>
+	void moveTo(Reference<Object> obj) {
+		obj->debugTrace(std::move(*this));
+	}
+
+	template <class Object>
+	void moveTo(Object* obj) {
+		obj->debugTrace(std::move(*this));
+	}
 
 protected:
+	State enabled;
 	bool initialized;
-	bool enabled;
 	bool logged;
 	std::string trackingKey;
 	TraceEventFields fields;
@@ -547,38 +456,39 @@ protected:
 	static unsigned long eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS];
 	static thread_local bool networkThread;
 
-	bool init();
-	bool init(struct TraceInterval&);
+	State init();
+	void init(struct TraceInterval&);
 };
 
 // The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
-struct TraceEvent : public BaseTraceEvent {
+struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 	TraceEvent() {}
 	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
 	TraceEvent(Severity, const char* type, UID id = UID());
 	TraceEvent(struct TraceInterval&, UID id = UID());
 	TraceEvent(Severity severity, struct TraceInterval& interval, UID id = UID());
+	TraceEvent(AuditedEvent, UID id = UID());
+	TraceEvent(Severity, AuditedEvent, UID id = UID());
 
-	BaseTraceEvent& error(const class Error& e) {
-		if (enabled) {
-			return errorImpl(e, false);
-		}
-		return *this;
-	}
-
+	BaseTraceEvent& error(const class Error& e);
 	TraceEvent& errorUnsuppressed(const class Error& e) {
-		if (enabled) {
-			return errorImpl(e, true);
-		}
+		BaseTraceEvent::errorUnsuppressed(e);
 		return *this;
 	}
 
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
 
-private:
-	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
+	// Exposed for Swift which cannot use std::enable_if
+	template <class T>
+	void addDetail(std::string key, const T& value) {
+		if (enabled && init()) {
+			auto s = Traceable<T>::toString(value);
+			addMetric(key.c_str(), value, s);
+			detailImpl(std::move(key), std::move(s), false);
+		}
+	}
 };
 
 class StringRef;
@@ -632,15 +542,21 @@ struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 #endif
 
 struct NetworkAddress;
-void openTraceFile(const NetworkAddress& na,
+template <class T>
+class Optional;
+
+using OptionalStdString = Optional<std::string>;
+using OptionalInt64 = Optional<int64_t>;
+
+void openTraceFile(const Optional<NetworkAddress>& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
                    std::string identifier = "",
-                   std::string tracePartialFileSuffix = "");
-void initTraceEventMetrics();
+                   std::string tracePartialFileSuffix = "",
+                   InitializeTraceMetrics initializeTraceMetrics = InitializeTraceMetrics::False);
 void closeTraceFile();
 bool traceFileIsOpen();
 void flushTraceFileVoid();
@@ -662,6 +578,7 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
+bool isTraceLocalAddressSet();
 void setTraceLocalAddress(const NetworkAddress& addr);
 void disposeTraceFileWriter();
 std::string getTraceFormatExtension();
