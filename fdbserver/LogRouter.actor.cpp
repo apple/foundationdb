@@ -256,12 +256,7 @@ ACTOR Future<Void> waitForVersion(LogRouterData* self, Version ver) {
 	// The only time the log router should allow a gap in versions larger than MAX_READ_TRANSACTION_LIFE_VERSIONS is
 	// when processing epoch end. Since one set of log routers is created per generation of transaction logs, the gap
 	// caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
-	TraceEvent("LogRouterWaitForVersion", self->dbgid)
-	    .detail("WaitForVersion", ver)
-	    .detail("StartVersion", self->startVersion)
-	    .detail("Version", self->version.get())
-	    .detail("MinPopped", self->minPopped.get())
-	    .detail("FoundEpochEnd", self->foundEpochEnd);
+
 	state double startTime = now();
 	if (self->version.get() < self->startVersion) {
 		// Log router needs to wait for remote tLogs to process data, whose version is less than self->startVersion,
@@ -301,6 +296,26 @@ ACTOR Future<Void> waitForVersion(LogRouterData* self, Version ver) {
 	self->waitForVersionTime += now() - startTime;
 	self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
 	return Void();
+}
+
+ACTOR Future<Void> waitForVersionAndLog(LogRouterData* self, Version ver) {
+	state Future<Void> f = waitForVersion(self, ver);
+	state double emitInterval = 60.0;
+	loop {
+		choose {
+			when(wait(f)) {
+				return Void();
+			}
+			when(wait(delay(emitInterval))) {
+				TraceEvent("LogRouterWaitForVersionLongDelay", self->dbgid)
+				    .detail("WaitForVersion", ver)
+				    .detail("StartVersion", self->startVersion)
+				    .detail("Version", self->version.get())
+				    .detail("MinPopped", self->minPopped.get())
+				    .detail("FoundEpochEnd", self->foundEpochEnd);
+			}
+		}
+	}
 }
 
 ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData* self,
@@ -385,7 +400,7 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					wait(waitForVersion(self, ver));
+					wait(waitForVersionAndLog(self, ver));
 
 					commitMessages(self, ver, messages);
 					self->version.set(ver);
@@ -400,7 +415,7 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 				if (!foundMessage) {
 					ver--; // ver is the next possible version we will get data for
 					if (ver > self->version.get() && ver >= r->popped()) {
-						wait(waitForVersion(self, ver));
+						wait(waitForVersionAndLog(self, ver));
 
 						self->version.set(ver);
 						wait(yield(TaskPriority::TLogCommit));
