@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/AccumulativeChecksum.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
 #include "fdbclient/StorageServerInterface.h"
@@ -517,6 +518,11 @@ extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 
 extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
+
+extern const KeyRef bulkLoadModeKey;
+extern const KeyRef bulkLoadPrefix;
+const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
+BulkLoadState decodeBulkLoadState(const ValueRef& value);
 
 // Keys to view and control tag throttling
 extern const KeyRangeRef tagThrottleKeys;

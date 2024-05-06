@@ -994,6 +994,26 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 	}
 }
 
+ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
+	loop {
+		try {
+			Database cx = self->txnProcessor->context();
+			Transaction tr(cx);
+			Optional<Value> mode = wait(tr.get(bulkLoadModeKey));
+			if (mode.present()) {
+				int bulkLoadMode = BinaryReader::fromStringRef<int>(mode.get(), Unversioned());
+				if (bulkLoadMode == 1) {
+					TraceEvent("BulkLoadingCore").detail("Status", "Mode On").log();
+					return Void();
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("BulkLoadingCore").detail("Status", "Error").errorUnsuppressed(e).log();
+			wait(delay(5.0));
+		}
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -1071,6 +1091,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+
+			actors.push_back(bulkLoadingCore(self));
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
