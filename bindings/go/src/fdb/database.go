@@ -61,7 +61,7 @@ type DatabaseOptions struct {
 }
 
 // Close will close the Database and clean up all resources.
-// You have to ensure that you're not resuing this database.
+// You have to ensure that you're not reusing this database.
 func (d Database) Close() {
 	// Remove database object from the cached databases
 	if d.isCached {
