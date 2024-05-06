@@ -61,7 +61,7 @@ struct BulkLoadState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, filePaths, taskId);
+		serializer(ar, range, loadType, phase, filePaths, taskId);
 	}
 
 	KeyRange range;
