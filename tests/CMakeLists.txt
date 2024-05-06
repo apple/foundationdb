@@ -296,6 +296,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
+  add_fdb_test(TEST_FILES rare/MockTLogGroup.toml)
+  add_fdb_test(TEST_FILES rare/MockTLog.toml)
   add_fdb_test(
     TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.toml
     restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.toml)

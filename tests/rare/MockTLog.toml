@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'Test MockTLog'
+startDelay = 0
+useDB = false
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 0
+    testsMatching = '/fdbserver/test/mocktlogdriver'
