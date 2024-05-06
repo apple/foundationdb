@@ -44,10 +44,11 @@ struct BulkLoadState {
 
 	BulkLoadState() = default;
 
-	BulkLoadState(BulkLoadType loadType, std::set<std::string> filePaths) : loadType(loadType), filePaths(filePaths) {}
+	BulkLoadState(BulkLoadType loadType, std::set<std::string> filePaths)
+	  : loadType(loadType), filePaths(filePaths), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
 
 	BulkLoadState(KeyRange range, BulkLoadType loadType, std::set<std::string> filePaths)
-	  : range(range), loadType(loadType), filePaths(filePaths) {}
+	  : range(range), loadType(loadType), filePaths(filePaths), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
 
 	bool isValid() const { return loadType != BulkLoadType::Invalid; }
 
@@ -56,14 +57,18 @@ struct BulkLoadState {
 		       ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) + ", [FilePath]: " + describe(filePaths);
 	}
 
+	void setTaskId(UID id) { taskId = id; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, filePaths);
+		serializer(ar, range, loadType, filePaths, taskId);
 	}
 
 	KeyRange range;
 	BulkLoadType loadType;
+	BulkLoadPhase phase;
 	std::set<std::string> filePaths;
+	UID taskId;
 };
 
 #endif

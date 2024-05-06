@@ -405,6 +405,9 @@ public:
 	Promise<Version> configChangeWatching;
 	Future<Void> onConfigChange;
 
+	ActorCollection bulkLoadActors;
+	std::unordered_map<UID, PromiseStream<int>> bulkLoadTasks;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
 	    configuration(context->configuration), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -413,7 +416,7 @@ public:
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
 	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
 	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1),
-	    auditStorageInitStarted(false) {}
+	    auditStorageInitStarted(false), bulkLoadActors(true) {}
 
 	// bootstrap steps
 
@@ -994,7 +997,7 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 	}
 }
 
-ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
+ACTOR Future<Void> waitForBulkLoadModeOn(Reference<DataDistributor> self) {
 	loop {
 		try {
 			Database cx = self->txnProcessor->context();
@@ -1003,12 +1006,189 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
 			if (mode.present()) {
 				int bulkLoadMode = BinaryReader::fromStringRef<int>(mode.get(), Unversioned());
 				if (bulkLoadMode == 1) {
-					TraceEvent("BulkLoadingCore").detail("Status", "Mode On").log();
 					return Void();
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent("BulkLoadingCore").detail("Status", "Error").errorUnsuppressed(e).log();
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			wait(delay(5.0));
+		}
+	}
+}
+
+void triggerBulkLoadDataMove(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+	// Following are atomic:
+	// Two splits
+	// One merge
+	// Create a new shard and trigger data move
+	ASSERT(self->bulkLoadTasks.find(taskId) == self->bulkLoadTasks.end());
+	self->bulkLoadTasks[taskId] = PromiseStream<int>();
+	return;
+}
+
+// All operation inside is transactional
+ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self, KeyRange range) {
+	// TODO:
+	// Stop merging and split, cancel existing merge and split
+	// Stop user traffic and mark it as running via the same transaction meanwhile check state
+	loop {
+		Database cx = self->txnProcessor->context();
+		state Transaction tr(cx);
+		state BulkLoadState bulkLoadState;
+		try {
+			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, range));
+			bulkLoadState = decodeBulkLoadState(result[0].value);
+			ASSERT(bulkLoadState.phase != BulkLoadPhase::Complete);
+			bulkLoadState.phase = BulkLoadPhase::Running; // Only place to set it running to metadata
+			bulkLoadState.taskId = deterministicRandom()->randomUniqueID(); // Only place to set task ID
+			wait(krmSetRange(&tr, bulkLoadPrefix, range, bulkLoadStateValue(bulkLoadState)));
+			triggerBulkLoadDataMove(self, bulkLoadState.range, bulkLoadState.taskId);
+			wait(tr.commit());
+			return bulkLoadState.taskId;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> waitOnBulkLoadInQueue(Reference<DataDistributor> self, UID taskId) {
+	loop choose {
+		when (int phaseInQueue = waitNext(self->bulkLoadTasks[taskId].getFuture())) {
+			// ...
+			break; // under a certain condition
+		}
+	}
+	return Void();
+}
+
+// Check progress of bulk loading via reading from bulk loading metadata
+// Exit when the metadata indicates the task completes
+ACTOR Future<Void> waitOnBulkLoad(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+	state double startTime = now();
+	state int retryTimes = 0;
+	state std::string exitReason;
+	loop {
+		Database cx = self->txnProcessor->context();
+		state Transaction tr(cx);
+		try {
+			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, range));
+			ASSERT(result.size() >= 2);
+			BulkLoadState bulkLoadState = decodeBulkLoadState(result[0].value);
+			if (bulkLoadState.taskId != taskId) {
+				exitReason = "Outdated: taskId mismatch";
+				break;
+			}
+			ASSERT(KeyRangeRef(result[0].key, result[1].key) == range);
+			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
+				exitReason = "Complete";
+				break;
+			} else if (bulkLoadState.phase == BulkLoadPhase::Error) {
+				throw bulkload_task_failed();
+			} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
+				wait(delay(10.0));
+			} else {
+				UNREACHABLE();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			wait(tr.onError(e));
+			retryTimes++;
+		}
+	}
+	TraceEvent(SevInfo, "BulkLoadingTaskEnd")
+		.detail("Reason", exitReason)
+		.detail("RunningTime", now() - startTime)
+		.detail("RetryTimes", retryTimes);
+	return Void();
+}
+
+void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, bool retry);
+
+ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range) {
+	TraceEvent("DoBulkLoadTask").detail("Range", range);
+	try {
+		state UID taskId = wait(startBulkLoadTask(self, range));
+		wait(waitOnBulkLoadInQueue(self, taskId));
+		wait(waitOnBulkLoad(self, range, taskId));
+		// At this point, bulk load task phase in metadata becomes complete
+		auto it = self->bulkLoadTasks.find(taskId);
+		ASSERT(it != self->bulkLoadTasks.end());
+		self->bulkLoadTasks.erase(it); // Only place to erase the promise
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		} else if (e.code() == error_code_bulkload_task_failed) {
+			runBulkLoadTaskOnRange(self, range, /*retry=*/true); // re-schedule
+		} else {
+			TraceEvent(SevWarn, "DoBulkLoadTaskUnexpectedError", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("Range", range);
+		}
+	}
+	return Void();
+}
+
+// fileChecksum is unique to a bulk load task
+void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, bool retry) {
+	TraceEvent(SevInfo, "RunBulkLoadTask", self->ddId)
+		.detail("Range", range)
+		.detail("Context", retry ? "Retry" : "New");
+	self->bulkLoadActors.add(doBulkLoadTask(self, range));
+	return;
+}
+
+ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		try {
+			// TODO: add parallelism limitation
+			Database cx = self->txnProcessor->context();
+			Transaction tr(cx);
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead));
+			for (int i = 0; i < result.size() - 1; i++) {
+				if (!result[i].value.empty()) {
+					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
+					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
+					if (range != bulkLoadState.range) {
+						TraceEvent(SevWarn, "BulkLoadingScheduleFailed")
+							.detail("Reason", "Task boundary changed")
+							.detail("BulkLoadTask", bulkLoadState.toString())
+							.detail("RangeInSpace", range);
+					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid || bulkLoadState.phase == BulkLoadPhase::Error) {
+						runBulkLoadTaskOnRange(self, bulkLoadState.range, /*retry=*/bulkLoadState.phase == BulkLoadPhase::Error);
+					} else {
+						ASSERT(bulkLoadState.phase == BulkLoadPhase::Running || bulkLoadState.phase == BulkLoadPhase::Complete);
+					}
+				}
+			}
+			beginKey = result.back().key;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			wait(delay(10.0));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
+	loop {
+		try {
+			self->bulkLoadActors.clear(true);
+			wait(waitForBulkLoadModeOn(self));
+			TraceEvent("BulkLoadingCore").detail("Status", "Mode On");
+			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
+			wait(self->bulkLoadActors.getResult());
+		} catch (Error& e) {
+			TraceEvent("BulkLoadingCore").detail("Status", "Error").errorUnsuppressed(e);
 			wait(delay(5.0));
 		}
 	}
@@ -1572,8 +1752,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 				coordSnapReqs.push_back(trySendSnapReq(
 				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
 		}
-		// At present, the fault injection workload doesn't respect the KNOB MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE
-		// Consequently, we ignore it in simulation tests
+		// At present, the fault injection workload doesn't respect the KNOB
+		// MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE Consequently, we ignore it in simulation tests
 		auto const coordFaultTolerance = std::min<int>(
 		    std::max<int>(0, (coordSnapReqs.size() - 1) / 2),
 		    g_network->isSimulated() ? coordSnapReqs.size() : SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
@@ -1635,8 +1815,8 @@ ACTOR Future<Void> ddSnapCreate(
         ddSnapResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!ddEnabledState->trySetSnapshot(snapReq.snapUID)) {
-		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
-		// here
+		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation
+		// fails here
 		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").detail("SnapUID", snapReq.snapUID);
 		ddSnapMap->at(snapReq.snapUID).reply.sendError(operation_failed());
 		ddSnapMap->erase(snapReq.snapUID);
@@ -3127,7 +3307,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	TraceEvent(SevInfo, "DDDoAuditLocationMetadataBegin", self->ddId)
 	    .detail("AuditId", audit->coreState.id)
 	    .detail("AuditRange", auditRange);
-	state AuditStorageState res(audit->coreState.id, audit->coreState.getType()); // we will set range of audit later
+	state AuditStorageState res(audit->coreState.id,
+	                            audit->coreState.getType()); // we will set range of audit later
 	state std::vector<Future<Void>> actors;
 	state std::vector<std::string> errors;
 	state AuditGetKeyServersRes keyServerRes;

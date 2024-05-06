@@ -171,6 +171,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
+	init( PRIORITY_BULK_LOADING,                                 961 );
 
 	init( FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD,                  0 ); if( randomize && BUGGIFY ) FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD = 700;
 

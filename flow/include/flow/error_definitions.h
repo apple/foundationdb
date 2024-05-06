@@ -113,6 +113,7 @@ ERROR( bulkload_check_status_input_error, 1088, "Bulk loading check task status 
 ERROR( bulkload_task_conflict, 1089, "Input bulk loading task is conflicting with existing task" )
 ERROR( bulkload_mode_not_found, 1090, "Cannot find bulk loading mode" )
 ERROR( bulkload_is_off_when_commit_task, 1091, "Bulk load mode is off when committing task" )
+ERROR( bulkload_task_failed, 1092, "Bulk load task is failed")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
