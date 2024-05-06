@@ -91,6 +91,15 @@ func (d *database) destroy() {
 // automatically creating and committing a transaction with appropriate retry
 // behavior.
 func (d Database) CreateTransaction() (Transaction, error) {
+	tr, err := d.createTransaction(true)
+	if err != nil {
+		return Transaction{}, err
+	}
+
+	return tr, nil
+}
+
+func (d Database) createTransaction(setFinalizer bool) (Transaction, error) {
 	var outt *C.FDBTransaction
 
 	if err := C.fdb_database_create_transaction(d.ptr, &outt); err != 0 {
@@ -98,7 +107,9 @@ func (d Database) CreateTransaction() (Transaction, error) {
 	}
 
 	t := &transaction{outt, d}
-	runtime.SetFinalizer(t, (*transaction).destroy)
+	if setFinalizer {
+		runtime.SetFinalizer(t, (*transaction).destroy)
+	}
 
 	return Transaction{t}, nil
 }
@@ -209,6 +220,7 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 //
 // The transaction is retried if the error is or wraps a retryable Error.
 // The error is unwrapped.
+// Read transactions are never committed and destroyed before returning to caller.
 //
 // Do not return Future objects from the function provided to ReadTransact. The
 // Transaction created by ReadTransact may be finalized at any point after
@@ -219,20 +231,19 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
 func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
-	tr, e := d.CreateTransaction()
+	tr, e := d.createTransaction(false)
 	// Any error here is non-retryable
 	if e != nil {
 		return nil, e
 	}
+	defer tr.transaction.destroy()
 
 	wrapped := func() (ret interface{}, e error) {
 		defer panicToError(&e)
 
 		ret, e = f(tr)
 
-		if e == nil {
-			e = tr.Commit().Get()
-		}
+		// read-only transactions are not committed and destroyed automatically on exit
 
 		return
 	}
