@@ -159,7 +159,8 @@ void GlobalConfig::erase(KeyRangeRef range) {
 // Updates local copy of global configuration by reading the entire key-range
 // from storage (proxied through the GrvProxies).
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) {
-	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
+	TraceEvent trace(SevInfo, "GlobalConfigRefresh");
+	std::cout << "Hfu5Refresh lastKnown=" << lastKnown << std::endl;
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
@@ -170,12 +171,16 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) 
 			                                       &GrvProxyInterface::refreshGlobalConfig,
 			                                       GlobalConfigRefreshRequest{ lastKnown }),
 			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			std::cout << "Hfu5Refresh reply received, lastKnown=" << lastKnown << std::endl;
 			for (const auto& kv : reply.result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
+				std::cout << "SystemKey=" << systemKey.toString() << std::endl;
 				self->insert(systemKey, kv.value);
 			}
 			return Void();
 		} catch (Error& e) {
+			TraceEvent("Hfu5GlobalConfigError").error(e);
+			std::cout << "Hfu5Refresh Error, lastKnown=" << lastKnown << " Error is " << e.code() << std::endl;
 			wait(backoff.onError());
 		}
 	}
@@ -187,6 +192,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 	loop {
 		try {
 			if (self->initialized.canBeSet()) {
+				std::cout << "Hfu5 Initialize updater" << std::endl;
 				wait(self->cx->onConnected());
 
 				wait(self->refresh(self, -1));
@@ -206,6 +212,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 						// This process missed too many global configuration
 						// history updates or the protocol version changed, so it
 						// must re-read the entire configuration range.
+						std::cout << "Hfu5 GlobalConfig refresh" << std::endl;
+
 						wait(self->refresh(self, history.back().version));
 						if (dbInfo->history.size() > 0) {
 							self->lastUpdate = dbInfo->history.back().version;
@@ -215,6 +223,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 						// version. Mutation history should already be stored in
 						// ascending version order.
 						for (const auto& vh : history) {
+							std::cout << "Hfu5 GlobalConfig Apply Version=" << vh.version << " lastUpdate=" << self->lastUpdate << std::endl;
 							if (vh.version <= self->lastUpdate) {
 								continue; // already applied this mutation
 							}

@@ -297,19 +297,32 @@ ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cach
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	loop {
 		try {
+			TraceEvent("HfuglobalConfigRefresh").detail("Version", *cachedVersion).log();
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
 			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
 			state Optional<Value> globalConfigVersion = wait(globalConfigVersionFuture);
 			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
 			*cachedData = tmpCachedData;
+			TraceEvent("HfuglobalConfigVersionBefore")
+				.detail("Exist", globalConfigVersion.present() ? "True" : "False")
+				.detail("Version", *cachedVersion)
+				.log();
 			if (globalConfigVersion.present()) {
 				Version parsedVersion;
 				memcpy(&parsedVersion, globalConfigVersion.get().begin(), sizeof(Version));
 				*cachedVersion = bigEndian64(parsedVersion);
 			}
+			TraceEvent("HfuglobalConfigVersionFinish")
+				.detail("Exist", globalConfigVersion.present() ? "True" : "False")
+				.detail("Version", *cachedVersion)
+				.log();
 			return Void();
 		} catch (Error& e) {
+			TraceEvent("HfuglobalConfigVersionError")
+				.detail("Version", *cachedVersion)
+				.detail("Code", e.code())
+				.log();
 			wait(tr->onError(e));
 		}
 	}

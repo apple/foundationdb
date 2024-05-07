@@ -8966,7 +8966,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	if (!cx->isError()) {
 		double sampleRate =
 			cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
-		std::cout << "Reading raw sample rate" << sampleRate << " isInf=" << (std::isinf(sampleRate) ? "True" : "False") << std::endl;
+		std::cout << "Reading raw sample rate=" << sampleRate << " isInf=" << (std::isinf(sampleRate) ? "True" : "False") << std::endl;
 		double clientSamplingProbability =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		// 	std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
