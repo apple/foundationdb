@@ -101,7 +101,8 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
-	// TraceEvent(SevInfo, "GlobalConfigInsert").detail("Key", key).detail("Value", value);
+	std::cout << "Hfu5 Inserting Range -- Erasing: " << key.toString() << std::endl;
+	TraceEvent(SevInfo, "GlobalConfigInsert").detail("Key", key).detail("Value", value);
 	data.erase(key);
 
 	Arena arena(key.expectedSize() + value.expectedSize());
@@ -124,6 +125,7 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 		} else {
 			ASSERT(false);
 		}
+		std::cout << "Hfu5 Inserting Range -- inserting again: " << key.toString() << "value is " << value.toString() << std::endl;
 		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
 
 		if (callbacks.find(stableKey) != callbacks.end()) {
@@ -139,7 +141,8 @@ void GlobalConfig::erase(Key key) {
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
-	// TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
+	std::cout << "Hfu5 Erasing Range" << range.toString() << std::endl;
+	TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
