@@ -387,6 +387,7 @@ public:
 	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+	PromiseStream<CreateBulkLoadShardRequest> createBulkLoadShard;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 
 	Promise<Void> initialized;
@@ -1018,25 +1019,16 @@ ACTOR Future<Void> waitForBulkLoadModeOn(Reference<DataDistributor> self) {
 	}
 }
 
-void triggerBulkLoadDataMove(Reference<DataDistributor> self, KeyRange range, UID taskId) {
-	// Following are atomic:
-	// Two splits
-	// One merge
-	// Create a new shard and trigger data move
-	ASSERT(self->bulkLoadTasks.find(taskId) == self->bulkLoadTasks.end());
-	self->bulkLoadTasks[taskId] = PromiseStream<int>();
-	return;
-}
-
 // All operation inside is transactional
-ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self, KeyRange range) {
-	// TODO:
-	// Stop merging and split, cancel existing merge and split
-	// Stop user traffic and mark it as running via the same transaction meanwhile check state
+// Return if a bulk load data move is successfully triggered
+ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self,
+                                    KeyRange range,
+                                    Promise<BulkLoadAckType> launchAck) {
 	loop {
 		Database cx = self->txnProcessor->context();
 		state Transaction tr(cx);
 		state BulkLoadState bulkLoadState;
+		state Promise<BulkLoadAckType> triggerAck;
 		try {
 			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, range));
 			bulkLoadState = decodeBulkLoadState(result[0].value);
@@ -1044,23 +1036,24 @@ ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self, KeyRange ra
 			bulkLoadState.phase = BulkLoadPhase::Triggered; // Only place to set it triggered to metadata
 			bulkLoadState.taskId = deterministicRandom()->randomUniqueID(); // Only place to set task ID
 			wait(krmSetRange(&tr, bulkLoadPrefix, range, bulkLoadStateValue(bulkLoadState)));
-			triggerBulkLoadDataMove(self, bulkLoadState.range, bulkLoadState.taskId);
-			wait(tr.commit());
+			wait(tr.commit()); // TODO: When commit proxy sees this transaction, it stops the user traffic within this
+			                   // range. CommitProxy should re-allow user traffic when it sees the bulk load on a range
+			                   // is acknowledged.
+			self->createBulkLoadShard.send(CreateBulkLoadShardRequest(
+			    range, bulkLoadState.taskId, tr.getCommittedVersion(), triggerAck, launchAck));
+			// Task with a newer version always overwrites the task with an older version when triggering data move
+			BulkLoadAckType ack = wait(triggerAck.getFuture());
+			if (ack != BulkLoadAckType::Succeed) {
+				TraceEvent(SevWarn, "BulkLoadTaskTriggerFailed", self->ddId)
+				    .detail("TaskID", bulkLoadState.taskId)
+				    .detail("Range", range);
+				throw bulkload_task_failed();
+			}
 			return bulkLoadState.taskId;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
-}
-
-ACTOR Future<Void> waitOnBulkLoadDequeue(Reference<DataDistributor> self, UID taskId) {
-	loop choose {
-		when(int phaseInQueue = waitNext(self->bulkLoadTasks[taskId].getFuture())) {
-			// ...
-			break; // under a certain condition
-		}
-	}
-	return Void();
 }
 
 // Check progress of bulk loading via reading from bulk loading metadata
@@ -1112,23 +1105,24 @@ void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, std
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range) {
 	TraceEvent("DoBulkLoadTask").detail("Range", range);
 	try {
-		state UID taskId = wait(startBulkLoadTask(self, range));
+		state Promise<BulkLoadAckType> launchAck;
+		state UID taskId = wait(startBulkLoadTask(self, range, launchAck));
 		TraceEvent("DoBulkLoadTaskStarted").detail("Range", range).detail("TaskId", taskId);
-		wait(waitOnBulkLoadDequeue(self, taskId));
-		// TODO: remove task from self->bulkLoadTasks
-		TraceEvent("DoBulkLoadTaskDequeued").detail("Range", range).detail("TaskId", taskId);
+		BulkLoadAckType ack = wait(launchAck.getFuture());
+		if (ack == BulkLoadAckType::Failed) {
+			TraceEvent(SevWarn, "BulkLoadTaskLaunchFailed", self->ddId).detail("Range", range).detail("TaskID", taskId);
+			throw bulkload_task_failed();
+		}
+		TraceEvent("DoBulkLoadTaskDataMovePersisted").detail("Range", range).detail("TaskId", taskId);
 		wait(waitOnBulkLoadEnd(self, range, taskId));
 		TraceEvent("DoBulkLoadTaskFinished").detail("Range", range).detail("TaskId", taskId);
 		// At this point, bulk load task phase in metadata becomes complete
+		// TODO: Wait on ack and restart boundary change
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
-		} else if (e.code() == error_code_bulkload_task_failed) {
-			runBulkLoadTaskOnRange(self, range, "Retry"); // re-schedule
 		} else {
-			TraceEvent(SevWarn, "DoBulkLoadTaskUnexpectedError", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("Range", range);
+			TraceEvent(SevWarn, "DoBulkLoadTaskFailed", self->ddId).errorUnsuppressed(e).detail("Range", range);
 		}
 	}
 	return Void();
@@ -1333,7 +1327,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                                 getTopKShardMetrics.getFuture(),
 			                                                                 getShardMetricsList.getFuture(),
 			                                                                 getAverageShardBytes.getFuture(),
-			                                                                 triggerStorageQueueRebalance.getFuture()),
+			                                                                 triggerStorageQueueRebalance.getFuture(),
+			                                                                 self->createBulkLoadShard.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));

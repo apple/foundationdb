@@ -829,6 +829,28 @@ ACTOR Future<Void> tenantCreationHandling(DataDistributionTracker* self, TenantC
 	return Void();
 }
 
+bool existBulkLoading(const KeyRangeMap<Version>& bulkLoadingMap, KeyRange keys) {
+	for (auto it : bulkLoadingMap.intersectingRanges(keys)) {
+		if (it->value() != invalidVersion) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool canTriggerBulkLoad(const KeyRangeMap<Version>& bulkLoadingMap, KeyRange keys, Version CommitVersion) {
+	for (auto it : bulkLoadingMap.intersectingRanges(keys)) {
+		ASSERT(it->value() != CommitVersion);
+		// If exist any intersecting bulkLoad task which is newer committed,
+		// the input bulkLoad task is logically cancelled by the newer one.
+		// So, do not launch the input one.
+		if (it->value() > CommitVersion) {
+			return false;
+		}
+	}
+	return true;
+}
+
 ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
@@ -918,6 +940,14 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
+	if (existBulkLoading(self->bulkLoadingMap, nextRange)) {
+		TraceEvent(SevWarn, "ShardCanForwardMergeButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("ShardMerging", keys)
+		    .detail("NextShard", nextRange);
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, nextRange);
 }
 
@@ -930,7 +960,63 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
+	if (existBulkLoading(self->bulkLoadingMap, prevRange)) {
+		TraceEvent(SevWarn, "ShardCanBackwardMergeButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("ShardMerging", keys)
+		    .detail("PrevShard", prevRange);
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, prevRange);
+}
+
+// Must be atomic
+void createShardToBulkLoad(DataDistributionTracker* self,
+                           KeyRange const& keys,
+                           Version commitVersion,
+                           UID taskId,
+                           Promise<BulkLoadAckType> triggerAck,
+                           Promise<BulkLoadAckType> launchAck) {
+	// Cancel the input task if there exists a newer bulk loading task on the input range
+	if (!canTriggerBulkLoad(self->bulkLoadingMap, keys, commitVersion)) {
+		triggerAck.send(BulkLoadAckType::Failed); // Indicating DDTracker has taken action
+		return;
+	}
+	TraceEvent e(SevInfo, "CreateShardToBulkLoad", self->distributorId);
+	e.detail("TaskId", taskId);
+	e.detail("BulkLoadRange", keys);
+	// Create shards at boundary and do not trigger data move on those boundary shards
+	// Create a new shard and trigger data move for bulk loading on the new shard
+	auto rangeMap = self->shards->intersectingRanges(keys);
+	KeyRange firstOverlapRange;
+	KeyRange lastOverlapRange;
+	if (rangeMap.begin().begin() != keys.begin) {
+		firstOverlapRange = Standalone(KeyRangeRef(rangeMap.begin().begin(), keys.begin));
+	}
+	if (rangeMap.end().begin() != keys.end) {
+		lastOverlapRange = Standalone(KeyRangeRef(keys.end, rangeMap.end().begin()));
+	}
+	if (!firstOverlapRange.empty()) {
+		restartShardTrackers(self, firstOverlapRange);
+		e.detail("FirstSplitShard", firstOverlapRange);
+	}
+	if (!lastOverlapRange.empty()) {
+		restartShardTrackers(self, lastOverlapRange);
+		e.detail("LastSplitShard", lastOverlapRange);
+	}
+	restartShardTrackers(self, keys);
+	e.detail("NewShardToLoad", keys);
+	if (!firstOverlapRange.empty()) {
+		self->shardsAffectedByTeamFailure->defineShard(firstOverlapRange);
+	}
+	if (!lastOverlapRange.empty()) {
+		self->shardsAffectedByTeamFailure->defineShard(lastOverlapRange);
+	}
+	self->shardsAffectedByTeamFailure->defineShard(keys);
+	self->bulkLoadingMap.insert(keys, commitVersion); // TODO: resume bulkLoadingMap when DD init
+	self->output.send(RelocateShard(keys, launchAck, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, taskId));
+	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has taken action
 }
 
 Future<Void> shardMerger(DataDistributionTracker* self,
@@ -1131,6 +1217,13 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
+	bool bulkLoading = existBulkLoading(self->bulkLoadingMap, keys);
+	if (bulkLoading && shouldSplit) {
+		TraceEvent(SevWarn, "ShardWantToSplitButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("KeyRange", keys);
+		shouldSplit = false;
+	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
 	if (keys.begin > allKeys.begin)
@@ -1143,6 +1236,12 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow &&
 	                   (shardForwardMergeFeasible(self, keys, nextIter.range()) ||
 	                    shardBackwardMergeFeasible(self, keys, prevIter.range()));
+	if (bulkLoading && shouldMerge) {
+		TraceEvent(SevWarn, "ShardWantToMergeButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("KeyRange", keys);
+		shouldMerge = false;
+	}
 
 	// Every invocation must set this or clear it
 	if (shouldMerge && !self->anyZeroHealthyTeams->get()) {
@@ -1523,6 +1622,9 @@ struct DataDistributionTrackerImpl {
 				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
 					self->actors.add(fetchShardMetricsList(self, req));
 				}
+				when(CreateBulkLoadShardRequest req = waitNext(self->createBulkLoadShard)) {
+					createShardToBulkLoad(self, req.keys, req.commitVersion, req.taskId, req.triggerAck, req.launchAck);
+				}
 				when(ServerTeamInfo req = waitNext(self->triggerStorageQueueRebalance)) {
 					TraceEvent e("TriggerDataMoveStorageQueueRebalance", self->distributorId);
 					e.detail("Server", req.serverId);
@@ -1584,13 +1686,17 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
                                           const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
                                           const FutureStream<GetMetricsListRequest>& getShardMetricsList,
                                           const FutureStream<Promise<int64_t>>& getAverageShardBytes,
-                                          const FutureStream<ServerTeamInfo>& triggerStorageQueueRebalance) {
+                                          const FutureStream<ServerTeamInfo>& triggerStorageQueueRebalance,
+                                          const FutureStream<CreateBulkLoadShardRequest>& createBulkLoadShard) {
 	self->getShardMetrics = getShardMetrics;
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
+	self->createBulkLoadShard = createBulkLoadShard;
 	self->userRangeConfig = initData->userRangeConfig;
+	self->bulkLoadingMap.insert(allKeys,
+	                            invalidVersion); // TODO: Resume for any RUNNING bulk loading task when DD restart
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

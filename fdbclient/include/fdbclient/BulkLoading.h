@@ -40,6 +40,11 @@ enum class BulkLoadType : uint8_t {
 	ShardedRocksDB = 3,
 };
 
+enum class BulkLoadAckType : uint8_t {
+	Failed = 0,
+	Succeed = 1,
+};
+
 struct BulkLoadState {
 	constexpr static FileIdentifier file_identifier = 1384499;
 

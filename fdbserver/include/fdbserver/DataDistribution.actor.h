@@ -24,6 +24,7 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
@@ -59,6 +60,7 @@ public:
 		SIZE_SPLIT,
 		WRITE_SPLIT,
 		TENANT_SPLIT,
+		BULKLOAD,
 		__COUNT
 	};
 	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
@@ -81,6 +83,8 @@ public:
 			return "WriteSplit";
 		case TENANT_SPLIT:
 			return "TenantSplit";
+		case BULKLOAD:
+			return "BulkLoad";
 		case __COUNT:
 			ASSERT(false);
 		}
@@ -123,6 +127,7 @@ struct DataMove {
 
 struct RelocateShard {
 	KeyRange keys;
+	Promise<BulkLoadAckType> launchAck;
 	int priority;
 	bool cancelled; // The data move should be cancelled.
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
@@ -138,6 +143,14 @@ struct RelocateShard {
 	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
 	    reason(reason), moveReason(moveReason), traceId(traceId) {}
+
+	RelocateShard(KeyRange const& keys,
+	              Promise<BulkLoadAckType> launchAck,
+	              DataMovementReason moveReason,
+	              RelocateReason reason,
+	              UID traceId)
+	  : keys(keys), launchAck(launchAck), priority(dataMovementPriority(moveReason)), cancelled(false),
+	    dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason), traceId(traceId) {}
 
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
@@ -220,6 +233,21 @@ struct GetMetricsListRequest {
 
 	GetMetricsListRequest() {}
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+};
+
+struct CreateBulkLoadShardRequest {
+	KeyRange keys;
+	Promise<BulkLoadAckType> triggerAck;
+	Promise<BulkLoadAckType> launchAck;
+	Version commitVersion;
+	UID taskId;
+	CreateBulkLoadShardRequest() {}
+	CreateBulkLoadShardRequest(KeyRange const& keys,
+	                           UID const& taskId,
+	                           Version commitVersion,
+	                           Promise<BulkLoadAckType> triggerAck,
+	                           Promise<BulkLoadAckType> launchAck)
+	  : keys(keys), commitVersion(commitVersion), taskId(taskId), triggerAck(triggerAck), launchAck(launchAck) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution

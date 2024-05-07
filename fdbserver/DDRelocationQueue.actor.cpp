@@ -96,6 +96,7 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
 		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD },
 		{ DataMovementReason::REBALANCE_STORAGE_QUEUE, SERVER_KNOBS->PRIORITY_REBALANCE_STORAGE_QUEUE },
+		{ DataMovementReason::BULKLOAD, SERVER_KNOBS->PRIORITY_BULK_LOADING },
 		{ DataMovementReason::ASSIGN_EMPTY_RANGE, -2 }, // dummy reason, no corresponding actual data move
 		{ DataMovementReason::SEED_SHARD_SERVER, -3 }, // dummy reason, no corresponding actual data move
 		{ DataMovementReason::NUMBER_OF_REASONS, -4 }, // dummy reason, no corresponding actual data move
@@ -146,10 +147,10 @@ RelocateData::RelocateData(RelocateShard const& rs)
     healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), dmReason(rs.moveReason),
     startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
     dataMoveId(rs.dataMoveId), workFactor(0),
-    wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
-                    rs.moveReason == DataMovementReason::SPLIT_SHARD ||
-                    rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
-                    rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE),
+    wantsNewServers(
+        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
+        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
+        rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE || rs.moveReason == DataMovementReason::BULKLOAD),
     cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
