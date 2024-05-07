@@ -6,11 +6,9 @@ Swift offers a unique modern type-safe low-ceremony approach taking the best of 
 apps to high-performance systems where previously memory-unsafe languages would be used. It also interoperates 
 seamlessly with C and C++.
 
-Since FoundationDB is largely implemented in C++ and Flow, large pieces of 
-
 ## Building with Swift
 
-Swift is built using the same CMake build as the rest of the project.
+Since FoundationDB is largely implemented in C++ and Flow, large pieces of Swift is built using the same CMake build as the rest of the project.
 
 To configure the build such that `clang` and `swiftc` are used, use the following:
 
