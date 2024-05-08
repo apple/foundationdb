@@ -198,6 +198,9 @@ public:
 	// STORAGE_FETCH_KEYS_RATE_LIMIT.
 	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
 
+	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT;
+	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+
 	// Data distribution
 	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
 	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
