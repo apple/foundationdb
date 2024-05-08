@@ -128,6 +128,7 @@ public:
 	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance,
 	                        FutureStream<CreateBulkLoadShardRequest> const& createBulkLoadShard);
+	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };
