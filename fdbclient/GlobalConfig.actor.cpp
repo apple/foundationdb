@@ -157,27 +157,33 @@ void GlobalConfig::erase(KeyRangeRef range) {
 }
 
 // Updates local copy of global configuration by reading the entire key-range
-// from storage (proxied through the GrvProxies).
-ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) {
-	TraceEvent trace(SevInfo, "GlobalConfigRefresh");
-	std::cout << "Hfu5Refresh lastKnown=" << lastKnown << std::endl;
+// from storage (proxied through the GrvProxies). Returns the version of the
+// refreshed data.
+ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown, Version largestSeen) {
+	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
+	std::cout << "Hfu5Refresh lastKnown=" << lastKnown << " largestSeen=" << largestSeen << std::endl;
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	loop {
 		try {
+			std::cout << "Hfu5Refresh request sent, lastKnown=" << lastKnown << " largestSeen=" << largestSeen << std::endl;
 			GlobalConfigRefreshReply reply =
 			    wait(timeoutError(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
 			                                       &GrvProxyInterface::refreshGlobalConfig,
 			                                       GlobalConfigRefreshRequest{ lastKnown }),
 			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
-			std::cout << "Hfu5Refresh reply received, lastKnown=" << lastKnown << std::endl;
+			std::cout << "Hfu5Refresh reply received, lastKnown=" << lastKnown << " largestSeen=" << largestSeen << std::endl;
 			for (const auto& kv : reply.result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 				std::cout << "SystemKey=" << systemKey.toString() << std::endl;
 				self->insert(systemKey, kv.value);
 			}
-			return Void();
+			if (reply.version >= largestSeen || largestSeen == std::numeric_limits<Version>::max()) {
+				return reply.version;
+			} else {
+				wait(delay(0.25));
+			}
 		} catch (Error& e) {
 			TraceEvent("Hfu5GlobalConfigError").error(e);
 			std::cout << "Hfu5Refresh Error, lastKnown=" << lastKnown << " Error is " << e.code() << std::endl;
@@ -195,59 +201,63 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 				std::cout << "Hfu5 Initialize updater" << std::endl;
 				wait(self->cx->onConnected());
 
-				wait(self->refresh(self, -1));
+				Version version = wait(self->refresh(self, -1, 0));
+				self->lastUpdate = version;
+
+				self->cx->addref();
 				self->initialized.send(Void());
+				self->cx->delref();
 			}
 
 			loop {
 				try {
-					wait(self->dbInfoChanged.onTrigger());
-
-					auto& history = dbInfo->history;
-					if (history.size() == 0) {
-						continue;
-					}
-					int size = history.size();
+					wait(delay(0));
+					int size = dbInfo->history.size();
 					for (int i = 0; i < size; i++) {
-						std::cout << "Hfu5 DBInfo Index="<< i <<" Version=" << history[i].version << std::endl;
+						std::cout << "Hfu5 DBInfo Index="<< i <<" Version=" << dbInfo->history[i].version << std::endl;
 					}
-
-					if (self->lastUpdate < history[0].version) {
-						// This process missed too many global configuration
-						// history updates or the protocol version changed, so it
-						// must re-read the entire configuration range.
-						std::cout << "Hfu5 GlobalConfig refresh" << std::endl;
-
-						wait(self->refresh(self, history.back().version));
-						if (dbInfo->history.size() > 0) {
-							self->lastUpdate = dbInfo->history.back().version;
-						}
-					} else {
-						// Apply history in order, from lowest version to highest
-						// version. Mutation history should already be stored in
-						// ascending version order.
-						for (const auto& vh : history) {
-							std::cout << "Hfu5 GlobalConfig Apply Version=" << vh.version << " lastUpdate=" << self->lastUpdate << std::endl;
-							if (vh.version <= self->lastUpdate) {
-								continue; // already applied this mutation
+					if (dbInfo->history.size() > 0) {
+						if (self->lastUpdate < dbInfo->history[0].version) {
+							// This process missed too many global configuration
+							// history updates or the protocol version changed, so it
+							// must re-read the entire configuration range.
+							Version version =
+							    wait(self->refresh(self, self->lastUpdate, dbInfo->history.back().version));
+							self->lastUpdate = version;
+							// DBInfo could have changed after the wait. If
+							// changes are present, re-run the loop to make
+							// sure they are applied.
+							if (dbInfo->history.size() > 0 && dbInfo->history[0].version != std::numeric_limits<Version>::max()) {
+								continue;
 							}
-
-							for (const auto& mutation : vh.mutations.contents()) {
-								if (mutation.type == MutationRef::SetValue) {
-									self->insert(mutation.param1, mutation.param2);
-								} else if (mutation.type == MutationRef::ClearRange) {
-									self->erase(KeyRangeRef(mutation.param1, mutation.param2));
-								} else {
-									ASSERT(false);
+						} else {
+							// Apply history in order, from lowest version to highest
+							// version. Mutation history should already be stored in
+							// ascending version order.
+							for (const auto& vh : dbInfo->history) {
+								if (vh.version <= self->lastUpdate) {
+									continue; // already applied this mutation
 								}
+
+								for (const auto& mutation : vh.mutations.contents()) {
+									if (mutation.type == MutationRef::SetValue) {
+										self->insert(mutation.param1, mutation.param2);
+									} else if (mutation.type == MutationRef::ClearRange) {
+										self->erase(KeyRangeRef(mutation.param1, mutation.param2));
+									} else {
+										ASSERT(false);
+									}
+								}
+
+								ASSERT(vh.version > self->lastUpdate);
+								self->lastUpdate = vh.version;
 							}
-
-							ASSERT(vh.version > self->lastUpdate);
-							self->lastUpdate = vh.version;
 						}
+						self->configChanged.trigger();
 					}
-
-					self->configChanged.trigger();
+					// In case this actor is canceled in the d'tor of GlobalConfig we can exit here.
+					wait(delay(0));
+					wait(self->dbInfoChanged.onTrigger());
 				} catch (Error& e) {
 					throw;
 				}

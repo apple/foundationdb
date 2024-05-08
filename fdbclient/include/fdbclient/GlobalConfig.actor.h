@@ -165,7 +165,7 @@ private:
 	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);
 
-	ACTOR static Future<Void> refresh(GlobalConfig* self, Version lastKnown);
+	ACTOR static Future<Version> refresh(GlobalConfig* self, Version lastKnown, Version largestSeen);
 	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
 
 	DatabaseContext* cx;

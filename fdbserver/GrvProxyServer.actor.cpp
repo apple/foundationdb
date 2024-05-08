@@ -297,14 +297,14 @@ ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cach
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	loop {
 		try {
-			TraceEvent("HfuglobalConfigRefresh").detail("Version", *cachedVersion).log();
+			TraceEvent("Hfu5globalConfigRefresh").detail("Version", *cachedVersion).log();
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
 			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
 			state Optional<Value> globalConfigVersion = wait(globalConfigVersionFuture);
 			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
 			*cachedData = tmpCachedData;
-			TraceEvent("HfuglobalConfigVersionBefore")
+			TraceEvent("Hfu5globalConfigVersionBefore")
 				.detail("Exist", globalConfigVersion.present() ? "True" : "False")
 				.detail("Version", *cachedVersion)
 				.log();
@@ -313,13 +313,13 @@ ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cach
 				memcpy(&parsedVersion, globalConfigVersion.get().begin(), sizeof(Version));
 				*cachedVersion = bigEndian64(parsedVersion);
 			}
-			TraceEvent("HfuglobalConfigVersionFinish")
+			TraceEvent("Hfu5globalConfigVersionFinish")
 				.detail("Exist", globalConfigVersion.present() ? "True" : "False")
 				.detail("Version", *cachedVersion)
 				.log();
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("HfuglobalConfigVersionError")
+			TraceEvent("Hfu5globalConfigVersionError")
 				.detail("Version", *cachedVersion)
 				.detail("Code", e.code())
 				.log();
@@ -355,8 +355,12 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 				// order to serve it to the client (up to date from the clients
 				// point of view. The client learns the version through a
 				// ClientDBInfo update).
+				TraceEvent("Hfu5GlobalConfigRequest")
+					.detail("LastKnown", refresh.lastKnown)
+					.detail("CachedVersion", cachedVersion)
+					.log();
 				if (refresh.lastKnown <= cachedVersion) {
-					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedData });
+					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedVersion, cachedData });
 				} else {
 					refresh.reply.sendError(future_version());
 				}
