@@ -687,9 +687,9 @@ func (o TransactionOptions) SetAutoThrottleTag(param string) error {
 	return o.setOpt(801, []byte(param))
 }
 
-// Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes
+// Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with a 33 bytes serialized binary format which consists of: 8 bytes protocol version, e.g. ``0x0FDB00B073000000LL`` in little-endian format, 16 bytes trace id, 8 bytes span id, 1 byte set to 1 if sampling is enabled
 //
-// Parameter: A byte string of length 16 used to associate the span of this transaction with a parent
+// Parameter: A serialized binary byte string of length 33 used to associate the span of this transaction with a parent
 func (o TransactionOptions) SetSpanParent(param []byte) error {
 	return o.setOpt(900, param)
 }
@@ -716,9 +716,16 @@ func (o TransactionOptions) SetAuthorizationToken(param string) error {
 	return o.setOpt(2000, []byte(param))
 }
 
-// Enables replica consistency check, which compares the results returned by all storage server replicas for a given read request, in client-side load balancer.
+// Enables replica consistency check, which compares the results returned by storage server replicas (as many as specified by consistency_check_required_replicas option) for a given read request, in client-side load balancer.
 func (o TransactionOptions) SetEnableReplicaConsistencyCheck() error {
 	return o.setOpt(4000, nil)
+}
+
+// Specifies the number of storage server replica results that the load balancer needs to compare when enable_replica_consistency_check option is set.
+//
+// Parameter: Number of storage replicas over which the load balancer consistency check is done.
+func (o TransactionOptions) SetConsistencyCheckRequiredReplicas(param int64) error {
+	return o.setOpt(4001, int64ToBytes(param))
 }
 
 type StreamingMode int
