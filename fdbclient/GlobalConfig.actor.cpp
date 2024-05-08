@@ -207,6 +207,10 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 					if (history.size() == 0) {
 						continue;
 					}
+					int size = history.size();
+					for (int i = 0; i < size; i++) {
+						std::cout << "Hfu5 DBInfo Index="<< i <<" Version=" << history[i].version << std::endl;
+					}
 
 					if (self->lastUpdate < history[0].version) {
 						// This process missed too many global configuration
