@@ -32,7 +32,7 @@ public:
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
-	PromiseStream<ServerTeamInfo> triggerStorageQueueRebalance;
+	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 	PromiseStream<CreateBulkLoadShardRequest> createBulkLoadShard;
 
 	KeyRangeMap<ShardTrackedData> shards;
