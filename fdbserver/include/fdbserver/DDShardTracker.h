@@ -30,7 +30,7 @@ public:
 	FutureStream<GetTopKMetricsRequest> getTopKMetrics;
 	FutureStream<GetMetricsListRequest> getShardMetricsList;
 	FutureStream<Promise<int64_t>> averageShardBytes;
-	FutureStream<ServerTeamInfo> triggerStorageQueueRebalance;
+	FutureStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 
 	virtual double getAverageShardBytes() = 0;
 	virtual ~IDDShardTracker() = default;
@@ -123,7 +123,7 @@ public:
 	                        FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
 	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
 	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes,
-	                        FutureStream<ServerTeamInfo> const& triggerStorageQueueRebalance);
+	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };
