@@ -62,7 +62,7 @@ type DatabaseOptions struct {
 
 // Close will close the Database and clean up all resources.
 // You have to ensure that you're not resuing this database.
-func (d *Database) Close() {
+func (d Database) Close() {
 	// Remove database object from the cached databases
 	if d.isCached {
 		openDatabases.Delete(d.clusterFile)

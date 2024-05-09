@@ -345,7 +345,7 @@ func createDatabase(clusterFile string) (Database, error) {
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{clusterFile, true, db}, nil
+	return Database{clusterFile: clusterFile, isCached: true, database: db}, nil
 }
 
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
