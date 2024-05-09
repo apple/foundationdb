@@ -410,7 +410,7 @@ func TestCreateExistTenant(t *testing.T) {
 	assertErrorCodeEqual(t, err, errTenantExists)
 }
 
-/* FIXME: This test will not pass as FDB does not support the tenant yet
+/* FIXME: This test will not pass as does not properly return error code TenantNotFound
 func TestOpenNotExistTenant(t *testing.T) {
 	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
