@@ -1592,7 +1592,7 @@ public:
 								teams.push_back(ShardsAffectedByTeamFailure::Team(servers, self->primary));
 							}
 							self->triggerStorageQueueRebalance.send(
-							    ServerTeamInfo(server->getId(), teams, self->primary));
+							    RebalanceStorageQueueRequest(server->getId(), teams, self->primary));
 						}
 					}
 				}
@@ -6013,7 +6013,7 @@ public:
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
-		                                                     PromiseStream<ServerTeamInfo>() }));
+		                                                     PromiseStream<RebalanceStorageQueueRequest>() }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -6067,7 +6067,7 @@ public:
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
-		                                                     PromiseStream<ServerTeamInfo>() }));
+		                                                     PromiseStream<RebalanceStorageQueueRequest>() }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
