@@ -297,17 +297,17 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
-    restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.toml
+    restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.txt
-    restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.toml
+    restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.txt
-    restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.txt)
+    TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.toml
+    restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1.txt
-    restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-2.txt)
+    TEST_FILES restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1.toml
+    restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_6.3.13/ClientTransactionProfilingCorrectness-1.txt
     restarting/from_6.3.13/ClientTransactionProfilingCorrectness-2.txt)
@@ -432,6 +432,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
+  add_fdb_test(TEST_FILES slow/ApiCorrectnessWithConsistencyCheck.toml)
   add_fdb_test(TEST_FILES slow/BlobGranuleVerifyLarge.toml)
   add_fdb_test(TEST_FILES slow/BlobGranuleVerifyLargeClean.toml)
   add_fdb_test(TEST_FILES slow/BlobGranuleVerifyBalance.toml)
@@ -561,7 +562,8 @@ if(WITH_PYTHON)
     string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
     string(APPEND authz_venv_cmd "&& pip install --upgrade pip ")
     string(APPEND authz_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
-    string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) ")
+	# NOTE: Here we are already in the venv so Python3_EXECUTABLE is not available anymore
+    string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
     string(APPEND authz_venv_cmd "&& touch ${authz_venv_stamp_file} ")
     string(APPEND authz_venv_cmd "|| echo 'venv already set up'")
     add_test(

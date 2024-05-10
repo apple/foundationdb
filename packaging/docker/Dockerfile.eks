@@ -67,7 +67,7 @@ RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-e
 
 WORKDIR /
 
-FROM golang:1.17.11-bullseye AS go-build
+FROM golang:1.22.2-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
@@ -178,7 +178,7 @@ ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
-FROM base as ycsb
+FROM foundationdb-base as ycsb
 
 RUN yum -y install \
     java-11-amazon-corretto-11.0.13+8-1.amzn2 && \
@@ -187,9 +187,10 @@ RUN yum -y install \
 
 # TODO: Log4J complains that it's eating the HTracer logs.  Even without it, we get per-operation
 # time series graphs of throughput, median, 90, 99, 99.9 and 99.99 (in usec).
-ADD run_ycsb.sh /usr/local/bin/run_ycsb.sh
+ADD run_ycsb.sh run_ycsb_standalone.sh /usr/local/bin
 RUN mkdir -p /var/log/fdb-trace-logs && \
-    chmod +x /usr/local/bin/run_ycsb.sh
+    chmod +x /usr/local/bin/run_ycsb.sh && \
+    chmod +x /usr/local/bin/run_ycsb_standalone.sh
 
 ADD YCSB /YCSB
 WORKDIR /YCSB
@@ -197,4 +198,4 @@ ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/var/dynamic-conf/lib/multivers
 ENV FDB_NETWORK_OPTION_TRACE_ENABLE=/var/log/fdb-trace-logs
 ENV LD_LIBRARY_PATH=/var/dynamic-conf/lib/
 ENV BUCKET=""
-CMD ["run_ycsb.sh"]
+ENTRYPOINT ["run_ycsb.sh"]

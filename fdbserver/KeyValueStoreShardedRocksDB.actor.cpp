@@ -502,7 +502,6 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
-	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
@@ -611,7 +610,7 @@ rocksdb::DBOptions getOptions() {
 	}
 
 	options.wal_recovery_mode = getWalRecoveryMode();
-	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
+	options.max_open_files = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	options.max_subcompactions = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
@@ -659,6 +658,7 @@ rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
 	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+	options.async_io = SERVER_KNOBS->SHARDED_ROCKSDB_READ_ASYNC_IO;
 	return options;
 }
 
@@ -1121,12 +1121,29 @@ public:
 		// Open instance.
 		TraceEvent(SevInfo, "ShardedRocksDBInitBegin", this->logId).detail("DataPath", path);
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
-			// Set rate limiter to a higher rate to avoid blocking storage engine initialization.
-			auto rateLimiter = rocksdb::NewGenericRateLimiter((int64_t)5 << 30, // 5GB
-			                                                  100 * 1000, // refill_period_us
-			                                                  10, // fairness
-			                                                  rocksdb::RateLimiter::Mode::kWritesOnly,
-			                                                  SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
+			rocksdb::RateLimiter::Mode mode;
+			switch (SERVER_KNOBS->SHARDED_ROCKSDB_RATE_LIMITER_MODE) {
+			case 0:
+				mode = rocksdb::RateLimiter::Mode::kReadsOnly;
+				break;
+			case 1:
+				mode = rocksdb::RateLimiter::Mode::kWritesOnly;
+				break;
+			case 2:
+				mode = rocksdb::RateLimiter::Mode::kAllIo;
+				break;
+			default:
+				TraceEvent(SevWarnAlways, "IncorrectRateLimiterMode")
+				    .detail("Mode", SERVER_KNOBS->SHARDED_ROCKSDB_RATE_LIMITER_MODE);
+				mode = rocksdb::RateLimiter::Mode::kWritesOnly;
+			}
+
+			auto rateLimiter =
+			    rocksdb::NewGenericRateLimiter(SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,
+			                                   100 * 1000, // refill_period_us
+			                                   10, // fairness
+			                                   mode,
+			                                   SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
 			dbOptions.rate_limiter = std::shared_ptr<rocksdb::RateLimiter>(rateLimiter);
 		}
 		std::vector<std::string> columnFamilies;
@@ -1287,9 +1304,6 @@ public:
 		    0 /* default_cf_ts_sz default:0 */);
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
-		if (SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
-			dbOptions.rate_limiter->SetBytesPerSecond(SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC);
-		}
 		TraceEvent(SevInfo, "ShardedRocksDBInitEnd", this->logId)
 		    .detail("DataPath", path)
 		    .detail("Duration", now() - start);
@@ -1722,9 +1736,6 @@ public:
 	}
 
 	void closeAllShards() {
-		if (dbOptions.rate_limiter != nullptr) {
-			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
-		}
 		columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
@@ -1737,9 +1748,6 @@ public:
 	}
 
 	void destroyAllShards() {
-		if (dbOptions.rate_limiter != nullptr) {
-			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
-		}
 		auto metadataShard = getMetaDataShard();
 		KeyRange metadataRange = prefixRange(shardMappingPrefix);
 		rocksdb::WriteOptions options;

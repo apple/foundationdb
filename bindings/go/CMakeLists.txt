@@ -20,7 +20,9 @@ set(SRCS
   src/fdb/database.go
   src/fdb/directory/directorySubspace.go
   src/fdb/fdb_test.go
-  src/fdb/snapshot.go)
+  src/fdb/snapshot.go
+
+  go.mod)
 
 set(GOPATH ${CMAKE_CURRENT_BINARY_DIR})
 set(GO_PACKAGE_ROOT github.com/apple/foundationdb/bindings/go)
@@ -100,8 +102,6 @@ function(build_go_package)
   endif()
   add_custom_command(OUTPUT ${outfile}
     COMMAND ${CMAKE_COMMAND} -E env ${go_env}
-            ${GO_EXECUTABLE} get -d ${GO_IMPORT_PATH}/${BGP_PATH} &&
-            ${CMAKE_COMMAND} -E env ${go_env}
             ${GO_EXECUTABLE} install ${GO_IMPORT_PATH}/${BGP_PATH}
     DEPENDS ${fdb_options_file}
     COMMENT "Building ${BGP_NAME}")

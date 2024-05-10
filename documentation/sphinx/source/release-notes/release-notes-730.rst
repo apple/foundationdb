@@ -2,9 +2,49 @@
 Release Notes
 #############
 
+7.3.37
+======
+* Same as 7.3.36 release with AVX enabled.
+
+7.3.36
+======
+* Fixed a DR corruption issue where destination cluster gets no mutations. `(PR #11246) <https://github.com/apple/foundationdb/pull/11246>`_
+* Added rocksdb direct_io knobs. `(PR #11267) <https://github.com/apple/foundationdb/pull/11267>`_
+
+7.3.35
+======
+* Same as 7.3.34 release with AVX enabled.
+
+7.3.34
+======
+* Added storage-queue-aware load balancer for data distributor. `(PR #11195) <https://github.com/apple/foundationdb/pull/11195>`_
+* Added a checksum field in MutationRef. `(PR #11193) <https://github.com/apple/foundationdb/pull/11193>`_
+* Abort processes when abnormal shutdown is initiated to enable coredumps. `(PR #11198) <https://github.com/apple/foundationdb/pull/11198>`_
+* Fixed fdbcli's checkall debug command. `(PR #11208) <https://github.com/apple/foundationdb/pull/11208>`_
+* Added knobs for enabling RocksDB in-memory checksums for data structures. `(PR #11214) <https://github.com/apple/foundationdb/pull/11214>`_
+* Fixed calculation of EmptyMessageRatio when version vector was enabled. `(PR #11227) <https://github.com/apple/foundationdb/pull/11227>`_
+* Added consistency checker urgent mode. `(PR #11228) <https://github.com/apple/foundationdb/pull/11228>`_
+* Disabled compaction compaction for newly added shard and fixed block cache usage reporting. `(PR #11247) <https://github.com/apple/foundationdb/pull/11247>`_
+* Fixed setting perpetual_storage_wiggle_engine is considered as wrongly configured. `(PR #11252) <https://github.com/apple/foundationdb/pull/11252>`_
+* Added a max range deletions knob before flush. `(PR #11243) <https://github.com/apple/foundationdb/pull/11243>`_
+
+7.3.33
+======
+* Same as 7.3.32 release with AVX enabled.
+
+7.3.32
+======
+* Enabled data distributor verbose tracing by default. `(PR #11159) <https://github.com/apple/foundationdb/pull/11159>`_
+* Added RocksDB file checksum knobs. `(PR #11171) <https://github.com/apple/foundationdb/pull/11171>`_
+* Fixed a regression that caused rebalance data moves to be scheduled at a much lower frequency. `(PR #11167) <https://github.com/apple/foundationdb/pull/11167>`_
+* Added throttling of RocksDB flushes when memtable layers exceed a limit. `(PR #11182) <https://github.com/apple/foundationdb/pull/11182>`_
+* Added a trace event when a log router cannot find its primary peek location. `(PR #11180) <https://github.com/apple/foundationdb/pull/11180>`_
+* Upgraded RocksDB version to 8.10.0. `(PR #11175) <https://github.com/apple/foundationdb/pull/11175>`_
+* Added periodical logging for RocksDB compaction reasons. `(PR #11186) <https://github.com/apple/foundationdb/pull/11186>`_
+
 7.3.31
 ======
-* Same as 7.3.30 release with AVX disabled.
+* Same as 7.3.30 release with AVX enabled.
 
 7.3.30
 ======
@@ -13,7 +53,7 @@ Release Notes
 
 7.3.29
 ======
-* Same as 7.3.28 release with AVX disabled.
+* Same as 7.3.28 release with AVX enabled.
 
 7.3.28
 ======
@@ -23,7 +63,7 @@ Release Notes
 
 7.3.27
 ======
-* Same as 7.3.26 release with AVX disabled.
+* Same as 7.3.26 release with AVX enabled.
 
 7.3.26
 ======

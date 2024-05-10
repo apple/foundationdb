@@ -549,6 +549,12 @@ ACTOR Future<Void> readCommitted(Database cx,
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (CLIENT_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS) {
+				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
+				int64_t requiredReplicas = CLIENT_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
+				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
+			}
 
 			// add lock
 			releaser.release();

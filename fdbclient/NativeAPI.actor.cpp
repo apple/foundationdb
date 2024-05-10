@@ -131,9 +131,12 @@ Future<REPLY_TYPE(Request)> loadBalance(
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = nullptr) {
+    QueueModel* model = nullptr,
+    bool compareReplicas = false,
+    int requiredReplicas = 0) {
 	if (alternatives->hasCaches) {
-		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
+		return loadBalance(
+		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 	}
 	return fmap(
 	    [ctx](auto const& res) {
@@ -142,7 +145,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		    }
 		    return res;
 	    },
-	    loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model));
+	    loadBalance(
+	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
 }
 } // namespace
 
@@ -3685,21 +3689,23 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					when(wait(trState->cx->connectionFileChanged())) {
 						throw transaction_too_old();
 					}
-					when(GetValueReply _reply = wait(loadBalance(
-					         trState->cx.getPtr(),
-					         locationInfo.locations,
-					         &StorageServerInterface::getValue,
-					         GetValueRequest(span.context,
-					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
-					                         key,
-					                         trState->readVersion(),
-					                         trState->cx->sampleReadTags() ? trState->options.readTags
-					                                                       : Optional<TagSet>(),
-					                         readOptions,
-					                         ssLatestCommitVersions),
-					         TaskPriority::DefaultPromiseEndpoint,
-					         AtMostOnce::False,
-					         trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr))) {
+					when(GetValueReply _reply = wait(
+					         loadBalance(trState->cx.getPtr(),
+					                     locationInfo.locations,
+					                     &StorageServerInterface::getValue,
+					                     GetValueRequest(span.context,
+					                                     useTenant ? trState->getTenantInfo() : TenantInfo(),
+					                                     key,
+					                                     trState->readVersion(),
+					                                     trState->cx->sampleReadTags() ? trState->options.readTags
+					                                                                   : Optional<TagSet>(),
+					                                     readOptions,
+					                                     ssLatestCommitVersions),
+					                     TaskPriority::DefaultPromiseEndpoint,
+					                     AtMostOnce::False,
+					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
+					                     trState->options.enableReplicaConsistencyCheck,
+					                     trState->options.requiredReplicas))) {
 						reply = _reply;
 					}
 				}
@@ -3832,14 +3838,16 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Use
 					when(wait(trState->cx->connectionFileChanged())) {
 						throw transaction_too_old();
 					}
-					when(GetKeyReply _reply = wait(loadBalance(
-					         trState->cx.getPtr(),
-					         locationInfo.locations,
-					         &StorageServerInterface::getKey,
-					         req,
-					         TaskPriority::DefaultPromiseEndpoint,
-					         AtMostOnce::False,
-					         trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr))) {
+					when(GetKeyReply _reply = wait(
+					         loadBalance(trState->cx.getPtr(),
+					                     locationInfo.locations,
+					                     &StorageServerInterface::getKey,
+					                     req,
+					                     TaskPriority::DefaultPromiseEndpoint,
+					                     AtMostOnce::False,
+					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
+					                     trState->options.enableReplicaConsistencyCheck,
+					                     trState->options.requiredReplicas))) {
 						reply = _reply;
 					}
 				}
@@ -4365,7 +4373,9 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 						         req,
 						         TaskPriority::DefaultPromiseEndpoint,
 						         AtMostOnce::False,
-						         trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr))) {
+						         trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
+						         trState->options.enableReplicaConsistencyCheck,
+						         trState->options.requiredReplicas))) {
 							rep = _rep;
 						}
 					}
@@ -4769,7 +4779,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
 					                     AtMostOnce::False,
-					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr));
+					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
+					                     trState->options.enableReplicaConsistencyCheck,
+					                     trState->options.requiredReplicas));
 					rep = _rep;
 					++trState->cx->transactionPhysicalReadsCompleted;
 				} catch (Error&) {
@@ -5041,7 +5053,7 @@ static Future<Void> tssStreamComparison(Request request,
 				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
 				        : SevError,
-				    TSS_mismatchTraceName(request));
+				    LB_mismatchTraceName(request, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
@@ -5064,7 +5076,7 @@ static Future<Void> tssStreamComparison(Request request,
 						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 						                            ? SevWarnAlways
 						                            : SevError,
-						                        TSS_mismatchTraceName(request));
+						                        LB_mismatchTraceName(request, TSS_COMPARISON));
 						summaryEvent.detail("TSSID", tssData.tssId).detail("MismatchId", mismatchUID);
 					}
 				} else {
@@ -6202,6 +6214,8 @@ void TransactionOptions::clear() {
 	skipGrvCache = false;
 	rawAccess = false;
 	bypassStorageQuota = false;
+	enableReplicaConsistencyCheck = false;
+	requiredReplicas = 0;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -7285,6 +7299,15 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->readOptions.withDefault(ReadOptions()).type = ReadType::HIGH;
 		break;
 
+	case FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK:
+		validateOptionValueNotPresent(value);
+		trState->options.enableReplicaConsistencyCheck = true;
+		break;
+
+	case FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS:
+		validateOptionValuePresent(value);
+		trState->options.requiredReplicas = extractIntOption(value, -2, std::numeric_limits<int64_t>::max());
+
 	default:
 		break;
 	}
@@ -7361,15 +7384,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded && e.code() != error_code_proxy_tag_throttled)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-			if (e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
-				wait(delayJittered(5.0));
-			} else if (e.code() == error_code_grv_proxy_memory_limit_exceeded) {
-				// FIXME(xwang): the better way is to let this error broadcast to transaction.onError(e), otherwise the
-				// txn->cx counter doesn't make sense
-				wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
-			} else {
-				throw;
-			}
+			throw;
 		}
 	}
 }

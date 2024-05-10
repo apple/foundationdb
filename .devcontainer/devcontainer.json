@@ -1,0 +1,33 @@
+{
+  "name": "FoundationDB remote dev env",
+  "image": "foundationdb/devel:centos7-latest",
+  "features": {},
+  "capAdd": [
+    "SYS_PTRACE"
+  ],
+  "privileged": true,
+  "securityOpt": [
+    "seccomp=unconfined"
+  ],
+  "hostRequirements": {
+    "storage": "60gb"
+  },
+  "containerEnv": {
+    "CC": "clang",
+    "CXX": "clang++",
+    "BOOST_ROOT": "/opt/boost_1_78_0_clang"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-vscode.cmake-tools"
+      ],
+      "settings": {
+        "cmake.configureArgs": [
+          "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+        ]
+      }
+    }
+  }
+}

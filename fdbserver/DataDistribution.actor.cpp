@@ -1033,7 +1033,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			ASSERT(self->configuration.storageTeamSize > 0);
 
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
-			state PromiseStream<ServerTeamInfo> triggerStorageQueueRebalance;
+			state PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
