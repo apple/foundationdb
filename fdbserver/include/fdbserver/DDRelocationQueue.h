@@ -59,6 +59,9 @@ public:
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
 
+	Optional<BulkLoadState> bulkLoadState;
+	Promise<BulkLoadAckType> launchAck;
+
 	RelocateData();
 	explicit RelocateData(RelocateShard const& rs);
 

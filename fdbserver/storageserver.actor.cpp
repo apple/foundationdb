@@ -8451,6 +8451,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		throw e;
 	}
 
+	if (priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+		TraceEvent("SSBulkLoadByFetchKeys").detail("Shard", keys);
+	}
+
 	try {
 		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
 

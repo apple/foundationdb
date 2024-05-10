@@ -250,7 +250,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 					                                          false,
 					                                          UID(), // for logging only
 					                                          &ddEnabledState,
-					                                          CancelConflictingDataMoves::True);
+					                                          CancelConflictingDataMoves::True,
+					                                          Optional<BulkLoadState>());
 				} else {
 					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 					                               AssignEmptyRange(false),
@@ -268,7 +269,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 					                                          false,
 					                                          UID(), // for logging only
 					                                          &ddEnabledState,
-					                                          CancelConflictingDataMoves::True);
+					                                          CancelConflictingDataMoves::True,
+					                                          Optional<BulkLoadState>());
 				}
 				wait(moveKeys(cx, *params));
 				break;

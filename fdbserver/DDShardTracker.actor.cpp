@@ -973,21 +973,21 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 
 // Must be atomic
 void createShardToBulkLoad(DataDistributionTracker* self,
-                           KeyRange const& keys,
+                           BulkLoadState bulkLoadState,
                            Version commitVersion,
-                           UID taskId,
                            Promise<BulkLoadAckType> triggerAck,
                            Promise<BulkLoadAckType> launchAck) {
 	// Cancel the input task if there exists a newer bulk loading task on the input range
-	if (!canTriggerBulkLoad(self->bulkLoadingMap, keys, commitVersion)) {
+	if (!canTriggerBulkLoad(self->bulkLoadingMap, bulkLoadState.range, commitVersion)) {
 		triggerAck.send(BulkLoadAckType::Failed); // Indicating DDTracker has taken action
 		return;
 	}
 	TraceEvent e(SevInfo, "CreateShardToBulkLoad", self->distributorId);
-	e.detail("TaskId", taskId);
-	e.detail("BulkLoadRange", keys);
+	e.detail("TaskId", bulkLoadState.taskId);
+	e.detail("BulkLoadRange", bulkLoadState.range);
 	// Create shards at boundary and do not trigger data move on those boundary shards
 	// Create a new shard and trigger data move for bulk loading on the new shard
+	KeyRange keys = bulkLoadState.range;
 	auto rangeMap = self->shards->intersectingRanges(keys);
 	KeyRange firstOverlapRange;
 	KeyRange lastOverlapRange;
@@ -1015,7 +1015,8 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	}
 	self->shardsAffectedByTeamFailure->defineShard(keys);
 	self->bulkLoadingMap.insert(keys, commitVersion); // TODO: resume bulkLoadingMap when DD init
-	self->output.send(RelocateShard(keys, launchAck, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, taskId));
+	self->output.send(RelocateShard(
+	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState, launchAck));
 	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has taken action
 }
 
@@ -1664,7 +1665,7 @@ struct DataDistributionTrackerImpl {
 					triggerStorageQueueRebalance(self, req);
 				}
 				when(CreateBulkLoadShardRequest req = waitNext(self->createBulkLoadShard)) {
-					createShardToBulkLoad(self, req.keys, req.commitVersion, req.taskId, req.triggerAck, req.launchAck);
+					createShardToBulkLoad(self, req.bulkLoadState, req.commitVersion, req.triggerAck, req.launchAck);
 				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {

@@ -127,7 +127,6 @@ struct DataMove {
 
 struct RelocateShard {
 	KeyRange keys;
-	Promise<BulkLoadAckType> launchAck;
 	int priority;
 	bool cancelled; // The data move should be cancelled.
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
@@ -137,6 +136,9 @@ struct RelocateShard {
 
 	UID traceId; // track the lifetime of this relocate shard
 
+	Optional<BulkLoadState> bulkLoadState;
+	Promise<BulkLoadAckType> launchAck;
+
 	// Initialization when define is a better practice. We should avoid assignment of member after definition.
 	// static RelocateShard emptyRelocateShard() { return {}; }
 
@@ -145,12 +147,13 @@ struct RelocateShard {
 	    reason(reason), moveReason(moveReason), traceId(traceId) {}
 
 	RelocateShard(KeyRange const& keys,
-	              Promise<BulkLoadAckType> launchAck,
 	              DataMovementReason moveReason,
 	              RelocateReason reason,
-	              UID traceId)
-	  : keys(keys), launchAck(launchAck), priority(dataMovementPriority(moveReason)), cancelled(false),
-	    dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason), traceId(traceId) {}
+	              UID traceId,
+	              BulkLoadState bulkLoadState,
+	              Promise<BulkLoadAckType> launchAck)
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason), traceId(traceId), bulkLoadState(bulkLoadState), launchAck(launchAck) {}
 
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
@@ -236,18 +239,16 @@ struct GetMetricsListRequest {
 };
 
 struct CreateBulkLoadShardRequest {
-	KeyRange keys;
+	BulkLoadState bulkLoadState;
+	Version commitVersion;
 	Promise<BulkLoadAckType> triggerAck;
 	Promise<BulkLoadAckType> launchAck;
-	Version commitVersion;
-	UID taskId;
 	CreateBulkLoadShardRequest() {}
-	CreateBulkLoadShardRequest(KeyRange const& keys,
-	                           UID const& taskId,
+	CreateBulkLoadShardRequest(BulkLoadState const& bulkLoadState,
 	                           Version commitVersion,
 	                           Promise<BulkLoadAckType> triggerAck,
 	                           Promise<BulkLoadAckType> launchAck)
-	  : keys(keys), commitVersion(commitVersion), taskId(taskId), triggerAck(triggerAck), launchAck(launchAck) {}
+	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), triggerAck(triggerAck), launchAck(launchAck) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution

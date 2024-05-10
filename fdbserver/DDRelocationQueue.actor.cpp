@@ -151,7 +151,8 @@ RelocateData::RelocateData(RelocateShard const& rs)
         isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
         rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
         rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE || rs.moveReason == DataMovementReason::BULKLOAD),
-    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
+    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove), bulkLoadState(rs.bulkLoadState),
+    launchAck(rs.launchAck) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 	}
@@ -801,7 +802,8 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 		// If there is a queued job that wants data relocation which we are about to cancel/modify,
 		//  make sure that we keep the relocation intent for the job that we queue up
-		if (foundActiveFetching || foundActiveRelocation) {
+		// If the new relocation is a bulk loading relocation, we do not inherit settings from the queued job
+		if ((foundActiveFetching || foundActiveRelocation) && rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING) {
 			rd.wantsNewServers |= rrs.wantsNewServers;
 			rd.startTime = std::min(rd.startTime, rrs.startTime);
 			if (!hasHealthPriority) {
@@ -813,6 +815,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
 		}
 
+		// New job cancels old queued jobs
 		if (rd.keys.contains(rrs.keys)) {
 			if (foundActiveFetching)
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
@@ -1823,7 +1826,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          self->teamCollections.size() > 1,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
-				                                          CancelConflictingDataMoves::False);
+				                                          CancelConflictingDataMoves::False,
+				                                          rd.bulkLoadState);
 			} else {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          rd.keys,
@@ -1836,7 +1840,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          self->teamCollections.size() > 1,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
-				                                          CancelConflictingDataMoves::False);
+				                                          CancelConflictingDataMoves::False,
+				                                          rd.bulkLoadState);
 			}
 			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
@@ -1864,7 +1869,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          self->teamCollections.size() > 1,
 									                                          relocateShardInterval.pairID,
 									                                          ddEnabledState,
-									                                          CancelConflictingDataMoves::False);
+									                                          CancelConflictingDataMoves::False,
+									                                          rd.bulkLoadState);
 								} else {
 									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 									                                          rd.keys,
@@ -1877,7 +1883,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          self->teamCollections.size() > 1,
 									                                          relocateShardInterval.pairID,
 									                                          ddEnabledState,
-									                                          CancelConflictingDataMoves::False);
+									                                          CancelConflictingDataMoves::False,
+									                                          rd.bulkLoadState);
 								}
 								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {
@@ -1993,6 +2000,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						// be atomic
 						self->physicalShardCollection->updatePhysicalShardCollection(
 						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
+					}
+
+					if (rd.bulkLoadState.present()) {
+						ASSERT_WE_THINK(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
+						ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
+					}
+					if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+						ASSERT_WE_THINK(rd.bulkLoadState.present());
+						if (rd.bulkLoadState.present()) {
+							rd.launchAck.send(BulkLoadAckType::Succeed);
+							TraceEvent("DDRelocatorBulkLoadAck").detail("Task", rd.bulkLoadState.get().toString());
+						}
 					}
 
 					return Void();

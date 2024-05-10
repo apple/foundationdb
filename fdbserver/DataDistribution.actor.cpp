@@ -1039,8 +1039,8 @@ ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self,
 			wait(tr.commit()); // TODO: When commit proxy sees this transaction, it stops the user traffic within this
 			                   // range. CommitProxy should re-allow user traffic when it sees the bulk load on a range
 			                   // is acknowledged.
-			self->createBulkLoadShard.send(CreateBulkLoadShardRequest(
-			    range, bulkLoadState.taskId, tr.getCommittedVersion(), triggerAck, launchAck));
+			self->createBulkLoadShard.send(
+			    CreateBulkLoadShardRequest(bulkLoadState, tr.getCommittedVersion(), triggerAck, launchAck));
 			// Task with a newer version always overwrites the task with an older version when triggering data move
 			BulkLoadAckType ack = wait(triggerAck.getFuture());
 			if (ack != BulkLoadAckType::Succeed) {
@@ -1103,19 +1103,21 @@ ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange r
 void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, std::string context);
 
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range) {
-	TraceEvent("DoBulkLoadTask").detail("Range", range);
+	TraceEvent(SevInfo, "DoBulkLoadTask", self->ddId).detail("Range", range);
 	try {
 		state Promise<BulkLoadAckType> launchAck;
 		state UID taskId = wait(startBulkLoadTask(self, range, launchAck));
-		TraceEvent("DoBulkLoadTaskStarted").detail("Range", range).detail("TaskId", taskId);
+		TraceEvent(SevInfo, "DoBulkLoadTaskStarted", self->ddId).detail("Range", range).detail("TaskId", taskId);
 		BulkLoadAckType ack = wait(launchAck.getFuture());
 		if (ack == BulkLoadAckType::Failed) {
 			TraceEvent(SevWarn, "BulkLoadTaskLaunchFailed", self->ddId).detail("Range", range).detail("TaskID", taskId);
 			throw bulkload_task_failed();
 		}
-		TraceEvent("DoBulkLoadTaskDataMovePersisted").detail("Range", range).detail("TaskId", taskId);
+		TraceEvent(SevInfo, "DoBulkLoadTaskDataMovePersisted", self->ddId)
+		    .detail("Range", range)
+		    .detail("TaskId", taskId);
 		wait(waitOnBulkLoadEnd(self, range, taskId));
-		TraceEvent("DoBulkLoadTaskFinished").detail("Range", range).detail("TaskId", taskId);
+		TraceEvent(SevInfo, "DoBulkLoadTaskFinished", self->ddId).detail("Range", range).detail("TaskId", taskId);
 		// At this point, bulk load task phase in metadata becomes complete
 		// TODO: Wait on ack and restart boundary change
 	} catch (Error& e) {
@@ -1151,7 +1153,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
 					if (range != bulkLoadState.range) {
-						TraceEvent(SevWarn, "BulkLoadingScheduleFailed")
+						TraceEvent(SevWarn, "BulkLoadingScheduleFailed", self->ddId)
 						    .detail("Reason", "Task boundary changed")
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);

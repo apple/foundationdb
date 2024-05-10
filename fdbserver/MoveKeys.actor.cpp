@@ -1618,7 +1618,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID relocationIntervalId,
                                           std::map<UID, StorageServerInterface>* tssMapping,
                                           const DDEnabledState* ddEnabledState,
-                                          CancelConflictingDataMoves cancelConflictingDataMoves) {
+                                          CancelConflictingDataMoves cancelConflictingDataMoves,
+                                          Optional<BulkLoadState> bulkLoadState) {
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
@@ -1629,7 +1630,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 	TraceEvent(SevInfo, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("TargetRange", describe(ranges));
+	    .detail("TargetRange", describe(ranges))
+	    .detail("BulkLoadState", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(ranges.size() == 1);
@@ -3153,7 +3155,8 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.relocationIntervalId,
 		                       &tssMapping,
 		                       params.ddEnabledState,
-		                       params.cancelConflictingDataMoves);
+		                       params.cancelConflictingDataMoves,
+		                       params.bulkLoadState);
 	}
 	ASSERT(params.keys.present());
 	return startMoveKeys(std::move(occ),
