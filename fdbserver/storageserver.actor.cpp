@@ -8525,6 +8525,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
+				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
+				int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
+				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
+			}
 			tr.trState->readOptions = readOptions;
 			tr.trState->taskID = TaskPriority::FetchKeys;
 

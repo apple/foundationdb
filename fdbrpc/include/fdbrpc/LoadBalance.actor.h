@@ -244,6 +244,35 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
+ACTOR template <class Resp>
+Future<Void> waitForQuorumReplies(std::vector<Future<Optional<ErrorOr<Resp>>>>* replies, int required) {
+	state int outstandingReplies = (int)replies->size();
+	state int requiredReplies = std::min(required, (int)replies->size());
+	state std::vector<Future<Optional<ErrorOr<Resp>>>> ongoingReplies;
+	loop {
+		ongoingReplies.clear();
+		for (auto& reply : (*replies)) {
+			if (!reply.isReady()) {
+				ongoingReplies.push_back(reply);
+			} else {
+				outstandingReplies--;
+				if (!reply.isError() && reply.get().present() && !reply.get().get().isError()) {
+					requiredReplies--;
+				}
+			}
+		}
+		ASSERT(ongoingReplies.size() == outstandingReplies);
+
+		if (requiredReplies == 0 || outstandingReplies == 0) {
+			break;
+		}
+
+		wait(quorum(ongoingReplies, std::min(requiredReplies, outstandingReplies)));
+	}
+
+	return Void();
+}
+
 ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
 Future<Void> replicaComparison(Req req,
                                Future<ErrorOr<Resp>> fSource,
@@ -254,7 +283,7 @@ Future<Void> replicaComparison(Req req,
 	state int srcErrorCode = error_code_success;
 	state ErrorOr<Resp> src;
 
-	if (ssTeam->size() <= 1) {
+	if (ssTeam->size() <= 1 || requiredReplicas == 0) {
 		return Void();
 	}
 
@@ -296,14 +325,22 @@ Future<Void> replicaComparison(Req req,
 				}
 			}
 
-			wait(waitForAllReady(restOfTeamFutures));
+			if (requiredReplicas == BEST_EFFORT || requiredReplicas == ALL_REPLICAS) {
+				wait(waitForAllReady(restOfTeamFutures));
+			} else {
+				wait(waitForQuorumReplies(&restOfTeamFutures, requiredReplicas));
+			}
 
 			int numError = 0;
 			int numMismatch = 0;
 			int numFetchReplicaTimeout = 0;
 			int replicaErrorCode = error_code_success;
+			int successfulReplies = 0;
 			for (Future<Optional<ErrorOr<Resp>>> f : restOfTeamFutures) {
-				ASSERT(f.isReady());
+				if (!f.isReady()) {
+					ASSERT(requiredReplicas > 0);
+					continue;
+				}
 				if (f.isError()) {
 					numError++;
 					replicaErrorCode = f.getError().code();
@@ -319,26 +356,33 @@ Future<Void> replicaComparison(Req req,
 					ASSERT(srcLB.present() ==
 					       fLB.present()); // getLoadBalancedReply returned different responses for same templated type
 
-					if (fLB.present() && fLB.get().error.present()) {
-						numError++;
-						replicaErrorCode = fLB.get().error.get().code();
-					} else if (fLB.present() &&
-					           !TSS_doCompare(
-					               src.get(),
-					               f.get().get().get())) { // re-use TSS compare logic to compare the replicas
-						numMismatch++;
-						TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, REPLICA_COMPARISON));
-						mismatchEvent.detail("ReplicaFetchErrors", numError)
-						    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
-						// Re-use TSS trace mechanism to log replica mismatch information.
-						TSS_traceMismatch(mismatchEvent, req, src.get(), f.get().get().get());
+					if (fLB.present()) {
+						if (fLB.get().error.present()) {
+							numError++;
+							replicaErrorCode = fLB.get().error.get().code();
+						} else {
+							if (!TSS_doCompare(
+							        src.get(),
+							        f.get().get().get())) { // re-use TSS compare logic to compare the replicas
+								numMismatch++;
+								TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, REPLICA_COMPARISON));
+								mismatchEvent.detail("ReplicaFetchErrors", numError)
+								    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
+								// Re-use TSS trace mechanism to log replica mismatch information.
+								TSS_traceMismatch(mismatchEvent, req, src.get(), f.get().get().get());
+							}
+							if (++successfulReplies == requiredReplicas) {
+								break;
+							}
+						}
 					}
 				}
 			}
 
 			if (numMismatch) {
 				throw storage_replica_comparison_error();
-			} else if ((numError || numFetchReplicaTimeout) && (requiredReplicas == ALL_REPLICAS)) {
+			} else if (((numError || numFetchReplicaTimeout) && (requiredReplicas == ALL_REPLICAS)) ||
+			           (successfulReplies != requiredReplicas && requiredReplicas > 0)) {
 				const char* type = numError ? "ReplicaComparisonReadError" : "ReplicaComparisonTimeoutError";
 				TraceEvent(SevError, type).detail("SSError", replicaErrorCode);
 
