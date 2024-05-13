@@ -181,6 +181,7 @@ ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnow
 				wait(delay(0.25));
 			}
 		} catch (Error& e) {
+			std::cout << "Hfu5Refresh Error, lastKnown=" << lastKnown<< std::endl;
 			wait(backoff.onError());
 		}
 	}
