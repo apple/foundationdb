@@ -199,7 +199,7 @@ struct GrvProxyData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
-	LatencySample* versionVectorSizeOnGRVReply;
+	LatencySample* versionVectorSizeOnGRVReply = nullptr;
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
