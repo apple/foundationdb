@@ -157,22 +157,26 @@ void GlobalConfig::erase(KeyRangeRef range) {
 // from storage (proxied through the GrvProxies).
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) {
 	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
+	std::cout << "Hfu5Refresh start, lastKnown=" << lastKnown  << std::endl;
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	loop {
 		try {
+			std::cout << "Hfu5Refresh request sent, lastKnown=" << lastKnown << std::endl;
 			GlobalConfigRefreshReply reply =
 			    wait(timeoutError(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
 			                                       &GrvProxyInterface::refreshGlobalConfig,
 			                                       GlobalConfigRefreshRequest{ lastKnown }),
 			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			std::cout << "Hfu5Refresh reply received, lastKnown=" << lastKnown << std::endl;
 			for (const auto& kv : reply.result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 				self->insert(systemKey, kv.value);
 			}
 			return Void();
 		} catch (Error& e) {
+			std::cout << "Hfu5Refresh Error, lastKnown=" << lastKnown<< std::endl;
 			wait(backoff.onError());
 		}
 	}
