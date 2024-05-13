@@ -632,7 +632,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( COMMIT_PROXY_LIVENESS_TIMEOUT,                        20.0 );
 
 	// FIXME Remove this when client latency issue is resolved
-	init( WRITE_CLIENT_LATENCY_TRACEEVENT,                       true );
+	init( WRITE_CLIENT_LATENCY_TRACEEVENT,                      false );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,                0.001 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_MIN = 0.1;
