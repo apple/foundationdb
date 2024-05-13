@@ -1,0 +1,11 @@
+[[test]]
+testTitle = 'Test MockTLogRecovery'
+startDelay = 0
+useDB = false
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 0
+    numTagsPerServer = 2
+    numLogServers = 4
+    testsMatching = '/fdbserver/test/mocktlogrecoverydriver'

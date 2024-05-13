@@ -58,7 +58,7 @@ struct TestTLogDriverOptions {
 		kvMemoryLimit = params.getDouble("kvMemoryLimit").orDefault(0x500e6);
 		numTagsPerServer = params.getInt("numTagsPerServer").orDefault(1);
 		numLogServers = params.getInt("numLogServers").orDefault(1);
-		numCommits = params.getInt("numCommits").orDefault(5);
+		numCommits = params.getInt("numCommits").orDefault(3);
 	}
 };
 
@@ -66,6 +66,8 @@ struct TestTLogDriverOptions {
 struct TLogContext {
 	UID tLogID;
 	::TLogInterface MockTLogInterface;
+	::TLogInterface MockLogRouterInterface;
+	PromiseStream<InitializeTLogRequest> init;
 	uint16_t tagProcessID;
 	IKeyValueStore* persistentData;
 	IDiskQueue* persistentQueue;
@@ -97,7 +99,7 @@ struct TLogDriverContext {
 	                                                  uint16_t logGroupID,
 	                                                  uint32_t tag);
 
-	TLogDriverContext(TestTLogDriverOptions& tLogOptions) : tLogOptions(tLogOptions) {}
+	TLogDriverContext(TestTLogDriverOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
 
 	UID logID;
 	UID workerID;
@@ -115,10 +117,12 @@ struct TLogDriverContext {
 	// fdb state
 	Reference<ILogSystem> ls;
 	ServerDBInfo dbInfo;
+	Reference<AsyncVar<ServerDBInfo>> dbInfoRef;
 	TLogSet tLogSet;
 	Standalone<StringRef> dcID;
 	Optional<Standalone<StringRef>> zoneID;
 	int8_t tagLocality;
+	int epoch;
 };
 
 #include "flow/unactorcompiler.h"
