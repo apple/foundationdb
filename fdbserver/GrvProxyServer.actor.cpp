@@ -178,7 +178,7 @@ struct GrvProxyData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
-	LatencySample versionVectorSizeOnGRVReply;
+	LatencySample* versionVectorSizeOnGRVReply;
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
@@ -213,13 +213,14 @@ struct GrvProxyData {
 	             Reference<AsyncVar<ServerDBInfo> const> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),
-	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
-	    versionVectorSizeOnGRVReply("VersionVectorSizeOnGRVReply",
-	                                dbgid,
-	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    updateCommitRequests(0), lastCommitTime(0), version(0), minKnownCommittedVersion(invalidVersion),
-	    tagThrottler(CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION) {}
+	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), updateCommitRequests(0), lastCommitTime(0),
+	    version(0), minKnownCommittedVersion(invalidVersion),
+	    tagThrottler(CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION) {
+		versionVectorSizeOnGRVReply = new LatencySample("VersionVectorSizeOnGRVReply",
+		                                                dbgid,
+		                                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+	}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -728,7 +729,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		reply.tagThrottleInfo.clear();
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 			grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
-			grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+			grvProxyData->versionVectorSizeOnGRVReply->addMeasurement(reply.ssVersionVectorDelta.size());
 		}
 		reply.proxyId = grvProxyData->dbgid;
 		reply.proxyTagThrottledDuration = request.proxyTagThrottledDuration;

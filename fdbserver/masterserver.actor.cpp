@@ -81,11 +81,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter reportLiveCommittedVersionRequests;
 	// This counter gives an estimate of the number of non-empty peeks that storage servers
 	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
-	LatencySample versionVectorTagUpdates;
+	LatencySample* versionVectorTagUpdates;
 	Counter waitForPrevCommitRequests;
 	Counter nonWaitForPrevCommitRequests;
-	LatencySample versionVectorSizeOnCVReply;
-	LatencySample waitForPrevLatencies;
+	LatencySample* versionVectorSizeOnCVReply;
+	LatencySample* waitForPrevLatencies;
 
 	PromiseStream<Future<Void>> addActor;
 
@@ -106,21 +106,23 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    versionVectorTagUpdates("VersionVectorTagUpdates",
-	                            dbgid,
-	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
-	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
-	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
-	                               dbgid,
-	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    waitForPrevLatencies("WaitForPrevLatencies",
-	                         dbgid,
-	                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    addActor(addActor) {
+	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc), addActor(addActor) {
+
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			versionVectorTagUpdates = new LatencySample("VersionVectorTagUpdates",
+			                                            dbgid,
+			                                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			versionVectorSizeOnCVReply = new LatencySample("VersionVectorSizeOnCVReply",
+			                                               dbgid,
+			                                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			waitForPrevLatencies = new LatencySample("WaitForPrevLatencies",
+			                                         dbgid,
+			                                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		}
 		logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
@@ -261,7 +263,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 			int8_t primaryLocality =
 			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
-			self->versionVectorTagUpdates.addMeasurement(req.writtenTags.get().size());
+			self->versionVectorTagUpdates->addMeasurement(req.writtenTags.get().size());
 		}
 		auto curTime = now();
 		// add debug here to change liveCommittedVersion to time bound of now()
@@ -280,7 +282,7 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 	state double startTime = now();
 	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
 	double latency = now() - startTime;
-	self->waitForPrevLatencies.addMeasurement(latency);
+	self->waitForPrevLatencies->addMeasurement(latency);
 	++self->waitForPrevCommitRequests;
 	updateLiveCommittedVersion(self, req);
 	req.reply.send(Void());
@@ -307,7 +309,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 					self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-					self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+					self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
 				}
 				req.reply.send(reply);
 			}
