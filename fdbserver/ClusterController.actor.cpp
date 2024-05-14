@@ -328,6 +328,13 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			recoveryCore.cancel();
 			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
+			if (cluster->outstandingRemoteRequestChecker.isValid()) {
+				cluster->outstandingRemoteRequestChecker.cancel();
+			}
+
+			if (cluster->outstandingRequestChecker.isValid()) {
+				cluster->outstandingRequestChecker.cancel();
+			}
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
 			CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
