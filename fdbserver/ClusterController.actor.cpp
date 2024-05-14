@@ -421,6 +421,13 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
+			if (cluster->outstandingRemoteRequestChecker.isValid()) {
+				cluster->outstandingRemoteRequestChecker.cancel();
+			}
+
+			if (cluster->outstandingRequestChecker.isValid()) {
+				cluster->outstandingRequestChecker.cancel();
+			}
 			wait(cleanupRecoveryActorCollection(db->recoveryData, true /* exThrown */));
 			ASSERT(addActor.isEmpty());
 
