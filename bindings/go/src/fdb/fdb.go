@@ -31,7 +31,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"unsafe"
 )
@@ -201,9 +200,15 @@ func init() {
 	openDatabases = make(map[string]Database)
 }
 
-func startNetwork() error {
+// executeWithRunningNetworkThread starts the internal network event loop, if not already done,
+// then runs the provided function while network thread is running.
+func executeWithRunningNetworkThread(f func()) error {
 	networkMutex.RLock()
 	if networkStarted {
+
+		// network thread is guaranteed to be running while this user-provided function runs
+		f()
+
 		networkMutex.RUnlock()
 		return nil
 	}
@@ -211,35 +216,37 @@ func startNetwork() error {
 	networkMutex.RUnlock()
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
-	if networkStarted {
-		return nil
-	}
 
-	if e := C.fdb_setup_network(); e != 0 {
-		return Error{int(e)}
-	}
-
-	go func() {
-		e := C.fdb_run_network()
-		if e != 0 {
-			log.Printf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e)
+	// check if meanwhile another goroutine started the network thread
+	if !networkStarted {
+		if e := C.fdb_setup_network(); e != 0 {
+			return Error{int(e)}
 		}
-	}()
 
-	networkStarted = true
+		go func() {
+			e := C.fdb_run_network()
+			if e != 0 {
+				panic(fmt.Sprintf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e))
+			}
+		}()
+
+		networkStarted = true
+	}
+
+	// network thread is guaranteed to be running while this user-provided function runs
+	f()
 
 	return nil
 }
 
 // Deprecated: the network is started automatically when a database is opened.
-// StartNetwork initializes the FoundationDB client networking engine. StartNetwork
-// must not be called more than once.
+// StartNetwork does nothing, but it will ensure that the API version is set and return an error otherwise.
 func StartNetwork() error {
 	if apiVersion == 0 {
 		return errAPIVersionUnset
 	}
 
-	return startNetwork()
+	return nil
 }
 
 // DefaultClusterFile should be passed to fdb.Open to allow the FoundationDB C
@@ -276,12 +283,8 @@ func MustOpenDefault() Database {
 // the multi-version client API must be used.
 // Caller must call Close() to release resources.
 func OpenDatabase(clusterFile string) (Database, error) {
-	if err := ensureNetworkIsStarted(); err != nil {
-		return Database{}, err
-	}
-
-	db, ok := openDatabases[clusterFile]
-	if !ok {
+	db, exist := openDatabases[clusterFile]
+	if !exist {
 		var e error
 		db, e = createDatabase(clusterFile)
 		if e != nil {
@@ -291,15 +294,6 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	}
 
 	return db, nil
-}
-
-// ensureNetworkIsStarted starts the network if not already done and ensures that the API version is set.
-func ensureNetworkIsStarted() error {
-	if apiVersion == 0 {
-		return errAPIVersionUnset
-	}
-
-	return startNetwork()
 }
 
 // MustOpenDatabase is like OpenDatabase but panics if the default database cannot
@@ -334,6 +328,10 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 // createDatabase is the internal function used to create a database.
 // Caller must call Close() to release resources.
 func createDatabase(clusterFile string) (Database, error) {
+	if apiVersion == 0 {
+		return Database{}, errAPIVersionUnset
+	}
+
 	var cf *C.char
 
 	if len(clusterFile) != 0 {
@@ -342,8 +340,16 @@ func createDatabase(clusterFile string) (Database, error) {
 	}
 
 	var outdb *C.FDBDatabase
-	if err := C.fdb_create_database(cf, &outdb); err != 0 {
-		return Database{}, Error{int(err)}
+	var createErr error
+	if err := executeWithRunningNetworkThread(func() {
+		if err := C.fdb_create_database(cf, &outdb); err != 0 {
+			createErr = Error{int(err)}
+		}
+	}); err != nil {
+		return Database{}, err
+	}
+	if createErr != nil {
+		return Database{}, createErr
 	}
 
 	db := &database{outdb}
@@ -356,8 +362,8 @@ func createDatabase(clusterFile string) (Database, error) {
 // to the database only for a short time e.g. to test different connection strings.
 // Caller must call Close() to release resources.
 func OpenWithConnectionString(connectionString string) (Database, error) {
-	if err := ensureNetworkIsStarted(); err != nil {
-		return Database{}, err
+	if apiVersion == 0 {
+		return Database{}, errAPIVersionUnset
 	}
 
 	var cf *C.char
@@ -370,8 +376,16 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 	defer C.free(unsafe.Pointer(cf))
 
 	var outdb *C.FDBDatabase
-	if err := C.fdb_create_database_from_connection_string(cf, &outdb); err != 0 {
-		return Database{}, Error{int(err)}
+	var createErr error
+	if err := executeWithRunningNetworkThread(func() {
+		if err := C.fdb_create_database_from_connection_string(cf, &outdb); err != 0 {
+			createErr = Error{int(err)}
+		}
+	}); err != nil {
+		return Database{}, err
+	}
+	if createErr != nil {
+		return Database{}, createErr
 	}
 
 	db := &database{outdb}
