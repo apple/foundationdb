@@ -11903,7 +11903,23 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		recentCommitStats.back().whenCommit = now();
 		try {
-			wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+			loop {
+				choose {
+					when(wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"))) {
+						break;
+					}
+					when(wait(delay(60.0))) {
+						TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
+						    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)
+						    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft);
+
+						if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+						    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
+							data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "CommitTooLong");
+						}
+					}
+				}
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_io_timeout) {
 				if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {
