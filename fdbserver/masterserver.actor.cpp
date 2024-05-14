@@ -101,7 +101,7 @@ SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommit
 		state double startTime = now();
 		wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
 		double latency = now() - startTime;
-		self->waitForPrevLatencies.addMeasurement(latency);
+		self->waitForPrevLatencies->addMeasurement(latency);
 		++self->waitForPrevCommitRequests;
 		updateLiveCommittedVersion(self, req);
 		req.reply.send(Void());
@@ -113,8 +113,7 @@ SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommit
 ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	state double startTime = now();
 	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
-	double latency = now() - startTime;
-	self->waitForPrevLatencies.addMeasurement(latency);
+	self->waitForPrevLatencies->addMeasurement(now() - startTime);
 	++self->waitForPrevCommitRequests;
 	updateLiveCommittedVersion(self, req);
 	req.reply.send(Void());
@@ -263,21 +262,8 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
     getCommitVersionRequests("GetCommitVersionRequests", cc),
     getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
     reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-    versionVectorTagUpdates("VersionVectorTagUpdates",
-                            dbgid,
-                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
     waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
-    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
-    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
-                               dbgid,
-                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-    waitForPrevLatencies("WaitForPrevLatencies",
-                         dbgid,
-                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-    addActor(addActor) {
+    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc), addActor(addActor) {
 	logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
 	if (forceRecovery && !myInterface.locality.dcId().present()) {
 		TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
@@ -285,6 +271,21 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	}
 	balancer = resolutionBalancer.resolutionBalancing();
 	locality = tagLocalityInvalid;
+
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		versionVectorTagUpdates = new LatencySample("VersionVectorTagUpdates",
+		                                            dbgid,
+		                                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		versionVectorSizeOnCVReply = new LatencySample("VersionVectorSizeOnCVReply",
+		                                               dbgid,
+		                                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		waitForPrevLatencies = new LatencySample("WaitForPrevLatencies",
+		                                         dbgid,
+		                                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+	}
 
 #ifdef WITH_SWIFT
 	using namespace fdbserver_swift;
@@ -352,7 +353,7 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 			int8_t primaryLocality =
 			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
-			self->versionVectorTagUpdates.addMeasurement(req.writtenTags.get().size());
+			self->versionVectorTagUpdates->addMeasurement(req.writtenTags.get().size());
 		}
 		auto curTime = now();
 		// add debug here to change liveCommittedVersion to time bound of now()
@@ -409,7 +410,7 @@ ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 					self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-					self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+					self->versionVectorSizeOnCVReply->addMeasurement(reply.ssVersionVectorDelta.size());
 				}
 				req.reply.send(reply);
 			}
