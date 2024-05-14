@@ -193,6 +193,7 @@ func MustGetAPIVersion() int {
 var apiVersion int
 var networkStarted bool
 var networkMutex sync.RWMutex
+var networkRunning sync.WaitGroup
 
 var openDatabases sync.Map
 
@@ -219,8 +220,10 @@ func executeWithRunningNetworkThread(f func()) error {
 			return Error{int(e)}
 		}
 
+		networkRunning.Add(1)
 		go func() {
 			e := C.fdb_run_network()
+			networkRunning.Done()
 			if e != 0 {
 				panic(fmt.Sprintf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e))
 			}
@@ -243,6 +246,22 @@ func StartNetwork() error {
 	}
 
 	return nil
+}
+
+// StopNetwork signals the internal network event loop to terminate and waits for its termination.
+// This function does nothing if the network has not yet started.
+// Once network is stopped it cannot be started again.
+// See also: https://github.com/apple/foundationdb/issues/3015
+func StopNetwork() {
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+
+	if !networkStarted {
+		return
+	}
+
+	C.fdb_stop_network()
+	networkRunning.Wait()
 }
 
 // DefaultClusterFile should be passed to fdb.Open to allow the FoundationDB C
