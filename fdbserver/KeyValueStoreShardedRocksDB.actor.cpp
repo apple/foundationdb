@@ -536,9 +536,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
-	if (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0) {
+	if (SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN > 0) {
 		// Prefix blooms are used during Seek.
-		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->ROCKSDB_PREFIX_LEN));
+		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN));
 
 		// Also turn on bloom filters in the memtable.
 		// TODO: Make a knob for this as well.
@@ -657,7 +657,7 @@ rocksdb::DBOptions getOptions() {
 rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
-	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+	options.auto_prefix_mode = (SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN > 0);
 	options.async_io = SERVER_KNOBS->SHARDED_ROCKSDB_READ_ASYNC_IO;
 	return options;
 }
@@ -704,7 +704,7 @@ public:
 		TraceEvent(SevVerbose, "ShardedRocksReadIteratorPool")
 		    .detail("Path", path)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS)
-		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
+		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN);
 	}
 
 	// Called on every db commit.
@@ -2464,8 +2464,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PROBABILITY <= 0.0) {
 			return Void();
 		}
-
-		state int count = 0;
 		try {
 			loop {
 				wait(delay(SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_PERIOD_SEC));
@@ -2680,12 +2678,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(RemoveShardAction& a) {
+			auto start = now();
 			for (auto& shard : a.shards) {
 				shard->deletePending = true;
 				columnFamilyMap->erase(shard->cf->GetID());
 				a.metadataShard->db->Delete(
 				    rocksdb::WriteOptions(), a.metadataShard->cf, compactionTimestampPrefix.toString() + shard->id);
 			}
+			TraceEvent("RemoveShardTime").detail("Duration", now() - start).detail("Size", a.shards.size());
 			a.shards.clear();
 			a.done.send(Void());
 		}
