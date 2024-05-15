@@ -23,7 +23,7 @@ else()
 endif()
 
 project(foundationdb
-  VERSION 7.1.60
+  VERSION 7.1.61
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
