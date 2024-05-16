@@ -81,11 +81,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter reportLiveCommittedVersionRequests;
 	// This counter gives an estimate of the number of non-empty peeks that storage servers
 	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
-	LatencySample* versionVectorTagUpdates;
+	std::unique_ptr<LatencySample> versionVectorTagUpdates;
 	Counter waitForPrevCommitRequests;
 	Counter nonWaitForPrevCommitRequests;
-	LatencySample* versionVectorSizeOnCVReply;
-	LatencySample* waitForPrevLatencies;
+	std::unique_ptr<LatencySample> versionVectorSizeOnCVReply;
+	std::unique_ptr<LatencySample> waitForPrevLatencies;
 
 	PromiseStream<Future<Void>> addActor;
 
@@ -110,18 +110,18 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc), addActor(addActor) {
 
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-			versionVectorTagUpdates = new LatencySample("VersionVectorTagUpdates",
-			                                            dbgid,
-			                                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-			                                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-			versionVectorSizeOnCVReply = new LatencySample("VersionVectorSizeOnCVReply",
-			                                               dbgid,
-			                                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-			                                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-			waitForPrevLatencies = new LatencySample("WaitForPrevLatencies",
-			                                         dbgid,
-			                                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-			                                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			versionVectorTagUpdates = std::make_unique<LatencySample>("VersionVectorTagUpdates",
+			                                                          dbgid,
+			                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			versionVectorSizeOnCVReply = std::make_unique<LatencySample>("VersionVectorSizeOnCVReply",
+			                                                             dbgid,
+			                                                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			waitForPrevLatencies = std::make_unique<LatencySample>("WaitForPrevLatencies",
+			                                                       dbgid,
+			                                                       SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                                       SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 		}
 		logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
