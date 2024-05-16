@@ -21,15 +21,13 @@ package com.apple.foundationdb;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import org.junit.jupiter.api.extension.AfterEachCallback;
-import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
-
+import org.junit.jupiter.api.extension.BeforeAllCallback;
 /**
  * Callback to help define a multi-client scenario and ensure that 
  * the clients can be configured properly.
  */
-public class MultiClientHelper implements BeforeAllCallback,AfterEachCallback{
+public class MultiClientHelper implements BeforeAllCallback {
 	private String[] clusterFiles;
 	private Collection<Database> openDatabases;
 	
@@ -67,16 +65,4 @@ public class MultiClientHelper implements BeforeAllCallback,AfterEachCallback{
 	public void beforeAll(ExtensionContext arg0) throws Exception {
 		clusterFiles = readClusterFromEnv();
 	}
-
-	@Override
-	public void afterEach(ExtensionContext arg0) throws Exception {
-		//close any databases that have been opened	
-		if(openDatabases!=null){
-			for(Database db : openDatabases){
-				db.close();
-			}
-		}
-		openDatabases = null;
-	}
-
 }
