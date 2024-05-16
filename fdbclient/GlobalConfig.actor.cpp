@@ -153,9 +153,6 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
-// Updates local copy of global configuration by reading the entire key-range
-// from storage (proxied through the GrvProxies). Returns the version of the
-// refreshed data.
 ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown, Version largestSeen) {
 	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
@@ -233,7 +230,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 									} else if (mutation.type == MutationRef::ClearRange) {
 										self->erase(KeyRangeRef(mutation.param1, mutation.param2));
 									} else {
-										ASSERT(false);
+										UNREACHABLE();
 									}
 								}
 
