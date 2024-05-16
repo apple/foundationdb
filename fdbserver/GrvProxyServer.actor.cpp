@@ -366,7 +366,7 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 				// point of view. The client learns the version through a
 				// ClientDBInfo update).
 				if (refresh.lastKnown <= cachedVersion) {
-					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedData });
+					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedVersion, cachedData });
 				} else {
 					refresh.reply.sendError(future_version());
 				}
