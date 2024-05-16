@@ -163,6 +163,9 @@ private:
 	// of the global configuration keyspace.
 	void erase(KeyRangeRef range);
 
+	// Updates local copy of global configuration by reading the entire key-range
+	// from storage (proxied through the GrvProxies). Returns the version of the
+	// refreshed data.
 	ACTOR static Future<Version> refresh(GlobalConfig* self, Version lastKnown, Version largestSeen);
 	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
 
