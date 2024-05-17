@@ -2548,6 +2548,10 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			stoppedPromise.send(Void());
 		}
 
+		if (self->terminated.isSet()) {
+			return Void();
+		}
+
 		if (registerWithCC.isReady()) {
 			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
