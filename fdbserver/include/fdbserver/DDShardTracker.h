@@ -31,7 +31,7 @@ public:
 	FutureStream<GetMetricsListRequest> getShardMetricsList;
 	FutureStream<Promise<int64_t>> averageShardBytes;
 	FutureStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
-	FutureStream<CreateBulkLoadShardRequest> createBulkLoadShard;
+	FutureStream<BulkLoadShardRequest> triggerShardBulkLoading;
 
 	virtual double getAverageShardBytes() = 0;
 	virtual ~IDDShardTracker() = default;
@@ -85,7 +85,7 @@ public:
 	// be accessed
 	bool* trackerCancelled = nullptr;
 
-	KeyRangeMap<Version> bulkLoadingMap;
+	KeyRangeMap<std::pair<UID, Version>> bulkLoadingMap; // BulkLoadTaskID, BulkLoadTaskCommitVerison
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -127,7 +127,7 @@ public:
 	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
 	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance,
-	                        FutureStream<CreateBulkLoadShardRequest> const& createBulkLoadShard);
+	                        FutureStream<BulkLoadShardRequest> const& triggerShardBulkLoading);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };

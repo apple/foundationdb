@@ -1,12 +1,14 @@
 [configuration]
 config = 'triple'
-generateFearless = true
-allowDefaultTenant = false
+storageEngineType = 5
+processesPerMachine = 3
+coordinators = 3
 machineCount = 18
 
 [[knobs]]
 shard_encode_location_metadata = true
-
+dd_physical_shard_move_probability = 1.0
+enable_physical_shard_move_experiment = true
 
 [[test]]
 testTitle = 'BulkLoadingWorkload'

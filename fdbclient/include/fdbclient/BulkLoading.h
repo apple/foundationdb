@@ -30,7 +30,6 @@ enum class BulkLoadPhase : uint8_t {
 	Triggered = 1, // Update when DD trigger a data move for the task
 	Running = 2, // Update atomically with updating KeyServer dest servers in startMoveKey
 	Complete = 3, // Update atomically with updating KeyServer src servers in finishMoveKey
-	Error = 4, //  Update atomically with updating KeyServer to cancel a data move
 };
 
 enum class BulkLoadType : uint8_t {

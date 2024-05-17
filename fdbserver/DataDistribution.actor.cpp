@@ -360,6 +360,11 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
                                     std::shared_ptr<DDAudit> audit,
                                     KeyRange rangeToSkip);
 
+void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, Optional<BulkLoadState> bulkLoadState);
+ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self,
+                                  KeyRange range,
+                                  Optional<BulkLoadState> bulkLoadState);
+
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 public:
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -387,7 +392,7 @@ public:
 	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
-	PromiseStream<CreateBulkLoadShardRequest> createBulkLoadShard;
+	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 
 	Promise<Void> initialized;
@@ -407,7 +412,6 @@ public:
 	Future<Void> onConfigChange;
 
 	ActorCollection bulkLoadActors;
-	std::unordered_map<UID, PromiseStream<int>> bulkLoadTasks;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
@@ -799,6 +803,12 @@ public:
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
+				if (rs.bulkLoadState.present()) {
+					// Since bulk load task phase updated to RUNNING in atomic to when data move metadata is persisted.
+					// For any data move metadata has bulk load task, there is a corresponding RUNNING bulk load task.
+					// We resume those tasks.
+					runBulkLoadTaskOnRange(self, rs.bulkLoadState.get().range, rs.bulkLoadState.get());
+				}
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
 				teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
 				if (!rs.dataMove->remoteDest.empty()) {
@@ -1021,14 +1031,15 @@ ACTOR Future<Void> waitForBulkLoadModeOn(Reference<DataDistributor> self) {
 
 // All operation inside is transactional
 // Return if a bulk load data move is successfully triggered
-ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self,
-                                    KeyRange range,
-                                    Promise<BulkLoadAckType> launchAck) {
+ACTOR Future<std::pair<BulkLoadState, Version>> startBulkLoadTask(Reference<DataDistributor> self,
+                                                                  KeyRange range,
+                                                                  Promise<BulkLoadAckType> launchAck) {
 	loop {
 		Database cx = self->txnProcessor->context();
 		state Transaction tr(cx);
 		state BulkLoadState bulkLoadState;
 		state Promise<BulkLoadAckType> triggerAck;
+		state Version commitVersion;
 		try {
 			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, range));
 			bulkLoadState = decodeBulkLoadState(result[0].value);
@@ -1036,11 +1047,12 @@ ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self,
 			bulkLoadState.phase = BulkLoadPhase::Triggered; // Only place to set it triggered to metadata
 			bulkLoadState.taskId = deterministicRandom()->randomUniqueID(); // Only place to set task ID
 			wait(krmSetRange(&tr, bulkLoadPrefix, range, bulkLoadStateValue(bulkLoadState)));
-			wait(tr.commit()); // TODO: When commit proxy sees this transaction, it stops the user traffic within this
-			                   // range. CommitProxy should re-allow user traffic when it sees the bulk load on a range
-			                   // is acknowledged.
-			self->createBulkLoadShard.send(
-			    CreateBulkLoadShardRequest(bulkLoadState, tr.getCommittedVersion(), triggerAck, launchAck));
+			wait(tr.commit()); // TODO(Zhe): When commit proxy sees this transaction, it stops the user traffic within
+			                   // this range. CommitProxy should re-allow user traffic when it sees the bulk load on a
+			                   // range is acknowledged.
+			commitVersion = tr.getCommittedVersion();
+			self->triggerShardBulkLoading.send(
+			    BulkLoadShardRequest(bulkLoadState, commitVersion, triggerAck, launchAck));
 			// Task with a newer version always overwrites the task with an older version when triggering data move
 			BulkLoadAckType ack = wait(triggerAck.getFuture());
 			if (ack != BulkLoadAckType::Succeed) {
@@ -1049,11 +1061,21 @@ ACTOR Future<UID> startBulkLoadTask(Reference<DataDistributor> self,
 				    .detail("Range", range);
 				throw bulkload_task_failed();
 			}
-			return bulkLoadState.taskId;
+			return std::make_pair(bulkLoadState, commitVersion);
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+ACTOR Future<Void> finishBulkLoadTask(Reference<DataDistributor> self,
+                                      std::pair<BulkLoadState, Version> committedBulkLoadTask) {
+	Promise<BulkLoadAckType> finishAck;
+	self->triggerShardBulkLoading.send(
+	    BulkLoadShardRequest(committedBulkLoadTask.first, committedBulkLoadTask.second, finishAck));
+	BulkLoadAckType ack = wait(finishAck.getFuture());
+	ASSERT(ack == BulkLoadAckType::Succeed);
+	return Void();
 }
 
 // Check progress of bulk loading via reading from bulk loading metadata
@@ -1077,8 +1099,6 @@ ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange r
 			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
 				exitReason = "Complete";
 				break;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Error) {
-				throw bulkload_task_failed();
 			} else if (bulkLoadState.phase == BulkLoadPhase::Triggered ||
 			           bulkLoadState.phase == BulkLoadPhase::Running) {
 				wait(delay(10.0));
@@ -1100,40 +1120,53 @@ ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange r
 	return Void();
 }
 
-void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, std::string context);
-
-ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range) {
-	TraceEvent(SevInfo, "DoBulkLoadTask", self->ddId).detail("Range", range);
+ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self,
+                                  KeyRange range,
+                                  Optional<BulkLoadState> bulkLoadState) {
+	TraceEvent(SevInfo, "DoBulkLoadTaskBegin", self->ddId).detail("Range", range);
 	try {
-		state Promise<BulkLoadAckType> launchAck;
-		state UID taskId = wait(startBulkLoadTask(self, range, launchAck));
-		TraceEvent(SevInfo, "DoBulkLoadTaskStarted", self->ddId).detail("Range", range).detail("TaskId", taskId);
-		BulkLoadAckType ack = wait(launchAck.getFuture());
-		if (ack == BulkLoadAckType::Failed) {
-			TraceEvent(SevWarn, "BulkLoadTaskLaunchFailed", self->ddId).detail("Range", range).detail("TaskID", taskId);
-			throw bulkload_task_failed();
+		if (!bulkLoadState.present()) {
+			state Promise<BulkLoadAckType> launchAck;
+			state std::pair<BulkLoadState, Version> committedBulkLoadTask =
+			    wait(startBulkLoadTask(self, range, launchAck));
+			TraceEvent(SevInfo, "DoBulkLoadTaskStarted", self->ddId)
+			    .detail("Task", committedBulkLoadTask.first.toString())
+			    .detail("CommitVersion", committedBulkLoadTask.second);
+			ASSERT(committedBulkLoadTask.first.range == range);
+			BulkLoadAckType ack = wait(launchAck.getFuture());
+			if (ack == BulkLoadAckType::Failed) {
+				TraceEvent(SevWarn, "DoBulkLoadTaskLaunchFailed", self->ddId)
+				    .detail("Task", committedBulkLoadTask.first.toString())
+				    .detail("CommitVersion", committedBulkLoadTask.second);
+				throw bulkload_task_failed();
+			}
+			TraceEvent(SevInfo, "DoBulkLoadTaskDataMovePersisted", self->ddId)
+			    .detail("Task", committedBulkLoadTask.first.toString())
+			    .detail("CommitVersion", committedBulkLoadTask.second);
 		}
-		TraceEvent(SevInfo, "DoBulkLoadTaskDataMovePersisted", self->ddId)
-		    .detail("Range", range)
-		    .detail("TaskId", taskId);
-		wait(waitOnBulkLoadEnd(self, range, taskId));
-		TraceEvent(SevInfo, "DoBulkLoadTaskFinished", self->ddId).detail("Range", range).detail("TaskId", taskId);
+		wait(waitOnBulkLoadEnd(self, range, committedBulkLoadTask.first.taskId));
+		TraceEvent(SevInfo, "DoBulkLoadTaskFinished", self->ddId)
+		    .detail("Task", committedBulkLoadTask.first.toString())
+		    .detail("CommitVersion", committedBulkLoadTask.second);
 		// At this point, bulk load task phase in metadata becomes complete
-		// TODO: Wait on ack and restart boundary change
+		wait(finishBulkLoadTask(self, committedBulkLoadTask));
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		} else {
 			TraceEvent(SevWarn, "DoBulkLoadTaskFailed", self->ddId).errorUnsuppressed(e).detail("Range", range);
+			self->bulkLoadActors.add(doBulkLoadTask(self, range, Optional<BulkLoadState>()));
 		}
 	}
 	return Void();
 }
 
-// TODO: add parallelism limitation here
-void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, std::string context) {
-	TraceEvent(SevInfo, "RunBulkLoadTask", self->ddId).detail("Range", range).detail("Context", context);
-	self->bulkLoadActors.add(doBulkLoadTask(self, range));
+// TODO(Zhe): add parallelism limitation here
+void runBulkLoadTaskOnRange(Reference<DataDistributor> self, KeyRange range, Optional<BulkLoadState> bulkLoadState) {
+	TraceEvent(SevInfo, "RunBulkLoadTask", self->ddId)
+	    .detail("Range", range)
+	    .detail("Context", bulkLoadState.present() ? "resume" : "new");
+	self->bulkLoadActors.add(doBulkLoadTask(self, range, bulkLoadState));
 	return;
 }
 
@@ -1143,7 +1176,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	state KeyRange rangeToRead;
 	while (beginKey < endKey) {
 		try {
-			// TODO: check parallelism limitation when expanding
+			// TODO(Zhe): check parallelism limitation when expanding
 			Database cx = self->txnProcessor->context();
 			Transaction tr(cx);
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
@@ -1153,16 +1186,12 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
 					if (range != bulkLoadState.range) {
-						TraceEvent(SevWarn, "BulkLoadingScheduleFailed", self->ddId)
+						TraceEvent(SevWarn, "BulkLoadScheduleFailed", self->ddId)
 						    .detail("Reason", "Task boundary changed")
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
-					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid ||
-					           bulkLoadState.phase == BulkLoadPhase::Error) {
-						runBulkLoadTaskOnRange(self,
-						                       bulkLoadState.range,
-						                       /*context=*/bulkLoadState.phase == BulkLoadPhase::Error ? "Retry"
-						                                                                               : "New");
+					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid) {
+						runBulkLoadTaskOnRange(self, bulkLoadState.range, Optional<BulkLoadState>());
 					} else {
 						ASSERT(bulkLoadState.phase == BulkLoadPhase::Triggered ||
 						       bulkLoadState.phase == BulkLoadPhase::Running ||
@@ -1178,10 +1207,12 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 			wait(delay(10.0));
 		}
 	}
-	TraceEvent(SevInfo, "ScheduleBulkLoadTasksEnd", self->ddId);
+	TraceEvent(SevInfo, "BulkLoadScheduleEnd", self->ddId);
 	return Void();
 }
 
+// Resume triggered bulk load tasks
+// The running task was resumed when DD init data moves
 ACTOR Future<Void> resumeBulkLoadFromMetadata(Reference<DataDistributor> self) {
 	state Key beginKey = normalKeys.begin;
 	state Key endKey = normalKeys.end;
@@ -1202,7 +1233,7 @@ ACTOR Future<Void> resumeBulkLoadFromMetadata(Reference<DataDistributor> self) {
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
 					} else if (bulkLoadState.phase == BulkLoadPhase::Triggered) {
-						runBulkLoadTaskOnRange(self, bulkLoadState.range, "Resume");
+						runBulkLoadTaskOnRange(self, bulkLoadState.range, bulkLoadState);
 					}
 				}
 			}
@@ -1330,7 +1361,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                                 getShardMetricsList.getFuture(),
 			                                                                 getAverageShardBytes.getFuture(),
 			                                                                 triggerStorageQueueRebalance.getFuture(),
-			                                                                 self->createBulkLoadShard.getFuture()),
+			                                                                 self->triggerShardBulkLoading.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));

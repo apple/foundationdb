@@ -478,6 +478,22 @@ public:
 						}
 					}
 
+					if (req.teamSelect == TeamSelect::WANT_STRICT_NEW_DESTS) {
+						for (const auto& srcId : req.src) {
+							std::vector<UID> serverIds = dest->getServerIDs();
+							for (const auto& serverId : serverIds) {
+								if (serverId == srcId) {
+									// Found a server in src team. Skip `dest`.
+									ok = false;
+									break;
+								}
+							}
+							if (!ok) {
+								break;
+							}
+						}
+					}
+
 					ok = ok && (!req.teamMustHaveShards ||
 					            self->shardsAffectedByTeamFailure->hasShards(
 					                ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));

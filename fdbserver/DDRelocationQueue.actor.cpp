@@ -802,8 +802,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 		// If there is a queued job that wants data relocation which we are about to cancel/modify,
 		//  make sure that we keep the relocation intent for the job that we queue up
-		// If the new relocation is a bulk loading relocation, we do not inherit settings from the queued job
-		if ((foundActiveFetching || foundActiveRelocation) && rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+		// If the new/old relocation is a bulk loading relocation, we do not inherit settings from the queued job
+		if ((foundActiveFetching || foundActiveRelocation) && (rrs.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING ||
+		                                                       rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING)) {
 			rd.wantsNewServers |= rrs.wantsNewServers;
 			rd.startTime = std::min(rd.startTime, rrs.startTime);
 			if (!hasHealthPriority) {
@@ -813,6 +814,15 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 				rd.boundaryPriority = std::max(rd.boundaryPriority, rrs.boundaryPriority);
 			}
 			rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
+		}
+
+		if (rrs.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+			TraceEvent(SevInfo, "BulkLoadTaskIsOverwrittern")
+			    .detail("OldDataMove", rrs.bulkLoadState.get().toString())
+			    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
+			    .detail("NewDataMovePriority", rd.priority);
+			if (rrs.launchAck.canBeSet())
+				rrs.launchAck.send(BulkLoadAckType::Failed);
 		}
 
 		// New job cancels old queued jobs
@@ -1360,8 +1370,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
+	state WantBulkLoadServers wantBulkLoadServers(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
+	if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+		TraceEvent(SevInfo, "BulkLoadRelocatorStart", self->distributorId)
+		    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+	}
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1485,7 +1500,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 						TeamSelect destTeamSelect;
-						if (!rd.wantsNewServers) {
+						if (wantBulkLoadServers) {
+							destTeamSelect = TeamSelect::WANT_STRICT_NEW_DESTS;
+						} else if (!rd.wantsNewServers) {
 							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
 						} else if (wantTrueBest) {
 							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
@@ -1812,6 +1829,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
+
+			if (rd.bulkLoadState.present()) {
+				ASSERT_WE_THINK(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
+				ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
+				for (const auto& destId : destIds) {
+					ASSERT_WE_THINK(std::find(rd.src.begin(), rd.src.end(), destId) == rd.src.end());
+				}
+			}
+			if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+				ASSERT_WE_THINK(rd.bulkLoadState.present());
+				TraceEvent(SevInfo, "BulkLoadRelocatorGotTeam", self->distributorId)
+				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+			}
+
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			std::unique_ptr<MoveKeysParams> params;
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -2003,15 +2034,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					if (rd.bulkLoadState.present()) {
-						ASSERT_WE_THINK(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
-						ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
-					}
-					if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
-						ASSERT_WE_THINK(rd.bulkLoadState.present());
-						if (rd.bulkLoadState.present()) {
-							rd.launchAck.send(BulkLoadAckType::Succeed);
-							TraceEvent("DDRelocatorBulkLoadAck").detail("Task", rd.bulkLoadState.get().toString());
-						}
+						rd.launchAck.send(BulkLoadAckType::Succeed);
+						TraceEvent("DDRelocatorBulkLoadAck")
+						    .detail("Dests", describe(destIds))
+						    .detail("Task", rd.bulkLoadState.get().toString());
 					}
 
 					return Void();

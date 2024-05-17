@@ -238,17 +238,24 @@ struct GetMetricsListRequest {
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
-struct CreateBulkLoadShardRequest {
+struct BulkLoadShardRequest {
 	BulkLoadState bulkLoadState;
 	Version commitVersion;
 	Promise<BulkLoadAckType> triggerAck;
 	Promise<BulkLoadAckType> launchAck;
-	CreateBulkLoadShardRequest() {}
-	CreateBulkLoadShardRequest(BulkLoadState const& bulkLoadState,
-	                           Version commitVersion,
-	                           Promise<BulkLoadAckType> triggerAck,
-	                           Promise<BulkLoadAckType> launchAck)
-	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), triggerAck(triggerAck), launchAck(launchAck) {}
+	Promise<BulkLoadAckType> finishAck;
+	bool terminate = false;
+
+	BulkLoadShardRequest() {}
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState,
+	                     Version commitVersion,
+	                     Promise<BulkLoadAckType> triggerAck,
+	                     Promise<BulkLoadAckType> launchAck)
+	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), triggerAck(triggerAck), launchAck(launchAck),
+	    terminate(false) {}
+
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Version commitVersion, Promise<BulkLoadAckType> finishAck)
+	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), finishAck(finishAck), terminate(true) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution
@@ -523,6 +530,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
+	KeyRangeMap<std::pair<UID, Version>> bulkLoadingMap; // BulkLoadTaskID, BulkLoadTaskCommitVerison
 };
 
 // Holds the permitted size and IO Bounds for a shard

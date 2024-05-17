@@ -829,22 +829,24 @@ ACTOR Future<Void> tenantCreationHandling(DataDistributionTracker* self, TenantC
 	return Void();
 }
 
-bool existBulkLoading(const KeyRangeMap<Version>& bulkLoadingMap, KeyRange keys) {
+bool existBulkLoading(const KeyRangeMap<std::pair<UID, Version>>& bulkLoadingMap, KeyRange keys) {
 	for (auto it : bulkLoadingMap.intersectingRanges(keys)) {
-		if (it->value() != invalidVersion) {
+		if (it->value().second != invalidVersion) {
 			return true;
 		}
 	}
 	return false;
 }
 
-bool canTriggerBulkLoad(const KeyRangeMap<Version>& bulkLoadingMap, KeyRange keys, Version CommitVersion) {
+bool canTriggerBulkLoad(const KeyRangeMap<std::pair<UID, Version>>& bulkLoadingMap,
+                        KeyRange keys,
+                        Version commitVersion) {
 	for (auto it : bulkLoadingMap.intersectingRanges(keys)) {
-		ASSERT(it->value() != CommitVersion);
+		ASSERT(it->value().second != commitVersion);
 		// If exist any intersecting bulkLoad task which is newer committed,
 		// the input bulkLoad task is logically cancelled by the newer one.
 		// So, do not launch the input one.
-		if (it->value() > CommitVersion) {
+		if (it->value().second > commitVersion) {
 			return false;
 		}
 	}
@@ -1014,10 +1016,22 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 		self->shardsAffectedByTeamFailure->defineShard(lastOverlapRange);
 	}
 	self->shardsAffectedByTeamFailure->defineShard(keys);
-	self->bulkLoadingMap.insert(keys, commitVersion); // TODO: resume bulkLoadingMap when DD init
+	self->bulkLoadingMap.insert(
+	    keys, std::make_pair(bulkLoadState.taskId, commitVersion)); // TODO: resume bulkLoadingMap when DD init
 	self->output.send(RelocateShard(
 	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState, launchAck));
-	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has taken action
+	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has triggered bulk loading
+}
+
+void terminateShardBulkLoad(DataDistributionTracker* self,
+                            BulkLoadState bulkLoadState,
+                            Version commitVersion,
+                            Promise<BulkLoadAckType> terminateAck) {
+	for (auto it : self->bulkLoadingMap.intersectingRanges(bulkLoadState.range)) {
+		ASSERT(it->value().first == bulkLoadState.taskId);
+	}
+	self->bulkLoadingMap.insert(bulkLoadState.range, std::make_pair(UID(0, 0), invalidVersion));
+	terminateAck.send(BulkLoadAckType::Succeed);
 }
 
 Future<Void> shardMerger(DataDistributionTracker* self,
@@ -1664,8 +1678,13 @@ struct DataDistributionTrackerImpl {
 				when(RebalanceStorageQueueRequest req = waitNext(self->triggerStorageQueueRebalance)) {
 					triggerStorageQueueRebalance(self, req);
 				}
-				when(CreateBulkLoadShardRequest req = waitNext(self->createBulkLoadShard)) {
-					createShardToBulkLoad(self, req.bulkLoadState, req.commitVersion, req.triggerAck, req.launchAck);
+				when(BulkLoadShardRequest req = waitNext(self->triggerShardBulkLoading)) {
+					if (!req.terminate) {
+						createShardToBulkLoad(
+						    self, req.bulkLoadState, req.commitVersion, req.triggerAck, req.launchAck);
+					} else {
+						terminateShardBulkLoad(self, req.bulkLoadState, req.commitVersion, req.finishAck);
+					}
 				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
@@ -1690,16 +1709,17 @@ Future<Void> DataDistributionTracker::run(
     const FutureStream<GetMetricsListRequest>& getShardMetricsList,
     const FutureStream<Promise<int64_t>>& getAverageShardBytes,
     const FutureStream<RebalanceStorageQueueRequest>& triggerStorageQueueRebalance,
-    const FutureStream<CreateBulkLoadShardRequest>& createBulkLoadShard) {
+    const FutureStream<BulkLoadShardRequest>& triggerShardBulkLoading) {
 	self->getShardMetrics = getShardMetrics;
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
-	self->createBulkLoadShard = createBulkLoadShard;
+	self->triggerShardBulkLoading = triggerShardBulkLoading;
 	self->userRangeConfig = initData->userRangeConfig;
-	self->bulkLoadingMap.insert(allKeys,
-	                            invalidVersion); // TODO: Resume for any RUNNING bulk loading task when DD restart
+	for (auto range : initData->bulkLoadingMap.intersectingRanges(normalKeys)) {
+		self->bulkLoadingMap.insert(range.range(), range.value());
+	}
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

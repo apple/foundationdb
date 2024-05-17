@@ -33,7 +33,7 @@ public:
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
-	PromiseStream<CreateBulkLoadShardRequest> createBulkLoadShard;
+	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 
 	KeyRangeMap<ShardTrackedData> shards;
 
@@ -116,7 +116,7 @@ public:
 		                                        getShardMetricsList.getFuture(),
 		                                        getAverageShardBytes.getFuture(),
 		                                        triggerStorageQueueRebalance.getFuture(),
-		                                        createBulkLoadShard.getFuture()));
+		                                        triggerShardBulkLoading.getFuture()));
 
 		actors.add(relocateShardReporter(this, output.getFuture()));
 

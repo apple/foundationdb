@@ -1810,7 +1810,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 						dataMove.src.insert(src.begin(), src.end());
 
-						if (shouldCreateCheckpoint(dataMoveId)) {
+						// If this is a bulk load data move, need not create checkpoint on the source servers
+						if (shouldCreateCheckpoint(dataMoveId) && !bulkLoadState.present()) {
 							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
 							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
 							                              DataMoveRocksCF,
@@ -1859,6 +1860,23 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("NewDataMoveMetaData", dataMove.toString());
 				}
 
+				dataMove.bulkLoadState = bulkLoadState;
+
+				if (bulkLoadState.present()) {
+					// Check if the current bulk load task is outdated, if not update phase
+					ASSERT(dataMove.ranges.size() == 1 && bulkLoadState.get().range == dataMove.ranges[0]);
+					RangeResult bulkLoadRes = wait(krmGetRanges(&tr, bulkLoadPrefix, bulkLoadState.get().range));
+					BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
+					if (bulkLoadState.get().taskId == existBulkLoad.taskId) {
+						bulkLoadState.get().phase = BulkLoadPhase::Running; // Only place to set it running to metadata
+						wait(krmSetRange(
+						    &tr, bulkLoadPrefix, bulkLoadState.get().range, bulkLoadStateValue(bulkLoadState.get())));
+					} else {
+						// TODO(Zhe): can I cancel this data move now?
+						// If I do so, does it exactly cancel this data move and do not impact on the future data move?
+					}
+				}
+
 				tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 
 				wait(waitForAll(actors));
@@ -1871,7 +1889,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("CommitVersion", tr.getCommittedVersion())
 				    .detail("DeltaRange", currentKeys.toString())
 				    .detail("Range", describe(dataMove.ranges))
-				    .detail("DataMove", dataMove.toString());
+				    .detail("DataMove", dataMove.toString())
+				    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 
 				// Post validate consistency of update of keyServers and serverKeys
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
@@ -1990,7 +2009,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
                                            bool hasRemote,
                                            UID relocationIntervalId,
                                            std::map<UID, StorageServerInterface> tssMapping,
-                                           const DDEnabledState* ddEnabledState) {
+                                           const DDEnabledState* ddEnabledState,
+                                           Optional<BulkLoadState> bulkLoadState) {
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(targetRanges.size() == 1);
 	state KeyRange keys = targetRanges[0];
@@ -2269,13 +2289,33 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						complete = true;
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString());
-					} else {
+					} else if (!bulkLoadState.present()) {
+						// Bulk Loading data move does not allow partial complete
 						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("CurrentRange", range)
 						    .detail("NewDataMoveMetaData", dataMove.toString());
 						dataMove.ranges.front() = KeyRangeRef(range.end, dataMove.ranges.front().end);
 						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+					}
+
+					if (bulkLoadState.present()) {
+						// Check if the current bulk load task is outdated, if not, update phase
+						RangeResult bulkLoadRes = wait(krmGetRanges(&tr, bulkLoadPrefix, bulkLoadState.get().range));
+						BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
+						if (bulkLoadState.get().taskId == existBulkLoad.taskId) {
+							bulkLoadState.get().phase =
+							    BulkLoadPhase::Complete; // Only place to set it complete to metadata
+							wait(krmSetRange(&tr,
+							                 bulkLoadPrefix,
+							                 bulkLoadState.get().range,
+							                 bulkLoadStateValue(bulkLoadState.get())));
+						} else {
+							// TODO(Zhe):
+							// Can I cancel the data move at this point?
+							// If I do so, does it exactly cancel this data move and do not impact on the future data
+							// move?
+						}
 					}
 
 					wait(tr.commit());
@@ -2324,7 +2364,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 		throw;
 	}
 
-	TraceEvent(SevInfo, "FinishMoveShardsEnd", relocationIntervalId).detail("DataMoveID", dataMoveId);
+	TraceEvent(SevInfo, "FinishMoveShardsEnd", relocationIntervalId)
+	    .detail("DataMoveID", dataMoveId)
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 	return Void();
 }
 
@@ -3206,7 +3248,8 @@ Future<Void> rawFinishMovement(Database occ,
 		                        params.hasRemote,
 		                        params.relocationIntervalId,
 		                        tssMapping,
-		                        params.ddEnabledState);
+		                        params.ddEnabledState,
+		                        params.bulkLoadState);
 	}
 	ASSERT(params.keys.present());
 	return finishMoveKeys(std::move(occ),

@@ -67,10 +67,20 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
-		if (self->clientId != 0) {
-			return Void();
+	bool allComplete(RangeResult input) {
+		for (int i = 0; i < input.size() - 1; i++) {
+			if (!input[i].value.empty()) {
+				BulkLoadState bulkLoadState = decodeBulkLoadState(input[i].value);
+				ASSERT(bulkLoadState.isValid());
+				if (bulkLoadState.phase != BulkLoadPhase::Complete) {
+					return false;
+				}
+			}
 		}
+		return true;
+	}
+
+	ACTOR Future<Void> issueTransactions(BulkLoading* self, Database cx) {
 		state ReadYourWritesTransaction tr(cx);
 		state Version version = wait(tr.getReadVersion());
 		TraceEvent("BulkLoadWorkloadStart").detail("Version", version);
@@ -235,6 +245,97 @@ struct BulkLoading : TestWorkload {
 		    .detail("AtVersion", tr.getReadVersion().get())
 		    .detail("Range", range3)
 		    .detail("Res", self->parseReadRangeResult(res9));
+
+		loop {
+			try {
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res10 = wait(tr.getRange(range3, GetRangeLimits()));
+				if (self->allComplete(res10)) {
+					break;
+				}
+				wait(delay(10.0));
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR Future<Void> setBulkLoadMode(Database cx, bool on) {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.set("\xff\xff/bulk_loading/mode"_sr, BinaryWriter::toValue(on ? "1"_sr : "0"_sr, Unversioned()));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> issueBulkLoadTasks(BulkLoading* self,
+	                                      Database cx,
+	                                      std::vector<std::pair<KeyRange, std::string>> tasks) {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				for (const auto& task : tasks) {
+					self->addBulkLoadTask(&tr, task.first, task.second);
+				}
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
+		if (self->clientId != 0) {
+			return Void();
+		}
+
+		wait(self->setBulkLoadMode(cx, /*on=*/true));
+
+		std::vector<std::pair<KeyRange, std::string>> tasks;
+		tasks.push_back(std::make_pair(Standalone(KeyRangeRef("1"_sr, "2"_sr)), "1"));
+		tasks.push_back(std::make_pair(Standalone(KeyRangeRef("2"_sr, "3"_sr)), "2"));
+		tasks.push_back(std::make_pair(Standalone(KeyRangeRef("3"_sr, "4"_sr)), "3"));
+
+		wait(self->issueBulkLoadTasks(self, cx, tasks));
+
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state KeyRange range =
+				    Standalone(KeyRangeRef("\xff\xff/bulk_loading/status/"_sr, "\xff\xff/bulk_loading/status/\xff"_sr));
+				RangeResult res = wait(tr.getRange(range, GetRangeLimits()));
+				if (self->allComplete(res)) {
+					break;
+				}
+				wait(delay(10.0));
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		wait(self->setBulkLoadMode(cx, /*on=*/false));
 
 		return Void();
 	}

@@ -8453,6 +8453,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 	if (priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
 		TraceEvent("SSBulkLoadByFetchKeys").detail("Shard", keys);
+		ASSERT_WE_THINK(false);
 	}
 
 	try {
@@ -9085,6 +9086,30 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 	return Void();
 }
 
+ACTOR Future<Void> fetchShardBulkLoadFile(StorageServer* data,
+                                          MoveInShard* moveInShard,
+                                          std::string dir,
+                                          BulkLoadState bulkLoadState) {
+	return Void();
+}
+
+ACTOR Future<Optional<BulkLoadState>> getBulkLoadState(Database cx, UID ssid, UID dataMoveId) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+			if (!val.present()) {
+				TraceEvent(SevError, "SSBulkLoadDataMoveIdNotExist", ssid).detail("DataMoveID", dataMoveId);
+				return Optional<BulkLoadState>(); // TODO(Zhe): is this case not expected?
+			}
+			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
+			return dataMoveMetaData.bulkLoadState;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard, std::string dir) {
 	TraceEvent(SevInfo, "FetchShardCheckpointMetaDataBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString());
@@ -9466,7 +9491,18 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				wait(fetchShardCheckpoint(data, moveInShard, dir));
+				Optional<BulkLoadState> bulkLoadState =
+				    wait(getBulkLoadState(data->cx, data->thisServerID, moveInShard->dataMoveId()));
+				if (bulkLoadState.present()) {
+					TraceEvent(SevInfo, "SSFetchShardBulkLoading", data->thisServerID)
+					    .detail("BulkLoadTask", bulkLoadState.get().toString());
+					// This is a bulk loading data move
+					// wait(fetchShardBulkLoadFile(data, moveInShard, dir, bulkLoadState.get()));
+					wait(fetchShardCheckpoint(data, moveInShard, dir));
+					// TODO(Zhe): transfer files and load the files
+				} else {
+					wait(fetchShardCheckpoint(data, moveInShard, dir));
+				}
 			} else if (phase == MoveInPhase::Ingesting) {
 				wait(fetchShardIngestCheckpoint(data, moveInShard));
 			} else if (phase == MoveInPhase::ApplyingUpdates) {

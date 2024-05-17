@@ -104,6 +104,7 @@ FDB_BOOLEAN_PARAM(ForReadBalance);
 FDB_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_BOOLEAN_PARAM(FindTeamByServers);
 FDB_BOOLEAN_PARAM(PreferWithinShardLimit);
+FDB_BOOLEAN_PARAM(WantBulkLoadServers);
 
 class TeamSelect {
 public:
@@ -111,6 +112,7 @@ public:
 		ANY = 0, // Any other situations except for the next two
 		WANT_COMPLETE_SRCS, // Try best to select a healthy team consists of servers in completeSources
 		WANT_TRUE_BEST, // Ask for the most or least utilized team in the cluster
+		WANT_STRICT_NEW_DESTS, // Must guarantee that any selected dest is not in src. This is used by bulk loading
 	};
 	TeamSelect() : value(ANY) {}
 	TeamSelect(Value v) : value(v) {}
@@ -120,6 +122,8 @@ public:
 			return "Want_Complete_Srcs";
 		case WANT_TRUE_BEST:
 			return "Want_True_Best";
+		case WANT_STRICT_NEW_DESTS:
+			return "Want_Strict_New_Dests";
 		case ANY:
 			return "Any";
 		default:
