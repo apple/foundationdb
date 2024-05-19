@@ -1219,6 +1219,7 @@ BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEvent
 	ASSERT(!logged);
 	if (enabled.isSuppressible()) {
 		if (initialized) {
+			std::cerr<<" AABBCC " << std::endl;
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
 			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
 			    .suppressFor(5);
