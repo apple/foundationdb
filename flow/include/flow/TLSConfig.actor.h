@@ -32,14 +32,19 @@
 #include <map>
 #include <string>
 #include <vector>
+
 #include <boost/system/system_error.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+
+#include <openssl/x509.h>
+
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-#include <openssl/x509.h>
+#include "flow/actorcompiler.h" // This must be the last #include.
+
 typedef int NID;
 
 enum class MatchType {
@@ -56,21 +61,21 @@ enum class X509Location {
 };
 
 struct Criteria {
-	Criteria(const std::string& s) : criteria(s), match_type(MatchType::EXACT), location(X509Location::NAME) {}
-	Criteria(const std::string& s, MatchType mt) : criteria(s), match_type(mt), location(X509Location::NAME) {}
-	Criteria(const std::string& s, X509Location loc) : criteria(s), match_type(MatchType::EXACT), location(loc) {}
-	Criteria(const std::string& s, MatchType mt, X509Location loc) : criteria(s), match_type(mt), location(loc) {}
-
 	std::string criteria;
 	MatchType match_type;
 	X509Location location;
 
-	bool operator==(const Criteria& c) const {
+	Criteria(const std::string& s, MatchType mt, X509Location loc) : criteria(s), match_type(mt), location(loc) {}
+	Criteria(const std::string& s, MatchType mt) : Criteria(s, mt, X509Location::NAME) {}
+	Criteria(const std::string& s, X509Location loc) : Criteria(s, MatchType::EXACT, loc) {}
+	explicit Criteria(const std::string& s) : Criteria(s, MatchType::EXACT, X509Location::NAME) {}
+
+	bool operator==(const Criteria& c) const noexcept {
 		return criteria == c.criteria && match_type == c.match_type && location == c.location;
 	}
-};
 
-#include "flow/actorcompiler.h" // This must be the last #include.
+	bool operator!=(const Criteria& c) const noexcept { return !(*this == c); }
+};
 
 enum class TLSEndpointType { UNSET = 0, CLIENT, SERVER };
 
@@ -241,13 +246,15 @@ public:
 	std::string toString() const;
 
 	struct Rule {
+		using CriteriaMap = std::map<NID, Criteria>;
+
 		explicit Rule(std::string input);
 
 		std::string toString() const;
 
-		std::map<NID, Criteria> subject_criteria;
-		std::map<NID, Criteria> issuer_criteria;
-		std::map<NID, Criteria> root_criteria;
+		CriteriaMap subject_criteria;
+		CriteriaMap issuer_criteria;
+		CriteriaMap root_criteria;
 
 		bool verify_cert = true;
 		bool verify_time = true;
