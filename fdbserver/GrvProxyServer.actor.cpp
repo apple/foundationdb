@@ -199,7 +199,7 @@ struct GrvProxyData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
-	LatencySample* versionVectorSizeOnGRVReply = nullptr;
+	std::unique_ptr<LatencySample> versionVectorSizeOnGRVReply;
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
@@ -238,10 +238,11 @@ struct GrvProxyData {
 	    version(0), minKnownCommittedVersion(invalidVersion),
 	    tagThrottler(CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-			versionVectorSizeOnGRVReply = new LatencySample("VersionVectorSizeOnGRVReply",
-			                                                dbgid,
-			                                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-			                                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			versionVectorSizeOnGRVReply =
+			    std::make_unique<LatencySample>("VersionVectorSizeOnGRVReply",
+			                                    dbgid,
+			                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                    SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 		}
 	}
 };

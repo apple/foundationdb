@@ -127,11 +127,11 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
 	CounterValue reportLiveCommittedVersionRequests;
 	// This counter gives an estimate of the number of non-empty peeks that storage servers
 	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
-	LatencySample* versionVectorTagUpdates = nullptr;
+	std::unique_ptr<LatencySample> versionVectorTagUpdates;
 	CounterValue waitForPrevCommitRequests;
 	CounterValue nonWaitForPrevCommitRequests;
-	LatencySample* versionVectorSizeOnCVReply = nullptr;
-	LatencySample* waitForPrevLatencies = nullptr;
+	std::unique_ptr<LatencySample> versionVectorSizeOnCVReply;
+	std::unique_ptr<LatencySample> waitForPrevLatencies;
 
 	PromiseStream<Future<Void>> addActor;
 
