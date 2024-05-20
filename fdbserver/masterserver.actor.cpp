@@ -273,18 +273,18 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	locality = tagLocalityInvalid;
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-		versionVectorTagUpdates = new LatencySample("VersionVectorTagUpdates",
-		                                            dbgid,
-		                                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-		versionVectorSizeOnCVReply = new LatencySample("VersionVectorSizeOnCVReply",
-		                                               dbgid,
-		                                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-		waitForPrevLatencies = new LatencySample("WaitForPrevLatencies",
-		                                         dbgid,
-		                                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		versionVectorTagUpdates = std::make_unique<LatencySample>("VersionVectorTagUpdates",
+		                                                          dbgid,
+		                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		versionVectorSizeOnCVReply = std::make_unique<LatencySample>("VersionVectorSizeOnCVReply",
+		                                                             dbgid,
+		                                                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		waitForPrevLatencies = std::make_unique<LatencySample>("WaitForPrevLatencies",
+		                                                       dbgid,
+		                                                       SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                       SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 	}
 
 #ifdef WITH_SWIFT
