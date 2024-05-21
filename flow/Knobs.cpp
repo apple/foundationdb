@@ -305,7 +305,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,              false ); if( randomize && BUGGIFY ) LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL = true; // If true, saves the full details of the mismatch in a trace event. If false, saves them in the DB and the trace event references the DB row.
 	init( TSS_LARGE_TRACE_SIZE,                              50000 );
 	init( LOAD_BALANCE_FETCH_REPLICA_TIMEOUT,                  5.0 );
-	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS,         false );
+	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS,         false ); if( randomize && BUGGIFY ) ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS = true;
 	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,                  -2 ); // Do consistency check based on all available storage replicas
 
 	// Health Monitor

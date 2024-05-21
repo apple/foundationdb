@@ -8397,6 +8397,8 @@ bool fetchKeyCanRetry(const Error& e) {
 	case error_code_blob_granule_transaction_too_old:
 	case error_code_grv_proxy_memory_limit_exceeded:
 	case error_code_commit_proxy_memory_limit_exceeded:
+	case error_code_storage_replica_comparison_error:
+	case error_code_unreachable_storage_replica:
 		return true;
 	default:
 		return false;
@@ -8525,11 +8527,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
-				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
-				int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
-				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
-				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
+			if (!isFullRestore) {
+				if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
+					tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
+					int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+					tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
+					             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
+				}
 			}
 			tr.trState->readOptions = readOptions;
 			tr.trState->taskID = TaskPriority::FetchKeys;
@@ -8571,6 +8575,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					TraceEvent(SevWarn, "FetchKeyGRVError", data->thisServerID).error(e);
 					lastError = e;
 				}
+			}
+			if (lastError.code() == error_code_storage_replica_comparison_error) {
+				Version knownCommitted = data->knownCommittedVersion.get();
+				wait(data->version.whenAtLeast(knownCommitted));
+				fetchVersion = data->version.get();
 			}
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
@@ -8982,7 +8991,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .error(e)
 		    .detail("Elapsed", now() - startTime)
 		    .detail("KeyBegin", keys.begin)
-		    .detail("KeyEnd", keys.end);
+		    .detail("KeyEnd", keys.end)
+		    .detail("FetchVersion", fetchVersion)
+		    .detail("KnownCommittedVersion", data->knownCommittedVersion.get());
 		if (e.code() != error_code_actor_cancelled)
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		throw; // goes nowhere
