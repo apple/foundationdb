@@ -15,7 +15,7 @@ Release Notes
 * Increase visibility of CommitProxyTerminated events for failed_to_progress errors. `(PR #11316) <https://github.com/apple/foundationdb/pull/11316>`_
 * Fixed an infinite retry of GRV request bug. `(PR #11352) <https://github.com/apple/foundationdb/pull/11352>`_
 * Improved distributed consistency checker to continuously run by default and visibility of recruitment errors. `(PR #11351) <https://github.com/apple/foundationdb/pull/11351>`_
-* Fix an assertion failure of cluster controller when waiting for recovery. `(PR #11398) <https://github.com/apple/foundationdb/pull/11398>`_
+* Fixed an assertion failure of cluster controller when waiting for recovery. `(PR #11398) <https://github.com/apple/foundationdb/pull/11398>`_
 
 7.1.59
 ======
