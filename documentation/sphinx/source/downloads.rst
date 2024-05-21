@@ -44,7 +44,7 @@ C
 
 FoundationDB's C bindings are installed with the FoundationDB client binaries. You can find more details in the :doc:`C API Documentation <api-c>`.
 
-Python 3.7+
+Python 3.8+
 -----------
 
 Python package is available from `PiPy <https://pypi.org/project/foundationdb/>`_

@@ -24,14 +24,14 @@ import ctypes
 import uuid
 import struct
 import math
-import sys
 import functools
 from bisect import bisect_left
 
-from fdb import six
 import fdb
 
 _size_limits = tuple((1 << (i * 8)) - 1 for i in range(9))
+
+int2byte = struct.Struct(">B").pack
 
 # Define type codes:
 NULL_CODE = 0x00
@@ -65,12 +65,12 @@ def _find_terminator(v, pos):
 # If encoding and sign bit is 1 (negative), flip all of the bits. Otherwise, just flip sign.
 # If decoding and sign bit is 0 (negative), flip all of the bits. Otherwise, just flip sign.
 def _float_adjust(v, encode):
-    if encode and six.indexbytes(v, 0) & 0x80 != 0x00:
-        return b"".join(map(lambda x: six.int2byte(x ^ 0xFF), six.iterbytes(v)))
-    elif not encode and six.indexbytes(v, 0) & 0x80 != 0x80:
-        return b"".join(map(lambda x: six.int2byte(x ^ 0xFF), six.iterbytes(v)))
+    if encode and v[0] & 0x80 != 0x00:
+        return b"".join(map(lambda x: int2byte(x ^ 0xFF), iter(v)))
+    elif not encode and v[0] & 0x80 != 0x80:
+        return b"".join(map(lambda x: int2byte(x ^ 0xFF), iter(v)))
     else:
-        return six.int2byte(six.indexbytes(v, 0) ^ 0x80) + v[1:]
+        return int2byte(v[0] ^ 0x80) + v[1:]
 
 
 @functools.total_ordering
@@ -81,7 +81,7 @@ class SingleFloat(object):
             self.value = ctypes.c_float(value).value
         elif isinstance(value, ctypes.c_float):
             self.value = value.value
-        elif isinstance(value, six.integer_types):
+        elif isinstance(value, int):
             self.value = ctypes.c_float(value).value
         else:
             raise ValueError(
@@ -121,7 +121,7 @@ class Versionstamp(object):
     LENGTH = 12
     _TR_VERSION_LEN = 10
     _MAX_USER_VERSION = (1 << 16) - 1
-    _UNSET_TR_VERSION = 10 * six.int2byte(0xFF)
+    _UNSET_TR_VERSION = 10 * int2byte(0xFF)
     _STRUCT_FORMAT_STRING = ">" + str(_TR_VERSION_LEN) + "sH"
 
     @classmethod
@@ -145,11 +145,11 @@ class Versionstamp(object):
 
     @classmethod
     def validate_user_version(cls, user_version):
-        if not isinstance(user_version, six.integer_types):
+        if not isinstance(user_version, int):
             raise TypeError(
                 "Local version has illegal type "
                 + str(type(user_version))
-                + " (requires integer type)"
+                + " (requires int)"
             )
         elif user_version < 0 or user_version > cls._MAX_USER_VERSION:
             raise ValueError(
@@ -182,9 +182,10 @@ class Versionstamp(object):
             tr_version = v[start : start + cls._TR_VERSION_LEN]
             if tr_version == cls._UNSET_TR_VERSION:
                 tr_version = None
-            user_version = six.indexbytes(v, start + cls._TR_VERSION_LEN) * (
-                1 << 8
-            ) + six.indexbytes(v, start + cls._TR_VERSION_LEN + 1)
+            user_version = (
+                v[start + cls._TR_VERSION_LEN] * (1 << 8)
+                + v[start + cls._TR_VERSION_LEN + 1]
+            )
             return Versionstamp(tr_version, user_version)
 
     def is_complete(self):
@@ -262,7 +263,7 @@ class Versionstamp(object):
 
 
 def _decode(v, pos):
-    code = six.indexbytes(v, pos)
+    code = v[pos]
     if code == NULL_CODE:
         return None, pos + 1
     elif code == BYTES_CODE:
@@ -284,18 +285,18 @@ def _decode(v, pos):
             end,
         )
     elif code == POS_INT_END:  # 0x1d; Positive 9-255 byte integer
-        length = six.indexbytes(v, pos + 1)
+        length = v[pos + 1]
         val = 0
         for i in _range(length):
             val = val << 8
-            val += six.indexbytes(v, pos + 2 + i)
+            val += v[pos + 2 + i]
         return val, pos + 2 + length
     elif code == NEG_INT_START:  # 0x0b; Negative 9-255 byte integer
-        length = six.indexbytes(v, pos + 1) ^ 0xFF
+        length = v[pos + 1] ^ 0xFF
         val = 0
         for i in _range(length):
             val = val << 8
-            val += six.indexbytes(v, pos + 2 + i)
+            val += v[pos + 2 + i]
         return val - (1 << (length * 8)) + 1, pos + 2 + length
     elif code == FLOAT_CODE:
         return (
@@ -329,8 +330,8 @@ def _decode(v, pos):
         ret = []
         end_pos = pos + 1
         while end_pos < len(v):
-            if six.indexbytes(v, end_pos) == 0x00:
-                if end_pos + 1 < len(v) and six.indexbytes(v, end_pos + 1) == 0xFF:
+            if v[end_pos] == 0x00:
+                if end_pos + 1 < len(v) and v[end_pos + 1] == 0xFF:
                     ret.append(None)
                     end_pos += 2
                 else:
@@ -357,17 +358,8 @@ def _reduce_children(child_values):
     return bytes_list, version_pos
 
 
-if sys.version_info < (2, 7):
-
-    def _bit_length(x):
-        s = bin(x)  # binary representation:  bin(-37) --> '-0b100101'
-        s = s.lstrip("-0b")  # remove leading zeros and minus sign
-        return len(s)
-
-else:
-
-    def _bit_length(x):
-        return x.bit_length()
+def _bit_length(x):
+    return x.bit_length()
 
 
 def _encode(value, nested=False):
@@ -376,85 +368,83 @@ def _encode(value, nested=False):
     # sorting need to work too!
     if value == None:  # ==, not is, because some fdb.impl.Value are equal to None
         if nested:
-            return b"".join([six.int2byte(NULL_CODE), six.int2byte(0xFF)]), -1
+            return b"".join([int2byte(NULL_CODE), int2byte(0xFF)]), -1
         else:
-            return b"".join([six.int2byte(NULL_CODE)]), -1
+            return b"".join([int2byte(NULL_CODE)]), -1
     elif isinstance(value, bytes):  # also gets non-None fdb.impl.Value
         return (
-            six.int2byte(BYTES_CODE) + value.replace(b"\x00", b"\x00\xFF") + b"\x00",
+            int2byte(BYTES_CODE) + value.replace(b"\x00", b"\x00\xFF") + b"\x00",
             -1,
         )
-    elif isinstance(value, six.text_type):
+    elif isinstance(value, str):
         return (
-            six.int2byte(STRING_CODE)
+            int2byte(STRING_CODE)
             + value.encode("utf-8").replace(b"\x00", b"\x00\xFF")
             + b"\x00",
             -1,
         )
-    elif isinstance(value, six.integer_types) and (
+    elif isinstance(value, int) and (
         not isinstance(value, bool) or (hasattr(fdb, "_version") and fdb._version < 500)
     ):
         if value == 0:
-            return b"".join([six.int2byte(INT_ZERO_CODE)]), -1
+            return b"".join([int2byte(INT_ZERO_CODE)]), -1
         elif value > 0:
             if value >= _size_limits[-1]:
                 length = (_bit_length(value) + 7) // 8
-                data = [six.int2byte(POS_INT_END), six.int2byte(length)]
+                data = [int2byte(POS_INT_END), int2byte(length)]
                 for i in _range(length - 1, -1, -1):
-                    data.append(six.int2byte((value >> (8 * i)) & 0xFF))
+                    data.append(int2byte((value >> (8 * i)) & 0xFF))
                 return b"".join(data), -1
 
             n = bisect_left(_size_limits, value)
-            return six.int2byte(INT_ZERO_CODE + n) + struct.pack(">Q", value)[-n:], -1
+            return int2byte(INT_ZERO_CODE + n) + struct.pack(">Q", value)[-n:], -1
         else:
             if -value >= _size_limits[-1]:
                 length = (_bit_length(value) + 7) // 8
                 value += (1 << (length * 8)) - 1
-                data = [six.int2byte(NEG_INT_START), six.int2byte(length ^ 0xFF)]
+                data = [int2byte(NEG_INT_START), int2byte(length ^ 0xFF)]
                 for i in _range(length - 1, -1, -1):
-                    data.append(six.int2byte((value >> (8 * i)) & 0xFF))
+                    data.append(int2byte((value >> (8 * i)) & 0xFF))
                 return b"".join(data), -1
 
             n = bisect_left(_size_limits, -value)
             maxv = _size_limits[n]
             return (
-                six.int2byte(INT_ZERO_CODE - n) + struct.pack(">Q", maxv + value)[-n:],
+                int2byte(INT_ZERO_CODE - n) + struct.pack(">Q", maxv + value)[-n:],
                 -1,
             )
     elif isinstance(value, ctypes.c_float) or isinstance(value, SingleFloat):
         return (
-            six.int2byte(FLOAT_CODE)
-            + _float_adjust(struct.pack(">f", value.value), True),
+            int2byte(FLOAT_CODE) + _float_adjust(struct.pack(">f", value.value), True),
             -1,
         )
     elif isinstance(value, ctypes.c_double):
         return (
-            six.int2byte(DOUBLE_CODE)
-            + _float_adjust(struct.pack(">d", value.value), True),
+            int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value.value), True),
             -1,
         )
     elif isinstance(value, float):
         return (
-            six.int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value), True),
+            int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value), True),
             -1,
         )
     elif isinstance(value, uuid.UUID):
-        return six.int2byte(UUID_CODE) + value.bytes, -1
+        return int2byte(UUID_CODE) + value.bytes, -1
     elif isinstance(value, bool):
         if value:
-            return b"".join([six.int2byte(TRUE_CODE)]), -1
+            return b"".join([int2byte(TRUE_CODE)]), -1
         else:
-            return b"".join([six.int2byte(FALSE_CODE)]), -1
+            return b"".join([int2byte(FALSE_CODE)]), -1
     elif isinstance(value, Versionstamp):
         version_pos = -1 if value.is_complete() else 1
-        return six.int2byte(VERSIONSTAMP_CODE) + value.to_bytes(), version_pos
+        return int2byte(VERSIONSTAMP_CODE) + value.to_bytes(), version_pos
     elif isinstance(value, tuple) or isinstance(value, list):
         child_bytes, version_pos = _reduce_children(
             map(lambda x: _encode(x, True), value)
         )
         new_version_pos = -1 if version_pos < 0 else version_pos + 1
         return (
-            b"".join([six.int2byte(NESTED_CODE)] + child_bytes + [six.int2byte(0x00)]),
+            b"".join([int2byte(NESTED_CODE)] + child_bytes + [int2byte(0x00)]),
             new_version_pos,
         )
     else:
@@ -552,13 +542,13 @@ def _code_for(value):
         return NULL_CODE
     elif isinstance(value, bytes):
         return BYTES_CODE
-    elif isinstance(value, six.text_type):
+    elif isinstance(value, str):
         return STRING_CODE
     elif (not hasattr(fdb, "_version") or fdb._version >= 500) and isinstance(
         value, bool
     ):
         return FALSE_CODE
-    elif isinstance(value, six.integer_types):
+    elif isinstance(value, int):
         return INT_ZERO_CODE
     elif isinstance(value, ctypes.c_float) or isinstance(value, SingleFloat):
         return FLOAT_CODE
