@@ -609,7 +609,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_OPEN_FILES,                      50000 ); // Should be smaller than OS's fd limit.
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
-
+	init ( SHARDED_ROCKSDB_CLEAR_RANGE_COMPACTION_LIMIT,          10 ); if (isSimulated) SHARDED_ROCKSDB_CLEAR_RANGE_COMPACTION_LIMIT = deterministicRandom()->randomInt(0, 100); 
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

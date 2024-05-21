@@ -85,6 +85,11 @@ public:
 	// Adds key range to a physical shard.
 	virtual Future<Void> addRange(KeyRangeRef range, std::string id, bool active = true) { return Void(); }
 
+	// Creates new physical shards for key ranges.
+	virtual Future<Void> addRanges(std::vector<std::pair<KeyRange, std::string>> ranges, bool active = true) {
+		return Void();
+	}
+
 	// Removes a key range from KVS and returns a list of empty physical shards after the removal.
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
 
