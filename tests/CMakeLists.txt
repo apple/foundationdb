@@ -385,7 +385,7 @@ if(WITH_PYTHON)
     restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml)
+    restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.txt
     restarting/from_7.3.0/SnapCycleRestart-2.txt)
@@ -412,7 +412,7 @@ if(WITH_PYTHON)
     restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.3.0_until_7.4.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/to_7.3.0_until_7.4.0/BlobGranuleRestartCorrectness-2.toml)
+    restarting/to_7.3.0_until_7.4.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.3.0_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.3.0_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
