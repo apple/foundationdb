@@ -968,7 +968,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									Value value = self->getRandomValue();
 									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(),
 									                                            versionStampKey,
-									                                            tr.getCachedReadVersion().orDefault(0),
+									                                            tr.getCachedReadVersion(),
 									                                            normalKeys.end);
 									self->changeCount.insert(range, changeNum++);
 									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", versionStampKey).detail("Range", range);

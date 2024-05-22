@@ -265,7 +265,10 @@ inline int32_t parseVersionstampOffset(StringRef& key) {
 /*
  * Returns the range corresponding to the specified versionstamp key.
  */
-inline KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef& key, Version minVersion, const KeyRef& maxKey) {
+inline KeyRangeRef getVersionstampKeyRange(Arena& arena,
+                                           const KeyRef& key,
+                                           Optional<Version> readVersion,
+                                           const KeyRef& maxKey) {
 	KeyRef begin(arena, key);
 	KeyRef end(arena, key);
 
@@ -280,7 +283,7 @@ inline KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef& key, Vers
 	if (pos < 0 || pos + 10 > begin.size())
 		throw client_invalid_operation();
 
-	placeVersionstamp(mutateString(begin) + pos, minVersion, 0);
+	placeVersionstamp(mutateString(begin) + pos, readVersion.map([](Version v) { return v + 1; }).orDefault(0), 0);
 	memset(mutateString(end) + pos, '\xff', 10);
 
 	return KeyRangeRef(begin, std::min(end, maxKey));
