@@ -1,4 +1,3 @@
-# FIXME: also add downgrade
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
