@@ -82,11 +82,11 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 
 // CopyFiles copies a list of files into the output directory.
 func CopyFiles(logger logr.Logger, outputDir string, copyDetails map[string]string, requiredCopies map[string]bool) error {
-	for inputPath, outputSubpath := range copyDetails {
-		if outputSubpath == "" {
-			outputSubpath = path.Base(inputPath)
+	for inputPath, outputSubPath := range copyDetails {
+		if outputSubPath == "" {
+			outputSubPath = path.Base(inputPath)
 		}
-		outputPath := path.Join(outputDir, outputSubpath)
+		outputPath := path.Join(outputDir, outputSubPath)
 		err := os.MkdirAll(path.Dir(outputPath), os.ModeDir|os.ModePerm)
 		if err != nil {
 			return err
@@ -135,7 +135,7 @@ func getLibraryPath() string {
 }
 
 // getCopyDetails will generate the details for all the files that should be copied.
-func getCopyDetails(inputDir string, copyPrimaryLibrary string, binaryOutputDirectory string, copyFiles []string, copyBinaries []string, copyLibraries []string, requiredCopyFiles []string, currentContainerVersion string) (map[string]string, map[string]bool, error) {
+func getCopyDetails(inputDir string, copyPrimaryLibrary string, binaryOutputDirectory string, copyFiles []string, copyBinaries []string, copyLibraries []string, requiredCopyFiles []string, currentContainerVersion string, mode executionMode) (map[string]string, map[string]bool, error) {
 	copyDetails := make(map[string]string, len(copyFiles)+len(copyBinaries))
 
 	for _, filePath := range copyFiles {
@@ -144,12 +144,17 @@ func getCopyDetails(inputDir string, copyPrimaryLibrary string, binaryOutputDire
 
 	if len(copyBinaries) > 0 {
 		if binaryOutputDirectory == "" {
-			compactVersion, err := getCompactVersion(currentContainerVersion)
-			if err != nil {
-				return nil, nil, err
-			}
+			// The operator expects that the sidecar will copy the binaries into /var/fdb/shared-binaries/bin/<new version>/fdbserver
+			if mode == executionModeSidecar {
+				binaryOutputDirectory = path.Join("bin", currentContainerVersion)
+			} else {
+				compactVersion, err := getCompactVersion(currentContainerVersion)
+				if err != nil {
+					return nil, nil, err
+				}
 
-			binaryOutputDirectory = compactVersion
+				binaryOutputDirectory = compactVersion
+			}
 		}
 
 		binaryDirectory := getBinaryDirectory()
