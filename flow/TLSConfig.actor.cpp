@@ -50,6 +50,8 @@ TLSPolicy::~TLSPolicy() {}
 #include <openssl/x509v3.h>
 #include <openssl/x509_vfy.h>
 
+#include <fmt/core.h>
+
 #include "flow/Platform.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FastRef.h"
@@ -734,7 +736,7 @@ public:
 std::string getX509Name(const X509_NAME* name) {
 	std::unique_ptr<BIO, decltype(&BIO_free)> out(BIO_new(BIO_s_mem()), BIO_free);
 	if (out == nullptr) {
-		return std::string("Unable to allocate OpenSSL BIO");
+		throw internal_error_msg("Unable to allocate OpenSSL BIO");
 	}
 	X509_NAME_print_ex(out.get(), name, /* indent= */ 0, /* flags */ XN_FLAG_ONELINE);
 	unsigned char* rawName = nullptr;
@@ -811,7 +813,7 @@ bool PeerVerifier::matchExtensionCriteria(const X509* cert,
 	}
 
 	// No entry matches
-	m_verifyState.emplace_back("NoMatchingEntry");
+	m_verifyState.emplace_back("NoMatchingEntry"sv);
 	return false;
 }
 
@@ -888,9 +890,6 @@ bool PeerVerifier::verifyRule(const TLSPolicy::Rule& rule) {
 		ASSERT(cert != nullptr);
 
 		m_verifyState.emplace_back("Subject"sv);
-		if (deterministicRandom()->randomInt(0, 6) < 4) {
-			return false;
-		}
 		if (auto subject = X509_get_subject_name(cert); subject != nullptr) {
 			if (!verifyCriterias(cert, subject, rule.subject_criteria)) {
 				return false;
@@ -1011,11 +1010,12 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 		for (size_t i = 0; i < rules.size(); ++i) {
 			const auto& failureReason = verifier.getFailureReasons()[i];
 			const auto& rule = rules[i];
-			TraceEvent traceEvent(SevWarn, "TLSPolicyFailure");
-			traceEvent.detail("Reason", failureReason).detail("Rule", rule.toString());
-			if (i == rules.size() - 1) {
-				traceEvent.suppressFor(1.0);
-			}
+			std::string eventName = fmt::format("TLSPolicyFailure{:02d}", i);
+
+			TraceEvent(SevWarn, eventName.c_str())
+			    .suppressFor(1.0)
+			    .detail("Reason", failureReason)
+			    .detail("Rule", rule.toString());
 		}
 	} else {
 		TraceEvent(SevInfo, "TLSPolicySuccess").suppressFor(1.0).detail("Reason", verifier.getSuccessReason());
