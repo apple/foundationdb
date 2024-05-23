@@ -691,7 +691,6 @@ bool match_criteria_entry(const std::string_view criteria, const ASN1_STRING* en
 class PeerVerifier {
 	const std::vector<TLSPolicy::Rule>& m_rules;
 	X509_STORE_CTX* m_storeCtx;
-	const bool m_isClient;
 	bool m_verified;
 
 	std::string_view m_successReason;
@@ -717,8 +716,8 @@ class PeerVerifier {
 	bool verify();
 
 public:
-	PeerVerifier(const std::vector<TLSPolicy::Rule>& rules, X509_STORE_CTX* store_ctx, const bool is_client)
-	  : m_rules(rules), m_storeCtx(store_ctx), m_isClient(is_client), m_successReason(), m_verifyState() {
+	PeerVerifier(const std::vector<TLSPolicy::Rule>& rules, X509_STORE_CTX* store_ctx)
+	  : m_rules(rules), m_storeCtx(store_ctx), m_successReason(), m_verifyState() {
 		ASSERT(m_storeCtx != nullptr);
 
 		// Prealloc 32 * sizeof(const char*) to avoid reallocation, this should be sufficient
@@ -1001,7 +1000,7 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 		return false;
 	}
 
-	PeerVerifier verifier(rules, store_ctx, is_client);
+	PeerVerifier verifier(rules, store_ctx);
 
 	if (verifier.isErr()) {
 		// Must have all rules tried with failure
