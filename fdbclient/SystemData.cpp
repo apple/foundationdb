@@ -629,6 +629,8 @@ void decodeDataMoveId(const UID& id,
 			// It is possible that the new binary decodes a wrong data move type.
 			// However, it only affects whether dest SSes use physical shard move
 			// to get the data from the source server.
+			// When SS decodes a data move type, SS checks whether its KVStore supports
+			// the data move type. If no, SS will use DataMoveType::LOGICAL by default.
 		}
 		dataMoveReason = static_cast<DataMovementReason>(0xFF & (id.second() >> 8));
 		if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason < DataMovementReason::INVALID) {
