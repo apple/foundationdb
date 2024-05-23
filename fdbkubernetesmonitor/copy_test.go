@@ -46,7 +46,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 		When("no files should be copied", func() {
 			It("no error should be thrown", func() {
-				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(BeEmpty())
 				Expect(requiredCopyMap).To(BeEmpty())
@@ -59,12 +59,24 @@ var _ = Describe("Testing the copy methods", func() {
 					copyBinaries = []string{"fdbserver"}
 				})
 
-				It("no error should be thrown", func() {
-					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(copyDetails).To(HaveKeyWithValue("/usr/bin/fdbserver", "7.1/fdbserver"))
-					Expect(copyDetails).To(HaveLen(1))
-					Expect(requiredCopyMap).To(BeEmpty())
+				When("the execution mode is init", func() {
+					It("no error should be thrown", func() {
+						copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(copyDetails).To(HaveKeyWithValue("/usr/bin/fdbserver", "7.1/fdbserver"))
+						Expect(copyDetails).To(HaveLen(1))
+						Expect(requiredCopyMap).To(BeEmpty())
+					})
+				})
+
+				When("the execution mode is sidecar", func() {
+					It("no error should be thrown", func() {
+						copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeSidecar)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(copyDetails).To(HaveKeyWithValue("/usr/bin/fdbserver", "bin/7.1.43/fdbserver"))
+						Expect(copyDetails).To(HaveLen(1))
+						Expect(requiredCopyMap).To(BeEmpty())
+					})
 				})
 			})
 
@@ -79,7 +91,7 @@ var _ = Describe("Testing the copy methods", func() {
 				})
 
 				It("no error should be thrown", func() {
-					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(HaveKeyWithValue("/usr/bin/fdbserver", "testing/fdbserver"))
 					Expect(copyDetails).To(HaveLen(1))
@@ -94,7 +106,7 @@ var _ = Describe("Testing the copy methods", func() {
 			})
 
 			It("no error should be thrown", func() {
-				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(
 					And(
@@ -113,7 +125,7 @@ var _ = Describe("Testing the copy methods", func() {
 			})
 
 			It("no error should be thrown", func() {
-				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(
 					And(
@@ -132,7 +144,7 @@ var _ = Describe("Testing the copy methods", func() {
 			})
 
 			It("no error should be thrown", func() {
-				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(
 					And(
@@ -152,7 +164,7 @@ var _ = Describe("Testing the copy methods", func() {
 			})
 
 			It("no error should be thrown", func() {
-				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(
 					And(
@@ -174,7 +186,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 			When("no input directory is set", func() {
 				It("no error should be thrown", func() {
-					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(
 						And(
@@ -196,7 +208,7 @@ var _ = Describe("Testing the copy methods", func() {
 				})
 
 				It("no error should be thrown", func() {
-					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(
 						And(
@@ -219,7 +231,7 @@ var _ = Describe("Testing the copy methods", func() {
 			})
 
 			It("no error should be thrown", func() {
-				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+				copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(
 					And(
@@ -248,7 +260,7 @@ var _ = Describe("Testing the copy methods", func() {
 				})
 
 				It("should throw an error", func() {
-					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 					Expect(err).To(HaveOccurred())
 					Expect(copyDetails).To(BeEmpty())
 					Expect(requiredCopyMap).To(BeEmpty())
@@ -261,7 +273,7 @@ var _ = Describe("Testing the copy methods", func() {
 				})
 
 				It("should not throw an error and include all files", func() {
-					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+					copyDetails, requiredCopyMap, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(
 						And(
@@ -292,24 +304,40 @@ var _ = Describe("Testing the copy methods", func() {
 		})
 
 		When("copying the binaries", func() {
-			var copyDetails map[string]string
+			When("the execution mode is init", func() {
+				BeforeEach(func() {
+					// Simulate the binary directory
+					GinkgoT().Setenv(binaryTestDirectoryEnv, inputBinaryDir)
+					copyDetails, _, err := getCopyDetails("", "", "", nil, binaries, nil, nil, "7.1.43", executionModeInit)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(copyDetails).To(HaveLen(3))
+					Expect(CopyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+				})
 
-			BeforeEach(func() {
-				// Simulate the binary directory
-				GinkgoT().Setenv(binaryTestDirectoryEnv, inputBinaryDir)
-
-				var err error
-				copyDetails, _, err = getCopyDetails("", "", "", nil, binaries, nil, nil, "7.1.43")
-				Expect(err).NotTo(HaveOccurred())
-				Expect(copyDetails).To(HaveLen(3))
-				Expect(CopyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+				It("should copy all the files", func() {
+					Expect(path.Join(outputBinaryDir, "7.1", "fdbserver")).Should(BeAnExistingFile())
+					Expect(path.Join(outputBinaryDir, "7.1", "fdbrestore")).Should(BeAnExistingFile())
+					Expect(path.Join(outputBinaryDir, "7.1", "fdbbackup")).Should(BeAnExistingFile())
+				})
 			})
 
-			It("should copy all the files", func() {
-				Expect(path.Join(outputBinaryDir, "7.1", "fdbserver")).Should(BeAnExistingFile())
-				Expect(path.Join(outputBinaryDir, "7.1", "fdbrestore")).Should(BeAnExistingFile())
-				Expect(path.Join(outputBinaryDir, "7.1", "fdbbackup")).Should(BeAnExistingFile())
+			When("the execution mode is sidecar", func() {
+				BeforeEach(func() {
+					// Simulate the binary directory
+					GinkgoT().Setenv(binaryTestDirectoryEnv, inputBinaryDir)
+					copyDetails, _, err := getCopyDetails("", "", "", nil, binaries, nil, nil, "7.1.43", executionModeSidecar)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(copyDetails).To(HaveLen(3))
+					Expect(CopyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+				})
+
+				It("should copy all the files", func() {
+					Expect(path.Join(outputBinaryDir, "bin", "7.1.43", "fdbserver")).Should(BeAnExistingFile())
+					Expect(path.Join(outputBinaryDir, "bin", "7.1.43", "fdbrestore")).Should(BeAnExistingFile())
+					Expect(path.Join(outputBinaryDir, "bin", "7.1.43", "fdbbackup")).Should(BeAnExistingFile())
+				})
 			})
+
 		})
 	})
 
@@ -335,7 +363,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 			BeforeEach(func() {
 				var err error
-				copyDetails, _, err = getCopyDetails("", "", "", nil, nil, libraries, nil, "7.1.43")
+				copyDetails, _, err = getCopyDetails("", "", "", nil, nil, libraries, nil, "7.1.43", executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(HaveLen(3))
 				Expect(CopyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
@@ -353,7 +381,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 			BeforeEach(func() {
 				var err error
-				copyDetails, _, err = getCopyDetails("", "7.1", "", nil, nil, libraries, nil, "7.1.43")
+				copyDetails, _, err = getCopyDetails("", "7.1", "", nil, nil, libraries, nil, "7.1.43", executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(HaveLen(3))
 				Expect(CopyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
@@ -382,7 +410,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 				BeforeEach(func() {
 					var err error
-					copyDetails, _, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, nil, "7.1.43")
+					copyDetails, _, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, nil, "7.1.43", executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(HaveLen(1))
 					Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
@@ -399,7 +427,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 				BeforeEach(func() {
 					var err error
-					copyDetails, requiredFiles, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, []string{"testfile"}, "7.1.43")
+					copyDetails, requiredFiles, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, []string{"testfile"}, "7.1.43", executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(HaveLen(1))
 				})
