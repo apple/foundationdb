@@ -85,7 +85,9 @@ extern const std::set<int> transactionRetryableErrors;
 
 #undef ERROR
 #define ERROR(name, number, description)                                                                               \
-	inline Error name() { return Error(number); };                                                                     \
+	inline Error name() {                                                                                              \
+		return Error(number);                                                                                          \
+	};                                                                                                                 \
 	enum { error_code_##name = number };
 
 #include "error_definitions.h"
@@ -126,20 +128,20 @@ extern bool isAssertDisabled(int line);
 // #define ASSERT( condition ) ((void)0)
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
-		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
+		if (!((condition) || isAssertDisabled(__LINE__))) [[unlikely]] {                                               \
 			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
 	} while (false)
 #define ASSERT_ABORT(condition)                                                                                        \
 	do {                                                                                                               \
-		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
+		if (!((condition) || isAssertDisabled(__LINE__))) [[unlikely]] {                                               \
 			internal_error_impl(#condition, __FILE__, __LINE__);                                                       \
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
 #define UNSTOPPABLE_ASSERT(condition)                                                                                  \
 	do {                                                                                                               \
-		if (!(condition)) {                                                                                            \
+		if (!(condition)) [[unlikely]] {                                                                               \
 			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
 	} while (false)
