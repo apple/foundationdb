@@ -626,7 +626,7 @@ void decodeDataMoveId(const UID& id,
 			// When upgrade from a release 7.3.x where dataMoveType is not encoded in
 			// datamove id, the decoded dataMoveType can be out of scope.
 			// For this case, we set it to DataMoveType::LOGICAL.
-			// It is possible that the new binary decodes a wrong data move type,
+			// It is possible that the new binary decodes a wrong data move type.
 			// However, it only affects whether dest SSes use physical shard move
 			// to get the data from the source server.
 		}
