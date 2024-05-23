@@ -4,6 +4,7 @@ extraDatabaseMode = "Local"
 allowDefaultTenant = false
 encryptModes = ['disabled']
 storageEngineExcludeTypes = [4,5]
+tenantModes = ['disabled']
 
 [[test]]
 testTitle = "DrUpgrade"

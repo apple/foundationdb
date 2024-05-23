@@ -1,20 +1,24 @@
-storageEngineExcludeTypes=4,5
+[configuration]
+storageEngineExcludeTypes=[4,5]
 logAntiQuorum=0
+tenantModes=['disabled']
 
-;write 1000 Keys ending with even numbers
-testTitle=SnapTestPre
+[[test]]
+testTitle="SnapTestPre"
 clearAfterTest=false
 
-        testName=SnapTest
+        [[test.workload]]
+        testName="SnapTest"
         numSnaps=1
         maxSnapDelay=3.0
         testID=0
 
-;Take snap and do read/write
-testTitle=SnapTestTakeSnap
+[[test]]
+testTitle="SnapTestTakeSnap"
 clearAfterTest=false
 
-        testName=ReadWrite
+        [[test.workload]]
+        testName="ReadWrite"
         testDuration=10.0
         transactionsPerSecond=10000
         writesPerTransactionA=0
@@ -26,23 +30,27 @@ clearAfterTest=false
         valueBytes=16
         discardEdgeMeasurements=false
 
-        testName=SnapTest
+        [[test.workload]]
+        testName="SnapTest"
         numSnaps=1
         maxSnapDelay=10.0
         testID=1
 
-;write 1000 Keys ending with odd numbers
-testTitle=SnapTestPost
+[[test]]
+testTitle="SnapTestPost"
 clearAfterTest=false
 
-        testName=SnapTest
+        [[test.workload]]
+        testName="SnapTest"
         numSnaps=1
         maxSnapDelay=25.0
         testID=2
 
-;save and shutdown
-testTitle=SnapTestShutdown
-        testName=SaveAndKill
-        restartInfoLocation=simfdb/restartInfo.ini
+[[test]]
+testTitle="SnapTestShutdown"
+
+        [[test.workload]]
+        testName="SaveAndKill"
+        restartInfoLocation="simfdb/restartInfo.ini"
         testDuration=10.0
         isRestoring=1
