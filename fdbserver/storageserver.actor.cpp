@@ -10621,6 +10621,14 @@ private:
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
 			dataMoveReason = DataMovementReason::INVALID;
 			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId, dataMoveReason);
+			if (dataMoveType != DataMoveType::LOGICAL &&
+			    data->storage.getKeyValueStoreType() != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+				TraceEvent(SevWarnAlways, "KVStoreNotSupportDataMoveType", data->thisServerID)
+				    .detail("DataMoveType", dataMoveType)
+				    .detail("KVStoreType", data->storage.getKeyValueStoreType())
+				    .detail("DataMoveId", dataMoveId);
+				dataMoveType = DataMoveType::LOGICAL;
+			}
 			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL ||
 			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
 			processedStartKey = true;

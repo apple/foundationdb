@@ -605,29 +605,6 @@ const Value serverKeysValue(const UID& id) {
 	return wr.toValue();
 }
 
-void validateDataMoveIdDecode(const DataMoveType& dataMoveType,
-                              const DataMovementReason& dataMoveReason,
-                              const bool& assigned,
-                              const bool& emptyRange,
-                              const UID& dataMoveId) {
-	if (dataMoveType >= DataMoveType::NUMBER_OF_TYPES || dataMoveType < DataMoveType::LOGICAL) {
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
-		    .detail("Reason", "WrongDataMoveTypeOutScope")
-		    .detail("Value", dataMoveType)
-		    .detail("DataMoveID", dataMoveId)
-		    .detail("SplitIDToDecode", dataMoveId.second());
-	}
-	if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason < DataMovementReason::INVALID) {
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DecodeDataMoveIdError")
-		    .detail("Reason", "WrongDataMoveReasonOutScope")
-		    .detail("Value", dataMoveReason)
-		    .detail("DataMoveID", dataMoveId)
-		    .detail("SplitIDToDecode", dataMoveId.second());
-	}
-
-	return;
-}
-
 void decodeDataMoveId(const UID& id,
                       bool& assigned,
                       bool& emptyRange,
@@ -639,8 +616,38 @@ void decodeDataMoveId(const UID& id,
 	emptyRange = id.second() == emptyShardId;
 	if (assigned && !emptyRange && id != anonymousShardId) {
 		dataMoveType = static_cast<DataMoveType>(0xFF & id.second());
+		if (dataMoveType >= DataMoveType::NUMBER_OF_TYPES || dataMoveType < DataMoveType::LOGICAL) {
+			TraceEvent(SevWarnAlways, "DecodeDataMoveIdError")
+			    .detail("Reason", "DataMoveTypeOutScope")
+			    .detail("Value", dataMoveType)
+			    .detail("DataMoveID", id)
+			    .detail("SplitIDToDecode", id.second());
+			dataMoveType = DataMoveType::LOGICAL;
+			// When upgrade from a release 7.3.x where dataMoveType is not encoded in
+			// datamove id, the decoded dataMoveType can be out of scope.
+			// For this case, we set it to DataMoveType::LOGICAL.
+			// It is possible that the new binary decodes a wrong data move type,
+			// However, it only affects whether dest SSes use physical shard move
+			// to get the data from the source server.
+		}
 		dataMoveReason = static_cast<DataMovementReason>(0xFF & (id.second() >> 8));
-		validateDataMoveIdDecode(dataMoveType, dataMoveReason, assigned, emptyRange, id);
+		if (dataMoveReason >= DataMovementReason::NUMBER_OF_REASONS || dataMoveReason < DataMovementReason::INVALID) {
+			TraceEvent(SevWarnAlways, "DecodeDataMoveIdError")
+			    .detail("Reason", "DataMoveReasonOutScope")
+			    .detail("Value", dataMoveReason)
+			    .detail("DataMoveID", id)
+			    .detail("SplitIDToDecode", id.second());
+			dataMoveReason = DataMovementReason::INVALID;
+			// When upgrade from release-7.3 where dataMoveReason is not encoded in
+			// datamove id, the decoded reason can be out of scope.
+			// For this case, we set it to DataMovementReason::INVALID.
+			// Currently, this is only used by priority-based fetchKeys throttling.
+			// It is possible that the new binary decodes a wrong data move reason.
+			// However, it only effects the throttling decison made by the fetchKeys.
+			// If the fetchKeys throttling is enabled and it misbehaves after the upgrading
+			// from release-7.3, users can temporarily disable the feature until the old data moves
+			// have been consumed.
+		}
 	}
 }
 
