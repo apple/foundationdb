@@ -21,7 +21,6 @@ package api
 
 import (
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net"
 	"os"
 	"strconv"
@@ -94,15 +93,10 @@ const (
 	// IPListArgumentType defines an argument that is a comma-separated list of
 	// IP addresses, provided through an environment variable.
 	IPListArgumentType = "IPList"
-
-	// NodeLabelArgumentType defines an argument that references a label key. The value
-	// of the label will be used as value. The label key must be specified in the Source field.
-	// This ArgumentType requires that the fdb-kubernetes-monitor is able to read the nodes metadata.
-	NodeLabelArgumentType = "NodeLabel"
 )
 
 // GenerateArgument processes an argument and generates its string representation.
-func (argument Argument) GenerateArgument(processNumber int, env map[string]string, node *metav1.PartialObjectMetadata) (string, error) {
+func (argument Argument) GenerateArgument(processNumber int, env map[string]string) (string, error) {
 	switch argument.ArgumentType {
 	case "":
 		fallthrough
@@ -111,7 +105,7 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 	case ConcatenateArgumentType:
 		concatenated := ""
 		for _, childArgument := range argument.Values {
-			childValue, err := childArgument.GenerateArgument(processNumber, env, node)
+			childValue, err := childArgument.GenerateArgument(processNumber, env)
 			if err != nil {
 				return "", err
 			}
@@ -127,17 +121,6 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		return strconv.Itoa(number), nil
 	case EnvironmentArgumentType, IPListArgumentType:
 		return argument.LookupEnv(env)
-	case NodeLabelArgumentType:
-		if node == nil {
-			return "", fmt.Errorf("no node information present")
-		}
-
-		value, ok := node.Labels[argument.Source]
-		if !ok {
-			return "", fmt.Errorf("label \"%s\" not found", argument.Source)
-		}
-
-		return value, nil
 	default:
 		return "", fmt.Errorf("unsupported argument type %s", argument.ArgumentType)
 	}
@@ -186,13 +169,13 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 }
 
 // GenerateArguments interprets the arguments in the process configuration and generates a command invocation.
-func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string, node *metav1.PartialObjectMetadata) ([]string, error) {
+func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string) ([]string, error) {
 	results := make([]string, 0, len(configuration.Arguments)+1)
 	if configuration.BinaryPath != "" {
 		results = append(results, configuration.BinaryPath)
 	}
 	for _, argument := range configuration.Arguments {
-		result, err := argument.GenerateArgument(processNumber, env, node)
+		result, err := argument.GenerateArgument(processNumber, env)
 		if err != nil {
 			return nil, err
 		}
