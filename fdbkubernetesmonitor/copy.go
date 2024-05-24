@@ -82,11 +82,11 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 
 // CopyFiles copies a list of files into the output directory.
 func CopyFiles(logger logr.Logger, outputDir string, copyDetails map[string]string, requiredCopies map[string]bool) error {
-	for inputPath, outputSubPath := range copyDetails {
-		if outputSubPath == "" {
-			outputSubPath = path.Base(inputPath)
+	for inputPath, outputSubpath := range copyDetails {
+		if outputSubpath == "" {
+			outputSubpath = path.Base(inputPath)
 		}
-		outputPath := path.Join(outputDir, outputSubPath)
+		outputPath := path.Join(outputDir, outputSubpath)
 		err := os.MkdirAll(path.Dir(outputPath), os.ModeDir|os.ModePerm)
 		if err != nil {
 			return err
