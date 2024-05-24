@@ -2,7 +2,7 @@
 //
 // This source file is part of the FoundationDB open source project
 //
-// Copyright 2021 Apple Inc. and the FoundationDB project authors
+// Copyright 2021-2024 Apple Inc. and the FoundationDB project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,8 +106,8 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string) {
-	podClient, err := CreatePodClient(ctx, logger)
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
+	podClient, err := CreatePodClient(ctx, logger, enableNodeWatcher)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
 		os.Exit(1)
@@ -192,7 +192,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment)
+	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment, monitor.PodClient.nodeMetadata)
 	if err != nil {
 		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return
@@ -277,7 +277,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			errorCounter = 0
 		}
 
-		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment)
+		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment, monitor.PodClient.nodeMetadata)
 		if err != nil {
 			backoffDuration := getBackoffDuration(errorCounter)
 			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
@@ -467,7 +467,7 @@ func (monitor *Monitor) Run() {
 			}
 		}
 
-		annotations := monitor.PodClient.metadata.Annotations
+		annotations := monitor.PodClient.podMetadata.Annotations
 		if len(annotations) > 0 {
 			delayValue, ok := annotations[DelayShutdownAnnotation]
 			if ok {
