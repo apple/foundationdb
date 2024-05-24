@@ -2,7 +2,7 @@
 //
 // This source file is part of the FoundationDB open source project
 //
-// Copyright 2021 Apple Inc. and the FoundationDB project authors
+// Copyright 2021-2024 Apple Inc. and the FoundationDB project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ package api
 
 import (
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net"
 	"os"
 	"strconv"
@@ -57,7 +58,7 @@ type Argument struct {
 	Values []Argument `json:"values,omitempty"`
 
 	// Source provides the name of the environment variable to use for an
-	// Environment type argument.
+	// Environment type argument. This setting is also used for NodeLabelArgumentType.
 	Source string `json:"source,omitempty"`
 
 	// Multiplier provides a multiplier for the process number for ProcessNumber
@@ -93,11 +94,15 @@ const (
 	// IPListArgumentType defines an argument that is a comma-separated list of
 	// IP addresses, provided through an environment variable.
 	IPListArgumentType = "IPList"
+
+	// NodeLabelArgumentType defines an argument that references a label key. The value
+	// of the label will be used as value. The label key must be specified in the Source field.
+	// This ArgumentType requires that the fdb-kubernetes-monitor is able to read the nodes metadata.
+	NodeLabelArgumentType = "NodeLabel"
 )
 
-// GenerateArgument processes an argument and generates its string
-// representation.
-func (argument Argument) GenerateArgument(processNumber int, env map[string]string) (string, error) {
+// GenerateArgument processes an argument and generates its string representation.
+func (argument Argument) GenerateArgument(processNumber int, env map[string]string, node *metav1.PartialObjectMetadata) (string, error) {
 	switch argument.ArgumentType {
 	case "":
 		fallthrough
@@ -106,7 +111,7 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 	case ConcatenateArgumentType:
 		concatenated := ""
 		for _, childArgument := range argument.Values {
-			childValue, err := childArgument.GenerateArgument(processNumber, env)
+			childValue, err := childArgument.GenerateArgument(processNumber, env, node)
 			if err != nil {
 				return "", err
 			}
@@ -122,6 +127,17 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		return strconv.Itoa(number), nil
 	case EnvironmentArgumentType, IPListArgumentType:
 		return argument.LookupEnv(env)
+	case NodeLabelArgumentType:
+		if node == nil {
+			return "", fmt.Errorf("no node information present")
+		}
+
+		value, ok := node.Labels[argument.Source]
+		if !ok {
+			return "", fmt.Errorf("label \"%s\" not found", argument.Source)
+		}
+
+		return value, nil
 	default:
 		return "", fmt.Errorf("unsupported argument type %s", argument.ArgumentType)
 	}
@@ -134,9 +150,11 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 	if env != nil {
 		value, present = env[argument.Source]
 	}
+
 	if !present {
 		value, present = os.LookupEnv(argument.Source)
 	}
+
 	if !present {
 		return "", fmt.Errorf("missing environment variable %s", argument.Source)
 	}
@@ -163,18 +181,18 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 		}
 		return "", fmt.Errorf("could not find IP with family %d", argument.IPFamily)
 	}
+
 	return value, nil
 }
 
-// GenerateArguments interprets the arguments in the process configuration and
-// generates a command invocation.
-func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string) ([]string, error) {
+// GenerateArguments interprets the arguments in the process configuration and generates a command invocation.
+func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string, node *metav1.PartialObjectMetadata) ([]string, error) {
 	results := make([]string, 0, len(configuration.Arguments)+1)
 	if configuration.BinaryPath != "" {
 		results = append(results, configuration.BinaryPath)
 	}
 	for _, argument := range configuration.Arguments {
-		result, err := argument.GenerateArgument(processNumber, env)
+		result, err := argument.GenerateArgument(processNumber, env, node)
 		if err != nil {
 			return nil, err
 		}
