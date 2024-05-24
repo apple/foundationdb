@@ -2,7 +2,7 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-tenantModes = ['disabled']
+tenantModes = ['optional', 'required']
 injectTargetedSSRestart = true
 injectSSDelay = true
 
@@ -18,7 +18,7 @@ clearAfterTest=false
 
     [[test.workload]]
     testName = 'BlobGranuleCorrectnessWorkload'
-    testDuration = 60.0
+    testDuration = 120.0
 
     [[test.workload]]
     testName = 'RandomClogging'
@@ -46,8 +46,3 @@ clearAfterTest=false
     [[test.workload]]
     testName = 'BlobFailureInjection'
     testDuration = 60.0
-
-    [[test.workload]]
-    testName='SaveAndKill'
-    restartInfoLocation='simfdb/restartInfo.ini'
-    testDuration=30.0

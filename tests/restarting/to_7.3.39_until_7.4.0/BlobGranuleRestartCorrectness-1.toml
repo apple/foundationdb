@@ -1,4 +1,3 @@
-# FIXME: also add downgrade
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
@@ -9,7 +8,6 @@ injectSSDelay = true
 [[knobs]]
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
-enable_configurable_encryption = true
 enable_rest_kms_communication = true
 deterministic_blob_metadata = true
 
