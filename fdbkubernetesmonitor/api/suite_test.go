@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package main
+package api
 
 import (
 	"testing"
@@ -33,5 +33,5 @@ import (
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 	SetDefaultEventuallyTimeout(10 * time.Second)
-	RunSpecs(t, "FDB Kubernetes Monitor")
+	RunSpecs(t, "FDB Kubernetes Monitor API")
 }
