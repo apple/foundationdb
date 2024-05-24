@@ -8527,13 +8527,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			if (!isFullRestore) {
-				if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
-					tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
-					int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
-					tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
-					             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
-				}
+			if (!isFullRestore && SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
+				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
+				int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
+				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
 			}
 			tr.trState->readOptions = readOptions;
 			tr.trState->taskID = TaskPriority::FetchKeys;
@@ -8575,11 +8573,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					TraceEvent(SevWarn, "FetchKeyGRVError", data->thisServerID).error(e);
 					lastError = e;
 				}
-			}
-			if (lastError.code() == error_code_storage_replica_comparison_error) {
-				Version knownCommitted = data->knownCommittedVersion.get();
-				wait(data->version.whenAtLeast(knownCommitted));
-				fetchVersion = data->version.get();
 			}
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
@@ -8697,9 +8690,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					throw e;
 				}
 				lastError = e;
+				if (lastError.code() == error_code_storage_replica_comparison_error) {
+					// The inconsistency could be because of the inclusion of a rolled back
+					// transaction(s)/version(s) in the returned results. Retry.
+					wait(data->knownCommittedVersion.whenAtLeast(fetchVersion));
+				}
 				if (blockBegin == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
-					    .errorUnsuppressed(e)
+					    .errorUnsuppressed(lastError)
 					    .suppressFor(1.0)
 					    .detail("FKID", interval.pairID);
 

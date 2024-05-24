@@ -326,7 +326,8 @@ Future<Void> replicaComparison(Req req,
 						        ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
 						        : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
 					} else if (requiredReplicas == ALL_REPLICAS) {
-						TraceEvent(SevError, "UnreachableStorageServer").detail("SSID", ssTeam->getInterface(i).id());
+						TraceEvent(SevWarnAlways, "UnreachableStorageServer")
+						    .detail("SSID", ssTeam->getInterface(i).id());
 						throw unreachable_storage_replica();
 					}
 				}
@@ -372,7 +373,11 @@ Future<Void> replicaComparison(Req req,
 							        src.get(),
 							        f.get().get().get())) { // re-use TSS compare logic to compare the replicas
 								numMismatch++;
-								TraceEvent mismatchEvent(SevWarnAlways, LB_mismatchTraceName(req, REPLICA_COMPARISON));
+								TraceEvent mismatchEvent(
+								    (requiredReplicas == BEST_EFFORT || requiredReplicas == ALL_REPLICAS)
+								        ? SevError
+								        : SevWarnAlways,
+								    LB_mismatchTraceName(req, REPLICA_COMPARISON));
 								mismatchEvent.detail("ReplicaFetchErrors", numError)
 								    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
 								// Re-use TSS trace mechanism to log replica mismatch information.
