@@ -309,14 +309,14 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/ClientTransactionProfilingCorrectness-1.txt
-    restarting/from_6.3.13/ClientTransactionProfilingCorrectness-2.txt)
+    TEST_FILES restarting/from_6.3.13_until_7.3.0/ClientTransactionProfilingCorrectness-1.txt
+    restarting/from_6.3.13_until_7.3.0/ClientTransactionProfilingCorrectness-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/CycleTestRestart-1.txt
-    restarting/from_6.3.13/CycleTestRestart-2.txt)
+    TEST_FILES restarting/from_6.3.13_until_7.3.0/CycleTestRestart-1.txt
+    restarting/from_6.3.13_until_7.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
-    restarting/from_6.3.13/StorefrontTestRestart-2.txt)
+    TEST_FILES restarting/from_6.3.13_until_7.3.0/StorefrontTestRestart-1.txt
+    restarting/from_6.3.13_until_7.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
     restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
@@ -387,17 +387,26 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
     restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.txt
-    restarting/from_7.3.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.toml
+    restarting/from_7.3.0/SnapCycleRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.txt
-    restarting/from_7.3.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.toml
+    restarting/from_7.3.0/SnapTestAttrition-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.3.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.toml
+    restarting/from_7.3.0/SnapTestSimpleRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.txt
-    restarting/from_7.3.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.toml
+    restarting/from_7.3.0/SnapTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/ClientTransactionProfilingCorrectness-1.toml
+    restarting/from_7.3.0/ClientTransactionProfilingCorrectness-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/CycleTestRestart-1.toml
+    restarting/from_7.3.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/StorefrontTestRestart-1.toml
+    restarting/from_7.3.0/StorefrontTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
