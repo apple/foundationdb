@@ -1,4 +1,3 @@
-# FIXME: also add downgrade
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
@@ -11,6 +10,9 @@ bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_rest_kms_communication = true
 deterministic_blob_metadata = true
+# Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)
+enable_mutation_checksum = false
+enable_accumulative_checksum = false
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'

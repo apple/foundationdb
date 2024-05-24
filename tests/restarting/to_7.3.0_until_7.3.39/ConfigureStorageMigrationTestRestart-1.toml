@@ -2,10 +2,13 @@
 extraMachineCountDC = 2
 maxTLogVersion=6
 disableHostname=true
-encryptModes = ['disabled']
 storageEngineExcludeTypes=[4]
 tenantModes=['disabled']
-simHTTPServerEnabled=false
+
+[[knobs]]
+# Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)
+enable_mutation_checksum = false
+enable_accumulative_checksum = false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
