@@ -21,7 +21,6 @@ package api
 
 import (
 	"encoding/json"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"os"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -41,7 +40,7 @@ func loadConfigFromFile(path string) *ProcessConfiguration {
 	return config
 }
 
-var _ = Describe("Testing FDB Kubernetes monitor API", func() {
+var _ = Describe("Testing FDB Kubernetes Monitor API", func() {
 	When("generating arguments for default config", func() {
 		var arguments []string
 
@@ -53,7 +52,7 @@ var _ = Describe("Testing FDB Kubernetes monitor API", func() {
 				"FDB_POD_IP":      "192.168.0.1",
 				"FDB_ZONE_ID":     "zone1",
 				"FDB_INSTANCE_ID": "storage-1",
-			}, nil)
+			})
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -82,7 +81,7 @@ var _ = Describe("Testing FDB Kubernetes monitor API", func() {
 				"FDB_POD_IP":      "192.168.0.1",
 				"FDB_ZONE_ID":     "zone1",
 				"FDB_INSTANCE_ID": "storage-1",
-			}, nil)
+			})
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -105,7 +104,7 @@ var _ = Describe("Testing FDB Kubernetes monitor API", func() {
 
 		JustBeforeEach(func() {
 			testArgument := Argument{ArgumentType: EnvironmentArgumentType, Source: "FDB_ZONE_ID"}
-			argument, err = testArgument.GenerateArgument(1, env, nil)
+			argument, err = testArgument.GenerateArgument(1, env)
 		})
 
 		When("the env variable is present", func() {
@@ -139,7 +138,7 @@ var _ = Describe("Testing FDB Kubernetes monitor API", func() {
 
 		JustBeforeEach(func() {
 			testArgument := Argument{ArgumentType: IPListArgumentType, Source: "FDB_PUBLIC_IP", IPFamily: IPFamily}
-			argument, err = testArgument.GenerateArgument(1, env, nil)
+			argument, err = testArgument.GenerateArgument(1, env)
 		})
 
 		When("using IP Family 4", func() {
@@ -243,56 +242,6 @@ var _ = Describe("Testing FDB Kubernetes monitor API", func() {
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal("unsupported IP family 5"))
 				Expect(argument).To(BeEmpty())
-			})
-		})
-	})
-
-	When("generating an argument with a node label", func() {
-		var argument string
-		var err error
-		var node *metav1.PartialObjectMetadata
-
-		JustBeforeEach(func() {
-			testArgument := Argument{ArgumentType: NodeLabelArgumentType, Source: "foundationdb.org/zone"}
-			argument, err = testArgument.GenerateArgument(1, nil, node)
-		})
-
-		When("the node is not present", func() {
-			It("should return an error", func() {
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(Equal("no node information present"))
-				Expect(argument).To(BeEmpty())
-			})
-		})
-
-		When("the node is present but the label is missing", func() {
-			BeforeEach(func() {
-				node = &metav1.PartialObjectMetadata{
-					ObjectMeta: metav1.ObjectMeta{},
-				}
-			})
-
-			It("should return an error", func() {
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(Equal("label \"foundationdb.org/zone\" not found"))
-				Expect(argument).To(BeEmpty())
-			})
-		})
-
-		When("the node and the label is present", func() {
-			BeforeEach(func() {
-				node = &metav1.PartialObjectMetadata{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"foundationdb.org/zone": "awesome",
-						},
-					},
-				}
-			})
-
-			It("should return an error", func() {
-				Expect(err).NotTo(HaveOccurred())
-				Expect(argument).To(Equal("awesome"))
 			})
 		})
 	})

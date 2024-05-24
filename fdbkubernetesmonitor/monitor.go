@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -161,6 +162,37 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	monitor.Run()
 }
 
+// updateCustomEnvironment will add the node labels and their values to the custom environment map. All the generated
+// environment variables will start with NODE_LABEL and "/" and "." will be replaced in the key as "_", e.g. from the
+// label "foundationdb.org/testing = awesome" the env variables NODE_LABEL_FOUNDATIONDB_ORG_TESTING = awesome" will be
+// generated.
+func (monitor *Monitor) updateCustomEnvironmentFromNodeMetadata() {
+	if monitor.PodClient.nodeMetadata == nil {
+		return
+	}
+
+	nodeLabels := monitor.PodClient.nodeMetadata.Labels
+	for key, value := range nodeLabels {
+		sanitizedKey := strings.ReplaceAll(key, "/", "_")
+		sanitizedKey = strings.ReplaceAll(sanitizedKey, ".", "_")
+		envKey := "NODE_LABEL_" + strings.ToUpper(sanitizedKey)
+		currentValue, ok := monitor.CustomEnvironment[envKey]
+		if !ok {
+			monitor.Logger.Info("adding new custom environment variable from node labels", "key", envKey, "value", value)
+			monitor.CustomEnvironment[envKey] = value
+			continue
+		}
+
+		if currentValue == value {
+			continue
+		}
+
+		monitor.Logger.Info("update custom environment variable from node labels", "key", envKey, "newValue", value, "currentValue", currentValue)
+		monitor.CustomEnvironment[envKey] = value
+		continue
+	}
+}
+
 // LoadConfiguration loads the latest configuration from the config file.
 func (monitor *Monitor) LoadConfiguration() {
 	file, err := os.Open(monitor.ConfigFile)
@@ -168,7 +200,10 @@ func (monitor *Monitor) LoadConfiguration() {
 		monitor.Logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.ConfigFile)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		monitor.Logger.Error(err, "Error could not close file", "monitorConfigPath", monitor.ConfigFile)
+	}()
 	configuration := &api.ProcessConfiguration{}
 	configurationBytes, err := io.ReadAll(file)
 	if err != nil {
@@ -192,7 +227,9 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 
-	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment, monitor.PodClient.nodeMetadata)
+	monitor.updateCustomEnvironmentFromNodeMetadata()
+
+	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment)
 	if err != nil {
 		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return
@@ -277,7 +314,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			errorCounter = 0
 		}
 
-		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment, monitor.PodClient.nodeMetadata)
+		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment)
 		if err != nil {
 			backoffDuration := getBackoffDuration(errorCounter)
 			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
@@ -375,8 +412,7 @@ func (monitor *Monitor) processRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "processRequired")
-	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
-	if monitor.ProcessCount < processNumber || !runProcesses {
+	if monitor.ProcessCount < processNumber || !pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true) {
 		if monitor.ProcessIDs[processNumber] != 0 {
 			logger.Info("Terminating run loop")
 			monitor.ProcessIDs[processNumber] = 0
