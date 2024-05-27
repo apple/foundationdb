@@ -35,6 +35,18 @@ import (
 	"unsafe"
 )
 
+var (
+	// ErrNetworkAlreadyStopped for multiple calls to StopNetwork().
+	ErrNetworkAlreadyStopped = errors.New("network has already been stopped")
+
+	// ErrNetworkIsStopped is returned when attempting to execute a function which needs to interact
+	// with the network thread while the network thread is no more running.
+	ErrNetworkIsStopped = errors.New("network is stopped")
+
+	// ErrNetworkAlreadyStopped for a too early call to StopNetwork().
+	ErrNetworkNotStarted = errors.New("network has not been started")
+)
+
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
@@ -107,6 +119,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // version is not supported by both the fdb package and the FoundationDB C
 // library, an error will be returned. APIVersion must be called prior to any
 // other functions in the fdb package.
+// This function is safe to be called from multiple goroutines.
 //
 // Currently, this package supports API versions 200 through 730.
 //
@@ -191,7 +204,7 @@ func MustGetAPIVersion() int {
 }
 
 var apiVersion int
-var networkStarted bool
+var networkStarted, networkStopped bool
 var networkMutex sync.RWMutex
 var networkRunning sync.WaitGroup
 
@@ -203,8 +216,15 @@ func init() {
 
 // executeWithRunningNetworkThread starts the internal network event loop, if not already done,
 // then runs the provided function while network thread is running.
+// This function is safe to be called from multiple goroutines.
 func executeWithRunningNetworkThread(f func()) error {
 	networkMutex.RLock()
+	if networkStopped {
+		networkMutex.RUnlock()
+
+		return ErrNetworkIsStopped
+	}
+
 	if networkStarted {
 
 		// network thread is guaranteed to be running while this user-provided function runs
@@ -217,6 +237,10 @@ func executeWithRunningNetworkThread(f func()) error {
 	networkMutex.RUnlock()
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
+
+	if networkStopped {
+		return ErrNetworkIsStopped
+	}
 
 	// check if meanwhile another goroutine started the network thread
 	if !networkStarted {
@@ -253,19 +277,27 @@ func StartNetwork() error {
 }
 
 // StopNetwork signals the internal network event loop to terminate and waits for its termination.
-// This function does nothing if the network has not yet started.
-// Once network is stopped it cannot be started again.
+// This function is safe to be called from multiple goroutines.
+// This function returns an error if network has not yet started or if network has already been stopped.
 // See also: https://github.com/apple/foundationdb/issues/3015
-func StopNetwork() {
+func StopNetwork() error {
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
 
 	if !networkStarted {
-		return
+		return ErrNetworkNotStarted
+	}
+
+	if networkStopped {
+		return ErrNetworkAlreadyStopped
 	}
 
 	C.fdb_stop_network()
 	networkRunning.Wait()
+
+	networkStopped = true
+
+	return nil
 }
 
 // DefaultClusterFile should be passed to fdb.Open to allow the FoundationDB C
@@ -415,6 +447,7 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 // Deprecated: Use OpenDatabase instead.
 // CreateCluster returns a cluster handle to the FoundationDB cluster identified
 // by the provided cluster file.
+// This function is safe to be called from multiple goroutines.
 func CreateCluster(clusterFile string) (Cluster, error) {
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -425,6 +458,10 @@ func CreateCluster(clusterFile string) (Cluster, error) {
 
 	if !networkStarted {
 		return Cluster{}, errNetworkNotSetup
+	}
+
+	if networkStopped {
+		return Cluster{}, ErrNetworkIsStopped
 	}
 
 	return Cluster{clusterFile}, nil
