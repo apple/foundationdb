@@ -1,6 +1,7 @@
 [configuration]
 maxTLogVersion = 6
 disableTss = true
+tenantModes = ['disabled']
 
 [[knobs]]
 # testing that restart with writing recover at version to CSTATE.

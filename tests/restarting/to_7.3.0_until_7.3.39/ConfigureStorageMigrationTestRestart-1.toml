@@ -3,7 +3,7 @@ extraMachineCountDC = 2
 maxTLogVersion=6
 disableHostname=true
 storageEngineExcludeTypes=[4]
-tenantModes=['disabled']
+tenantModes = ['disabled']
 
 [[knobs]]
 # Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)

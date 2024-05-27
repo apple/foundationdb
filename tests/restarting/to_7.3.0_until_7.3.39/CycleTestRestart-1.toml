@@ -2,6 +2,7 @@
 maxTLogVersion = 6
 disableTss = true
 disableHostname = true
+tenantModes = ['disabled']
 
 [[knobs]]
 # Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)
