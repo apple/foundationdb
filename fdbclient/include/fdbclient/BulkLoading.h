@@ -49,30 +49,55 @@ struct BulkLoadState {
 
 	BulkLoadState() = default;
 
-	BulkLoadState(BulkLoadType loadType, std::set<std::string> filePaths)
-	  : loadType(loadType), filePaths(filePaths), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
+	BulkLoadState(BulkLoadType loadType, std::string folder)
+	  : loadType(loadType), folder(folder), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
 
-	BulkLoadState(KeyRange range, BulkLoadType loadType, std::set<std::string> filePaths)
-	  : range(range), loadType(loadType), filePaths(filePaths), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
+	BulkLoadState(KeyRange range, BulkLoadType loadType, std::string folder)
+	  : range(range), loadType(loadType), folder(folder), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
 
 	bool isValid() const { return loadType != BulkLoadType::Invalid; }
 
 	std::string toString() const {
-		return "BulkLoadState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		       ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) + ", [FilePath]: " + describe(filePaths);
+		std::string res = "BulkLoadState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
+		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
+		                  ", [FilePath]: " + describe(filePaths);
+		if (byteSampleFile.present()) {
+			res = res + ", [ByteSampleFile]: " + byteSampleFile.get();
+		}
+		res = res + ", [TaskId]: " + taskId.toString();
+		return res;
 	}
 
 	void setTaskId(UID id) { taskId = id; }
 
+	bool addDataFile(std::string filePath) {
+		if (filePath.substr(0, folder.size()) != folder) {
+			return false;
+		}
+		filePaths.insert(filePath);
+		return true;
+	}
+
+	bool addByteSampleFile(std::string filePath) {
+		if (filePath.substr(0, folder.size()) != folder) {
+			return false;
+		}
+		byteSampleFile = filePath;
+		return true;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, phase, filePaths, taskId);
+		serializer(ar, range, loadType, phase, folder, filePaths, byteSampleFile, taskId);
 	}
 
 	KeyRange range;
 	BulkLoadType loadType;
 	BulkLoadPhase phase;
-	std::set<std::string> filePaths;
+	std::string folder;
+	std::unordered_set<std::string> filePaths;
+	Optional<std::string> byteSampleFile;
 	UID taskId;
 };
 

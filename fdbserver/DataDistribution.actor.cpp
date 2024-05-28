@@ -1256,7 +1256,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
 			wait(waitForBulkLoadModeOn(self));
 			TraceEvent("BulkLoadingCore").detail("Status", "Mode On");
 			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
-			wait(self->bulkLoadActors.getResult());
+			wait(self->bulkLoadActors.getResult() && delay(10.0));
 			TraceEvent("BulkLoadingCore").detail("Status", "Round complete");
 		} catch (Error& e) {
 			TraceEvent("BulkLoadingCore").detail("Status", "Error").errorUnsuppressed(e);
