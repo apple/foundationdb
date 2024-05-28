@@ -80,7 +80,6 @@ EXCLUDED_FILES = list(
             r"fdbrpc/zlib/.*",
             r"fdbrpc/sha1/.*",
             r"fdbrpc/xml2json.hpp$",
-            r"fdbrpc/libcoroutine/.*",
             r"fdbrpc/libeio/.*",
             r"fdbrpc/lib64/.*",
             r"fdbrpc/generated-constants.cpp$",
