@@ -20,10 +20,11 @@
 
 #ifndef FDBSERVER_IKEYVALUESTORE_H
 #define FDBSERVER_IKEYVALUESTORE_H
-#include "fdbclient/GetEncryptCipherKeys.h"
+
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/IKeyValueStore.actor.h"
 #include "flow/BooleanParam.h"
 

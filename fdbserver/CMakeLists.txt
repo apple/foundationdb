@@ -1,12 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
 
-if(${COROUTINE_IMPL} STREQUAL libcoro)
-  list(APPEND FDBSERVER_SRCS coroimpl/CoroFlowCoro.actor.cpp)
-else()
-  list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
-endif()
-
-
 if(WITH_ROCKSDB)
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
@@ -19,6 +12,8 @@ if(WITH_ROCKSDB)
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
+
+list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 

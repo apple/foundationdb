@@ -42,38 +42,11 @@ if(COMPILE_EIO)
   target_compile_options(eio BEFORE PRIVATE -w) # disable warnings for eio
 endif()
 
-if(${COROUTINE_IMPL} STREQUAL libcoro)
-  set(CORO_SRCS libcoroutine/Common.c libcoroutine/Coro.c)
-  if(APPLE)
-    list(APPEND CORO_SRCS libcoroutine/asm.S)
-  endif()
-  if(NOT WIN32)
-    list(APPEND CORO_SRCS libcoroutine/context.c)
-  endif()
-  add_library(coro STATIC ${CORO_SRCS})
-  target_link_libraries(coro PRIVATE flow)
-  target_include_directories(coro PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libcoroutine)
-  if(WIN32)
-    target_compile_definitions(coro PRIVATE USE_FIBERS)
-  else()
-    target_compile_definitions(coro PRIVATE USE_UCONTEXT)
-    target_compile_options(coro BEFORE PRIVATE -w) # disable warnings for third party
-  endif()
-  if(USE_VALGRIND)
-    target_link_libraries(coro PUBLIC Valgrind)
-  endif()
-endif()
-
 target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 
 target_include_directories(fdbrpc_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling libb64 md5 PRIVATE rapidjson)
-
-if(${COROUTINE_IMPL} STREQUAL libcoro)
-  target_link_libraries(fdbrpc PUBLIC coro)
-  target_link_libraries(fdbrpc_sampling PUBLIC coro)
-endif()
 
 if(COMPILE_EIO)
   target_link_libraries(fdbrpc PRIVATE eio)
