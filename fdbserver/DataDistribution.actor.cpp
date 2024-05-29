@@ -1020,6 +1020,7 @@ ACTOR Future<Void> waitForBulkLoadModeOn(Reference<DataDistributor> self) {
 					return Void();
 				}
 			}
+			wait(delay(SERVER_KNOBS->DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
@@ -1068,11 +1069,9 @@ ACTOR Future<std::pair<BulkLoadState, Version>> startBulkLoadTask(Reference<Data
 	}
 }
 
-ACTOR Future<Void> finishBulkLoadTask(Reference<DataDistributor> self,
-                                      std::pair<BulkLoadState, Version> committedBulkLoadTask) {
+ACTOR Future<Void> finishBulkLoadTask(Reference<DataDistributor> self, BulkLoadState bulkLoadState) {
 	Promise<BulkLoadAckType> finishAck;
-	self->triggerShardBulkLoading.send(
-	    BulkLoadShardRequest(committedBulkLoadTask.first, committedBulkLoadTask.second, finishAck));
+	self->triggerShardBulkLoading.send(BulkLoadShardRequest(bulkLoadState, finishAck));
 	BulkLoadAckType ack = wait(finishAck.getFuture());
 	ASSERT(ack == BulkLoadAckType::Succeed);
 	return Void();
@@ -1143,13 +1142,21 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self,
 			TraceEvent(SevInfo, "DoBulkLoadTaskDataMovePersisted", self->ddId)
 			    .detail("Task", committedBulkLoadTask.first.toString())
 			    .detail("CommitVersion", committedBulkLoadTask.second);
+			wait(waitOnBulkLoadEnd(self, range, committedBulkLoadTask.first.taskId));
+			TraceEvent(SevInfo, "DoBulkLoadTaskFinished", self->ddId)
+			    .detail("Task", committedBulkLoadTask.first.toString())
+			    .detail("CommitVersion", committedBulkLoadTask.second);
+			// At this point, bulk load task phase in metadata becomes complete
+			wait(finishBulkLoadTask(self, committedBulkLoadTask.first));
+		} else {
+			wait(waitOnBulkLoadEnd(self, range, bulkLoadState.get().taskId));
+			TraceEvent(SevInfo, "DoBulkLoadTaskFinished", self->ddId)
+			    .detail("Task", bulkLoadState.get().toString())
+			    .detail("CommitVersion", "restart unknown");
+			// At this point, bulk load task phase in metadata becomes complete
+			wait(finishBulkLoadTask(self, bulkLoadState.get()));
 		}
-		wait(waitOnBulkLoadEnd(self, range, committedBulkLoadTask.first.taskId));
-		TraceEvent(SevInfo, "DoBulkLoadTaskFinished", self->ddId)
-		    .detail("Task", committedBulkLoadTask.first.toString())
-		    .detail("CommitVersion", committedBulkLoadTask.second);
-		// At this point, bulk load task phase in metadata becomes complete
-		wait(finishBulkLoadTask(self, committedBulkLoadTask));
+
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -1256,7 +1263,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
 			wait(waitForBulkLoadModeOn(self));
 			TraceEvent("BulkLoadingCore").detail("Status", "Mode On");
 			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
-			wait(self->bulkLoadActors.getResult() && delay(10.0));
+			wait(self->bulkLoadActors.getResult() && delay(SERVER_KNOBS->DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC));
 			TraceEvent("BulkLoadingCore").detail("Status", "Round complete");
 		} catch (Error& e) {
 			TraceEvent("BulkLoadingCore").detail("Status", "Error").errorUnsuppressed(e);

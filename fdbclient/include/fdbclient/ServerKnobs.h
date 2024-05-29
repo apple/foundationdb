@@ -377,6 +377,11 @@ public:
 	                            // requested
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
+	double DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC; // the minimal period of seconds that bulk load scheduler restarts
+	                                            // looking up bulk loading task keys to find new tasks to do
+	double DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC; // the period of seconds that bulk load looks up bulk load mode key
+	                                            // to see if bulk load mode is on. After that, bulk load starts
+	                                            // schedule tasks
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

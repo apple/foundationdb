@@ -254,8 +254,8 @@ struct BulkLoadShardRequest {
 	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), triggerAck(triggerAck), launchAck(launchAck),
 	    terminate(false) {}
 
-	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Version commitVersion, Promise<BulkLoadAckType> finishAck)
-	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), finishAck(finishAck), terminate(true) {}
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<BulkLoadAckType> finishAck)
+	  : bulkLoadState(bulkLoadState), commitVersion(invalidVersion), finishAck(finishAck), terminate(true) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution
