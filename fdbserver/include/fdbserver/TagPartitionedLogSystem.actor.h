@@ -139,15 +139,17 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
 	    locality(locality), addActor(addActor), popActors(false) {}
 
-	void stopRejoins() final;
+	void stopRejoins() override final;
 
-	void addref() final;
+	void addref() override final;
 
-	void delref() final;
+	void delref() override final;
 
-	std::string describe() const final;
+	std::string describe() const override final;
 
-	UID getDebugID() const final;
+	UID getDebugID() const override final;
+
+	virtual LogSystemType getLogSystemType() const override final;
 
 	void addPseudoLocality(int8_t locality);
 
@@ -177,18 +179,18 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                    LogSystemConfig const& lsConf);
 
 	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
-	void toCoreState(DBCoreState& newState) const final;
+	void toCoreState(DBCoreState& newState) const override final;
 
-	bool remoteStorageRecovered() const final;
+	bool remoteStorageRecovered() const override final;
 
 	// Checks older TLog generations and remove no longer needed generations from the log system.
-	void purgeOldRecoveredGenerations() final;
+	void purgeOldRecoveredGenerations() override final;
 
-	Future<Void> onCoreStateChanged() const final;
+	Future<Void> onCoreStateChanged() const override final;
 
-	void coreStateWritten(DBCoreState const& newState) final;
+	void coreStateWritten(DBCoreState const& newState) override final;
 
-	Future<Void> onError() const final;
+	Future<Void> onError() const override final;
 
 	ACTOR static Future<Void> onError_internal(TagPartitionedLogSystem const* self);
 
@@ -199,26 +201,27 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> push(Version prevVersion,
-	                     Version version,
-	                     Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion,
+	Future<Version> push(const ILogSystem::PushVersionSet& versionSet,
 	                     LogPushData& data,
 	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
+	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) override final;
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
 	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
 
-	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore) final;
+	Reference<IPeekCursor> peek(UID dbgid,
+	                            Version begin,
+	                            Optional<Version> end,
+	                            Tag tag,
+	                            bool parallelGetMore) override final;
 
 	Reference<IPeekCursor> peek(UID dbgid,
 	                            Version begin,
 	                            Optional<Version> end,
 	                            std::vector<Tag> tags,
-	                            bool parallelGetMore) final;
+	                            bool parallelGetMore) override final;
 
 	Reference<IPeekCursor> peekLocal(UID dbgid,
 	                                 Tag tag,
@@ -231,29 +234,29 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                               Version begin,
 	                               int8_t peekLocality,
 	                               Version localEnd,
-	                               bool canDiscardPopped) final;
+	                               bool canDiscardPopped) override final;
 
 	Reference<IPeekCursor> peekSingle(UID dbgid,
 	                                  Version begin,
 	                                  Tag tag,
-	                                  std::vector<std::pair<Version, Tag>> history) final;
+	                                  std::vector<std::pair<Version, Tag>> history) override final;
 
 	// LogRouter or BackupWorker use this function to obtain a cursor for peeking tlogs of a generation (i.e., epoch).
 	// Specifically, the epoch is determined by looking up "dbgid" in tlog sets of generations.
 	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
 	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
-	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag, bool useSatellite) final;
+	Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag, bool useSatellite) override final;
 
-	Version getKnownCommittedVersion() final;
+	Version getKnownCommittedVersion() override final;
 
-	Future<Void> onKnownCommittedVersionChange() final;
+	Future<Void> onKnownCommittedVersionChange() override final;
 
 	void popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality);
 
-	void popTxs(Version upTo, int8_t popLocality) final;
+	void popTxs(Version upTo, int8_t popLocality) override final;
 
 	// pop 'tag.locality' type data up to the 'upTo' version
-	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) final;
+	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) override final;
 
 	// pop tag from log up to the version defined in self->outstandingPops[].first
 	ACTOR static Future<Void> popFromLog(TagPartitionedLogSystem* self,
@@ -266,14 +269,14 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	ACTOR static Future<Version> getPoppedTxs(TagPartitionedLogSystem* self);
 
-	Future<Version> getTxsPoppedVersion() final;
+	Future<Version> getTxsPoppedVersion() override final;
 
 	ACTOR static Future<Void> confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID);
 
 	// Returns success after confirming that pushes in the current epoch are still possible
-	Future<Void> confirmEpochLive(Optional<UID> debugID) final;
+	Future<Void> confirmEpochLive(Optional<UID> debugID) override final;
 
-	Future<Void> endEpoch() final;
+	Future<Void> endEpoch() override final;
 
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
@@ -285,43 +288,43 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       std::vector<Tag> const& allTags,
-	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) final;
+	                                       Reference<AsyncVar<bool>> const& recruitmentStalled) override final;
 
-	LogSystemConfig getLogSystemConfig() const final;
+	LogSystemConfig getLogSystemConfig() const override final;
 
-	Standalone<StringRef> getLogsValue() const final;
+	Standalone<StringRef> getLogsValue() const override final;
 
-	Future<Void> onLogSystemConfigChange() final;
+	Future<Void> onLogSystemConfigChange() override final;
 
-	Version getEnd() const final;
+	Version getEnd() const override final;
 
 	Version getPeekEnd() const;
 
-	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) const final;
+	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) const override final;
 
-	bool hasRemoteLogs() const final;
+	bool hasRemoteLogs() const override final;
 
-	Tag getRandomRouterTag() const final;
+	Tag getRandomRouterTag() const override final;
 
-	Tag getRandomTxsTag() const final;
+	Tag getRandomTxsTag() const override final;
 
-	TLogVersion getTLogVersion() const final;
+	TLogVersion getTLogVersion() const override final;
 
-	int getLogRouterTags() const final;
+	int getLogRouterTags() const override final;
 
-	Version getBackupStartVersion() const final;
+	Version getBackupStartVersion() const override final;
 
-	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const final;
+	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const override final;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
-	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) final;
+	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) override final;
 
-	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
+	bool removeBackupWorker(const BackupWorkerDoneRequest& req) override final;
 
-	LogEpoch getOldestBackupEpoch() const final;
+	LogEpoch getOldestBackupEpoch() const override final;
 
-	void setOldestBackupEpoch(LogEpoch epoch) final;
+	void setOldestBackupEpoch(LogEpoch epoch) override final;
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer,
 	                                     Reference<AsyncVar<bool>> failed);
 
