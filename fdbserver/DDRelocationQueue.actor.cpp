@@ -1831,7 +1831,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Promise<Void> dataMovementComplete;
 
 			if (rd.bulkLoadState.present()) {
-				ASSERT_WE_THINK(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
+				if (rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+					TraceEvent(SevError, "BulkLoadRelocatorWrongPriority", self->distributorId)
+					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+					ASSERT(false); // TODO(Zhe): Very important. If wrong, check the logic
+				}
 				ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
 				for (const auto& destId : destIds) {
 					ASSERT_WE_THINK(std::find(rd.src.begin(), rd.src.end(), destId) ==

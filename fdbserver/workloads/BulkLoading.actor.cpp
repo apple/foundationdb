@@ -86,12 +86,10 @@ struct BulkLoading : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				for (const auto& task : tasks) {
-					TraceEvent("BulkLoadingIssueBulkLoadTask")
-					    .detail("Range", task.range)
-					    .detail("BulkLoadState", task.toString());
 					wait(krmSetRange(&tr, bulkLoadPrefix, task.range, bulkLoadStateValue(task)));
 				}
 				wait(tr.commit());
+				TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

@@ -375,7 +375,7 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysL
 Future<Void> checkMoveKeysLock(Transaction* tr,
                                MoveKeysLock const& lock,
                                const DDEnabledState* ddEnabledState,
-                               bool isWrite = true) {
+                               bool isWrite) {
 	if (!ddEnabledState->isEnabled()) {
 		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
@@ -1846,20 +1846,28 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				}
 
 				if (currentKeys.end == keys.end) {
-					dataMove.setPhase(DataMoveMetaData::Running);
-					complete = true;
-					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", relocationIntervalId)
-					    .detail("DataMoveID", dataMoveId)
-					    .detail("DataMove", dataMove.toString());
 					if (bulkLoadState.present()) {
 						RangeResult bulkLoadRes = wait(krmGetRanges(&tr, bulkLoadPrefix, bulkLoadState.get().range));
 						BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
-						ASSERT(bulkLoadState.get().taskId == existBulkLoad.taskId);
-						bulkLoadState.get().phase = BulkLoadPhase::Running; // Only place to set it running to metadata
+						if (bulkLoadState.get().taskId != existBulkLoad.taskId) {
+							TraceEvent(SevWarn, "StartMoveShardsConflictWithExistingTask", relocationIntervalId)
+							    .detail("ExistBulkLoad", existBulkLoad.toString())
+							    .detail("CurrentBulkLoad", bulkLoadState.get().toString())
+							    .detail("DataMove", dataMove.toString());
+							// Let data move solve the conflict
+						}
+						// Only place to set it running to metadata
+						bulkLoadState.get().phase = BulkLoadPhase::Running;
 						wait(krmSetRange(
 						    &tr, bulkLoadPrefix, bulkLoadState.get().range, bulkLoadStateValue(bulkLoadState.get())));
 						TraceEvent("BulkLoadTaskRunningPersist").detail("BulkLoadTask", bulkLoadState.get().toString());
 					}
+					dataMove.setPhase(DataMoveMetaData::Running);
+					complete = true;
+					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", relocationIntervalId)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("DataMove", dataMove.toString())
+					    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 				} else {
 					dataMove.setPhase(DataMoveMetaData::Prepare);
 					TraceEvent(sevDm, "StartMoveShardsDataMovePartial", relocationIntervalId)
@@ -2280,20 +2288,20 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
-						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
-						tr.clear(dataMoveKeyFor(dataMoveId));
-						complete = true;
-						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
-						    .detail("DataMove", dataMove.toString());
-
 						if (bulkLoadState.present()) {
 							// Check if the current bulk load task is outdated, if not, update phase
 							RangeResult bulkLoadRes =
 							    wait(krmGetRanges(&tr, bulkLoadPrefix, bulkLoadState.get().range));
 							BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
-							ASSERT(bulkLoadState.get().taskId == existBulkLoad.taskId);
-							bulkLoadState.get().phase =
-							    BulkLoadPhase::Complete; // Only place to set it complete to metadata
+							if (bulkLoadState.get().taskId != existBulkLoad.taskId) {
+								TraceEvent(SevWarn, "FinishMoveShardsConflictWithExistingTask", relocationIntervalId)
+								    .detail("ExistBulkLoad", existBulkLoad.toString())
+								    .detail("CurrentBulkLoad", bulkLoadState.get().toString())
+								    .detail("DataMove", dataMove.toString());
+								// Let data move solve the conflict
+							}
+							// Only place to set it complete to metadata
+							bulkLoadState.get().phase = BulkLoadPhase::Complete;
 							wait(krmSetRange(&tr,
 							                 bulkLoadPrefix,
 							                 bulkLoadState.get().range,
@@ -2301,6 +2309,11 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							TraceEvent(SevInfo, "PersistBulkLoadFinish", relocationIntervalId)
 							    .detail("BulkLoadTask", bulkLoadState.get().toString());
 						}
+						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						tr.clear(dataMoveKeyFor(dataMoveId));
+						complete = true;
+						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
+						    .detail("DataMove", dataMove.toString());
 					} else if (!bulkLoadState.present()) {
 						// Bulk Loading data move does not allow partial complete
 						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)

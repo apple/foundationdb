@@ -208,5 +208,10 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
                                       UID bmId,
                                       UID reqId = UID());
 
+Future<Void> checkMoveKeysLock(Transaction* tr,
+                               MoveKeysLock const& lock,
+                               const DDEnabledState* ddEnabledState,
+                               bool isWrite = true);
+
 #include "flow/unactorcompiler.h"
 #endif

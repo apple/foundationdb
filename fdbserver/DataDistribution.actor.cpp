@@ -39,6 +39,7 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
@@ -1052,6 +1053,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> startBulkLoadTask(Reference<Data
 		state Promise<BulkLoadAckType> triggerAck;
 		state Version commitVersion;
 		try {
+			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
 			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, range));
 			bulkLoadState = decodeBulkLoadState(result[0].value);
 			state UID oldTaskId = bulkLoadState.taskId;
