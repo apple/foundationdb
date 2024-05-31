@@ -361,14 +361,6 @@ class DDTxnProcessorImpl {
 						ASSERT(!r.value()->valid);
 					}
 					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
-					if (meta.bulkLoadState.present()) {
-						// Since bulk load task phase updated to RUNNING in atomic to when data move metadata is
-						// persisted. For any data move metadata has bulk load task, there is a corresponding RUNNING
-						// bulk load task. For any RUNNING task, we add it to bulkLoadingMap. This will be used by
-						// DDTracker to avoid boundary changes during the bulk loading
-						result->bulkLoadingMap.insert(meta.bulkLoadState.get().range,
-						                              std::make_pair(meta.bulkLoadState.get().taskId, invalidVersion));
-					}
 					++numDataMoves;
 				}
 
@@ -487,11 +479,21 @@ class DDTxnProcessorImpl {
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
 
+		result->bulkLoadingMap.insert(allKeys, std::make_pair(UID(), invalidVersion));
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 				const DDShardInfo& iShard = result->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
 				result->dataMoveMap[keys.begin]->validateShard(iShard, keys);
+				const DataMoveMetaData& meta = result->dataMoveMap[keys.begin]->meta;
+				if (meta.bulkLoadState.present() && !result->dataMoveMap[keys.begin]->isCancelled()) {
+					// Since bulk load task phase updated to RUNNING in atomic to when data move metadata is
+					// persisted. For any data move metadata (not cancelled data move) has bulk load task, there is a
+					// corresponding RUNNING bulk load task. For any RUNNING task, we add it to bulkLoadingMap. This
+					// will be used by DDTracker to avoid boundary changes during the bulk loading
+					result->bulkLoadingMap.insert(meta.bulkLoadState.get().range,
+					                              std::make_pair(meta.bulkLoadState.get().taskId, invalidVersion));
+				}
 			}
 		}
 

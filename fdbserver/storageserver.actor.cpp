@@ -9115,24 +9115,50 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	    .detail("BulkLoadState", bulkLoadState.toString())
 	    .detail("DestShardId", moveInShard->destShardIdString())
 	    .detail("Ranges", describe(moveInShard->ranges()));
+
+	// TODO(Zhe): Conduct file checksum
+	// TODO(Zhe): Conduct bytes sampling if byte sample file is not provided
+	// Step 0: Check data in SST file (Reserved for the case where byte sampling file is not provided)
+	/* for (const auto& filePath : bulkLoadState.filePaths) {
+	    std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+	    reader->open(filePath);
+	    while (reader->hasNext()) {
+	        KeyValue kv = reader->next();
+	    }
+	}*/
+
+	// Step 1: Build LocalRecord
 	state CheckpointMetaData localRecord;
 	localRecord.checkpointID = UID();
 	localRecord.dir = bulkLoadState.folder;
-	localRecord.ranges = { bulkLoadState.range };
+	for (const auto& range : moveInShard->ranges()) {
+		ASSERT(bulkLoadState.range.contains(range)); // TODO(Zhe): Drop data that not in the moveInShard range
+	}
+	localRecord.ranges = moveInShard->ranges();
 	RocksDBCheckpointKeyValues rcp({ bulkLoadState.range });
 	for (const auto& filePath : bulkLoadState.filePaths) {
 		CheckpointFile cpFile;
 		cpFile.path = filePath;
-		cpFile.range = bulkLoadState.range;
+		ASSERT(moveInShard->ranges().size() == 1);
+		cpFile.range = moveInShard->ranges()[0];
 		rcp.fetchedFiles.push_back(cpFile);
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
-	localRecord.version = 0;
-	ASSERT_WE_THINK(bulkLoadState.byteSampleFile.present());
-	localRecord.bytesSampleFile = bulkLoadState.byteSampleFile.get();
+	localRecord.version = 0; // Zhe: What does this use for?
+	ASSERT_WE_THINK(bulkLoadState.bytesSampleFile.present());
+	if (fileExists(bulkLoadState.bytesSampleFile.get())) {
+		localRecord.bytesSampleFile = bulkLoadState.bytesSampleFile.get();
+	} else {
+		TraceEvent(SevWarnAlways, "InjectExternalSSTProvidedSampleBytesFileNotFound", data->thisServerID)
+		    .detail("FilePath", bulkLoadState.bytesSampleFile.get())
+		    .detail("BulkLoadState", bulkLoadState.toString());
+		localRecord.bytesSampleFile = Optional<std::string>();
+	}
 	localRecord.setFormat(CheckpointFormat::RocksDBKeyValues);
 	localRecord.setState(CheckpointMetaData::Complete);
 	moveInShard->meta->checkpoints.push_back(localRecord);
+
+	// Step 2: Restore data from SST file
 	try {
 		wait(
 		    data->storage.restore(moveInShard->destShardIdString(), moveInShard->ranges(), moveInShard->checkpoints()));
@@ -9151,7 +9177,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 		}
 		throw err;
 	}
-	TraceEvent(SevInfo, "FetchShardIngestedRestoreComplete", data->thisServerID)
+	TraceEvent(SevInfo, "InjectExternalSSTRestoreComplete", data->thisServerID)
 	    .detail("BulkLoadState", bulkLoadState.toString())
 	    .detail("DestShardId", moveInShard->destShardIdString())
 	    .detail("MoveInShard", moveInShard->toString())
@@ -9159,33 +9185,47 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	for (const auto& range : moveInShard->ranges()) {
 		data->storage.persistRangeMapping(range, true);
 	}
-	std::unique_ptr<ICheckpointByteSampleReader> reader = newCheckpointByteSampleReader(localRecord);
-	while (reader->hasNext()) {
-		KeyValue kv = reader->next();
-		int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-		KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
-		if (!localRecord.containsKey(key)) {
-			TraceEvent(SevWarnAlways, "InjectExternalSSTKeySampleNotInRange", data->thisServerID)
+
+	// Step 3: Restore BytesSample from bytes sample file if exists
+	if (localRecord.bytesSampleFile.present()) {
+		std::unique_ptr<ICheckpointByteSampleReader> reader = newCheckpointByteSampleReader(localRecord);
+		while (reader->hasNext()) {
+			KeyValue kv = reader->next();
+			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
+			if (!localRecord.containsKey(key)) {
+				TraceEvent(SevWarnAlways, "InjectExternalSSTKeySampleNotInRange", data->thisServerID)
+				    .detail("BulkLoadState", bulkLoadState.toString())
+				    .detail("DestShardId", moveInShard->destShardIdString())
+				    .detail("LocalRecord", localRecord.toString())
+				    .detail("SampleKey", key)
+				    .detail("Size", size);
+				continue;
+			}
+			TraceEvent(SevInfo, "InjectExternalSSTRestoreKeySampleComplete", data->thisServerID)
 			    .detail("BulkLoadState", bulkLoadState.toString())
 			    .detail("DestShardId", moveInShard->destShardIdString())
 			    .detail("LocalRecord", localRecord.toString())
 			    .detail("SampleKey", key)
 			    .detail("Size", size);
-			continue;
+			data->metrics.byteSample.sample.insert(key, size);
+			data->metrics.notifyBytes(key, size);
+			data->addMutationToMutationLogOrStorage(invalidVersion,
+			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
 		}
-		TraceEvent(SevInfo, "InjectExternalSSTRestoreKeySampleComplete", data->thisServerID)
-		    .detail("BulkLoadState", bulkLoadState.toString())
-		    .detail("DestShardId", moveInShard->destShardIdString())
-		    .detail("LocalRecord", localRecord.toString())
-		    .detail("SampleKey", key)
-		    .detail("Size", size);
-		data->metrics.byteSample.sample.insert(key, size);
-		data->metrics.notifyBytes(key, size);
-		data->addMutationToMutationLogOrStorage(invalidVersion, MutationRef(MutationRef::SetValue, kv.key, kv.value));
 	}
+
+	// Step 4: Update the moveInShard phase
 	moveInShard->setPhase(MoveInPhase::ApplyingUpdates);
 	updateMoveInShardMetaData(data, moveInShard);
 	moveInShard->fetchComplete.send(Void());
+
+	TraceEvent(SevInfo, "InjectExternalSSTComplete", data->thisServerID)
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("BulkLoadState", bulkLoadState.toString())
+	    .detail("DestShardId", moveInShard->destShardIdString())
+	    .detail("Ranges", describe(moveInShard->ranges()));
+
 	return Void();
 }
 
@@ -9574,7 +9614,8 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			if (phase == MoveInPhase::Fetching) {
 				if (bulkLoadState.present()) {
 					TraceEvent(SevInfo, "SSFetchShardBulkLoading", data->thisServerID)
-					    .detail("BulkLoadTask", bulkLoadState.get().toString());
+					    .detail("BulkLoadTask", bulkLoadState.get().toString())
+					    .detail("MoveInShard", moveInShard->toString());
 					// This is a bulk loading data move, need not fetch data in simulation
 					if (!g_network->isSimulated()) {
 						throw not_implemented();

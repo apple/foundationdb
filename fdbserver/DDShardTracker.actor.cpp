@@ -831,7 +831,7 @@ ACTOR Future<Void> tenantCreationHandling(DataDistributionTracker* self, TenantC
 
 bool existBulkLoading(const KeyRangeMap<std::pair<UID, Version>>& bulkLoadingMap, KeyRange keys) {
 	for (auto it : bulkLoadingMap.intersectingRanges(keys)) {
-		if (it->value().second != invalidVersion) {
+		if (it->value().first.isValid()) { // In case BulkLoadTask id is valid
 			return true;
 		}
 	}
@@ -846,7 +846,7 @@ bool canTriggerBulkLoad(const KeyRangeMap<std::pair<UID, Version>>& bulkLoadingM
 		// If exist any intersecting bulkLoad task which is newer committed,
 		// the input bulkLoad task is logically cancelled by the newer one.
 		// So, do not launch the input one.
-		if (it->value().second > commitVersion) {
+		if (commitVersion < it->value().second) {
 			return false;
 		}
 	}
@@ -981,7 +981,13 @@ void createShardToBulkLoad(DataDistributionTracker* self,
                            Promise<BulkLoadAckType> launchAck) {
 	// Cancel the input task if there exists a newer bulk loading task on the input range
 	if (!canTriggerBulkLoad(self->bulkLoadingMap, bulkLoadState.range, commitVersion)) {
-		triggerAck.send(BulkLoadAckType::Failed); // Indicating DDTracker has taken action
+		TraceEvent(SevInfo, "CreateShardToBulkLoadFailedToTrigger", self->distributorId)
+		    .detail("BulkLoadState", bulkLoadState.toString())
+		    .detail("Reason", "CannotTriggerBulkLoad")
+		    .detail("CommitVersion", commitVersion);
+		if (triggerAck.canBeSet()) {
+			triggerAck.send(BulkLoadAckType::Failed);
+		}
 		return;
 	}
 	TraceEvent e(SevInfo, "CreateShardToBulkLoad", self->distributorId);
@@ -1028,9 +1034,9 @@ void terminateShardBulkLoad(DataDistributionTracker* self,
                             Version commitVersion,
                             Promise<BulkLoadAckType> terminateAck) {
 	for (auto it : self->bulkLoadingMap.intersectingRanges(bulkLoadState.range)) {
-		ASSERT(it->value().first == bulkLoadState.taskId);
+		ASSERT(it->value().first == bulkLoadState.taskId); // TODO(Zhe): fix it
 	}
-	self->bulkLoadingMap.insert(bulkLoadState.range, std::make_pair(UID(0, 0), invalidVersion));
+	self->bulkLoadingMap.insert(bulkLoadState.range, std::make_pair(UID(), invalidVersion));
 	terminateAck.send(BulkLoadAckType::Succeed);
 }
 

@@ -1834,7 +1834,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				ASSERT_WE_THINK(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
 				ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
 				for (const auto& destId : destIds) {
-					ASSERT_WE_THINK(std::find(rd.src.begin(), rd.src.end(), destId) == rd.src.end());
+					ASSERT_WE_THINK(std::find(rd.src.begin(), rd.src.end(), destId) ==
+					                rd.src.end()); // TODO(Zhe): Fix this
 				}
 			}
 			if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
@@ -2034,10 +2035,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					if (rd.bulkLoadState.present()) {
-						rd.launchAck.send(BulkLoadAckType::Succeed);
-						TraceEvent("DDRelocatorBulkLoadAck")
-						    .detail("Dests", describe(destIds))
-						    .detail("Task", rd.bulkLoadState.get().toString());
+						if (rd.launchAck.canBeSet()) {
+							rd.launchAck.send(BulkLoadAckType::Succeed);
+							TraceEvent("DDRelocatorBulkLoadAck")
+							    .detail("Dests", describe(destIds))
+							    .detail("Task", rd.bulkLoadState.get().toString());
+						} else {
+							TraceEvent("DDRelocatorBulkLoadAckCannotSendAck")
+							    .detail("Dests", describe(destIds))
+							    .detail("Task", rd.bulkLoadState.get().toString());
+						}
 					}
 
 					return Void();

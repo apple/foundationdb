@@ -62,8 +62,8 @@ struct BulkLoadState {
 		                  ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
 		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
 		                  ", [FilePath]: " + describe(filePaths);
-		if (byteSampleFile.present()) {
-			res = res + ", [ByteSampleFile]: " + byteSampleFile.get();
+		if (bytesSampleFile.present()) {
+			res = res + ", [ByteSampleFile]: " + bytesSampleFile.get();
 		}
 		res = res + ", [TaskId]: " + taskId.toString();
 		return res;
@@ -83,13 +83,13 @@ struct BulkLoadState {
 		if (filePath.substr(0, folder.size()) != folder) {
 			return false;
 		}
-		byteSampleFile = filePath;
+		bytesSampleFile = filePath;
 		return true;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, phase, folder, filePaths, byteSampleFile, taskId);
+		serializer(ar, range, loadType, phase, folder, filePaths, bytesSampleFile, taskId);
 	}
 
 	KeyRange range;
@@ -97,7 +97,7 @@ struct BulkLoadState {
 	BulkLoadPhase phase;
 	std::string folder;
 	std::unordered_set<std::string> filePaths;
-	Optional<std::string> byteSampleFile;
+	Optional<std::string> bytesSampleFile;
 	UID taskId;
 };
 

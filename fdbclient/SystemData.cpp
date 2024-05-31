@@ -1217,7 +1217,8 @@ const UID dataDistributionModeLock = UID(6345, 3425);
 
 // Bulk loading keys
 const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
-const KeyRef bulkLoadPrefix = "\xff/bulkLoad/"_sr;
+const KeyRangeRef bulkLoadKeys = KeyRangeRef("\xff/bulkLoad/"_sr, "\xff/bulkLoad0"_sr);
+const KeyRef bulkLoadPrefix = bulkLoadKeys.begin;
 
 const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {
 	return ObjectWriter::toValue(bulkLoadState, IncludeVersion());

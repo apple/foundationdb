@@ -792,21 +792,31 @@ public:
 			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				if (rs.bulkLoadState.present()) {
+					// The data move corresponds to the bulk loading task is cancelled
+					// so we start a new bulk load task
+					TraceEvent("DDInitResumeWithNewBulkLoad")
+					    .detail("BulkLoadState", rs.bulkLoadState.get().toString());
+					runBulkLoadTaskOnRange(self, rs.bulkLoadState.get().range, Optional<BulkLoadState>());
+				}
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
 				if (rs.bulkLoadState.present()) {
 					// Since bulk load task phase updated to RUNNING in atomic to when data move metadata is persisted.
 					// For any data move metadata has bulk load task, there is a corresponding RUNNING bulk load task.
 					// We resume those tasks.
+					TraceEvent("DDInitResumeBulkLoad").detail("BulkLoadState", rs.bulkLoadState.get().toString());
 					runBulkLoadTaskOnRange(self, rs.bulkLoadState.get().range, rs.bulkLoadState.get());
 				}
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
@@ -1044,13 +1054,19 @@ ACTOR Future<std::pair<BulkLoadState, Version>> startBulkLoadTask(Reference<Data
 		try {
 			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, range));
 			bulkLoadState = decodeBulkLoadState(result[0].value);
-			ASSERT(bulkLoadState.phase != BulkLoadPhase::Complete);
+			state UID oldTaskId = bulkLoadState.taskId;
+			state BulkLoadPhase oldTaskPhase = bulkLoadState.phase;
+			bulkLoadState.taskId = deterministicRandom()->randomUniqueID(); // TODO(Zhe): merge UID created by users
 			bulkLoadState.phase = BulkLoadPhase::Triggered; // Only place to set it triggered to metadata
-			bulkLoadState.taskId = deterministicRandom()->randomUniqueID(); // Only place to set task ID
 			wait(krmSetRange(&tr, bulkLoadPrefix, range, bulkLoadStateValue(bulkLoadState)));
 			wait(tr.commit()); // TODO(Zhe): When commit proxy sees this transaction, it stops the user traffic within
 			                   // this range. CommitProxy should re-allow user traffic when it sees the bulk load on a
 			                   // range is acknowledged.
+			TraceEvent(SevInfo, "PersistBulkLoadTriggered", self->ddId)
+			    .detail("Task", bulkLoadState.toString())
+			    .detail("Range", range)
+			    .detail("OldTaskId", oldTaskId)
+			    .detail("OldTaskPhase", oldTaskPhase);
 			commitVersion = tr.getCommittedVersion();
 			self->triggerShardBulkLoading.send(
 			    BulkLoadShardRequest(bulkLoadState, commitVersion, triggerAck, launchAck));
