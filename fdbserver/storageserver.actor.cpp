@@ -4215,8 +4215,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		else
 			readBegin = range.begin;
 
+		// We can get lower_bound from the result of lastLessOrEqual
 		if (vCurrent) {
-			// We can get first greater or equal from the result of lastLessOrEqual
 			if (vCurrent.key() != readBegin) {
 				++vCurrent;
 			}
@@ -4226,6 +4226,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Either way that's the correct result for lower_bound.
 			vCurrent = view.begin();
 		}
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(vCurrent == view.lower_bound(readBegin));
+		}
+
 		while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
 			ASSERT(!vCurrent || vCurrent.key() >= readBegin);
 			ASSERT(data->storageVersion() <= version);
@@ -7084,7 +7088,22 @@ void expandClear(MutationRef& m,
 	} else if (eager->enableClearRangeEagerReads) {
 		// Expand to the next set or clear (from storage or latestVersion), and if it
 		// is a clear, engulf it as well
-		i = d.lower_bound(m.param2);
+
+		// We can get lower_bound from the result of lastLessOrEqual
+		if (i) {
+			if (i.key() != m.param2) {
+				++i;
+			}
+		} else {
+			// There's nothing less than or equal to m.param2 in view, so
+			// begin() is the first thing greater than m.param2, or end().
+			// Either way that's the correct result for lower_bound.
+			i = d.begin();
+		}
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(i == d.lower_bound(m.param2));
+		}
+
 		KeyRef endKeyAtStorageVersion =
 		    m.param2 == eagerTrustedEnd ? eagerTrustedEnd : std::min(eager->getKeyEnd(m.param2), eagerTrustedEnd);
 		if (!i || endKeyAtStorageVersion < i.key())
@@ -7139,7 +7158,9 @@ void applyMutation(StorageServer* self,
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
 		ASSERT(m.param2 > m.param1);
-		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
+		}
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
 		++self->counters.pTreeClears;
