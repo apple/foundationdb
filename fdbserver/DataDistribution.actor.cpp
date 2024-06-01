@@ -1070,7 +1070,8 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 			ASSERT(ack == BulkLoadAckType::Succeed);
 			return std::make_pair(bulkLoadState, commitVersion);
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled || e.code() == error_code_bulkload_task_outdated) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_bulkload_task_outdated ||
+			    e.code() == error_code_movekeys_conflict) {
 				throw e;
 			}
 			TraceEvent(SevWarn, "TriggerBulkLoadTaskError", self->ddId).errorUnsuppressed(e).detail("Range", range);
