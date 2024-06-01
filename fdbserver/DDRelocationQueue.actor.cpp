@@ -1001,7 +1001,10 @@ void DDQueue::launchQueuedWork(RelocateData launchData, const DDEnabledState* dd
 	launchQueuedWork(combined, ddEnabledState);
 }
 
-DataMoveType newDataMoveType() {
+DataMoveType newDataMoveType(bool doBulkLoad) {
+	if (doBulkLoad) {
+		return DataMoveType::PHYSICAL_BULKLOAD;
+	}
 	DataMoveType type = DataMoveType::LOGICAL;
 	if (deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY) {
 		type = DataMoveType::PHYSICAL;
@@ -1127,7 +1130,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					} else {
 						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                               AssignEmptyRange::False,
-						                               newDataMoveType(),
+						                               newDataMoveType(rrs.bulkLoadState.present()),
 						                               rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
@@ -1508,9 +1511,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 						TeamSelect destTeamSelect;
-						if (wantBulkLoadServers) {
-							destTeamSelect = TeamSelect::WANT_STRICT_NEW_DESTS;
-						} else if (!rd.wantsNewServers) {
+						/*if (wantBulkLoadServers) {
+						    destTeamSelect = TeamSelect::WANT_STRICT_NEW_DESTS;
+						} else */
+						if (!rd.wantsNewServers) {
 							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
 						} else if (wantTrueBest) {
 							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
@@ -1738,6 +1742,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			}
 
 			if (enableShardMove) {
+				// TODO(Zhe): double check if bulk loading can do with physical shard collection feature
 				if (!rd.isRestore()) {
 					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
 					// thus, update the physicalShardIDCandidate to related data structures
@@ -1747,8 +1752,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(
-					    physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType(), rd.dmReason);
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
+					                              AssignEmptyRange::False,
+					                              newDataMoveType(rd.bulkLoadState.present()),
+					                              rd.dmReason);
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
@@ -1825,7 +1832,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("DataMovePriority", rd.priority)
 					    .detail("DataMoveId", rd.dataMoveId);
 					if (rd.launchAck.canBeSet()) {
-						rd.launchAck.sendError(bulkload_task_failed());
+						rd.launchAck.sendError(bulkload_task_launch_failed());
 					}
 					throw movekeys_conflict();
 					// Very important invariant. If this error appears, check the logic
@@ -1837,25 +1844,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("DataMoveId", rd.dataMoveId)
 					    .detail("RelocatorRange", rd.keys);
 					if (rd.launchAck.canBeSet()) {
-						rd.launchAck.sendError(bulkload_task_failed());
+						rd.launchAck.sendError(bulkload_task_launch_failed());
 					}
 					throw movekeys_conflict();
 					// Very important invariant. If this error appears, check the logic
-				}
-				for (const auto& destId : destIds) {
-					if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end()) {
-						// This is because DC fails
-						TraceEvent(SevWarnAlways, "BulkLoadRelocatorUnexpectedDestTeam")
-						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
-						    .detail("DataMovePriority", rd.priority)
-						    .detail("DataMoveId", rd.dataMoveId)
-						    .detail("SrcIds", describe(rd.src))
-						    .detail("DestId", destId);
-						if (rd.launchAck.canBeSet()) {
-							rd.launchAck.sendError(bulkload_task_failed());
-						}
-						throw data_move_dest_team_not_found();
-					}
 				}
 				TraceEvent(SevInfo, "BulkLoadRelocatorGotTeam", self->distributorId)
 				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())

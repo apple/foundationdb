@@ -115,7 +115,7 @@ ERROR( bulkload_mode_not_found, 1090, "Cannot find bulk loading mode" )
 ERROR( bulkload_is_off_when_commit_task, 1091, "Bulk load mode is off when committing task" )
 ERROR( bulkload_task_failed, 1092, "Bulk load task is failed")
 ERROR( bulkload_task_outdated, 1093, "Bulk load task is outdated" )
-ERROR( bulkload_task_trigger_failed, 1094, "Bulk load task is failed to trigger" )
+ERROR( bulkload_task_trigger_failed, 1094, "Bulk load task is failed to trigger" ) // TODO(Zhe): Too many error types here
 ERROR( bulkload_task_launch_failed, 1095, "Bulk load task is failed to launch" )
 ERROR( bulkload_task_wait_end_failed, 1096, "Bulk load task is failed to wait end" )
 ERROR( bulkload_task_terminate_failed, 1097, "Bulk load task is failed to terminate" )

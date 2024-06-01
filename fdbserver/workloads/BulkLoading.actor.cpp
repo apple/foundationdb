@@ -208,6 +208,7 @@ struct BulkLoading : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
+				TraceEvent(SevInfo, "BulkLoadingWorkLoadValueError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -264,12 +265,17 @@ struct BulkLoading : TestWorkload {
 		tasks.push_back(self->newBulkLoadTask(range2, folder2));
 		tasks.push_back(self->newBulkLoadTask(range3, folder3));
 		wait(self->issueBulkLoadTasks(self, cx, tasks));
+		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
+		TraceEvent("BulkLoadingWorkLoadAllComplete");
 		wait(self->setBulkLoadMode(cx, /*on=*/false));
 
 		wait(self->checkData(cx, data1, valueToLoad));
+		TraceEvent("BulkLoadingWorkLoadCheckedData1");
 		wait(self->checkData(cx, data2, valueToLoad));
+		TraceEvent("BulkLoadingWorkLoadCheckedData2");
 		wait(self->checkData(cx, data3, valueToLoad));
+		TraceEvent("BulkLoadingWorkLoadCheckedData3");
 
 		TraceEvent("BulkLoadingWorkLoadComplete");
 

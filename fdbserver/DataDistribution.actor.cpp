@@ -1178,6 +1178,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// Step 4: re-enable shard boundary change by DD Tracker
 		// Zhe(TODO): reopen user traffic to the loading range
 		wait(finishBulkLoadTask(self, committedBulkLoadTask.first));
+		TraceEvent(SevInfo, "DoBulkLoadTaskFinishProcessed", self->ddId)
+		    .detail("Task", committedBulkLoadTask.first.toString())
+		    .detail("CommitVersion", committedBulkLoadTask.second);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -1211,10 +1214,10 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 			    .detail("CommitVersion", committedBulkLoadTask.second);
 			runBulkLoadTaskAsync(self, range, committedBulkLoadTask.first); // retry existing task
 		} else {
-			ASSERT_WE_THINK(e.code() == error_code_movekeys_conflict);
 			TraceEvent(SevWarn, "DoBulkLoadTaskUnretriableError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("Range", range);
+			ASSERT_WE_THINK(e.code() == error_code_movekeys_conflict);
 			throw e;
 		}
 	}
