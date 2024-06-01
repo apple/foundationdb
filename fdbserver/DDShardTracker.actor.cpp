@@ -985,9 +985,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 		    .detail("BulkLoadState", bulkLoadState.toString())
 		    .detail("Reason", "CannotTriggerBulkLoad")
 		    .detail("CommitVersion", commitVersion);
-		if (triggerAck.canBeSet()) {
-			triggerAck.send(BulkLoadAckType::Failed);
-		}
+		triggerAck.sendError(bulkload_task_outdated());
 		return;
 	}
 	TraceEvent e(SevInfo, "CreateShardToBulkLoad", self->distributorId);
@@ -1022,6 +1020,9 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 		self->shardsAffectedByTeamFailure->defineShard(lastOverlapRange);
 	}
 	self->shardsAffectedByTeamFailure->defineShard(keys);
+	TraceEvent(SevInfo, "UpdateBulkLoadMap")
+	    .detail("Context", "Start")
+	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(
 	    keys, std::make_pair(bulkLoadState.taskId, commitVersion)); // TODO: resume bulkLoadingMap when DD init
 	self->output.send(RelocateShard(
@@ -1034,8 +1035,17 @@ void terminateShardBulkLoad(DataDistributionTracker* self,
                             Version commitVersion,
                             Promise<BulkLoadAckType> terminateAck) {
 	for (auto it : self->bulkLoadingMap.intersectingRanges(bulkLoadState.range)) {
-		ASSERT(it->value().first == bulkLoadState.taskId); // TODO(Zhe): fix it
+		if (it->value().first != bulkLoadState.taskId) {
+			TraceEvent(SevWarn, "TerminateShardBulkLoadTaskOutdated")
+			    .detail("BulkLoadState", bulkLoadState.toString())
+			    .detail("ExistingBulkLoadTaskID", it->value().first);
+			terminateAck.sendError(bulkload_task_outdated());
+			return;
+		}
 	}
+	TraceEvent(SevInfo, "UpdateBulkLoadMap")
+	    .detail("Context", "Terminate")
+	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(bulkLoadState.range, std::make_pair(UID(), invalidVersion));
 	terminateAck.send(BulkLoadAckType::Succeed);
 }
@@ -1701,7 +1711,12 @@ struct DataDistributionTrackerImpl {
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "DataDistributionTrackerError", self->distributorId).error(e);
+			if (e.code() != error_code_broken_promise) {
+				TraceEvent(SevError, "DataDistributionTrackerError", self->distributorId)
+				    .error(e); // FIXME: get rid of broken_promise
+			} else {
+				TraceEvent(SevWarn, "DataDistributionTrackerError", self->distributorId).error(e);
+			}
 			throw e;
 		}
 	}

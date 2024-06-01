@@ -92,6 +92,9 @@ struct BulkLoading : TestWorkload {
 				TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks));
 				break;
 			} catch (Error& e) {
+				TraceEvent("BulkLoadingIssueBulkLoadTaskError")
+				    .errorUnsuppressed(e)
+				    .detail("BulkLoadStates", describe(tasks));
 				wait(tr.onError(e));
 			}
 		}

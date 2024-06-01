@@ -554,6 +554,13 @@ public:
 				// Attempt to find the unhealthy source server team and return it
 				auto healthyTeam = self->findTeamFromServers(req.completeSources, /* wantHealthy=*/false);
 				if (healthyTeam.present()) {
+					if (req.teamSelect == TeamSelect::WANT_STRICT_NEW_DESTS) {
+						// Dedicated to bulk loading datamove
+						TraceEvent(SevInfo, "GetStrictNewServersFailedDueToDCFail", self->distributorId)
+						    .detail("SrcIds", describe(req.src))
+						    .detail("BestOption", healthyTeam.get()->getServerIDs())
+						    .detail("TeamId", healthyTeam.get()->getTeamID());
+					}
 					req.reply.send(std::make_pair(healthyTeam, foundSrc));
 					return Void();
 				}
@@ -576,6 +583,12 @@ public:
 				    .detail("Reason", "bestOption not present");
 				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
 			} else {
+				if (req.teamSelect == TeamSelect::WANT_STRICT_NEW_DESTS) {
+					// Dedicated to bulk loading datamove
+					TraceEvent(SevInfo, "GetStrictNewServers", self->distributorId)
+					    .detail("SrcIds", describe(req.src))
+					    .detail("BestOption", bestOption.present() ? describe(bestOption.get()->getServerIDs()) : "");
+				}
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
 

@@ -803,8 +803,8 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		// If there is a queued job that wants data relocation which we are about to cancel/modify,
 		//  make sure that we keep the relocation intent for the job that we queue up
 		// If the new/old relocation is a bulk loading relocation, we do not inherit settings from the queued job
-		if ((foundActiveFetching || foundActiveRelocation) && (rrs.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING ||
-		                                                       rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING)) {
+		if ((foundActiveFetching || foundActiveRelocation) &&
+		    (!rrs.bulkLoadState.present() || !rd.bulkLoadState.present())) {
 			rd.wantsNewServers |= rrs.wantsNewServers;
 			rd.startTime = std::min(rd.startTime, rrs.startTime);
 			if (!hasHealthPriority) {
@@ -816,13 +816,12 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
 		}
 
-		if (rrs.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+		if (rrs.bulkLoadState.present()) {
 			TraceEvent(SevInfo, "BulkLoadTaskIsOverwrittern")
 			    .detail("OldDataMove", rrs.bulkLoadState.get().toString())
 			    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
 			    .detail("NewDataMovePriority", rd.priority);
-			if (rrs.launchAck.canBeSet())
-				rrs.launchAck.send(BulkLoadAckType::Failed);
+			rrs.launchAck.sendError(bulkload_task_launch_failed());
 		}
 
 		// New job cancels old queued jobs
@@ -1370,10 +1369,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
-	state WantBulkLoadServers wantBulkLoadServers(rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING);
+	state WantBulkLoadServers wantBulkLoadServers(rd.bulkLoadState.present());
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
-	if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
+	if (rd.bulkLoadState.present()) {
 		TraceEvent(SevInfo, "BulkLoadRelocatorStart", self->distributorId)
 		    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
 	}
@@ -1489,6 +1488,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						}
 						anyHealthy = true;
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+						if (rd.bulkLoadState.present()) {
+							TraceEvent("SelectBestTeamRestore")
+							    .detail("Team", bestTeam.first.get()->getServerIDs())
+							    .detail("TeamID", bestTeam.first.get()->getTeamID())
+							    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+							    .detail("Priority", rd.priority)
+							    .detail("DataMoveId", rd.dataMoveId)
+							    .detail("Primary", tciIndex == 0);
+						}
 					} else {
 						double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
@@ -1650,6 +1658,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							}
 						} else {
 							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+							if (rd.bulkLoadState.present()) {
+								TraceEvent("SelectBestTeam")
+								    .detail("Team", bestTeam.first.get()->getServerIDs())
+								    .detail("TeamID", bestTeam.first.get()->getTeamID())
+								    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+								    .detail("Priority", rd.priority)
+								    .detail("DataMoveId", rd.dataMoveId)
+								    .detail("Primary", tciIndex == 0);
+							}
 						}
 					}
 					tciIndex++;
@@ -1718,6 +1735,32 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
+			}
+
+			if (rd.bulkLoadState.present()) {
+				if (rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING &&
+				    rd.priority != SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
+					TraceEvent(SevError, "BulkLoadRelocatorWrongPriority", self->distributorId)
+					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+					    .detail("DataMovePriority", rd.priority)
+					    .detail("DataMoveId", rd.dataMoveId);
+					ASSERT(false); // Very important invariant. If wrong, check the logic
+				}
+				ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
+				for (const auto& destId : destIds) {
+					if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end()) {
+						// This is because DC fails
+						TraceEvent(SevWarnAlways, "BulkLoadRelocatorUnexpectedDestTeam")
+						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+						    .detail("DataMovePriority", rd.priority)
+						    .detail("DataMoveId", rd.dataMoveId)
+						    .detail("SrcIds", describe(rd.src))
+						    .detail("DestId", destId);
+						throw data_move_dest_team_not_found();
+					}
+				}
+				TraceEvent(SevInfo, "BulkLoadRelocatorGotTeam", self->distributorId)
+				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
 			}
 
 			if (enableShardMove) {
@@ -1829,24 +1872,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
-
-			if (rd.bulkLoadState.present()) {
-				if (rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING) {
-					TraceEvent(SevError, "BulkLoadRelocatorWrongPriority", self->distributorId)
-					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-					ASSERT(false); // TODO(Zhe): Very important. If wrong, check the logic
-				}
-				ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
-				for (const auto& destId : destIds) {
-					ASSERT_WE_THINK(std::find(rd.src.begin(), rd.src.end(), destId) ==
-					                rd.src.end()); // TODO(Zhe): Fix this
-				}
-			}
-			if (rd.priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
-				ASSERT_WE_THINK(rd.bulkLoadState.present());
-				TraceEvent(SevInfo, "BulkLoadRelocatorGotTeam", self->distributorId)
-				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-			}
 
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			std::unique_ptr<MoveKeysParams> params;

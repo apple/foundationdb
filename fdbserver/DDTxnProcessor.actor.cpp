@@ -487,10 +487,12 @@ class DDTxnProcessorImpl {
 				result->dataMoveMap[keys.begin]->validateShard(iShard, keys);
 				const DataMoveMetaData& meta = result->dataMoveMap[keys.begin]->meta;
 				if (meta.bulkLoadState.present() && !result->dataMoveMap[keys.begin]->isCancelled()) {
-					// Since bulk load task phase updated to RUNNING in atomic to when data move metadata is
-					// persisted. For any data move metadata (not cancelled data move) has bulk load task, there is a
-					// corresponding RUNNING bulk load task. For any RUNNING task, we add it to bulkLoadingMap. This
-					// will be used by DDTracker to avoid boundary changes during the bulk loading
+					// Initialize bulkLoadingMap which will be used by DD Tracker to decide
+					// whether a range has existing bulk loading
+					ASSERT(meta.bulkLoadState.get().phase == BulkLoadPhase::Running);
+					TraceEvent(SevInfo, "UpdateBulkLoadMap")
+					    .detail("Context", "Resume")
+					    .detail("BulkLoadTask", meta.bulkLoadState.get().toString());
 					result->bulkLoadingMap.insert(meta.bulkLoadState.get().range,
 					                              std::make_pair(meta.bulkLoadState.get().taskId, invalidVersion));
 				}

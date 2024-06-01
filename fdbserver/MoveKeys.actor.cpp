@@ -1660,7 +1660,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					dataMove = dmv;
 					TraceEvent(sevDm, "StartMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
-					    .detail("DataMove", dataMove.toString());
+					    .detail("DataMove", dataMove.toString())
+					    .detail("CancelDataMove", cancelDataMove);
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 						TraceEvent(sevDm, "StartMoveShardsDataMoveDeleted", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString())
@@ -2059,7 +2060,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(sevDm, "FinishMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
-					    .detail("DataMove", dataMove.toString());
+					    .detail("DataMove", dataMove.toString())
+					    .detail("CancelDataMove", cancelDataMove);
 					if (cancelDataMove) {
 						dataMove.setPhase(DataMoveMetaData::Deleting);
 						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
@@ -2111,13 +2113,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					    .detail("SrcID", srcId)
 					    .detail("Src", describe(src))
 					    .detail("DestID", destId)
-					    .detail("Dest", describe(dest));
+					    .detail("Dest", describe(dest))
+					    .detail("DataMove", dataMove.toString());
 					allServers.insert(src.begin(), src.end());
 					allServers.insert(dest.begin(), dest.end());
 					if (destId != dataMoveId) {
 						TraceEvent(SevWarnAlways, "FinishMoveShardsInconsistentIDs", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
-						    .detail("ExistingShardID", destId);
+						    .detail("ExistingShardID", destId)
+						    .detail("DataMove", dataMove.toString());
 						cancelDataMove = true;
 						throw retry();
 					}
@@ -2205,7 +2209,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				TraceEvent(sevDm, "FinishMoveShardsWaitingServers", relocationIntervalId)
 				    .detail("DataMoveID", dataMoveId)
-				    .detail("NewDestinations", describe(newDestinations));
+				    .detail("NewDestinations", describe(newDestinations))
+				    .detail("DataMove", dataMove.toString());
 
 				// Wait for all storage server moves, and explicitly swallow errors for tss ones with
 				// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
@@ -2262,7 +2267,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("ReadyServers", describe(readyServers))
 				    .detail("NewDestinations", describe(newDestinations))
-				    .detail("ReadyTSS", tssCount);
+				    .detail("ReadyTSS", tssCount)
+				    .detail("DataMove", dataMove.toString());
 
 				if (readyServers.size() == newDestinations.size()) {
 
@@ -2282,7 +2288,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						TraceEvent(sevDm, "FinishMoveShardsSetServerKeyRange", relocationIntervalId)
 						    .detail("StorageServerID", ssId)
 						    .detail("KeyRange", range)
-						    .detail("ShardID", destHasServer ? dataMoveId : UID());
+						    .detail("ShardID", destHasServer ? dataMoveId : UID())
+						    .detail("DataMove", dataMove.toString());
 					}
 
 					wait(waitForAll(actors));
@@ -2307,7 +2314,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							                 bulkLoadState.get().range,
 							                 bulkLoadStateValue(bulkLoadState.get())));
 							TraceEvent(SevInfo, "PersistBulkLoadFinish", relocationIntervalId)
-							    .detail("BulkLoadTask", bulkLoadState.get().toString());
+							    .detail("BulkLoadTask", bulkLoadState.get().toString())
+							    .detail("DataMove", dataMove.toString());
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
@@ -2319,7 +2327,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("CurrentRange", range)
-						    .detail("NewDataMoveMetaData", dataMove.toString());
+						    .detail("NewDataMoveMetaData", dataMove.toString())
+						    .detail("DataMove", dataMove.toString());
 						dataMove.ranges.front() = KeyRangeRef(range.end, dataMove.ranges.front().end);
 						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 					}
@@ -2372,7 +2381,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 	TraceEvent(SevInfo, "FinishMoveShardsEnd", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "")
+	    .detail("DataMove", dataMove.toString());
 	return Void();
 }
 

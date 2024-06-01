@@ -8451,11 +8451,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		throw e;
 	}
 
-	if (priority == SERVER_KNOBS->PRIORITY_BULK_LOADING) {
-		TraceEvent("SSBulkLoadByFetchKeys").detail("Shard", keys);
-		ASSERT_WE_THINK(false);
-	}
-
 	try {
 		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
 
@@ -9139,20 +9134,22 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	for (const auto& filePath : bulkLoadState.filePaths) {
 		CheckpointFile cpFile;
 		cpFile.path = filePath;
-		ASSERT(moveInShard->ranges().size() == 1);
+		if (moveInShard->ranges().size() != 1) {
+			TraceEvent(SevError, "InjectExternalSSTMoveInShardRangeSizeUnexpected", data->thisServerID)
+			    .detail("BulkLoadState", bulkLoadState.toString())
+			    .detail("MoveInShard", moveInShard->toString());
+		}
 		cpFile.range = moveInShard->ranges()[0];
 		rcp.fetchedFiles.push_back(cpFile);
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 	localRecord.version = 0; // Zhe: What does this use for?
-	ASSERT_WE_THINK(bulkLoadState.bytesSampleFile.present());
-	if (fileExists(bulkLoadState.bytesSampleFile.get())) {
+	if (bulkLoadState.bytesSampleFile.present() && fileExists(bulkLoadState.bytesSampleFile.get())) {
 		localRecord.bytesSampleFile = bulkLoadState.bytesSampleFile.get();
 	} else {
 		TraceEvent(SevWarnAlways, "InjectExternalSSTProvidedSampleBytesFileNotFound", data->thisServerID)
-		    .detail("FilePath", bulkLoadState.bytesSampleFile.get())
 		    .detail("BulkLoadState", bulkLoadState.toString());
-		localRecord.bytesSampleFile = Optional<std::string>();
+		// TODO(Zhe): Handle this case later
 	}
 	localRecord.setFormat(CheckpointFormat::RocksDBKeyValues);
 	localRecord.setState(CheckpointMetaData::Complete);
@@ -9160,6 +9157,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 
 	// Step 2: Restore data from SST file
 	try {
+		// TODO(Zhe): what if the file is not found?
 		wait(
 		    data->storage.restore(moveInShard->destShardIdString(), moveInShard->ranges(), moveInShard->checkpoints()));
 	} catch (Error& e) {
@@ -9202,7 +9200,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 				    .detail("Size", size);
 				continue;
 			}
-			TraceEvent(SevInfo, "InjectExternalSSTRestoreKeySampleComplete", data->thisServerID)
+			TraceEvent(SevInfo, "InjectExternalSSTRestoreKeySample", data->thisServerID)
 			    .detail("BulkLoadState", bulkLoadState.toString())
 			    .detail("DestShardId", moveInShard->destShardIdString())
 			    .detail("LocalRecord", localRecord.toString())
