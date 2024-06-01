@@ -816,7 +816,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
 		}
 
-		if (rrs.bulkLoadState.present()) {
+		if (rrs.bulkLoadState.present() && rrs.launchAck.canBeSet()) {
 			TraceEvent(SevInfo, "BulkLoadTaskIsOverwrittern")
 			    .detail("OldDataMove", rrs.bulkLoadState.get().toString())
 			    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
