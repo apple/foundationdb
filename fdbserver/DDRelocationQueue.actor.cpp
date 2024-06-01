@@ -1737,32 +1737,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
 			}
 
-			if (rd.bulkLoadState.present()) {
-				if (rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING &&
-				    rd.priority != SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
-					TraceEvent(SevError, "BulkLoadRelocatorWrongPriority", self->distributorId)
-					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
-					    .detail("DataMovePriority", rd.priority)
-					    .detail("DataMoveId", rd.dataMoveId);
-					ASSERT(false); // Very important invariant. If wrong, check the logic
-				}
-				ASSERT_WE_THINK(rd.keys == rd.bulkLoadState.get().range);
-				for (const auto& destId : destIds) {
-					if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end()) {
-						// This is because DC fails
-						TraceEvent(SevWarnAlways, "BulkLoadRelocatorUnexpectedDestTeam")
-						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
-						    .detail("DataMovePriority", rd.priority)
-						    .detail("DataMoveId", rd.dataMoveId)
-						    .detail("SrcIds", describe(rd.src))
-						    .detail("DestId", destId);
-						throw data_move_dest_team_not_found();
-					}
-				}
-				TraceEvent(SevInfo, "BulkLoadRelocatorGotTeam", self->distributorId)
-				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-			}
-
 			if (enableShardMove) {
 				if (!rd.isRestore()) {
 					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
@@ -1815,13 +1789,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 
 				// TODO(psm): Make DataMoveMetaData aware of the two-step data move optimization.
-				if (allHealthy && anyWithSource && !bestTeams[i].second) {
+				if (allHealthy && anyWithSource && !bestTeams[i].second && !rd.bulkLoadState.present()) {
 					// When all servers in bestTeams[i] do not hold the shard (!bestTeams[i].second), it indicates
 					// the bestTeams[i] is in a new DC where data has not been replicated to.
 					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data movement
 					// across DC, we randomly choose a server in bestTeams[i] as the shard's destination, and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
 					// propagate its data to the servers in the same team. This saves data movement bandwidth across DC
+					// Bulk loading data move avoids this optimization since it does not move any data from source
+					// servers
 					int idx = deterministicRandom()->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);
@@ -1838,6 +1814,54 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						healthyDestinations.addTeam(bestTeams[i].first);
 					}
 				}
+			}
+
+			// Sanity check for bulk loading data move
+			if (rd.bulkLoadState.present()) {
+				if (rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING &&
+				    rd.priority != SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
+					TraceEvent(SevError, "BulkLoadRelocatorWrongPriority", self->distributorId)
+					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+					    .detail("DataMovePriority", rd.priority)
+					    .detail("DataMoveId", rd.dataMoveId);
+					if (rd.launchAck.canBeSet()) {
+						rd.launchAck.sendError(bulkload_task_failed());
+					}
+					throw movekeys_conflict();
+					// Very important invariant. If this error appears, check the logic
+				}
+				if (rd.keys != rd.bulkLoadState.get().range) {
+					TraceEvent(SevError, "BulkLoadRelocatorWrongRange", self->distributorId)
+					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+					    .detail("DataMovePriority", rd.priority)
+					    .detail("DataMoveId", rd.dataMoveId)
+					    .detail("RelocatorRange", rd.keys);
+					if (rd.launchAck.canBeSet()) {
+						rd.launchAck.sendError(bulkload_task_failed());
+					}
+					throw movekeys_conflict();
+					// Very important invariant. If this error appears, check the logic
+				}
+				for (const auto& destId : destIds) {
+					if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end()) {
+						// This is because DC fails
+						TraceEvent(SevWarnAlways, "BulkLoadRelocatorUnexpectedDestTeam")
+						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+						    .detail("DataMovePriority", rd.priority)
+						    .detail("DataMoveId", rd.dataMoveId)
+						    .detail("SrcIds", describe(rd.src))
+						    .detail("DestId", destId);
+						if (rd.launchAck.canBeSet()) {
+							rd.launchAck.sendError(bulkload_task_failed());
+						}
+						throw data_move_dest_team_not_found();
+					}
+				}
+				TraceEvent(SevInfo, "BulkLoadRelocatorGotTeam", self->distributorId)
+				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+				    .detail("DataMoveId", rd.dataMoveId)
+				    .detail("SrcIds", describe(rd.src))
+				    .detail("DestId", describe(destIds));
 			}
 
 			// Sanity check
