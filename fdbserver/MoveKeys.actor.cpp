@@ -1750,6 +1750,21 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("DestID", destId)
 						    .detail("ReadVersion", tr.getReadVersion().get());
 
+						if (bulkLoadState.present()) {
+							state std::vector<UID> owners(src.size() + dest.size());
+							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), owners.begin());
+							for (const auto& ssid : servers) {
+								if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
+									TraceEvent(SevWarn, "BulkLoadStartMoveShardsMoveInConflict")
+									    .detail("BulkLoadTask", bulkLoadState.get().toString())
+									    .detail("OwnerIds", describe(owners))
+									    .detail("DataMove", dataMove.toString());
+									cancelDataMove = true;
+									throw retry();
+								}
+							}
+						}
+
 						// Pre validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 							std::vector<UID> servers(src.size() + dest.size());

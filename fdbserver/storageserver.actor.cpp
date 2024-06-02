@@ -9136,12 +9136,13 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	for (const auto& filePath : bulkLoadState.filePaths) {
 		CheckpointFile cpFile;
 		cpFile.path = filePath;
-		if (moveInShard->ranges().size() != 1) {
+		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
+		if (coalesceRanges.size() != 1) {
 			TraceEvent(SevError, "InjectExternalSSTMoveInShardRangeSizeUnexpected", data->thisServerID)
 			    .detail("BulkLoadState", bulkLoadState.toString())
 			    .detail("MoveInShard", moveInShard->toString());
 		}
-		cpFile.range = moveInShard->ranges()[0];
+		cpFile.range = coalesceRanges[0];
 		rcp.fetchedFiles.push_back(cpFile);
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
@@ -10541,26 +10542,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 					}
 				}
 			}
-		} else if (dataAvailable && doBulkLoad && r->value()->shardId != dataMoveId.first()) {
-			// Currently, we set dataMoveId.first as shardId to distinguish whether the current operation
-			// is for the same data move (aka, bulk load task)
-			removeRanges.push_back(range);
-			if (r->value()->moveInShard) {
-				r->value()->moveInShard->cancel();
-				removeRanges.push_back(range);
-			}
-			data->pendingRemoveRanges[cVer].push_back(range);
-			data->watches.triggerRange(range.begin, range.end); // Trigger watch since we overwrite old data
-			std::shared_ptr<MoveInShard> moveInShard = data->getMoveInShard(dataMoveId, cVer);
-			moveInShard->addRange(range);
-			TraceEvent("BulkLoadOverwriteReadWriteShard", data->thisServerID)
-			    .detail("AtVersion", data->version.get())
-			    .detail("Range", range)
-			    .detail("MoveInShard", moveInShard->toString());
-			updatedMoveInShards.emplace(moveInShard->id(), moveInShard);
-			updatedShards.push_back(
-			    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn, moveInShard->id()));
-
 		} else {
 			updatedShards.push_back(StorageServerShard(
 			    range, cVer, data->shards[range.begin]->shardId, desiredId, StorageServerShard::ReadWrite));

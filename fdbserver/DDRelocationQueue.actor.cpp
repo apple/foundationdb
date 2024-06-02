@@ -1052,6 +1052,16 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			continue;
 		}
 
+		if (rd.bulkLoadState.present() && inFlightActors.liveActorIn(rd.bulkLoadState.get().range)) {
+			ASSERT(rd.bulkLoadState.get().range == rd.keys);
+			ASSERT(!rd.isRestore());
+			TraceEvent("BulkLoadTaskDelayedForInflightDataMove")
+			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+			continue;
+			// Guarantee that BulkLoad does not impact on any alive data move
+			// e.g. MoveIn shard for BulkLoad at SS does not conflict to any alive data move
+		}
+
 		// Because the busyness of a server is decreased when a superseding relocation is issued, we
 		//  need to consider what the busyness of a server WOULD be if
 		auto containedRanges = inFlight.containedRanges(rd.keys);
@@ -1511,10 +1521,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 						TeamSelect destTeamSelect;
-						/*if (wantBulkLoadServers) {
-						    destTeamSelect = TeamSelect::WANT_STRICT_NEW_DESTS;
-						} else */
-						if (!rd.wantsNewServers) {
+						if (wantBulkLoadServers) {
+							destTeamSelect = TeamSelect::WANT_STRICT_NEW_DESTS;
+						} else if (!rd.wantsNewServers) {
 							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
 						} else if (wantTrueBest) {
 							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
