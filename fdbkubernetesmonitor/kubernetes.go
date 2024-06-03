@@ -254,7 +254,7 @@ func (podClient *PodClient) updateFdbClusterTimestampAnnotation() error {
 // will be updated if the annotation is absent it will be added.
 func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
 	annotations := podClient.podMetadata.Annotations
-	if len(annotations) > 0 {
+	if len(annotations) == 0 {
 		annotations = map[string]string{}
 	}
 
