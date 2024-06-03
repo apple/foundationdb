@@ -75,7 +75,12 @@ struct BulkLoadState {
 	void setTaskId(UID id) { taskId = id; }
 
 	void setDataMoveId(UID id) {
-		ASSERT(!dataMoveId.present() || dataMoveId.get() == id);
+		if (dataMoveId.present() && dataMoveId.get() != id) {
+			TraceEvent(SevError, "DDBulkLoadTaskSetDataMoveError")
+			    .detail("NewId", id)
+			    .detail("BulkLoadTask", this->toString());
+			ASSERT(false);
+		}
 		dataMoveId = id;
 	}
 

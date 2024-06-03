@@ -1061,6 +1061,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 			state BulkLoadPhase oldTaskPhase = bulkLoadState.phase;
 			bulkLoadState.taskId = deterministicRandom()->randomUniqueID(); // TODO(Zhe): merge UID created by users
 			bulkLoadState.phase = BulkLoadPhase::Triggered; // Only place to set it triggered to metadata
+			bulkLoadState.dataMoveId.reset();
 			wait(krmSetRange(&tr, bulkLoadPrefix, range, bulkLoadStateValue(bulkLoadState)));
 			wait(tr.commit()); // TODO(Zhe): When commit proxy sees this transaction, it stops the user traffic within
 			                   // this range. CommitProxy should re-allow user traffic when it sees the bulk load on a

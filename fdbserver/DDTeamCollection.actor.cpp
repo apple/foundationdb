@@ -196,7 +196,8 @@ public:
 	}
 
 	// Power of D choices to balance bulk load tasks
-	static void getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
+	ACTOR static Future<Void> getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
+		wait(self->checkBuildTeams());
 		std::vector<Reference<TCTeamInfo>> randomTeams;
 		int nTries = 0;
 		while (randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT &&
@@ -228,7 +229,7 @@ public:
 			}
 		}
 		Optional<Reference<IDataDistributionTeam>> res;
-		if (randomTeams.size() > 0) {
+		if (randomTeams.size() > 1) {
 			res = deterministicRandom()->randomChoice(randomTeams);
 		}
 		// TODO(Zhe): select the best one
@@ -239,6 +240,7 @@ public:
 			e.detail("DestTeam", res.get()->getTeamID());
 		}
 		req.reply.send(std::make_pair(res, false));
+		return Void();
 	}
 
 	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
@@ -3069,7 +3071,7 @@ public:
 			if (req.findTeamByServers) {
 				getTeamByServers(self, req);
 			} else if (req.findTeamForBulkLoad) {
-				getTeamForBulkLoad(self, req);
+				self->addActor.send(getTeamForBulkLoad(self, req));
 			} else {
 				self->addActor.send(self->getTeam(req));
 			}
