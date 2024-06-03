@@ -5,8 +5,8 @@ set(SRCS
   TraceLogUtil.cs
   XmlParser.cs)
 
-set(TRACE_LOG_HELPER_REFERENCES
-  "-r:System,System.Core,System.Runtime.Serialization,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml")
+#set(TRACE_LOG_HELPER_REFERENCES
+#  "-r:System,System.Core,System.Runtime.Serialization,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml")
 
 
 set(out_file ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll)
