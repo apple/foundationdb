@@ -57,7 +57,7 @@ type Argument struct {
 	Values []Argument `json:"values,omitempty"`
 
 	// Source provides the name of the environment variable to use for an
-	// Environment type argument. This setting is also used for NodeLabelArgumentType.
+	// Environment type argument.
 	Source string `json:"source,omitempty"`
 
 	// Multiplier provides a multiplier for the process number for ProcessNumber
