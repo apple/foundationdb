@@ -108,7 +108,7 @@ type Monitor struct {
 
 // StartMonitor starts the monitor loop.
 func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
-	podClient, err := CreatePodClient(ctx, logger, enableNodeWatcher)
+	podClient, err := CreatePodClient(ctx, logger, enableNodeWatcher, setupCache)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
 		os.Exit(1)
