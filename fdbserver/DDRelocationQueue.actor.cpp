@@ -803,7 +803,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		//  make sure that we keep the relocation intent for the job that we queue up
 		// If the new/old relocation is a bulk loading relocation, we do not inherit settings from the queued job
 		if ((foundActiveFetching || foundActiveRelocation) &&
-		    (!rrs.bulkLoadState.present() || !rd.bulkLoadState.present())) {
+		    (!rrs.bulkLoadState.present() && !rd.bulkLoadState.present())) {
 			rd.wantsNewServers |= rrs.wantsNewServers;
 			rd.startTime = std::min(rd.startTime, rrs.startTime);
 			if (!hasHealthPriority) {
