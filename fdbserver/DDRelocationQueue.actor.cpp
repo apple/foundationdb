@@ -1764,6 +1764,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("NumOfTeamCollections", self->teamCollections.size());
 					if (rd.isRestore() && stuckCount > 50) {
 						throw data_move_dest_team_not_found();
+					} else if (rd.bulkLoadState.present() && stuckCount > 50) {
+						throw data_move_dest_team_not_found();
 					}
 					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
 				}
