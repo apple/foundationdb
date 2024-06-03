@@ -137,7 +137,6 @@ struct RelocateShard {
 	UID traceId; // track the lifetime of this relocate shard
 
 	Optional<BulkLoadState> bulkLoadState;
-	Promise<BulkLoadAckType> launchAck;
 
 	// Initialization when define is a better practice. We should avoid assignment of member after definition.
 	// static RelocateShard emptyRelocateShard() { return {}; }
@@ -150,10 +149,9 @@ struct RelocateShard {
 	              DataMovementReason moveReason,
 	              RelocateReason reason,
 	              UID traceId,
-	              BulkLoadState bulkLoadState,
-	              Promise<BulkLoadAckType> launchAck)
+	              BulkLoadState bulkLoadState)
 	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
-	    reason(reason), moveReason(moveReason), traceId(traceId), bulkLoadState(bulkLoadState), launchAck(launchAck) {}
+	    reason(reason), moveReason(moveReason), traceId(traceId), bulkLoadState(bulkLoadState) {}
 
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),

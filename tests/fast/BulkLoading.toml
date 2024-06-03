@@ -3,13 +3,14 @@ config = 'triple'
 storageEngineType = 5
 processesPerMachine = 3
 coordinators = 3
-machineCount = 18
+machineCount = 36
 tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. Therefore, disable tenant
 
 [[knobs]]
 shard_encode_location_metadata = true
 dd_physical_shard_move_probability = 1.0
 enable_physical_shard_move_experiment = true
+desired_teams_per_server = 10
 
 [[test]]
 testTitle = 'BulkLoadingWorkload'

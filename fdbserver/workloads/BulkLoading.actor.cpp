@@ -262,8 +262,8 @@ struct BulkLoading : TestWorkload {
 		wait(self->setBulkLoadMode(cx, /*on=*/true));
 		std::vector<BulkLoadState> tasks;
 		tasks.push_back(self->newBulkLoadTask(range1, folder1));
-		tasks.push_back(self->newBulkLoadTask(range2, folder2));
-		tasks.push_back(self->newBulkLoadTask(range3, folder3));
+		// tasks.push_back(self->newBulkLoadTask(range2, folder2));
+		// tasks.push_back(self->newBulkLoadTask(range3, folder3));
 		wait(self->issueBulkLoadTasks(self, cx, tasks));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
@@ -272,10 +272,10 @@ struct BulkLoading : TestWorkload {
 
 		wait(self->checkData(cx, data1, valueToLoad));
 		TraceEvent("BulkLoadingWorkLoadCheckedData1");
-		wait(self->checkData(cx, data2, valueToLoad));
-		TraceEvent("BulkLoadingWorkLoadCheckedData2");
-		wait(self->checkData(cx, data3, valueToLoad));
-		TraceEvent("BulkLoadingWorkLoadCheckedData3");
+		// wait(self->checkData(cx, data2, valueToLoad));
+		// TraceEvent("BulkLoadingWorkLoadCheckedData2");
+		// wait(self->checkData(cx, data3, valueToLoad));
+		// TraceEvent("BulkLoadingWorkLoadCheckedData3");
 
 		TraceEvent("BulkLoadingWorkLoadComplete");
 

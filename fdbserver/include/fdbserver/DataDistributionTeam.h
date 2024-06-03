@@ -104,7 +104,7 @@ FDB_BOOLEAN_PARAM(ForReadBalance);
 FDB_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_BOOLEAN_PARAM(FindTeamByServers);
 FDB_BOOLEAN_PARAM(PreferWithinShardLimit);
-FDB_BOOLEAN_PARAM(WantBulkLoadServers);
+FDB_BOOLEAN_PARAM(FindTeamForBulkLoad);
 
 class TeamSelect {
 public:
@@ -112,7 +112,6 @@ public:
 		ANY = 0, // Any other situations except for the next two
 		WANT_COMPLETE_SRCS, // Try best to select a healthy team consists of servers in completeSources
 		WANT_TRUE_BEST, // Ask for the most or least utilized team in the cluster
-		WANT_STRICT_NEW_DESTS, // Must guarantee that any selected dest is not in src. This is used by bulk loading
 	};
 	TeamSelect() : value(ANY) {}
 	TeamSelect(Value v) : value(v) {}
@@ -122,8 +121,6 @@ public:
 			return "Want_Complete_Srcs";
 		case WANT_TRUE_BEST:
 			return "Want_True_Best";
-		case WANT_STRICT_NEW_DESTS:
-			return "Want_Strict_New_Dests";
 		case ANY:
 			return "Any";
 		default:
@@ -147,6 +144,7 @@ struct GetTeamRequest {
 	bool preferWithinShardLimit;
 	double inflightPenalty;
 	bool findTeamByServers;
+	bool findTeamForBulkLoad;
 	Optional<KeyRange> keys;
 	bool storageQueueAware;
 
@@ -174,13 +172,15 @@ struct GetTeamRequest {
 	  : teamSelect(teamSelectRequest), storageQueueAware(false), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
 	    preferLowerReadUtil(preferLowerReadUtil), preferWithinShardLimit(preferWithinShardLimit),
-	    inflightPenalty(inflightPenalty), findTeamByServers(FindTeamByServers::False), keys(keys) {}
+	    inflightPenalty(inflightPenalty), findTeamByServers(FindTeamByServers::False),
+	    findTeamForBulkLoad(FindTeamForBulkLoad::False), keys(keys) {}
 	GetTeamRequest(std::vector<UID> servers)
 	  : teamSelect(TeamSelect::WANT_COMPLETE_SRCS), storageQueueAware(false),
 	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
 	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False),
 	    preferWithinShardLimit(PreferWithinShardLimit::False), inflightPenalty(1.0),
-	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
+	    findTeamByServers(FindTeamByServers::True), findTeamForBulkLoad(FindTeamForBulkLoad::False),
+	    src(std::move(servers)) {}
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {

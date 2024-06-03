@@ -195,6 +195,52 @@ public:
 		req.reply.send(std::make_pair(res, false));
 	}
 
+	// Power of D choices to balance bulk load tasks
+	static void getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
+		std::vector<Reference<TCTeamInfo>> randomTeams;
+		int nTries = 0;
+		while (randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT &&
+		       nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES) {
+			Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
+			bool ok = dest->isHealthy();
+			for (int i = 0; ok && i < randomTeams.size(); i++) {
+				if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
+					ok = false; // Do not select duplicated teams
+					break;
+				}
+			}
+			for (const auto& srcId : req.src) {
+				std::vector<UID> serverIds = dest->getServerIDs();
+				for (const auto& serverId : serverIds) {
+					if (serverId == srcId) {
+						ok = false; // Do not select a team that has a server owning the bulk loading range
+						break;
+					}
+				}
+				if (!ok) {
+					break;
+				}
+			}
+			if (ok) {
+				randomTeams.push_back(dest);
+			} else {
+				nTries++;
+			}
+		}
+		Optional<Reference<IDataDistributionTeam>> res;
+		if (randomTeams.size() > 0) {
+			res = deterministicRandom()->randomChoice(randomTeams);
+		}
+		// TODO(Zhe): select the best one
+		TraceEvent e(SevInfo, "DDBulkLoadTaskGetTeamRes", self->distributorId);
+		e.detail("SrcIds", describe(req.src));
+		if (res.present()) {
+			e.detail("DestIds", describe(res.get()->getServerIDs()));
+			e.detail("DestTeam", res.get()->getTeamID());
+		}
+		req.reply.send(std::make_pair(res, false));
+	}
+
 	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
 	// portion of teams that have longer storage queues
 	// A team storage queue size is defined as the longest storage queue size among all SSes of the team
@@ -478,22 +524,6 @@ public:
 						}
 					}
 
-					if (req.teamSelect == TeamSelect::WANT_STRICT_NEW_DESTS) {
-						for (const auto& srcId : req.src) {
-							std::vector<UID> serverIds = dest->getServerIDs();
-							for (const auto& serverId : serverIds) {
-								if (serverId == srcId) {
-									// Found a server in src team. Skip `dest`.
-									ok = false;
-									break;
-								}
-							}
-							if (!ok) {
-								break;
-							}
-						}
-					}
-
 					ok = ok && (!req.teamMustHaveShards ||
 					            self->shardsAffectedByTeamFailure->hasShards(
 					                ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));
@@ -554,13 +584,6 @@ public:
 				// Attempt to find the unhealthy source server team and return it
 				auto healthyTeam = self->findTeamFromServers(req.completeSources, /* wantHealthy=*/false);
 				if (healthyTeam.present()) {
-					if (req.teamSelect == TeamSelect::WANT_STRICT_NEW_DESTS) {
-						// Dedicated to bulk loading datamove
-						TraceEvent(SevInfo, "GetStrictNewServersFailedDueToDCFail", self->distributorId)
-						    .detail("SrcIds", describe(req.src))
-						    .detail("BestOption", healthyTeam.get()->getServerIDs())
-						    .detail("TeamId", healthyTeam.get()->getTeamID());
-					}
 					req.reply.send(std::make_pair(healthyTeam, foundSrc));
 					return Void();
 				}
@@ -583,12 +606,6 @@ public:
 				    .detail("Reason", "bestOption not present");
 				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
 			} else {
-				if (req.teamSelect == TeamSelect::WANT_STRICT_NEW_DESTS) {
-					// Dedicated to bulk loading datamove
-					TraceEvent(SevInfo, "GetStrictNewServers", self->distributorId)
-					    .detail("SrcIds", describe(req.src))
-					    .detail("BestOption", bestOption.present() ? describe(bestOption.get()->getServerIDs()) : "");
-				}
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
 
@@ -3051,6 +3068,8 @@ public:
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
 			if (req.findTeamByServers) {
 				getTeamByServers(self, req);
+			} else if (req.findTeamForBulkLoad) {
+				getTeamForBulkLoad(self, req);
 			} else {
 				self->addActor.send(self->getTeam(req));
 			}

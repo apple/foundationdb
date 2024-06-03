@@ -65,11 +65,19 @@ struct BulkLoadState {
 		if (bytesSampleFile.present()) {
 			res = res + ", [ByteSampleFile]: " + bytesSampleFile.get();
 		}
+		if (dataMoveId.present()) {
+			res = res + ", [DataMoveId]: " + dataMoveId.get().toString();
+		}
 		res = res + ", [TaskId]: " + taskId.toString();
 		return res;
 	}
 
 	void setTaskId(UID id) { taskId = id; }
+
+	void setDataMoveId(UID id) {
+		ASSERT(!dataMoveId.present() || dataMoveId.get() == id);
+		dataMoveId = id;
+	}
 
 	bool addDataFile(std::string filePath) {
 		if (filePath.substr(0, folder.size()) != folder) {
@@ -89,7 +97,7 @@ struct BulkLoadState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, phase, folder, filePaths, bytesSampleFile, taskId);
+		serializer(ar, range, loadType, phase, folder, filePaths, bytesSampleFile, dataMoveId, taskId);
 	}
 
 	KeyRange range;
@@ -98,7 +106,9 @@ struct BulkLoadState {
 	std::string folder;
 	std::unordered_set<std::string> filePaths;
 	Optional<std::string> bytesSampleFile;
+	Optional<UID> dataMoveId;
 	UID taskId;
+	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
 };
 
 #endif

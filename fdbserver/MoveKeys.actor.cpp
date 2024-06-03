@@ -1755,12 +1755,12 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), owners.begin());
 							for (const auto& ssid : servers) {
 								if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
-									TraceEvent(SevWarn, "BulkLoadStartMoveShardsMoveInConflict")
+									TraceEvent(SevWarn, "DDBulkLoadTaskStartMoveShardsMoveInConflict")
 									    .detail("BulkLoadTask", bulkLoadState.get().toString())
+									    .detail("DestServerId", ssid)
 									    .detail("OwnerIds", describe(owners))
 									    .detail("DataMove", dataMove.toString());
-									cancelDataMove = true;
-									throw retry();
+									throw data_move_dest_team_not_found();
 								}
 							}
 						}
@@ -1874,9 +1874,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						}
 						// Only place to set it running to metadata
 						bulkLoadState.get().phase = BulkLoadPhase::Running;
+						bulkLoadState.get().setDataMoveId(dataMoveId);
 						wait(krmSetRange(
 						    &tr, bulkLoadPrefix, bulkLoadState.get().range, bulkLoadStateValue(bulkLoadState.get())));
-						TraceEvent("BulkLoadTaskRunningPersist").detail("BulkLoadTask", bulkLoadState.get().toString());
+						TraceEvent("DDBulkLoadTaskRunningPersist")
+						    .detail("BulkLoadTask", bulkLoadState.get().toString());
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
 					complete = true;
@@ -1925,6 +1927,12 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (e.code() == error_code_location_metadata_corruption) {
 					throw location_metadata_corruption();
 				} else if (e.code() == error_code_retry) {
+					if (cancelDataMove && bulkLoadState.present() && bulkLoadState.get().launchAck.canBeSet()) {
+						TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
+						    .detail("Reason", "Cancel data move when start move shard")
+						    .detail("BulkLoadTask", bulkLoadState.get().toString());
+						bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+					}
 					runPreCheck = false;
 					wait(delay(1));
 				} else {
@@ -1942,6 +1950,14 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		TraceEvent(SevWarn, "StartMoveShardsError", relocationIntervalId)
 		    .errorUnsuppressed(e)
 		    .detail("DataMoveID", dataMoveId);
+		if (e.code() != error_code_actor_cancelled && bulkLoadState.present() &&
+		    bulkLoadState.get().launchAck.canBeSet()) {
+			TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
+			    .errorUnsuppressed(e)
+			    .detail("Reason", "Cancel data move when start move shard")
+			    .detail("BulkLoadTask", bulkLoadState.get().toString());
+			bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+		}
 		throw;
 	}
 
@@ -2321,6 +2337,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 								    .detail("CurrentBulkLoad", bulkLoadState.get().toString())
 								    .detail("DataMove", dataMove.toString());
 								// Let data move solve the conflict
+							} else {
+								ASSERT(existBulkLoad.dataMoveId.present() &&
+								       existBulkLoad.dataMoveId.get() == dataMoveId);
 							}
 							// Only place to set it complete to metadata
 							bulkLoadState.get().phase = BulkLoadPhase::Complete;
@@ -2369,6 +2388,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				if (error.code() == error_code_location_metadata_corruption) {
 					throw location_metadata_corruption();
 				} else if (error.code() == error_code_retry) {
+					if (cancelDataMove && bulkLoadState.present() && bulkLoadState.get().launchAck.canBeSet()) {
+						TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
+						    .detail("Reason", "Cancel data move when finish move shard")
+						    .detail("BulkLoadTask", bulkLoadState.get().toString());
+						bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+					}
 					runPreCheck = false;
 					++retries;
 					wait(delay(1));
@@ -2391,6 +2416,14 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FinishMoveShardsError", relocationIntervalId).errorUnsuppressed(e);
+		if (e.code() != error_code_actor_cancelled && bulkLoadState.present() &&
+		    bulkLoadState.get().launchAck.canBeSet()) {
+			TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
+			    .errorUnsuppressed(e)
+			    .detail("Reason", "Cancel data move when finish move shard")
+			    .detail("BulkLoadTask", bulkLoadState.get().toString());
+			bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+		}
 		throw;
 	}
 

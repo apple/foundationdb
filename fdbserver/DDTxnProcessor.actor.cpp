@@ -490,7 +490,7 @@ class DDTxnProcessorImpl {
 					// Initialize bulkLoadingMap which will be used by DD Tracker to decide
 					// whether a range has existing bulk loading
 					ASSERT(meta.bulkLoadState.get().phase == BulkLoadPhase::Running);
-					TraceEvent(SevInfo, "UpdateBulkLoadMap")
+					TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap")
 					    .detail("Context", "Resume")
 					    .detail("BulkLoadTask", meta.bulkLoadState.get().toString());
 					result->bulkLoadingMap.insert(meta.bulkLoadState.get().range,

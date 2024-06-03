@@ -981,14 +981,14 @@ void createShardToBulkLoad(DataDistributionTracker* self,
                            Promise<BulkLoadAckType> launchAck) {
 	// Cancel the input task if there exists a newer bulk loading task on the input range
 	if (!canTriggerBulkLoad(self->bulkLoadingMap, bulkLoadState.range, commitVersion)) {
-		TraceEvent(SevInfo, "CreateShardToBulkLoadFailedToTrigger", self->distributorId)
+		TraceEvent(SevInfo, "DDBulkLoadTaskTriggerFailed", self->distributorId)
 		    .detail("BulkLoadState", bulkLoadState.toString())
 		    .detail("Reason", "CannotTriggerBulkLoad")
 		    .detail("CommitVersion", commitVersion);
 		triggerAck.sendError(bulkload_task_outdated());
 		return;
 	}
-	TraceEvent e(SevInfo, "CreateShardToBulkLoad", self->distributorId);
+	TraceEvent e(SevInfo, "DDBulkLoadTaskTriggered", self->distributorId);
 	e.detail("TaskId", bulkLoadState.taskId);
 	e.detail("BulkLoadRange", bulkLoadState.range);
 	// Create shards at boundary and do not trigger data move on those boundary shards
@@ -1020,13 +1020,14 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 		self->shardsAffectedByTeamFailure->defineShard(lastOverlapRange);
 	}
 	self->shardsAffectedByTeamFailure->defineShard(keys);
-	TraceEvent(SevInfo, "UpdateBulkLoadMap")
+	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap")
 	    .detail("Context", "Start")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(
 	    keys, std::make_pair(bulkLoadState.taskId, commitVersion)); // TODO: resume bulkLoadingMap when DD init
+	bulkLoadState.launchAck = launchAck; // Used to propagate launchAck signal in DDQueue
 	self->output.send(RelocateShard(
-	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState, launchAck));
+	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState));
 	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has triggered bulk loading
 }
 
@@ -1036,14 +1037,15 @@ void terminateShardBulkLoad(DataDistributionTracker* self,
                             Promise<BulkLoadAckType> terminateAck) {
 	for (auto it : self->bulkLoadingMap.intersectingRanges(bulkLoadState.range)) {
 		if (it->value().first != bulkLoadState.taskId) {
-			TraceEvent(SevWarn, "TerminateShardBulkLoadTaskOutdated")
+			TraceEvent(SevWarn, "DDBulkLoadTaskOutdated")
+			    .detail("Context", "Terminate")
 			    .detail("BulkLoadState", bulkLoadState.toString())
 			    .detail("ExistingBulkLoadTaskID", it->value().first);
 			terminateAck.sendError(bulkload_task_outdated());
 			return;
 		}
 	}
-	TraceEvent(SevInfo, "UpdateBulkLoadMap")
+	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap")
 	    .detail("Context", "Terminate")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(bulkLoadState.range, std::make_pair(UID(), invalidVersion));

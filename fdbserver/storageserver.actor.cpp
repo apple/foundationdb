@@ -9107,7 +9107,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	if (!g_network->isSimulated()) {
 		throw not_implemented();
 	}
-	TraceEvent(SevInfo, "InjectExternalSSTBegin", data->thisServerID)
+	TraceEvent(SevInfo, "SSBulkLoadTaskInjectExternalSSTBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("BulkLoadState", bulkLoadState.toString())
 	    .detail("DestShardId", moveInShard->destShardIdString())
@@ -9138,7 +9138,8 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 		cpFile.path = filePath;
 		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
 		if (coalesceRanges.size() != 1) {
-			TraceEvent(SevError, "InjectExternalSSTMoveInShardRangeSizeUnexpected", data->thisServerID)
+			TraceEvent(SevError, "SSBulkLoadTaskInjectExternalSSTError", data->thisServerID)
+			    .detail("Reason", "MoveInShard ranges unexpected")
 			    .detail("BulkLoadState", bulkLoadState.toString())
 			    .detail("MoveInShard", moveInShard->toString());
 		}
@@ -9150,7 +9151,8 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	if (bulkLoadState.bytesSampleFile.present() && fileExists(bulkLoadState.bytesSampleFile.get())) {
 		localRecord.bytesSampleFile = bulkLoadState.bytesSampleFile.get();
 	} else {
-		TraceEvent(SevWarnAlways, "InjectExternalSSTProvidedSampleBytesFileNotFound", data->thisServerID)
+		TraceEvent(SevWarnAlways, "SSBulkLoadTaskInjectExternalSSTError", data->thisServerID)
+		    .detail("Reason", "Provided sampleBytesFile not found")
 		    .detail("BulkLoadState", bulkLoadState.toString());
 		// TODO(Zhe): Handle this case later
 	}
@@ -9165,8 +9167,9 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 		    data->storage.restore(moveInShard->destShardIdString(), moveInShard->ranges(), moveInShard->checkpoints()));
 	} catch (Error& e) {
 		state Error err = e;
-		TraceEvent(SevWarn, "InjectExternalSSTRestoreError", data->thisServerID)
+		TraceEvent(SevWarn, "SSBulkLoadTaskInjectExternalSSTError", data->thisServerID)
 		    .errorUnsuppressed(e)
+		    .detail("Reason", "Failed to restore SST file")
 		    .detail("BulkLoadState", bulkLoadState.toString())
 		    .detail("DestShardId", moveInShard->destShardIdString())
 		    .detail("MoveInShard", moveInShard->toString())
@@ -9178,7 +9181,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 		}
 		throw err;
 	}
-	TraceEvent(SevInfo, "InjectExternalSSTRestoreComplete", data->thisServerID)
+	TraceEvent(SevInfo, "SSBulkLoadTaskInjectExternalSSTRestored", data->thisServerID)
 	    .detail("BulkLoadState", bulkLoadState.toString())
 	    .detail("DestShardId", moveInShard->destShardIdString())
 	    .detail("MoveInShard", moveInShard->toString())
@@ -9195,7 +9198,8 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
 			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
 			if (!localRecord.containsKey(key)) {
-				TraceEvent(SevWarnAlways, "InjectExternalSSTKeySampleNotInRange", data->thisServerID)
+				TraceEvent(SevWarnAlways, "SSBulkLoadTaskInjectExternalBytesSampleError", data->thisServerID)
+				    .detail("Reason", "Sampled key is not in the injected range")
 				    .detail("BulkLoadState", bulkLoadState.toString())
 				    .detail("DestShardId", moveInShard->destShardIdString())
 				    .detail("LocalRecord", localRecord.toString())
@@ -9203,7 +9207,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 				    .detail("Size", size);
 				continue;
 			}
-			TraceEvent(SevInfo, "InjectExternalSSTRestoreKeySample", data->thisServerID)
+			TraceEvent(SevInfo, "SSBulkLoadTaskInjectExternalBytesSampleRestored", data->thisServerID)
 			    .detail("BulkLoadState", bulkLoadState.toString())
 			    .detail("DestShardId", moveInShard->destShardIdString())
 			    .detail("LocalRecord", localRecord.toString())
@@ -9221,7 +9225,7 @@ ACTOR Future<Void> injectExternalSst(StorageServer* data,
 	updateMoveInShardMetaData(data, moveInShard);
 	moveInShard->fetchComplete.send(Void());
 
-	TraceEvent(SevInfo, "InjectExternalSSTComplete", data->thisServerID)
+	TraceEvent(SevInfo, "SSBulkLoadTaskInjectExternalSSTComplete", data->thisServerID)
 	    .detail("AtVersion", data->version.get())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("BulkLoadState", bulkLoadState.toString())
@@ -9618,7 +9622,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
 				if (bulkLoadState.present()) {
-					TraceEvent(SevInfo, "SSFetchShardBulkLoading", data->thisServerID)
+					TraceEvent(SevInfo, "SSBulkLoadTaskFetchFile", data->thisServerID)
 					    .detail("BulkLoadTask", bulkLoadState.get().toString())
 					    .detail("MoveInShard", moveInShard->toString());
 					// This is a bulk loading data move, need not fetch data in simulation
