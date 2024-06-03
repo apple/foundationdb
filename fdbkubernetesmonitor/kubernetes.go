@@ -80,17 +80,16 @@ type PodClient struct {
 	client.Client
 }
 
-// CreatePodClient creates a new client for working with the pod object.
-func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher bool) (*PodClient, error) {
+func setupCache(namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	scheme := runtime.NewScheme()
 	err = clientgoscheme.AddToScheme(scheme)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Create the new client for writes. This client will also be used to setup the cache.
@@ -98,12 +97,8 @@ func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		Scheme: scheme,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	namespace := os.Getenv("FDB_POD_NAMESPACE")
-	podName := os.Getenv("FDB_POD_NAME")
-	nodeName := os.Getenv("FDB_NODE_NAME")
 
 	internalCache, err := cache.New(config, cache.Options{
 		Scheme:    scheme,
@@ -119,15 +114,19 @@ func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Fetch the informer for the FoundationDBCluster resource
-	informer, err := internalCache.GetInformer(ctx, &corev1.Pod{})
-	if err != nil {
-		return nil, err
-	}
+	return internalClient, internalCache, nil
+}
 
+// CreatePodClient creates a new client for working with the pod object.
+func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher bool, setupCache func(string, string, string) (client.WithWatch, cache.Cache, error)) (*PodClient, error) {
+	namespace := os.Getenv("FDB_POD_NAMESPACE")
+	podName := os.Getenv("FDB_POD_NAME")
+	nodeName := os.Getenv("FDB_NODE_NAME")
+
+	internalClient, internalCache, err := setupCache(namespace, podName, nodeName)
 	podClient := &PodClient{
 		podMetadata:   nil,
 		nodeMetadata:  nil,
@@ -135,8 +134,26 @@ func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		Logger:        logger,
 	}
 
-	// Setup an event handler to make sue we get events for new clusters and directly reload.
-	_, err = informer.AddEventHandler(podClient)
+	// Fetch the informer for the Pod resource.
+	podInformer, err := internalCache.GetInformer(ctx, &corev1.Pod{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Setup an event handler to make sure we get events for the Pod and directly reload the information.
+	_, err = podInformer.AddEventHandler(podClient)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch the informer for the Pod resource.
+	nodeInformer, err := internalCache.GetInformer(ctx, &corev1.Node{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Setup an event handler to make sure we get events for the node and directly reload the information.
+	_, err = nodeInformer.AddEventHandler(podClient)
 	if err != nil {
 		return nil, err
 	}
@@ -265,8 +282,8 @@ func (podClient *PodClient) OnAdd(obj interface{}) {
 			ObjectMeta: castedObj.ObjectMeta,
 		}
 	case *corev1.Node:
-		podClient.Logger.Info("Got event for OnAdd Node resource", "name", castedObj.Name)
-		podClient.podMetadata = &metav1.PartialObjectMetadata{
+		podClient.Logger.Info("Got event for OnAdd for Node resource", "name", castedObj.Name)
+		podClient.nodeMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
@@ -302,8 +319,8 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 
 		podClient.TimestampFeed <- timestamp
 	case *corev1.Node:
-		podClient.Logger.Info("Got event for OnUpdate Node resource", "name", castedObj.Name)
-		podClient.podMetadata = &metav1.PartialObjectMetadata{
+		podClient.Logger.Info("Got event for OnUpdate for Node resource", "name", castedObj.Name)
+		podClient.nodeMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
@@ -320,7 +337,7 @@ func (podClient *PodClient) OnDelete(obj interface{}) {
 		podClient.Logger.Info("Got event for OnDelete for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
 		podClient.podMetadata = nil
 	case *corev1.Node:
-		podClient.Logger.Info("Got event for OnDelete Node resource", "name", castedObj.Name)
-		podClient.podMetadata = nil
+		podClient.Logger.Info("Got event for OnDelete for Node resource", "name", castedObj.Name)
+		podClient.nodeMetadata = nil
 	}
 }
