@@ -146,16 +146,19 @@ func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		return nil, err
 	}
 
-	// Fetch the informer for the Pod resource.
-	nodeInformer, err := internalCache.GetInformer(ctx, &corev1.Node{})
-	if err != nil {
-		return nil, err
-	}
+	if enableNodeWatcher {
+		var nodeInformer cache.Informer
+		// Fetch the informer for the node resource.
+		nodeInformer, err = internalCache.GetInformer(ctx, &corev1.Node{})
+		if err != nil {
+			return nil, err
+		}
 
-	// Setup an event handler to make sure we get events for the node and directly reload the information.
-	_, err = nodeInformer.AddEventHandler(podClient)
-	if err != nil {
-		return nil, err
+		// Setup an event handler to make sure we get events for the node and directly reload the information.
+		_, err = nodeInformer.AddEventHandler(podClient)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Make sure the internal cache is started.

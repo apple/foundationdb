@@ -84,6 +84,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				It("should have the metadata for the pod but not the node", func() {
 					Expect(podClient.podMetadata).NotTo(BeNil())
 					Expect(podClient.nodeMetadata).To(BeNil())
+					Expect(internalCache.InformersByGVK).To(HaveLen(1))
 				})
 			})
 
@@ -95,6 +96,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				It("should have the metadata for the pod and node", func() {
 					Expect(podClient.podMetadata).NotTo(BeNil())
 					Expect(podClient.nodeMetadata).NotTo(BeNil())
+					Expect(internalCache.InformersByGVK).To(HaveLen(2))
 				})
 			})
 		})
