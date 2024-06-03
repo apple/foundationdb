@@ -27,7 +27,7 @@ project(foundationdb
   VERSION 7.4.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Swift)
+  LANGUAGES C CXX ASM)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -131,8 +131,6 @@ set(FDB_PREV3_RELEASE_VERSION "7.0.0")
 
 include(utils)
 
-# Flow and other tools are written in C# - so we need that dependency
-include(EnableCsharp)
 
 # First thing we need is the actor compiler - and to compile and run the
 # actor compiler, we need mono
