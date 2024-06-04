@@ -32,7 +32,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -271,6 +270,7 @@ func MustOpenDefault() Database {
 // clusters simultaneously, with each invocation requiring its own cluster file.
 // To connect to multiple clusters running at different, incompatible versions,
 // the multi-version client API must be used.
+// Caller must call Close() to release resources.
 func OpenDatabase(clusterFile string) (Database, error) {
 	if err := ensureNetworkIsStarted(); err != nil {
 		return Database{}, err
@@ -329,6 +329,8 @@ func MustOpen(clusterFile string, dbName []byte) Database {
 	return db
 }
 
+// createDatabase is the internal function used to create a database.
+// Caller must call Close() to release resources.
 func createDatabase(clusterFile string) (Database, error) {
 	var cf *C.char
 
@@ -343,7 +345,6 @@ func createDatabase(clusterFile string) (Database, error) {
 	}
 
 	db := &database{outdb}
-	runtime.SetFinalizer(db, (*database).destroy)
 
 	return Database{clusterFile: clusterFile, isCached: true, database: db}, nil
 }
@@ -351,6 +352,7 @@ func createDatabase(clusterFile string) (Database, error) {
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
 // by the provided connection string. This method can be useful for scenarios where you want to connect
 // to the database only for a short time e.g. to test different connection strings.
+// Caller must call Close() to release resources.
 func OpenWithConnectionString(connectionString string) (Database, error) {
 	if err := ensureNetworkIsStarted(); err != nil {
 		return Database{}, err
@@ -371,7 +373,6 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 	}
 
 	db := &database{outdb}
-	runtime.SetFinalizer(db, (*database).destroy)
 
 	return Database{"", false, db}, nil
 }

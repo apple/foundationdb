@@ -61,29 +61,27 @@ type DatabaseOptions struct {
 }
 
 // Close will close the Database and clean up all resources.
-// You have to ensure that you're not reusing this database.
+// It must be called exactly once for each created database.
+// You have to ensure that you're not reusing this database
+// after it has been closed.
 func (d Database) Close() {
 	// Remove database object from the cached databases
 	if d.isCached {
 		openDatabases.Delete(d.clusterFile)
 	}
 
+	if d.ptr == nil {
+		return
+	}
+
 	// Destroy the database
-	d.destroy()
+	C.fdb_database_destroy(d.ptr)
 }
 
 func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 	return setOpt(func(p *C.uint8_t, pl C.int) C.fdb_error_t {
 		return C.fdb_database_set_option(opt.d.ptr, C.FDBDatabaseOption(code), p, pl)
 	}, param)
-}
-
-func (d *database) destroy() {
-	if d.ptr == nil {
-		return
-	}
-
-	C.fdb_database_destroy(d.ptr)
 }
 
 // CreateTransaction returns a new FoundationDB transaction. It is generally
