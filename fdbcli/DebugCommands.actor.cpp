@@ -326,22 +326,23 @@ bool checkResults(Version version,
 					if (corruptedKeys.find(currentKV.key) != corruptedKeys.end()) {
 						if (currentKV.value == referenceKV.value) {
 							printf("Inconsistency: CorruptedMatch, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
-								"Version %ld, Key %s\n",
-								printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-								printStorageServerMachineInfo(servers[j]).c_str(),
-								currentI,
-								referenceI,
-								version,
-								toHex(currentKV.key).c_str());
+							       "Version %ld, Key %s\n",
+							       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
+							       printStorageServerMachineInfo(servers[j]).c_str(),
+							       currentI,
+							       referenceI,
+							       version,
+							       toHex(currentKV.key).c_str());
 						} else {
-							printf("Inconsistency: MismatchValue, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, Version "
-								"%ld, Key %s\n",
-								printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-								printStorageServerMachineInfo(servers[j]).c_str(),
-								currentI,
-								referenceI,
-								version,
-								toHex(currentKV.key).c_str());
+							printf("Inconsistency: MismatchValue, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
+							       "Version "
+							       "%ld, Key %s\n",
+							       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
+							       printStorageServerMachineInfo(servers[j]).c_str(),
+							       currentI,
+							       referenceI,
+							       version,
+							       toHex(currentKV.key).c_str());
 						}
 					}
 					currentI++;
