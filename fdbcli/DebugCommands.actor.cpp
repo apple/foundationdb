@@ -208,7 +208,7 @@ bool checkResults(Version version,
 	for (int j = 0; j < replies.size(); j++) {
 		if (firstValidServer == -1) {
 			firstValidServer = j;
-			// Please full list of servers that are involved in the check
+			// Print full list of comparing servers and the reference server
 			// Used to check server info which does not produce an inconsistency log
 			printf("CheckResult: servers: %s, reference server: %s\n",
 			       printAllStorageServerMachineInfo(servers).c_str(),
