@@ -181,7 +181,7 @@ std::string printStorageServerMachineInfo(const StorageServerInterface& server) 
 std::string printAllStorageServerMachineInfo(const std::vector<StorageServerInterface>& servers) {
 	std::string res;
 	for (const auto& server : servers) {
-		res = res + " " + printStorageServerMachineInfo(server);
+		res = res + ", " + printStorageServerMachineInfo(server);
 	}
 	return res;
 }
@@ -198,14 +198,16 @@ bool checkResults(Version version,
                   Key claimEndKey,
                   const std::vector<StorageServerInterface>& servers,
                   const std::vector<GetKeyValuesReply>& replies) {
+	// Please full list of servers that are involved in the check
+	// Used to check server info which does not produce an inconsistency log
 	printf("CheckResult on servers:%s\n", printAllStorageServerMachineInfo(servers).c_str());
 	// Compare servers and collect corrupted keys
 	bool allSame = true;
 	int firstValidServer = -1;
-	std::unordered_set<Key> corruptedKeys;
 	for (int j = 0; j < replies.size(); j++) {
 		if (firstValidServer == -1) {
 			firstValidServer = j;
+			printf("Reference server: %s\n", printStorageServerMachineInfo(servers[firstValidServer]).c_str());
 			continue; // always select the first server as reference
 		}
 		// compare reference and current
@@ -235,7 +237,6 @@ bool checkResults(Version version,
 				       referenceI,
 				       version,
 				       toHex(reference.data[referenceI].key).c_str());
-				corruptedKeys.insert(reference.data[referenceI].key);
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
 				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
@@ -246,7 +247,6 @@ bool checkResults(Version version,
 				       referenceI,
 				       version,
 				       toHex(current.data[currentI].key).c_str());
-				corruptedKeys.insert(current.data[currentI].key);
 				currentI++;
 			} else {
 				KeyValueRef currentKV = current.data[currentI];
@@ -262,7 +262,6 @@ bool checkResults(Version version,
 						       referenceI,
 						       version,
 						       toHex(currentKV.key).c_str());
-						corruptedKeys.insert(currentKV.key);
 					}
 					currentI++;
 					referenceI++;
@@ -275,7 +274,6 @@ bool checkResults(Version version,
 					       referenceI,
 					       version,
 					       toHex(currentKV.key).c_str());
-					corruptedKeys.insert(currentKV.key);
 					currentI++;
 				} else {
 					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
@@ -286,70 +284,6 @@ bool checkResults(Version version,
 					       referenceI,
 					       version,
 					       toHex(referenceKV.key).c_str());
-					corruptedKeys.insert(referenceKV.key);
-					referenceI++;
-				}
-			}
-		}
-	}
-
-	if (allSame) {
-		return allSame;
-	}
-
-	firstValidServer = -1;
-	for (int j = 0; j < replies.size(); j++) {
-		if (firstValidServer == -1) {
-			firstValidServer = j;
-			continue; // always select the first server as reference
-		}
-		// compare reference and current
-		GetKeyValuesReply current = replies[j];
-		GetKeyValuesReply reference = replies[firstValidServer];
-		// Detecting corrupted keys for any mismatching replies between current and reference servers
-		size_t currentI = 0, referenceI = 0;
-		while (currentI < current.data.size() || referenceI < reference.data.size()) {
-			if (hasMore && ((referenceI < reference.data.size() && reference.data[referenceI].key >= claimEndKey) ||
-			                (currentI < current.data.size() && current.data[currentI].key >= claimEndKey))) {
-				// If there will be a next round and the key is out of claimEndKey
-				// We will delay the detection to the next round
-				break;
-			}
-			if (currentI >= current.data.size()) {
-				referenceI++;
-			} else if (referenceI >= reference.data.size()) {
-				currentI++;
-			} else {
-				KeyValueRef currentKV = current.data[currentI];
-				KeyValueRef referenceKV = reference.data[referenceI];
-				if (currentKV.key == referenceKV.key) {
-					if (corruptedKeys.find(currentKV.key) != corruptedKeys.end()) {
-						if (currentKV.value == referenceKV.value) {
-							printf("Inconsistency: CorruptedMatch, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
-							       "Version %ld, Key %s\n",
-							       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-							       printStorageServerMachineInfo(servers[j]).c_str(),
-							       currentI,
-							       referenceI,
-							       version,
-							       toHex(currentKV.key).c_str());
-						} else {
-							printf("Inconsistency: MismatchValue, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
-							       "Version "
-							       "%ld, Key %s\n",
-							       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-							       printStorageServerMachineInfo(servers[j]).c_str(),
-							       currentI,
-							       referenceI,
-							       version,
-							       toHex(currentKV.key).c_str());
-						}
-					}
-					currentI++;
-					referenceI++;
-				} else if (currentKV.key < referenceKV.key) {
-					currentI++;
-				} else {
 					referenceI++;
 				}
 			}
