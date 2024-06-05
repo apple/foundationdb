@@ -201,7 +201,7 @@ bool checkResults(Version version,
 	// Please full list of servers that are involved in the check
 	// Used to check server info which does not produce an inconsistency log
 	printf("CheckResult on servers:%s\n", printAllStorageServerMachineInfo(servers).c_str());
-	// Compare servers and collect corrupted keys
+	// Compare servers
 	bool allSame = true;
 	int firstValidServer = -1;
 	for (int j = 0; j < replies.size(); j++) {
