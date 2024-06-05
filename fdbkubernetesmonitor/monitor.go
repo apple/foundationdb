@@ -106,8 +106,12 @@ type Monitor struct {
 	metrics *metrics
 }
 
+type httpConfig struct {
+	listenAddr, certFile, keyFile string
+}
+
 // StartMonitor starts the monitor loop.
-func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, promConfig httpConfig, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
 	podClient, err := CreatePodClient(ctx, logger, enableNodeWatcher, setupCache)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
@@ -152,7 +156,14 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	// Add Prometheus support
 	mux.Handle("/metrics", promHandler)
 	go func() {
-		err := http.ListenAndServe(listenAddr, mux)
+		if promConfig.keyFile != "" || promConfig.certFile != "" {
+			err := http.ListenAndServeTLS(promConfig.listenAddr, promConfig.certFile, promConfig.keyFile, mux)
+			if err != nil {
+				logger.Error(err, "could not start HTTPS server")
+				os.Exit(1)
+			}
+		}
+		err := http.ListenAndServe(promConfig.listenAddr, mux)
 		if err != nil {
 			logger.Error(err, "could not start HTTP server")
 			os.Exit(1)
