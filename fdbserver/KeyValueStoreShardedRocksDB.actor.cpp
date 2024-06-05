@@ -3592,9 +3592,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		// occurring.
 		if (g_network->isSimulated()) {
 			TraceEvent(SevDebug, "ShardedRocksDB").detail("Info", "Use Coro threads in simulation.");
-			writeThread = CoroThreadPool::createThreadPool();
-			compactionThread = CoroThreadPool::createThreadPool();
-			readThreads = CoroThreadPool::createThreadPool();
+			writeThread = CoroThreadPool::createThreadPool(true);
+			compactionThread = CoroThreadPool::createThreadPool(true);
+			readThreads = CoroThreadPool::createThreadPool(true);
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY);

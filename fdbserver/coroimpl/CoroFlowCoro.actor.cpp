@@ -126,8 +126,9 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 		bool stop;
 		ThreadReturnPromise<Void> stopped;
 		ThreadReturnPromise<Void> error;
+		bool immediate = false;
 
-		Worker(Pool* pool, IThreadPoolReceiver* userData) : pool(pool), userData(userData), stop(false) {}
+		Worker(Pool* pool, IThreadPoolReceiver* userData, bool immediate) : pool(pool), userData(userData), stop(false), immediate(immediate) {}
 
 		void run() override {
 			try {
@@ -144,6 +145,9 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 						PThreadAction a = pool->work.front();
 						pool->work.pop_front();
 						pool->queueLock.leave();
+						if (immediate) {
+							ASSERT(false);
+						}
 						(*a)(userData);
 						if (IS_CORO)
 							CoroThreadPool::waitFor(yield());
@@ -174,6 +178,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	Reference<Pool> pool;
 	Future<Void> m_stopOnError; // must be last, because its cancellation calls stop()!
 	Error error;
+	bool immediate;
 
 	ACTOR Future<Void> stopOnError(WorkPool* w) {
 		try {
@@ -193,13 +198,14 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	}
 
 public:
-	WorkPool() : pool(new Pool) { m_stopOnError = stopOnError(this); }
+	WorkPool() : pool(new Pool), immediate(false) { m_stopOnError = stopOnError(this); }
+	WorkPool(bool immediate) : pool(new Pool), immediate(immediate) { m_stopOnError = stopOnError(this); }
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
 	void addThread(IThreadPoolReceiver* userData, const char*) override {
 		checkError();
 
-		auto w = new Worker(pool.getPtr(), userData);
+		auto w = new Worker(pool.getPtr(), userData, immediate);
 		pool->queueLock.enter();
 		pool->workers.push_back(w);
 		pool->queueLock.leave();
@@ -216,15 +222,20 @@ public:
 	void post(PThreadAction action) override {
 		checkError();
 
-		pool->queueLock.enter();
-		pool->work.push_back(action);
-		if (!pool->idle.empty()) {
-			Worker* c = pool->idle.back();
-			pool->idle.pop_back();
-			pool->queueLock.leave();
-			c->unblock();
-		} else
-			pool->queueLock.leave();
+		if (!immediate) {
+			pool->queueLock.enter();
+			pool->work.push_back(action);
+			if (!pool->idle.empty()) {
+				Worker* c = pool->idle.back();
+				pool->idle.pop_back();
+				pool->queueLock.leave();
+				c->unblock();
+			} else
+				pool->queueLock.leave();
+		} else {
+			ASSERT(pool->workers.size() > 0 && !pool->workers[0]->stop);
+			(*action)(pool->workers[0]->userData);
+		}
 	}
 	Future<Void> stop(Error const& e) override {
 		if (error.code() == invalid_error_code) {
@@ -299,6 +310,6 @@ void CoroThreadPool::init() {
 	}
 }
 
-Reference<IThreadPool> CoroThreadPool::createThreadPool() {
-	return Reference<IThreadPool>(new CoroPool);
+Reference<IThreadPool> CoroThreadPool::createThreadPool(bool immediate) {
+	return Reference<IThreadPool>(new CoroPool(immediate));
 }
