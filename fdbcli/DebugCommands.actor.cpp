@@ -180,8 +180,12 @@ std::string printStorageServerMachineInfo(const StorageServerInterface& server) 
 
 std::string printAllStorageServerMachineInfo(const std::vector<StorageServerInterface>& servers) {
 	std::string res;
-	for (const auto& server : servers) {
-		res = res + ", " + printStorageServerMachineInfo(server);
+	for (int i = 0; i < servers.size(); i++) {
+		if (i == 0) {
+			res = printStorageServerMachineInfo(servers[i]);
+		} else {
+			res = res + "; " + printStorageServerMachineInfo(servers[i]);
+		}
 	}
 	return res;
 }
@@ -198,16 +202,17 @@ bool checkResults(Version version,
                   Key claimEndKey,
                   const std::vector<StorageServerInterface>& servers,
                   const std::vector<GetKeyValuesReply>& replies) {
-	// Please full list of servers that are involved in the check
-	// Used to check server info which does not produce an inconsistency log
-	printf("CheckResult on servers:%s\n", printAllStorageServerMachineInfo(servers).c_str());
 	// Compare servers
 	bool allSame = true;
 	int firstValidServer = -1;
 	for (int j = 0; j < replies.size(); j++) {
 		if (firstValidServer == -1) {
 			firstValidServer = j;
-			printf("Reference server: %s\n", printStorageServerMachineInfo(servers[firstValidServer]).c_str());
+			// Please full list of servers that are involved in the check
+			// Used to check server info which does not produce an inconsistency log
+			printf("CheckResult: servers: %s, reference server: %s\n",
+			       printAllStorageServerMachineInfo(servers).c_str(),
+			       printStorageServerMachineInfo(servers[firstValidServer]).c_str());
 			continue; // always select the first server as reference
 		}
 		// compare reference and current
