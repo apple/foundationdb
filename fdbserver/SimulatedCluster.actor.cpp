@@ -1591,7 +1591,8 @@ void SimulationConfig::set_config(std::string config) {
 	// The only mechanism we have for turning "single" into what single means
 	// is buildConfiguration()... :/
 	std::map<std::string, std::string> hack_map;
-	ASSERT(buildConfiguration(config, hack_map) != ConfigurationResult::NO_OPTIONS_PROVIDED);
+	const auto buildResult = buildConfiguration(config, hack_map);
+	ASSERT(buildResult != ConfigurationResult::NO_OPTIONS_PROVIDED);
 	for (auto kv : hack_map)
 		db.set(kv.first, kv.second);
 }
