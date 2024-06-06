@@ -1877,7 +1877,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						bulkLoadState.get().setDataMoveId(dataMoveId);
 						wait(krmSetRange(
 						    &tr, bulkLoadPrefix, bulkLoadState.get().range, bulkLoadStateValue(bulkLoadState.get())));
-						TraceEvent("DDBulkLoadTaskRunningPersist")
+						TraceEvent(SevInfo, "DDBulkLoadTaskRunningPersist", relocationIntervalId)
 						    .detail("BulkLoadTask", bulkLoadState.get().toString());
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
@@ -1927,11 +1927,14 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (e.code() == error_code_location_metadata_corruption) {
 					throw location_metadata_corruption();
 				} else if (e.code() == error_code_retry) {
-					if (cancelDataMove && bulkLoadState.present() && bulkLoadState.get().launchAck.canBeSet()) {
+					if (cancelDataMove && bulkLoadState.present()) {
 						TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
 						    .detail("Reason", "Cancel data move when start move shard")
-						    .detail("BulkLoadTask", bulkLoadState.get().toString());
-						bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						    .detail("BulkLoadTask", bulkLoadState.get().toString())
+						    .detail("CanSignalOut", bulkLoadState.get().launchAck.canBeSet());
+						if (bulkLoadState.get().launchAck.canBeSet()) {
+							bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						}
 					}
 					runPreCheck = false;
 					wait(delay(1));
@@ -1950,13 +1953,15 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		TraceEvent(SevWarn, "StartMoveShardsError", relocationIntervalId)
 		    .errorUnsuppressed(e)
 		    .detail("DataMoveID", dataMoveId);
-		if (e.code() != error_code_actor_cancelled && bulkLoadState.present() &&
-		    bulkLoadState.get().launchAck.canBeSet()) {
+		if (e.code() != error_code_actor_cancelled && bulkLoadState.present()) {
 			TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
 			    .errorUnsuppressed(e)
 			    .detail("Reason", "Cancel data move when start move shard")
-			    .detail("BulkLoadTask", bulkLoadState.get().toString());
-			bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+			    .detail("BulkLoadTask", bulkLoadState.get().toString())
+			    .detail("CanSignalOut", bulkLoadState.get().launchAck.canBeSet());
+			if (bulkLoadState.get().launchAck.canBeSet()) {
+				bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+			}
 		}
 		throw;
 	}
@@ -2293,16 +2298,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						readyServers.push_back(storageServerInterfaces[s].uniqueID);
 					} else if (bulkLoadState.present()) {
 						errorServers.insert(storageServerInterfaces[s].uniqueID);
-						TraceEvent e(SevWarn, "DDBulkLoadTaskServerFinishMoveShardsError", relocationIntervalId);
-						e.detail("DataMoveID", dataMoveId);
-						e.detail("ErrorServer", storageServerInterfaces[s].uniqueID);
-						e.detail("NewDestinations", describe(newDestinations));
-						e.detail("BulkLoadTask", bulkLoadState.get().toString());
-						e.detail("Ready", serverReady[s].isReady());
-						e.detail("IsError", serverReady[s].isError());
-						if (serverReady[s].isError()) {
-							e.errorUnsuppressed(serverReady[s].getError());
-						}
 					}
 				}
 				if (bulkLoadState.present() && errorServers.size() > 0) {
@@ -2312,13 +2307,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						bulkLoadRetryCount = 0;
 						errorBulkLoadServers = errorServers;
 					}
-					if (bulkLoadRetryCount > SERVER_KNOBS->DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX &&
-					    bulkLoadState.get().launchAck.canBeSet()) {
+					if (bulkLoadRetryCount > SERVER_KNOBS->DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX) {
 						TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed")
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Reason", "Finish move shard retry too many times")
-						    .detail("NewDataMove", bulkLoadState.get().toString());
-						bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						    .detail("NewDataMove", bulkLoadState.get().toString())
+						    .detail("CanSignalOut", bulkLoadState.get().launchAck.canBeSet());
+						if (bulkLoadState.get().launchAck.canBeSet()) {
+							bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						}
 					}
 				}
 				int tssCount = 0;
@@ -2420,11 +2417,14 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				if (error.code() == error_code_location_metadata_corruption) {
 					throw location_metadata_corruption();
 				} else if (error.code() == error_code_retry) {
-					if (cancelDataMove && bulkLoadState.present() && bulkLoadState.get().launchAck.canBeSet()) {
+					if (cancelDataMove && bulkLoadState.present()) {
 						TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
 						    .detail("Reason", "Cancel data move when finish move shard")
-						    .detail("BulkLoadTask", bulkLoadState.get().toString());
-						bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						    .detail("BulkLoadTask", bulkLoadState.get().toString())
+						    .detail("CanSignalOut", bulkLoadState.get().launchAck.canBeSet());
+						if (bulkLoadState.get().launchAck.canBeSet()) {
+							bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						}
 					}
 					runPreCheck = false;
 					++retries;
@@ -2448,13 +2448,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FinishMoveShardsError", relocationIntervalId).errorUnsuppressed(e);
-		if (e.code() != error_code_actor_cancelled && bulkLoadState.present() &&
-		    bulkLoadState.get().launchAck.canBeSet()) {
+		if (e.code() != error_code_actor_cancelled && bulkLoadState.present()) {
 			TraceEvent("DDBulkLoadTaskLaunchFailed", relocationIntervalId)
 			    .errorUnsuppressed(e)
 			    .detail("Reason", "Cancel data move when finish move shard")
-			    .detail("BulkLoadTask", bulkLoadState.get().toString());
-			bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+			    .detail("BulkLoadTask", bulkLoadState.get().toString())
+			    .detail("CanSignalOut", bulkLoadState.get().launchAck.canBeSet());
+			if (bulkLoadState.get().launchAck.canBeSet()) {
+				bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+			}
 		}
 		throw;
 	}

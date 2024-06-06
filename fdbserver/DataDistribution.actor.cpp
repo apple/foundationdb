@@ -788,21 +788,22 @@ public:
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
 				continue;
 			}
-			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			if (meta.bulkLoadState.present()) {
+				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				rs.bulkLoadState = meta.bulkLoadState;
+				rs.dataMoveId = meta.id;
+				rs.cancelled = true;
+				self->relocationProducer.send(rs);
+				// Cancel data move for old bulk loading
+				TraceEvent("DDInitScheduledCancelOldBulkLoadDataMove", self->ddId).detail("DataMove", meta.toString());
+			} else if (it.value()->isCancelled() ||
+			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
-				if (rs.bulkLoadState.present() && SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-					// The data move corresponds to the bulk loading task is cancelled
-					// so we start a new bulk load task
-					TraceEvent("BulkLoadTaskResume")
-					    .detail("Context", "DDInit but data move cancelled")
-					    .detail("BulkLoadState", rs.bulkLoadState.get().toString());
-					runBulkLoadTaskAsync(self, rs.bulkLoadState.get().range, Optional<BulkLoadState>());
-				}
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.ranges.front() == it.range());
@@ -811,15 +812,6 @@ public:
 				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
-				if (rs.bulkLoadState.present()) {
-					// Since bulk load task phase updated to RUNNING in atomic to when data move metadata is persisted.
-					// For any data move metadata has bulk load task, there is a corresponding RUNNING bulk load task.
-					// We resume those tasks.
-					TraceEvent("BulkLoadTaskResume")
-					    .detail("Context", "DDInit and data move alive")
-					    .detail("BulkLoadState", rs.bulkLoadState.get().toString());
-					runBulkLoadTaskAsync(self, rs.bulkLoadState.get().range, rs.bulkLoadState.get());
-				}
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
 				teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
 				if (!rs.dataMove->remoteDest.empty()) {
@@ -1372,8 +1364,6 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	return Void();
 }
 
-// Resume TRIGGERED bulk load tasks
-// RUNNING tasks are resumed when DD init data moves
 ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 	state Key beginKey = normalKeys.begin;
 	state Key endKey = normalKeys.end;
@@ -1398,7 +1388,12 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
 						runBulkLoadTaskAsync(self, bulkLoadState.range, Optional<BulkLoadState>());
-					} // Running tasks are handled when resumeRelocation
+					} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
+						TraceEvent(SevInfo, "DDBulkLoadRestartRunningTask", self->ddId)
+						    .detail("OldBulkLoadTask", bulkLoadState.toString())
+						    .detail("RangeInSpace", range);
+						runBulkLoadTaskAsync(self, bulkLoadState.range, Optional<BulkLoadState>());
+					}
 				}
 			}
 			beginKey = result.back().key;
@@ -1413,13 +1408,25 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 	return Void();
 }
 
-ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
+ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self) {
+	wait(self->initialized.getFuture() && waitForBulkLoadModeOn(self));
 	wait(restartTriggeredBulkLoad(self));
+	self->bulkLoadActors.add(Void());
+	TraceEvent(SevInfo, "DDBulkLoadRetriggeredDone", self->ddId);
+	wait(self->bulkLoadActors.getResult());
+	self->bulkLoadActors.clear(true);
+	TraceEvent(SevInfo, "DDBulkLoadResumeDone", self->ddId);
+	return Void();
+}
+
+ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
+	wait(resumeBulkLoading(self));
 	loop {
 		try {
 			wait(waitForBulkLoadModeOn(self));
 			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Mode On");
 			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
+			self->bulkLoadActors.add(Void());
 			wait(self->bulkLoadActors.getResult() && delay(SERVER_KNOBS->DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC));
 			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Round complete");
 		} catch (Error& e) {

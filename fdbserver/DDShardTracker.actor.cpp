@@ -1020,7 +1020,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 		self->shardsAffectedByTeamFailure->defineShard(lastOverlapRange);
 	}
 	self->shardsAffectedByTeamFailure->defineShard(keys);
-	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap")
+	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap", self->distributorId)
 	    .detail("Context", "Start")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(
@@ -1045,7 +1045,7 @@ void terminateShardBulkLoad(DataDistributionTracker* self,
 			return;
 		}
 	}
-	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap")
+	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap", self->distributorId)
 	    .detail("Context", "Terminate")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(bulkLoadState.range, std::make_pair(UID(), invalidVersion));

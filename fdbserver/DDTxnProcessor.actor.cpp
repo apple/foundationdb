@@ -479,23 +479,13 @@ class DDTxnProcessorImpl {
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
 
-		result->bulkLoadingMap.insert(allKeys, std::make_pair(UID(), invalidVersion));
+		result->bulkLoadingMap.insert(
+		    allKeys, std::make_pair(UID(), invalidVersion)); // TODO(Zhe): do not use init bulkLoadingMap
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 				const DDShardInfo& iShard = result->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
 				result->dataMoveMap[keys.begin]->validateShard(iShard, keys);
-				const DataMoveMetaData& meta = result->dataMoveMap[keys.begin]->meta;
-				if (meta.bulkLoadState.present() && !result->dataMoveMap[keys.begin]->isCancelled()) {
-					// Initialize bulkLoadingMap which will be used by DD Tracker to decide
-					// whether a range has existing bulk loading
-					ASSERT(meta.bulkLoadState.get().phase == BulkLoadPhase::Running);
-					TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap")
-					    .detail("Context", "Resume")
-					    .detail("BulkLoadTask", meta.bulkLoadState.get().toString());
-					result->bulkLoadingMap.insert(meta.bulkLoadState.get().range,
-					                              std::make_pair(meta.bulkLoadState.get().taskId, invalidVersion));
-				}
 			}
 		}
 
