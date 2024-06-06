@@ -1914,7 +1914,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    rd.bulkLoadState.get().launchAck.canBeSet()) {
 						// This is because RemoteTeam has to select src as dest when remote team is not ready
 						// For this case, we have to give up data move at this time
-						TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", self->distributorId)
+						TraceEvent(SevWarn, "DDBulkLoadTaskLaunchFailed", self->distributorId)
 						    .detail("Reason", "Conflict src and dest")
 						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
 						    .detail("DataMovePriority", rd.priority)
