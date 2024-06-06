@@ -119,6 +119,7 @@ ERROR( bulkload_task_trigger_failed, 1094, "Bulk load task is failed to trigger"
 ERROR( bulkload_task_launch_failed, 1095, "Bulk load task is failed to launch" )
 ERROR( bulkload_task_wait_end_failed, 1096, "Bulk load task is failed to wait end" )
 ERROR( bulkload_task_terminate_failed, 1097, "Bulk load task is failed to terminate" )
+ERROR( bulkload_task_timed_out, 1098, "Bulk load task is timed out" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

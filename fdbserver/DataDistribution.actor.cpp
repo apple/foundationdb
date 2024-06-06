@@ -1090,7 +1090,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 
 // Check progress of bulk loading via reading from bulk loading metadata
 // Exit when the metadata indicates the task completes or outdated
-ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+ACTOR Future<Void> waitOnBulkLoadEndInternal(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	state double startTime = now();
 	state int retryTimes = 0;
 	state std::string exitReason;
@@ -1102,14 +1102,14 @@ ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange r
 			ASSERT(result.size() >= 2);
 			BulkLoadState bulkLoadState = decodeBulkLoadState(result[0].value);
 			if (bulkLoadState.taskId != taskId) {
-				TraceEvent(SevInfo, "WaitOnBulkLoadEndTaskOutdated")
+				TraceEvent(SevInfo, "WaitOnBulkLoadEndTaskOutdated", self->ddId)
 				    .detail("RunningTime", now() - startTime)
 				    .detail("RetryTimes", retryTimes);
 				throw bulkload_task_outdated();
 			}
 			ASSERT(KeyRangeRef(result[0].key, result[1].key) == range);
 			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-				TraceEvent(SevInfo, "WaitOnBulkLoadEnd")
+				TraceEvent(SevInfo, "WaitOnBulkLoadEnd", self->ddId)
 				    .detail("RunningTime", now() - startTime)
 				    .detail("RetryTimes", retryTimes);
 				return Void();
@@ -1132,6 +1132,21 @@ ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange r
 			retryTimes++;
 		}
 	}
+}
+
+ACTOR Future<Void> waitOnBulkLoadEnd(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+	try {
+		// wait(timeoutError(waitOnBulkLoadEndInternal(self, range, taskId), SERVER_KNOBS->DD_BULKLOAD_TASK_TIMEOUT));
+		wait(waitOnBulkLoadEndInternal(self, range, taskId));
+	} catch (Error& e) {
+		if (e.code() == error_code_timed_out) {
+			TraceEvent(SevWarn, "BulkLoadTaskTimedOut", self->ddId).detail("TaskID", taskId).detail("Range", range);
+			throw bulkload_task_timed_out();
+		} else {
+			throw e;
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Void> finishBulkLoadTask(Reference<DataDistributor> self, BulkLoadState bulkLoadState) {
@@ -1208,6 +1223,13 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 			    .detail("Task", committedBulkLoadTask.first.toString())
 			    .detail("CommitVersion", committedBulkLoadTask.second);
 			runBulkLoadTaskAsync(self, range, Optional<BulkLoadState>()); // trigger a new task
+		} else if (e.code() == error_code_bulkload_task_timed_out) {
+			TraceEvent(SevWarn, "BulkLoadTaskNewFailed", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("Reason", "Timed out")
+			    .detail("Range", range)
+			    .detail("Task", committedBulkLoadTask.first.toString());
+			runBulkLoadTaskAsync(self, range, Optional<BulkLoadState>()); // trigger a new task
 		} else if (e.code() == error_code_bulkload_task_wait_end_failed) {
 			ASSERT(committedBulkLoadTask.first.isValid());
 			TraceEvent(SevWarn, "DDBulkLoadTaskNewFailed", self->ddId)
@@ -1252,12 +1274,19 @@ ACTOR Future<Void> doResumeBulkLoadTask(Reference<DataDistributor> self, KeyRang
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_bulkload_task_outdated) {
-			TraceEvent(SevInfo, "DDBulkLoadResumeFailed", self->ddId)
+			TraceEvent(SevWarn, "DDBulkLoadResumeFailed", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("Reason", "Task outdated")
 			    .detail("Range", range)
 			    .detail("BulkLoadTask", bulkLoadState.toString());
 			// sliently exits
+		} else if (e.code() == error_code_bulkload_task_timed_out) {
+			TraceEvent(SevWarn, "BulkLoadTaskResumeFailed", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("Reason", "Timed out")
+			    .detail("Range", range)
+			    .detail("Task", bulkLoadState.toString());
+			runBulkLoadTaskAsync(self, range, Optional<BulkLoadState>()); // trigger a new task
 		} else if (e.code() == error_code_bulkload_task_wait_end_failed) {
 			TraceEvent(SevWarn, "DDBulkLoadResumeFailed", self->ddId)
 			    .errorUnsuppressed(e)
@@ -1360,12 +1389,12 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
 					if (range != bulkLoadState.range) {
-						TraceEvent(SevWarn, "DDBulkLoadRestartTriggeredTaskFailed")
+						TraceEvent(SevWarn, "DDBulkLoadRestartTriggeredTaskFailed", self->ddId)
 						    .detail("Reason", "Task boundary changed")
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
 					} else if (bulkLoadState.phase == BulkLoadPhase::Triggered) {
-						TraceEvent(SevInfo, "DDBulkLoadRestartTriggeredTask")
+						TraceEvent(SevInfo, "DDBulkLoadRestartTriggeredTask", self->ddId)
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
 						runBulkLoadTaskAsync(self, bulkLoadState.range, Optional<BulkLoadState>());
@@ -1389,13 +1418,16 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
 	loop {
 		try {
 			wait(waitForBulkLoadModeOn(self));
-			TraceEvent("DDBulkLoadCore").detail("Status", "Mode On");
+			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Mode On");
 			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
 			wait(self->bulkLoadActors.getResult() && delay(SERVER_KNOBS->DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC));
-			TraceEvent("DDBulkLoadCore").detail("Status", "Round complete");
+			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Round complete");
 		} catch (Error& e) {
-			TraceEvent("DDBulkLoadCore").detail("Status", "Error").errorUnsuppressed(e);
-			if (e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).errorUnsuppressed(e).detail("Status", "Error");
+			if (e.code() == error_code_movekeys_conflict) {
 				throw e;
 			}
 			wait(delay(5.0));

@@ -1073,18 +1073,26 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		if (overlappingInFlight) {
 			ASSERT(!rd.isRestore());
 			// logRelocation( rd, "SkippingOverlappingInFlight" );
+			if (rd.bulkLoadState.present()) {
+				TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
+				    .detail("Reason", "Overlapping alive relocator 1")
+				    .detail("DataMoveID", rd.dataMoveId)
+				    .detail("RandomID", rd.randomId)
+				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+			}
 			continue;
 		}
 
 		if (rd.bulkLoadState.present() && inFlightActors.liveActorIn(rd.bulkLoadState.get().range)) {
 			ASSERT(rd.bulkLoadState.get().range == rd.keys);
 			ASSERT(!rd.isRestore());
-			TraceEvent("DDBulkLoadTaskLaunchDelayed")
-			    .detail("Reason", "Overlapping alive relocator")
+			TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
+			    .detail("Reason", "Overlapping alive relocator 2")
+			    .detail("DataMoveID", rd.dataMoveId)
+			    .detail("RandomID", rd.randomId)
 			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
 			continue;
-			// Guarantee that BulkLoad does not impact on any alive data move
-			// e.g. MoveIn shard for BulkLoad at SS does not conflict to any alive data move
+			// BulkLoad should not impact on any alive data move
 		}
 
 		// Because the busyness of a server is decreased when a superseding relocation is issued, we
@@ -1103,6 +1111,14 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 		if (!rd.isRestore() && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 			// logRelocation( rd, "SkippingQueuedRelocation" );
+			if (rd.bulkLoadState.present()) {
+				TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
+				    .detail("Reason", "Source server Busy")
+				    .detail("DataMoveID", rd.dataMoveId)
+				    .detail("RandomID", rd.randomId)
+				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+				// Remove later since bulk load does not care source servers
+			}
 			continue;
 		}
 
@@ -1892,6 +1908,21 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 					throw movekeys_conflict();
 					// Very important invariant. If this error appears, check the logic
+				}
+				for (const auto& destId : destIds) {
+					if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end() &&
+					    rd.bulkLoadState.get().launchAck.canBeSet()) {
+						// This is because RemoteTeam has to select src as dest when remote team is not ready
+						// For this case, we have to give up data move at this time
+						TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", self->distributorId)
+						    .detail("Reason", "Conflict src and dest")
+						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+						    .detail("DataMovePriority", rd.priority)
+						    .detail("DataMoveId", rd.dataMoveId)
+						    .detail("RelocatorRange", rd.keys);
+						rd.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+						throw data_move_dest_team_not_found();
+					}
 				}
 				TraceEvent(SevInfo, "DDBulkLoadTaskGotDestTeam", self->distributorId)
 				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())

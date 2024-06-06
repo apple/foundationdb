@@ -365,6 +365,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
 	init( DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC,                  30.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC = 5.0;
 	init( DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC,                  30.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC = 5.0;
+	init( DD_BULKLOAD_TASK_TIMEOUT,                            300.0 );
+	init( DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX,                50 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true

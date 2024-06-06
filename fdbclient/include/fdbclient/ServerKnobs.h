@@ -382,6 +382,8 @@ public:
 	double DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC; // the period of seconds that bulk load looks up bulk load mode key
 	                                            // to see if bulk load mode is on. After that, bulk load starts
 	                                            // schedule tasks
+	double DD_BULKLOAD_TASK_TIMEOUT;
+	int DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX;
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

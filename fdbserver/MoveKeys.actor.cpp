@@ -2064,6 +2064,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 	ASSERT(!destinationTeam.empty());
 
+	state std::set<UID> errorBulkLoadServers;
+	state int bulkLoadRetryCount = 0;
+
 	try {
 		TraceEvent(SevInfo, "FinishMoveShardsBegin", relocationIntervalId)
 		    .detail("DataMoveID", dataMoveId)
@@ -2284,9 +2287,38 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				}
 
 				std::vector<UID> readyServers;
+				std::set<UID> errorServers;
 				for (int s = 0; s < serverReady.size(); ++s) {
 					if (serverReady[s].isReady() && !serverReady[s].isError()) {
 						readyServers.push_back(storageServerInterfaces[s].uniqueID);
+					} else if (bulkLoadState.present()) {
+						errorServers.insert(storageServerInterfaces[s].uniqueID);
+						TraceEvent e(SevWarn, "DDBulkLoadTaskServerFinishMoveShardsError", relocationIntervalId);
+						e.detail("DataMoveID", dataMoveId);
+						e.detail("ErrorServer", storageServerInterfaces[s].uniqueID);
+						e.detail("NewDestinations", describe(newDestinations));
+						e.detail("BulkLoadTask", bulkLoadState.get().toString());
+						e.detail("Ready", serverReady[s].isReady());
+						e.detail("IsError", serverReady[s].isError());
+						if (serverReady[s].isError()) {
+							e.errorUnsuppressed(serverReady[s].getError());
+						}
+					}
+				}
+				if (bulkLoadState.present() && errorServers.size() > 0) {
+					if (errorServers.size() >= errorBulkLoadServers.size()) {
+						bulkLoadRetryCount = bulkLoadRetryCount + 1;
+					} else {
+						bulkLoadRetryCount = 0;
+						errorBulkLoadServers = errorServers;
+					}
+					if (bulkLoadRetryCount > SERVER_KNOBS->DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX &&
+					    bulkLoadState.get().launchAck.canBeSet()) {
+						TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed")
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("Reason", "Finish move shard retry too many times")
+						    .detail("NewDataMove", bulkLoadState.get().toString());
+						bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
 					}
 				}
 				int tssCount = 0;
