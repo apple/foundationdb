@@ -1410,8 +1410,7 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 
 ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self) {
 	wait(self->initialized.getFuture() && waitForBulkLoadModeOn(self));
-	wait(restartTriggeredBulkLoad(self));
-	self->bulkLoadActors.add(Void());
+	self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
 	TraceEvent(SevInfo, "DDBulkLoadRetriggeredDone", self->ddId);
 	wait(self->bulkLoadActors.getResult());
 	self->bulkLoadActors.clear(true);
@@ -1426,8 +1425,8 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
 			wait(waitForBulkLoadModeOn(self));
 			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Mode On");
 			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
-			self->bulkLoadActors.add(Void());
 			wait(self->bulkLoadActors.getResult() && delay(SERVER_KNOBS->DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC));
+			self->bulkLoadActors.clear(true);
 			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Round complete");
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
