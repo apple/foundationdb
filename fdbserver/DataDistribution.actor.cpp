@@ -1215,6 +1215,14 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 			    .detail("Task", committedBulkLoadTask.first.toString())
 			    .detail("CommitVersion", committedBulkLoadTask.second);
 			runBulkLoadTaskAsync(self, range, Optional<BulkLoadState>()); // trigger a new task
+		} else if (e.code() == error_code_bulkload_task_launch_overwritten) {
+			ASSERT(committedBulkLoadTask.first.isValid());
+			TraceEvent(SevWarn, "DDBulkLoadTaskNewFailed", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("Reason", "Failed to launch by new bulk load overwrite")
+			    .detail("Task", committedBulkLoadTask.first.toString())
+			    .detail("CommitVersion", committedBulkLoadTask.second);
+			// sliently exits
 		} else if (e.code() == error_code_bulkload_task_timed_out) {
 			TraceEvent(SevWarn, "BulkLoadTaskNewFailed", self->ddId)
 			    .errorUnsuppressed(e)
@@ -1408,8 +1416,8 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 	return Void();
 }
 
-ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self) {
-	wait(self->initialized.getFuture() && waitForBulkLoadModeOn(self));
+ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self, Future<Void> readyToStart) {
+	wait(readyToStart && waitForBulkLoadModeOn(self));
 	self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
 	TraceEvent(SevInfo, "DDBulkLoadRetriggeredDone", self->ddId);
 	wait(self->bulkLoadActors.getResult());
@@ -1418,8 +1426,8 @@ ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self) {
 	return Void();
 }
 
-ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self) {
-	wait(resumeBulkLoading(self));
+ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
+	wait(resumeBulkLoading(self, readyToStart));
 	loop {
 		try {
 			wait(waitForBulkLoadModeOn(self));
@@ -1565,8 +1573,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(bulkLoadingCore(self));
-
 			if (self->ddTenantCache.present()) {
 				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorTenantMap(),
 				                                    "DDTenantCacheMonitor",
@@ -1660,6 +1666,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
+			if (self->configuration.usableRegions > 1) {
+				actors.push_back(bulkLoadingCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+			} else {
+				actors.push_back(bulkLoadingCore(self, self->initialized.getFuture()));
+			}
 
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);
