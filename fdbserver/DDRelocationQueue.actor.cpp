@@ -1069,8 +1069,31 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
 		for (auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
 			if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
-			    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
-			    rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+			    // The new data move intention is bypassed at this time
+			    // if this new intention overlaps active relocators
+			    // and if the range of this data move intention does not fully cover the existing relocator
+			    // and if the existing one has a higher priority and the new intention is not a dataMove to heal
+			    // replicas
+			    ((!rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
+			      rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) ||
+			     // or if the new intention is a bulk loading data move while the existing one is not a bulk load data
+			     // move aka. any bulk loading on a range should wait until existing data moves on the same range
+			     // complete
+			     (!it->value().bulkLoadState.present() && rd.bulkLoadState.present()))) {
+				if (rd.bulkLoadState.present()) {
+					// Bulk load task cannot be alive across DD restarts
+					// Any restored data move for bulk loading just dropped the bulkLoadState
+					// and it is marked as cancelled data move
+					ASSERT(!rd.isRestore());
+					TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
+					    .detail("Reason", "Overlapping alive relocator")
+					    .detail("DataMoveID", rd.dataMoveId)
+					    .detail("RandomID", rd.randomId)
+					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+					    .detail("ExistBulkLoadTask",
+					            it->value().bulkLoadState.present() ? it->value().bulkLoadState.get().toString() : "")
+					    .detail("ExistDataMove", it->value().dataMove ? it->value().dataMove->meta.toString() : "");
+				}
 
 				DebugRelocationTraceEvent("OverlappingInFlight", distributorId)
 				    .detail("KeyBegin", it->value().keys.begin)
@@ -1085,26 +1108,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		if (overlappingInFlight) {
 			ASSERT(!rd.isRestore());
 			// logRelocation( rd, "SkippingOverlappingInFlight" );
-			if (rd.bulkLoadState.present()) {
-				TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
-				    .detail("Reason", "Overlapping alive relocator 1")
-				    .detail("DataMoveID", rd.dataMoveId)
-				    .detail("RandomID", rd.randomId)
-				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-			}
 			continue;
-		}
-
-		if (rd.bulkLoadState.present() && inFlightActors.liveActorIn(rd.bulkLoadState.get().range)) {
-			ASSERT(rd.bulkLoadState.get().range == rd.keys);
-			ASSERT(!rd.isRestore());
-			TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
-			    .detail("Reason", "Overlapping alive relocator 2")
-			    .detail("DataMoveID", rd.dataMoveId)
-			    .detail("RandomID", rd.randomId)
-			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-			continue;
-			// BulkLoad should not impact on any alive data move
 		}
 
 		// Because the busyness of a server is decreased when a superseding relocation is issued, we

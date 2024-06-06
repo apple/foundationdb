@@ -790,11 +790,11 @@ public:
 			}
 			if (meta.bulkLoadState.present()) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
-				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				// Cancel data move for old bulk loading
+				// Do not assign bulk load to rs so that this is a normal data move cancellation signal
 				TraceEvent("DDInitScheduledCancelOldBulkLoadDataMove", self->ddId).detail("DataMove", meta.toString());
 			} else if (it.value()->isCancelled() ||
 			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
