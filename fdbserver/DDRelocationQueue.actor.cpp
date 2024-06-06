@@ -1070,8 +1070,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			finishRelocation(rd.priority, rd.healthPriority);
 
 			// now we are launching: remove this entry from the queue of all the src servers
-			for (int i = 0; i < rd.src.size(); i++) {
-				ASSERT(queue[rd.src[i]].erase(rd));
+			for (size_t i = 0; i < rd.src.size(); i++) {
+				const auto result = queue[rd.src[i]].erase(rd);
+				ASSERT(result);
 			}
 		}
 
