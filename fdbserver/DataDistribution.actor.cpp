@@ -2023,8 +2023,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 				coordSnapReqs.push_back(trySendSnapReq(
 				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
 		}
-		// At present, the fault injection workload doesn't respect the KNOB
-		// MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE Consequently, we ignore it in simulation tests
+		// At present, the fault injection workload doesn't respect the KNOB MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE
+		// Consequently, we ignore it in simulation tests
 		auto const coordFaultTolerance = std::min<int>(
 		    std::max<int>(0, (coordSnapReqs.size() - 1) / 2),
 		    g_network->isSimulated() ? coordSnapReqs.size() : SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
@@ -2086,8 +2086,8 @@ ACTOR Future<Void> ddSnapCreate(
         ddSnapResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!ddEnabledState->trySetSnapshot(snapReq.snapUID)) {
-		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation
-		// fails here
+		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
+		// here
 		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").detail("SnapUID", snapReq.snapUID);
 		ddSnapMap->at(snapReq.snapUID).reply.sendError(operation_failed());
 		ddSnapMap->erase(snapReq.snapUID);
@@ -3578,8 +3578,7 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	TraceEvent(SevInfo, "DDDoAuditLocationMetadataBegin", self->ddId)
 	    .detail("AuditId", audit->coreState.id)
 	    .detail("AuditRange", auditRange);
-	state AuditStorageState res(audit->coreState.id,
-	                            audit->coreState.getType()); // we will set range of audit later
+	state AuditStorageState res(audit->coreState.id, audit->coreState.getType()); // we will set range of audit later
 	state std::vector<Future<Void>> actors;
 	state std::vector<std::string> errors;
 	state AuditGetKeyServersRes keyServerRes;
