@@ -285,6 +285,8 @@ public:
 		}
 
 		std::vector<Reference<TCTeamInfo>> candidateTeams;
+		int unhealthyTeamCount = 0;
+		int duplicatedCount = 0;
 		for (const auto& dest : self->teams) {
 			if (!dest->isHealthy()) {
 				TraceEvent(SevDebug, "DDBulkLoadTaskGetTeamSkipTeam", self->distributorId)
@@ -295,6 +297,7 @@ public:
 				    .detail("TeamCount", self->teams.size())
 				    .detail("SrcIds", describe(req.src))
 				    .detail("DestIds", describe(dest->getServerIDs()));
+				unhealthyTeamCount++;
 				continue;
 			}
 			bool ok = true;
@@ -319,6 +322,7 @@ public:
 				    .detail("TeamCount", self->teams.size())
 				    .detail("SrcIds", describe(req.src))
 				    .detail("DestIds", describe(dest->getServerIDs()));
+				duplicatedCount++;
 				continue;
 			}
 			candidateTeams.push_back(dest);
@@ -333,6 +337,8 @@ public:
 		e.detail("Primary", self->isPrimary());
 		e.detail("TeamSize", self->teams.size());
 		e.detail("CandidateSize", candidateTeams.size());
+		e.detail("UnhealthyTeamCount", unhealthyTeamCount);
+		e.detail("DuplicatedCount", duplicatedCount);
 		if (res.present()) {
 			e.detail("DestIds", describe(res.get()->getServerIDs()));
 			e.detail("DestTeam", res.get()->getTeamID());
