@@ -2,6 +2,48 @@
 Release Notes
 #############
 
+7.3.43
+======
+* Same as 7.3.42 release with AVX enabled.
+
+7.3.42
+======
+* Fixed a segfault when tlog encounters a platform_error. `(PR #11406) <https://github.com/apple/foundationdb/pull/11406>`_
+* Fixed an assertion failure of cluster controller when waiting for recovery. `(PR #11402) <https://github.com/apple/foundationdb/pull/11402>`_
+* Fixed a global config bug that causes client latency metrics to be missing after upgrade. `(PR #11400) <https://github.com/apple/foundationdb/pull/11400>`_
+* Added a knob for shard merge parallelism and added logs for max shard size. `(PR #11389) <https://github.com/apple/foundationdb/pull/11389>`_
+* Updated the RocksDB memtable max range deletions knob. `(PR #11387) <https://github.com/apple/foundationdb/pull/11387>`_
+* Improved visibility when Sharded RocksDB takes a long time to commit. `(PR #11362) <https://github.com/apple/foundationdb/pull/11362>`_
+* Fixed data move trigger for rebalancing storage queue. `(PR #11375) <https://github.com/apple/foundationdb/pull/11375>`_
+* Fixed an infinite retry of GRV request bug. `(PR #11353) <https://github.com/apple/foundationdb/pull/11353>`_
+* Improved distributed consistency checker to continuously run by default and visibility of recruitment errors. `(PR #11349) <https://github.com/apple/foundationdb/pull/11349>`_
+* Fixed add-prefix and remove-prefix for fdbrestore. `(PR #11344) <https://github.com/apple/foundationdb/pull/11344>`_
+* Fixed a crash of data distributor when taking a snapshot. `(PR #11341) <https://github.com/apple/foundationdb/pull/11341>`_
+* Increased visibility of gray failure actions. `(PR #11324) <https://github.com/apple/foundationdb/pull/11324>`_
+* Increased visibility of CommitProxyTerminated events for failed_to_progress errors. `(PR #11315) <https://github.com/apple/foundationdb/pull/11315>`_
+
+7.3.41
+======
+* Same as 7.3.40 release with AVX enabled.
+
+7.3.40
+======
+* Upgraded RocksDB to version 8.11.4. `(PR #11327) <https://github.com/apple/foundationdb/pull/11327>`_
+
+7.3.39
+======
+* Same as 7.3.38 release with AVX enabled.
+
+7.3.38
+======
+* Fixed the detection of private mutations in version vector. `(PR #11279) <https://github.com/apple/foundationdb/pull/11279>`_
+* Added accumulative checksum feature. `(PR #11281) <https://github.com/apple/foundationdb/pull/11281>`_ and `(PR #11289) <https://github.com/apple/foundationdb/pull/11289>`_
+* Added Go tenanting support. `(PR #11299) <https://github.com/apple/foundationdb/pull/11299>`_
+* Added RocksDB caching knobs. `(PR #11312) <https://github.com/apple/foundationdb/pull/11312>`_
+* Added RocksDB metrics in status json. `(PR #11320) <https://github.com/apple/foundationdb/pull/11320>`_
+* Various Sharded RocksDB improvements. `(PR #11332) <https://github.com/apple/foundationdb/pull/11332>`_
+
+
 7.3.37
 ======
 * Same as 7.3.36 release with AVX enabled.

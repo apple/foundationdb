@@ -4215,8 +4215,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		else
 			readBegin = range.begin;
 
+		// We can get lower_bound from the result of lastLessOrEqual
 		if (vCurrent) {
-			// We can get first greater or equal from the result of lastLessOrEqual
 			if (vCurrent.key() != readBegin) {
 				++vCurrent;
 			}
@@ -4226,6 +4226,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Either way that's the correct result for lower_bound.
 			vCurrent = view.begin();
 		}
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(vCurrent == view.lower_bound(readBegin));
+		}
+
 		while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
 			ASSERT(!vCurrent || vCurrent.key() >= readBegin);
 			ASSERT(data->storageVersion() <= version);
@@ -7084,7 +7088,22 @@ void expandClear(MutationRef& m,
 	} else if (eager->enableClearRangeEagerReads) {
 		// Expand to the next set or clear (from storage or latestVersion), and if it
 		// is a clear, engulf it as well
-		i = d.lower_bound(m.param2);
+
+		// We can get lower_bound from the result of lastLessOrEqual
+		if (i) {
+			if (i.key() != m.param2) {
+				++i;
+			}
+		} else {
+			// There's nothing less than or equal to m.param2 in view, so
+			// begin() is the first thing greater than m.param2, or end().
+			// Either way that's the correct result for lower_bound.
+			i = d.begin();
+		}
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(i == d.lower_bound(m.param2));
+		}
+
 		KeyRef endKeyAtStorageVersion =
 		    m.param2 == eagerTrustedEnd ? eagerTrustedEnd : std::min(eager->getKeyEnd(m.param2), eagerTrustedEnd);
 		if (!i || endKeyAtStorageVersion < i.key())
@@ -7139,7 +7158,9 @@ void applyMutation(StorageServer* self,
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
 		ASSERT(m.param2 > m.param1);
-		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
+		}
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
 		++self->counters.pTreeClears;
@@ -8525,6 +8546,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
+				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
+				int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
+				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
+			}
 			tr.trState->readOptions = readOptions;
 			tr.trState->taskID = TaskPriority::FetchKeys;
 
@@ -10794,6 +10821,14 @@ private:
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
 			dataMoveReason = DataMovementReason::INVALID;
 			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId, dataMoveReason);
+			if (dataMoveType != DataMoveType::LOGICAL &&
+			    data->storage.getKeyValueStoreType() != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+				TraceEvent(SevWarnAlways, "KVStoreNotSupportDataMoveType", data->thisServerID)
+				    .detail("DataMoveType", dataMoveType)
+				    .detail("KVStoreType", data->storage.getKeyValueStoreType())
+				    .detail("DataMoveId", dataMoveId);
+				dataMoveType = DataMoveType::LOGICAL;
+			}
 			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL_BULKLOAD ||
 			                                    dataMoveType == DataMoveType::PHYSICAL ||
 			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
@@ -12338,10 +12373,26 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		recentCommitStats.back().whenCommit = now();
 		try {
-			wait(ioTimeoutErrorIfCleared(durable,
-			                             SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME,
-			                             data->getEncryptCipherKeysMonitor->degraded(),
-			                             "StorageCommit"));
+			loop {
+				choose {
+					when(wait(ioTimeoutErrorIfCleared(durable,
+					                                  SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME,
+					                                  data->getEncryptCipherKeysMonitor->degraded(),
+					                                  "StorageCommit"))) {
+						break;
+					}
+					when(wait(delay(60.0))) {
+						TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
+						    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)
+						    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft);
+
+						if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+						    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
+							data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "CommitTooLong");
+						}
+					}
+				}
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_io_timeout) {
 				if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {

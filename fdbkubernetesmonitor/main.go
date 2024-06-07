@@ -110,14 +110,13 @@ func main() {
 		panic(err)
 	}
 	currentContainerVersion := strings.TrimSpace(string(versionBytes))
-
-	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+	mode := executionMode(executionModeString)
+	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
 	if err != nil {
 		logger.Error(err, "Error getting list of files to copy")
 		os.Exit(1)
 	}
 
-	mode := executionMode(executionModeString)
 	switch mode {
 	case executionModeLauncher:
 		customEnvironment, err := loadAdditionalEnvironment(logger)

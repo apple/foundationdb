@@ -328,6 +328,13 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			recoveryCore.cancel();
 			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
+			if (cluster->outstandingRemoteRequestChecker.isValid()) {
+				cluster->outstandingRemoteRequestChecker.cancel();
+			}
+
+			if (cluster->outstandingRequestChecker.isValid()) {
+				cluster->outstandingRequestChecker.cancel();
+			}
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
 			CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
@@ -1070,6 +1077,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
 		    .detail("ReqGrvProxies", req.grvProxies)
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
+		    .detail("GlobalConfigHistorySize", db->clientInfo->get().history.size())
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
@@ -1086,6 +1094,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
+		clientInfo.history = db->clientInfo->get().history;
 		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
 		clientInfo.clusterType = db->clusterType;
@@ -1735,12 +1744,12 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
+		state ClientDBInfo clientInfo;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state ClientDBInfo clientInfo = db->serverInfo->get().client;
 
 				if (globalConfigVersion.present()) {
 					// Since the history keys end with versionstamps, they
@@ -1751,11 +1760,12 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					// If the global configuration version key has been set,
 					// the history should contain at least one item.
 					ASSERT(globalConfigHistory.size() > 0);
+					clientInfo = db->serverInfo->get().client;
 					clientInfo.history.clear();
 
 					for (const auto& kv : globalConfigHistory) {
 						ObjectReader reader(kv.value.begin(), IncludeVersion());
-						if (reader.protocolVersion() != g_network->protocolVersion()) {
+						if (reader.protocolVersion() != g_network->protocolVersion() || BUGGIFY_WITH_PROB(0.01)) {
 							// If the protocol version has changed, the
 							// GlobalConfig actor should refresh its view by
 							// reading the entire global configuration key

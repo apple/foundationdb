@@ -2,7 +2,7 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-tenantModes = ['optional', 'required']
+tenantModes = ['disabled']
 injectTargetedSSRestart = true
 injectSSDelay = true
 

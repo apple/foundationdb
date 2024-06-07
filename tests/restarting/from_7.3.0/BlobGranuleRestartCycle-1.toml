@@ -8,6 +8,7 @@ injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4, 5]
+tenantModes = ['disabled']
 
 [[knobs]]
 enable_blob_granule_file_logical_size=false

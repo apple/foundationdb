@@ -242,7 +242,9 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 
   # A prebuild target ensures that all actors, Swift-generated headers, and Swift modules are built.
-  add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
+  if (WITH_SWIFT)
+     add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
+  endif()
 endif()
 
 ################################################################################

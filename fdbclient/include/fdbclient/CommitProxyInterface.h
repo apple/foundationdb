@@ -727,14 +727,16 @@ struct ExclusionSafetyCheckRequest {
 struct GlobalConfigRefreshReply {
 	constexpr static FileIdentifier file_identifier = 12680327;
 	Arena arena;
+	Version version;
 	RangeResultRef result;
 
 	GlobalConfigRefreshReply() {}
-	GlobalConfigRefreshReply(Arena const& arena, RangeResultRef result) : arena(arena), result(result) {}
+	GlobalConfigRefreshReply(Arena const& arena, Version version, RangeResultRef result)
+	  : arena(arena), version(version), result(result) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, result, arena);
+		serializer(ar, result, version, arena);
 	}
 };
 
