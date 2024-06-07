@@ -1053,10 +1053,7 @@ void DDQueue::launchQueuedWork(RelocateData launchData, const DDEnabledState* dd
 	launchQueuedWork(combined, ddEnabledState);
 }
 
-DataMoveType newDataMoveType(bool doBulkLoad) {
-	if (doBulkLoad) {
-		return DataMoveType::PHYSICAL_BULKLOAD;
-	}
+DataMoveType newDataMoveType() {
 	DataMoveType type = DataMoveType::LOGICAL;
 	if (deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY) {
 		type = DataMoveType::PHYSICAL;
@@ -1226,7 +1223,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					} else {
 						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                               AssignEmptyRange::False,
-						                               newDataMoveType(rrs.bulkLoadState.present()),
+						                               newDataMoveType(),
 						                               rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID", this->distributorId)
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
@@ -1861,10 +1858,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
-					                              AssignEmptyRange::False,
-					                              newDataMoveType(rd.bulkLoadState.present()),
-					                              rd.dmReason);
+					rd.dataMoveId = newDataMoveId(
+					    physicalShardIDCandidate, AssignEmptyRange::False, newDataMoveType(), rd.dmReason);
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())

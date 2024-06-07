@@ -9069,8 +9069,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         bool nowAssigned,
                                         Version version,
                                         ChangeServerKeysContext context,
-                                        EnablePhysicalShardMove enablePSM,
-                                        DoBulkLoad doBulkLoad);
+                                        EnablePhysicalShardMove enablePSM);
 
 ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveInShard) {
 	if (moveInShard->getPhase() != MoveInPhase::Fetching && moveInShard->getPhase() != MoveInPhase::Ingesting) {
@@ -9096,8 +9095,7 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 			                                   true,
 			                                   mLV.version - 1,
 			                                   CSK_FALL_BACK,
-			                                   EnablePhysicalShardMove::False,
-			                                   DoBulkLoad::False);
+			                                   EnablePhysicalShardMove::False);
 		} else {
 			TraceEvent(SevWarn, "ShardAlreadyChanged", data->thisServerID)
 			    .detail("ShardRange", currentShard->keys)
@@ -10363,8 +10361,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         bool nowAssigned,
                                         Version version,
                                         ChangeServerKeysContext context,
-                                        EnablePhysicalShardMove enablePSM,
-                                        DoBulkLoad doBulkLoad) {
+                                        EnablePhysicalShardMove enablePSM) {
 	ASSERT(!keys.empty());
 	const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 	TraceEvent(SevInfo, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
@@ -10769,7 +10766,6 @@ private:
 	bool emptyRange;
 	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-	DoBulkLoad doBulkLoad = DoBulkLoad::False;
 	UID dataMoveId;
 	bool processedStartKey;
 
@@ -10795,11 +10791,8 @@ private:
 					    .detail("Range", keys)
 					    .detail("NowAssigned", nowAssigned)
 					    .detail("Version", ver);
-					if (doBulkLoad) {
-						ASSERT(nowAssigned); // TODO(Zhe): remove this unsafe assert
-					}
 					changeServerKeysWithPhysicalShards(
-					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context, enablePSM, doBulkLoad);
+					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context, enablePSM);
 				} else {
 					// add changes in shard assignment to the mutation log
 					setAssignedStatus(data, keys, nowAssigned);
@@ -10829,10 +10822,8 @@ private:
 				    .detail("DataMoveId", dataMoveId);
 				dataMoveType = DataMoveType::LOGICAL;
 			}
-			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL_BULKLOAD ||
-			                                    dataMoveType == DataMoveType::PHYSICAL ||
+			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL ||
 			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
-			doBulkLoad = DoBulkLoad(dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)

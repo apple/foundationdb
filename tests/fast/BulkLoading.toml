@@ -7,6 +7,12 @@ machineCount = 36
 tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. Therefore, disable tenant
 
 [[knobs]]
+# This knob is commented out since the knob override is done *after* the simulation system is set up. However,
+# this is not going to completely work:
+# The purpose of setting the knob to true was to enable the shard rocksdb storage engine
+# The shard rocksdb storage engine is set up before this knob is overridden
+# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
+# so for this BulkLoading test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
 dd_physical_shard_move_probability = 1.0
 enable_physical_shard_move_experiment = true

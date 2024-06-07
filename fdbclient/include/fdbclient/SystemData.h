@@ -38,14 +38,12 @@
 FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
-FDB_BOOLEAN_PARAM(DoBulkLoad);
 
 enum class DataMoveType : uint8_t {
 	LOGICAL = 0,
 	PHYSICAL = 1,
 	PHYSICAL_EXP = 2,
-	PHYSICAL_BULKLOAD = 3,
-	NUMBER_OF_TYPES = 4,
+	NUMBER_OF_TYPES = 3,
 };
 
 // One-to-one relationship to the priority knobs
