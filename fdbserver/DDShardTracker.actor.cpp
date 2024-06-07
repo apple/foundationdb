@@ -1023,8 +1023,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap", self->distributorId)
 	    .detail("Context", "Start")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
-	self->bulkLoadingMap.insert(
-	    keys, std::make_pair(bulkLoadState.taskId, commitVersion));
+	self->bulkLoadingMap.insert(keys, std::make_pair(bulkLoadState.taskId, commitVersion));
 	bulkLoadState.launchAck = launchAck; // Used to propagate launchAck signal in DDQueue
 	self->output.send(RelocateShard(
 	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState));

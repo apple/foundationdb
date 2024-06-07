@@ -799,7 +799,6 @@ public:
 			} else if (it.value()->isCancelled() ||
 			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
-				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
@@ -809,7 +808,6 @@ public:
 				ASSERT(meta.ranges.front() == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
-				rs.bulkLoadState = meta.bulkLoadState;
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
@@ -1319,7 +1317,7 @@ void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, Optio
 	TraceEvent e(SevInfo, "DDBulkLoadTaskRunAsync", self->ddId);
 	e.detail("Range", range);
 	if (bulkLoadState.present()) { // Only when DD restarts and those are from resumed data moves
-		ASSERT(bulkLoadState.get().range == range && bulkLoadState.get().phase == BulkLoadPhase::Running);
+		ASSERT(bulkLoadState.get().range == range);
 		e.detail("ExistingBulkLoadTask", bulkLoadState.get().toString());
 		self->bulkLoadActors.add(doResumeBulkLoadTask(self, range, bulkLoadState.get()));
 	} else {
