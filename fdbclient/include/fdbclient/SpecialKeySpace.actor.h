@@ -182,7 +182,6 @@ public:
 		STATUSJSON,
 		UNKNOWN, // default value for all unregistered range
 		WORKERINTERFACE,
-		BULKLOADING,
 	};
 
 	enum class IMPLTYPE {

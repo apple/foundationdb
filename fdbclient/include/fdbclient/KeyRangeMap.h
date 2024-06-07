@@ -123,15 +123,6 @@ public:
 		Future<Void> actorAt = map[key];
 		return actorAt.isValid() && !actorAt.isReady();
 	}
-	bool liveActorIn(const KeyRangeRef& keys) {
-		auto f = map.intersectingRanges(keys);
-		for (auto it = f.begin(); it != f.end(); ++it) {
-			if (it->value().isValid() && !it->value().isReady()) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 private:
 	KeyRangeMap<Future<Void>> map;

@@ -1024,7 +1024,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	    .detail("Context", "Start")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(
-	    keys, std::make_pair(bulkLoadState.taskId, commitVersion)); // TODO: resume bulkLoadingMap when DD init
+	    keys, std::make_pair(bulkLoadState.taskId, commitVersion));
 	bulkLoadState.launchAck = launchAck; // Used to propagate launchAck signal in DDQueue
 	self->output.send(RelocateShard(
 	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState));
@@ -1740,9 +1740,7 @@ Future<Void> DataDistributionTracker::run(
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
 	self->triggerShardBulkLoading = triggerShardBulkLoading;
 	self->userRangeConfig = initData->userRangeConfig;
-	for (auto range : initData->bulkLoadingMap.intersectingRanges(normalKeys)) {
-		self->bulkLoadingMap.insert(range.range(), range.value());
-	}
+	self->bulkLoadingMap.insert(allKeys, std::make_pair(UID(), invalidVersion));
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

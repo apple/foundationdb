@@ -154,21 +154,15 @@ ERROR( transaction_throttled_hot_shard, 1235, "Transaction throttled due to hot 
 ERROR( storage_replica_comparison_error, 1236, "Storage replicas not consistent" )
 ERROR( unreachable_storage_replica, 1237, "Storage replica cannot be reached" )
 
-ERROR( bulkload_add_task_input_error, 1238, "Bulk loading add task input is error" )
-ERROR( bulkload_cancel_task_input_error, 1239, "Bulk loading cancel task input is error" )
-ERROR( bulkload_check_status_input_error, 1240, "Bulk loading check task status input is error" )
-ERROR( bulkload_task_conflict, 1241, "Input bulk loading task is conflicting with existing task" )
-ERROR( bulkload_mode_not_found, 1242, "Cannot find bulk loading mode" )
-ERROR( bulkload_is_off_when_commit_task, 1243, "Bulk load mode is off when committing task" )
-ERROR( bulkload_task_failed, 1244, "Bulk load task is failed")
-ERROR( bulkload_task_outdated, 1245, "Bulk load task is outdated" )
-ERROR( bulkload_task_trigger_failed, 1246, "Bulk load task is failed to trigger" ) // TODO(Zhe): Too many error types here
-ERROR( bulkload_task_launch_failed, 1247, "Bulk load task is failed to launch" )
-ERROR( bulkload_task_wait_end_failed, 1248, "Bulk load task is failed to wait end" )
-ERROR( bulkload_task_terminate_failed, 1249, "Bulk load task is failed to terminate" )
-ERROR( bulkload_task_timed_out, 1250, "Bulk load task is timed out" )
-ERROR( bulkload_task_launch_overwritten, 1251, "Bulk load task is failed to launch due to new bulk load" )
-ERROR( bulkload_task_launch_failed_for_remote_recovery, 1252, "Bulk load task is failed to launch due to remote recovery")
+ERROR( bulkload_task_failed, 1300, "Bulk load task is failed")
+ERROR( bulkload_task_outdated, 1301, "Bulk load task is outdated" )
+ERROR( bulkload_task_trigger_failed, 1302, "Bulk load task is failed to trigger" ) // TODO(Zhe): Too many error types here
+ERROR( bulkload_task_launch_failed, 1303, "Bulk load task is failed to launch" )
+ERROR( bulkload_task_wait_end_failed, 1304, "Bulk load task is failed to wait end" )
+ERROR( bulkload_task_terminate_failed, 1305, "Bulk load task is failed to terminate" )
+ERROR( bulkload_task_timed_out, 1306, "Bulk load task is timed out" )
+ERROR( bulkload_task_launch_overwritten, 1307, "Bulk load task is failed to launch due to new bulk load" )
+ERROR( bulkload_task_launch_failed_for_remote_recovery, 1308, "Bulk load task is failed to launch due to remote recovery")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

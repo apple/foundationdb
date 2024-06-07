@@ -528,7 +528,6 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
-	KeyRangeMap<std::pair<UID, Version>> bulkLoadingMap; // BulkLoadTaskID, BulkLoadTaskCommitVerison
 };
 
 // Holds the permitted size and IO Bounds for a shard

@@ -1417,12 +1417,26 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 }
 
 ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self, Future<Void> readyToStart) {
-	wait(readyToStart && waitForBulkLoadModeOn(self));
-	self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
-	TraceEvent(SevInfo, "DDBulkLoadRetriggeredDone", self->ddId);
-	wait(self->bulkLoadActors.getResult());
-	self->bulkLoadActors.clear(true);
-	TraceEvent(SevInfo, "DDBulkLoadResumeDone", self->ddId);
+	loop {
+		try {
+			wait(readyToStart && waitForBulkLoadModeOn(self));
+			self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
+			TraceEvent(SevInfo, "DDBulkLoadRetriggeredDone", self->ddId);
+			wait(self->bulkLoadActors.getResult());
+			self->bulkLoadActors.clear(true);
+			TraceEvent(SevInfo, "DDBulkLoadResumeDone", self->ddId);
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevInfo, "DDBulkLoadResumeError", self->ddId).errorUnsuppressed(e);
+			if (e.code() == error_code_movekeys_conflict) {
+				throw e;
+			}
+			wait(delay(5.0));
+		}
+	}
 	return Void();
 }
 

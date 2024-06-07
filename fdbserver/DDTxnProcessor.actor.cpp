@@ -479,8 +479,6 @@ class DDTxnProcessorImpl {
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
 
-		result->bulkLoadingMap.insert(
-		    allKeys, std::make_pair(UID(), invalidVersion)); // TODO(Zhe): do not use init bulkLoadingMap
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 				const DDShardInfo& iShard = result->shards[shard];

@@ -2001,7 +2001,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
-
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			std::unique_ptr<MoveKeysParams> params;
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
