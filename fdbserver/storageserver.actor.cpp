@@ -1766,7 +1766,7 @@ public:
 			auto sh = shards.intersectingRanges(newShard->keys);
 			for (auto it = sh.begin(); it != sh.end(); ++it) {
 				if (it->value().isValid() && !it->value()->notAssigned()) {
-					TraceEvent(SevInfo, "StorageServerAddShardClear")
+					TraceEvent(SevVerbose, "StorageServerAddShardClear")
 					    .detail("NewShardRange", newShard->keys)
 					    .detail("Range", it->value()->keys)
 					    .detail("ShardID", format("%016llx", it->value()->desiredShardId))
