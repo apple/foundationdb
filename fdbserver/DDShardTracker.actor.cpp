@@ -1249,12 +1249,14 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
-	bool bulkLoading = existBulkLoading(self->bulkLoadingMap, keys);
-	if (bulkLoading && shouldSplit) {
+	bool onBulkLoading = existBulkLoading(self->bulkLoadingMap, keys);
+	if (onBulkLoading && shouldSplit) {
 		TraceEvent(SevWarn, "ShardWantToSplitButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("KeyRange", keys);
 		shouldSplit = false;
+		// Bulk loading will delay shard boundary change until the loading completes
+		onChange = onChange || delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC);
 	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
@@ -1268,11 +1270,13 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow &&
 	                   (shardForwardMergeFeasible(self, keys, nextIter.range()) ||
 	                    shardBackwardMergeFeasible(self, keys, prevIter.range()));
-	if (bulkLoading && shouldMerge) {
+	if (onBulkLoading && shouldMerge) {
 		TraceEvent(SevWarn, "ShardWantToMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("KeyRange", keys);
 		shouldMerge = false;
+		// Bulk loading will delay shard boundary change until the loading completes
+		onChange = onChange || delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC);
 	}
 
 	// Every invocation must set this or clear it

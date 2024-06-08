@@ -108,13 +108,24 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	std::vector<KeyValue> generateRandomData(KeyRange range, int iterations, std::vector<Key> keyCandidates) {
+	Key getRandomKey(const std::vector<Key>& keyCharList, size_t keySizeMin, size_t keySizeMax) {
+		Key key = ""_sr;
+		int keyLength = deterministicRandom()->randomInt(keySizeMin, keySizeMax);
+		for (int j = 0; j < keyLength; j++) {
+			Key appendedItem = deterministicRandom()->randomChoice(keyCharList);
+			key = key.withSuffix(appendedItem);
+		}
+		return key;
+	}
+
+	std::vector<KeyValue> generateRandomData(KeyRange range, size_t count, const std::vector<Key>& keyCharList) {
 		std::set<Key> keys;
-		for (int i = 0; i < iterations; i++) {
-			Key key = deterministicRandom()->randomChoice(keyCandidates);
-			if (range.contains(key)) {
-				keys.insert(key);
+		while (keys.size() < count) {
+			Key key = getRandomKey(keyCharList, 1, 100);
+			if (!range.contains(key)) {
+				continue;
 			}
+			keys.insert(key);
 		}
 		std::vector<KeyValue> res;
 		for (const auto& key : keys) {
@@ -122,6 +133,7 @@ struct BulkLoading : TestWorkload {
 			Value val = Standalone(StringRef(randomId.toString()));
 			res.push_back(Standalone(KeyValueRef(key, val)));
 		}
+		ASSERT(res.size() == count);
 		return res;
 	}
 
@@ -247,30 +259,13 @@ struct BulkLoading : TestWorkload {
 		return bulkLoadTask;
 	}
 
-	std::vector<Key> getRandomKeyList() {
-		int keyListCount = 1000000;
-		std::vector<Key> keyList;
-		std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
-		for (int i = 0; i < keyListCount; i++) {
-			Key key = ""_sr;
-			int keyLength = deterministicRandom()->randomInt(1, 100);
-			for (int j = 0; j < keyLength; j++) {
-				Key appendedItem = deterministicRandom()->randomChoice(keyCharList);
-				key = key.withSuffix(appendedItem);
-			}
-			keyList.push_back(key);
-		}
-		return keyList;
-	}
-
 	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
 		}
 
-		std::vector<Key> keyCandidates = self->getRandomKeyList();
+		std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
 
-		std::vector<Key> keyList = self->getRandomKeyList();
 		std::string dataFileName = generateRandomBulkLoadDataFileName();
 		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
 		KeyRange range = Standalone(KeyRangeRef("1"_sr, "2"_sr));
@@ -278,7 +273,8 @@ struct BulkLoading : TestWorkload {
 
 		state BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask = self->newBulkLoadTask(range, folder, dataFileName, bytesSampleFileName);
-		taskUnit.data = self->generateRandomData(range, 10000, keyCandidates); // TODO(Zhe): increase size
+		size_t dataSize = deterministicRandom()->randomInt(10, 10000);
+		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
 		self->produceFilesToLoad(taskUnit);
 
 		wait(self->setBulkLoadMode(cx, /*on=*/true));
