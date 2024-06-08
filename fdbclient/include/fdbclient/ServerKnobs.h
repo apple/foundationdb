@@ -387,6 +387,7 @@ public:
 	                                            // schedule tasks
 	double DD_BULKLOAD_TASK_TIMEOUT;
 	int DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX;
+	int BULKLOAD_FILE_BYTES_MAX;
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

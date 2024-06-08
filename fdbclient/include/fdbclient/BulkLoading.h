@@ -44,6 +44,14 @@ enum class BulkLoadAckType : uint8_t {
 	Succeed = 1,
 };
 
+enum class BulkLoadTransportMethod : uint8_t {
+	Invalid = 0,
+	CP = 1,
+	SCP = 2,
+	Blob = 3,
+	S3 = 4,
+};
+
 struct BulkLoadState {
 	constexpr static FileIdentifier file_identifier = 1384499;
 
@@ -61,7 +69,7 @@ struct BulkLoadState {
 		std::string res = "BulkLoadState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		                  ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
 		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
-		                  ", [FilePath]: " + describe(filePaths);
+		                  ", [DataFiles]: " + describe(dataFiles);
 		if (bytesSampleFile.present()) {
 			res = res + ", [ByteSampleFile]: " + bytesSampleFile.get();
 		}
@@ -84,15 +92,27 @@ struct BulkLoadState {
 		dataMoveId = id;
 	}
 
+	bool setTransportMethod(BulkLoadTransportMethod method) {
+		transportMethod = method;
+		// TODO(Zhe): do some validation between method and path
+		if (method == BulkLoadTransportMethod::Invalid) {
+			return false;
+		} else if (method == BulkLoadTransportMethod::CP) {
+			return true;
+		} else {
+			throw not_implemented();
+		}
+	}
+
 	bool addDataFile(std::string filePath) {
 		if (filePath.substr(0, folder.size()) != folder) {
 			return false;
 		}
-		filePaths.insert(filePath);
+		dataFiles.insert(filePath);
 		return true;
 	}
 
-	bool addByteSampleFile(std::string filePath) {
+	bool setByteSampleFile(std::string filePath) {
 		if (filePath.substr(0, folder.size()) != folder) {
 			return false;
 		}
@@ -102,18 +122,20 @@ struct BulkLoadState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, phase, folder, filePaths, bytesSampleFile, dataMoveId, taskId);
+		serializer(ar, range, loadType, transportMethod, phase, folder, dataFiles, bytesSampleFile, dataMoveId, taskId);
 	}
 
 	KeyRange range;
 	BulkLoadType loadType;
+	BulkLoadTransportMethod transportMethod;
 	BulkLoadPhase phase;
-	std::string folder;
-	std::unordered_set<std::string> filePaths;
-	Optional<std::string> bytesSampleFile;
+	std::string folder; // Used by SS to inject files
+	std::unordered_set<std::string> dataFiles; // Used by SS to inject files
+	Optional<std::string> bytesSampleFile; // Used by SS to inject files
 	Optional<UID> dataMoveId;
 	UID taskId;
 	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
+	// TODO(Zhe): add file checksum
 };
 
 #endif
