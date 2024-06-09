@@ -168,7 +168,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		// See https://github.com/apple/foundationdb/issues/2424
 		if (BUGGIFY) {
-			enableBuggify(true, BuggifyType::Client);
+			enableClientBuggify();
 		}
 
 		if (adjacentKeys) {

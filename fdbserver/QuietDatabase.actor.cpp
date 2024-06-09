@@ -1024,7 +1024,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
+	state QuietDatabaseChecker checker(isGeneralBuggifyEnabled() ? 4000.0 : 1000.0);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;

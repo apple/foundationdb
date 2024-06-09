@@ -816,7 +816,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("CommandLine", "fdbserver -r simulation")
-			    .detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
+			    .detail("BuggifyEnabled", isGeneralBuggifyEnabled())
 			    .detail("Simulated", true)
 			    .trackLatest("ProgramStart");
 
@@ -2986,11 +2986,11 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		                                  rebooting);
 		wait(testConfig.longRunningTest ? runTestsF
 		                                : timeoutError(runTestsF,
-		                                               isBuggifyEnabled(BuggifyType::General)
+		                                              isGeneralBuggifyEnabled()
 		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
 		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
-		auto timeoutVal = isBuggifyEnabled(BuggifyType::General) ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		auto timeoutVal =isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
 		                                                         : testConfig.simulationNormalRunTestsTimeoutSeconds;
 		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
 		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);

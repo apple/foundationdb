@@ -365,7 +365,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    rangeCount > ((prevAdjacent || nextAdjacent) ? CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT
 					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT) &&
 					    (!g_network->isSimulated() ||
-					     (isBuggifyEnabled(BuggifyType::General) && !g_simulator->speedUpSimulation))) {
+					     (isGeneralBuggifyEnabled() && !g_simulator->speedUpSimulation))) {
 						CODE_PROBE(true, "range insert delayed because versionMap is too large");
 
 						if (rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)

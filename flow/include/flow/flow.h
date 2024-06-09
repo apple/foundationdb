@@ -33,6 +33,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <iosfwd>
 #include <functional>
 #include <memory>
@@ -44,6 +45,7 @@
 #include <utility>
 #include <vector>
 
+#include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
 #include "flow/Deque.h"
 #include "flow/Error.h"
@@ -78,38 +80,6 @@
 		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
 	} while (false)
 
-/*
-usage:
-if (BUGGIFY) (
-// code here is executed on some runs (with probability P_BUGGIFIED_SECTION_ACTIVATED),
-//  sometimes --
-)
-*/
-
-extern std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED, P_BUGGIFIED_SECTION_FIRES;
-extern double P_EXPENSIVE_VALIDATION;
-enum class BuggifyType : uint8_t { General = 0, Client };
-bool isBuggifyEnabled(BuggifyType type);
-void clearBuggifySections(BuggifyType type);
-int getSBVar(std::string const& file, int line, BuggifyType);
-void enableBuggify(bool enabled,
-                   BuggifyType type); // Currently controls buggification and (randomized) expensive validation
-bool validationIsEnabled(BuggifyType type);
-
-#define BUGGIFY_WITH_PROB(x)                                                                                           \
-	(getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
-#define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)])
-#define EXPENSIVE_VALIDATION                                                                                           \
-	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
-
-namespace SwiftBridging {
-
-inline bool buggify(const char * _Nonnull filename, int line) {
-    // SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
-    return getSBVar(filename, line, BuggifyType::General) && deterministicRandom()->random01() < (P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)]);
-}
-
-} // namespace SwiftBridging
 
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");

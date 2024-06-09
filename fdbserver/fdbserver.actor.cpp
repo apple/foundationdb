@@ -1986,7 +1986,11 @@ int main(int argc, char* argv[]) {
 
 		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
-		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
+		if (opts.buggifyEnabled) {
+			enableGeneralBuggify();
+		} else {
+			disableGeneralBuggify();
+		}
 		enableFaultInjection(opts.faultInjectionEnabled);
 
 		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
