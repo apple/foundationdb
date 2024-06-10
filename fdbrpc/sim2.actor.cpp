@@ -364,7 +364,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			TraceEvent("SimulatedDisconnection")
 			    .detail("Phase", "Connect")
 			    .detail("Address", process->address)
-			    .detail("Peer", peerProcess->address);
+			    .detail("Peer", peerProcess->address)
+			    .detail("PeerAddress", peerProcess->address);
 			throw connection_failed();
 		}
 
@@ -586,6 +587,7 @@ private:
 			TraceEvent("ConnectionFailure", dbgid)
 			    .detail("MyAddr", process->address)
 			    .detail("PeerAddr", peerProcess->address)
+			    .detail("PeerAddress", peerProcess->address)
 			    .detail("PeerIsValid", peer.isValid())
 			    .detail("SendClosed", a > .33)
 			    .detail("RecvClosed", a < .66)
@@ -619,6 +621,7 @@ private:
 		    .detail("MyAddr", self->process->address)
 		    .detail("IsPublic", self->process->address.isPublic())
 		    .detail("PeerAddr", self->peerEndpoint)
+		    .detail("PeerAddress", self->peerEndpoint)
 		    .detail("PeerId", self->peerId)
 		    .detail("Opened", self->opened);
 		return Void();

@@ -43,6 +43,7 @@ ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	DebugLogTraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
 	    .detail("Tag", self->tag)
 	    .detail("PeerAddr", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
+	    .detail("PeerAddress", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
 	    .detail("PeerToken", self->interf->get().interf().peekStreamMessages.getEndpoint().token);
 	return Void();
 }
