@@ -237,7 +237,7 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 		return
 	}
 
-	podClient.Logger.Info("Got event for OnAdd", "name", pod.Name, "namespace", pod.Namespace, "generation", pod.Generation)
+	podClient.Logger.Info("Got event for OnUpdate", "name", pod.Name, "namespace", pod.Namespace, "generation", pod.Generation)
 
 	podClient.metadata = &metav1.PartialObjectMetadata{
 		TypeMeta:   pod.TypeMeta,
