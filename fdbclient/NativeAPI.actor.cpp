@@ -2579,10 +2579,10 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		tlsConfig.setDisablePlainTextConnection(true);
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
-	 	enableClientBuggify();
+		enableClientBuggify();
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_DISABLE:
-	 	disableClientBuggify();
+		disableClientBuggify();
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
 		validateOptionValuePresent(value);

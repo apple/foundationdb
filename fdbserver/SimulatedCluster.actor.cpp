@@ -2984,14 +2984,14 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		                                  defaultTenant,
 		                                  tenantsToCreate,
 		                                  rebooting);
-		wait(testConfig.longRunningTest ? runTestsF
-		                                : timeoutError(runTestsF,
-		                                              isGeneralBuggifyEnabled()
-		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
+		wait(testConfig.longRunningTest
+		         ? runTestsF
+		         : timeoutError(runTestsF,
+		                        isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                                  : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
-		auto timeoutVal =isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                                         : testConfig.simulationNormalRunTestsTimeoutSeconds;
+		auto timeoutVal = isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                            : testConfig.simulationNormalRunTestsTimeoutSeconds;
 		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
 		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		TraceEvent(SevError, "SetupAndRunError").error(e);
