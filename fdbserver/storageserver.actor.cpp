@@ -3237,7 +3237,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (data->version.get() < req.begin) {
@@ -3284,7 +3285,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FetchVersion", feedInfo->fetchVersion)
 		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
 		    .detail("DurableValidationVersion", durableValidationVersion)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -3711,7 +3713,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("PopVersion", reply.popVersion)
 		    .detail("Count", reply.mutations.size())
 		    .detail("GotAll", gotAll)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
@@ -3793,7 +3796,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
@@ -3835,7 +3839,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
 			    .detail("Version", req.begin - 1)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		loop {
@@ -3852,7 +3857,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
 					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 				removeUID = true;
 			}
@@ -3874,7 +3880,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
 					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 			}
 			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
@@ -6094,7 +6101,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
 
-	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+	for (; offset < sz && *remainingLimitBytes > 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];

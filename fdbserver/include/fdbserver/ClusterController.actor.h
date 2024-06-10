@@ -3034,7 +3034,8 @@ public:
 			TraceEvent("ClusterControllerReceivedPeerRecovering")
 			    .suppressFor(10.0)
 			    .detail("Worker", req.address)
-			    .detail("Peer", peer);
+			    .detail("Peer", peer)
+			    .detail("PeerAddress", peer);
 			health.degradedPeers.erase(peer);
 			health.disconnectedPeers.erase(peer);
 		}
@@ -3066,7 +3067,10 @@ public:
 		for (auto& [workerAddress, health] : workerHealth) {
 			for (auto it = health.degradedPeers.begin(); it != health.degradedPeers.end();) {
 				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
-					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
+					TraceEvent("WorkerPeerHealthRecovered")
+					    .detail("Worker", workerAddress)
+					    .detail("Peer", it->first)
+					    .detail("PeerAddress", it->first);
 					health.degradedPeers.erase(it++);
 				} else {
 					++it;
@@ -3074,7 +3078,10 @@ public:
 			}
 			for (auto it = health.disconnectedPeers.begin(); it != health.disconnectedPeers.end();) {
 				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
-					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
+					TraceEvent("WorkerPeerHealthRecovered")
+					    .detail("Worker", workerAddress)
+					    .detail("Peer", it->first)
+					    .detail("PeerAddress", it->first);
 					health.disconnectedPeers.erase(it++);
 				} else {
 					++it;
