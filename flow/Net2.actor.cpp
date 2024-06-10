@@ -369,6 +369,11 @@ public:
 					if (error.value() >= (1 << 24L)) {
 						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
 					}
+
+					if (peerAddr.isValid()) {
+						evt.detail("PeerAddr", peerAddr);
+						evt.detail("PeerAddress", peerAddr);
+					}
 				}
 
 				p.sendError(connection_failed());
@@ -533,6 +538,7 @@ private:
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
+			    .detail("PeerAddress", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
 	}
@@ -541,6 +547,7 @@ private:
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
+		    .detail("PeerAddress", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -549,6 +556,7 @@ private:
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
+		    .detail("PeerAddress", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -809,6 +817,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
+				    .detail("PeerAddr", h.getPeerAddress())
+				    .detail("PeerAddress", h.getPeerAddress())
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
@@ -820,6 +830,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			TraceEvent(SevWarn,
 			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"_audit
 			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
+			    .detail("PeerAddr", h.getPeerAddress())
+			    .detail("PeerAddress", h.getPeerAddress())
 			    .detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
@@ -1156,6 +1168,7 @@ private:
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
+		    .detail("PeerAddress", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1164,6 +1177,7 @@ private:
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
+		    .detail("PeerAddress", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
