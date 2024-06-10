@@ -35,12 +35,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/utils/pointer"
-
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/utils/pointer"
 )
 
 // maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
@@ -106,6 +106,7 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		Logger:                  logger,
 		CustomEnvironment:       customEnvironment,
 		ProcessCount:            processCount,
+		ProcessIDs:              make([]int, processCount+1),
 		CurrentContainerVersion: currentContainerVersion,
 	}
 
@@ -198,16 +199,13 @@ func checkOwnerExecutable(path string) error {
 func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
-	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 
-	if monitor.ProcessIDs == nil {
-		monitor.ProcessIDs = make([]int, monitor.ProcessCount+1)
-	} else {
-		for len(monitor.ProcessIDs) <= monitor.ProcessCount {
-			monitor.ProcessIDs = append(monitor.ProcessIDs, 0)
-		}
+	// If the configuration hasn't changed ignore those events to prevent noisy logging.
+	if equality.Semantic.DeepEqual(monitor.ActiveConfiguration, configuration) {
+		return
 	}
 
+	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 	monitor.ActiveConfiguration = configuration
 	monitor.ActiveConfigurationBytes = configurationBytes
 	monitor.LastConfigurationTime = time.Now()
@@ -247,7 +245,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 	var errorCounter int
 
 	for {
-		if !monitor.checkProcessRequired(processNumber) {
+		if !monitor.processRequired(processNumber) {
 			return
 		}
 
@@ -343,19 +341,22 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 	}
 }
 
-// checkProcessRequired determines if the latest configuration requires that a
+// processRequired determines if the latest configuration requires that a
 // process stay running.
 // If the process is no longer desired, this will remove it from the process ID
 // list and return false. If the process is still desired, this will return
 // true.
-func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
+func (monitor *Monitor) processRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
-	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
+	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "processRequired")
 	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
 	if monitor.ProcessCount < processNumber || !runProcesses {
-		logger.Info("Terminating run loop")
-		monitor.ProcessIDs[processNumber] = 0
+		if monitor.ProcessIDs[processNumber] != 0 {
+			logger.Info("Terminating run loop")
+			monitor.ProcessIDs[processNumber] = 0
+		}
+
 		return false
 	}
 
@@ -409,19 +410,21 @@ func (monitor *Monitor) Run() {
 		// Reset the ProcessCount to 0 to make sure the monitor doesn't try to restart the processes.
 		monitor.ProcessCount = 0
 		for processNumber, processID := range monitor.ProcessIDs {
-			if processID > 0 {
-				subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
-				process, err := os.FindProcess(processID)
-				if err != nil {
-					subprocessLogger.Error(err, "Error finding subprocess")
-					continue
-				}
-				subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
-				err = process.Signal(latestSignal)
-				if err != nil {
-					subprocessLogger.Error(err, "Error signaling subprocess")
-					continue
-				}
+			if processID <= 0 {
+				continue
+			}
+
+			subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
+			process, err := os.FindProcess(processID)
+			if err != nil {
+				subprocessLogger.Error(err, "Error finding subprocess")
+				continue
+			}
+			subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
+			err = process.Signal(latestSignal)
+			if err != nil {
+				subprocessLogger.Error(err, "Error signaling subprocess")
+				continue
 			}
 		}
 
