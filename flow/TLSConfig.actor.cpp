@@ -157,19 +157,21 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 
 void ConfigureSSLStream(Reference<TLSPolicy> policy,
                         boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
+                        const NetworkAddress& peerAddress,
                         std::function<void(bool)> callback) {
 	try {
-		stream.set_verify_callback([policy, callback](bool preverified, boost::asio::ssl::verify_context& ctx) {
-			bool success = policy->verify_peer(preverified, ctx.native_handle());
-			if (!success) {
-				if (policy->on_failure)
-					policy->on_failure();
-			}
-			if (callback) {
-				callback(success);
-			}
-			return success;
-		});
+		stream.set_verify_callback(
+		    [policy, peerAddress, callback](bool preverified, boost::asio::ssl::verify_context& ctx) {
+			    bool success = policy->verify_peer(preverified, ctx.native_handle(), peerAddress);
+			    if (!success) {
+				    if (policy->on_failure)
+					    policy->on_failure();
+			    }
+			    if (callback) {
+				    callback(success);
+			    }
+			    return success;
+		    });
 	} catch (boost::system::system_error& e) {
 		TraceEvent("TLSStreamConfigureError")
 		    .detail("What", e.what())
@@ -990,11 +992,12 @@ bool PeerVerifier::verify() {
 
 } // anonymous namespace
 
-bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
+bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx, const NetworkAddress& peerAddress) {
 	// Preverification
 	if (!preverified) {
 		TraceEvent(SevWarn, "TLSPolicyFailure")
 		    .suppressFor(1.0)
+		    .detail("PeerAddress", peerAddress)
 		    .detail("Reason", "preverification failed")
 		    .detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
 		return false;
@@ -1013,11 +1016,15 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 
 			TraceEvent(SevWarn, eventName.c_str())
 			    .suppressFor(1.0)
+			    .detail("PeerAddress", peerAddress)
 			    .detail("Reason", failureReason)
 			    .detail("Rule", rule.toString());
 		}
 	} else {
-		TraceEvent(SevInfo, "TLSPolicySuccess").suppressFor(1.0).detail("Reason", verifier.getSuccessReason());
+		TraceEvent(SevInfo, "TLSPolicySuccess")
+		    .suppressFor(1.0)
+		    .detail("PeerAddress", peerAddress)
+		    .detail("Reason", verifier.getSuccessReason());
 	}
 
 	return verifier.isOk();
