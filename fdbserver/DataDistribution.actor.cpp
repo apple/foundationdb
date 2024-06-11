@@ -1461,6 +1461,37 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 	}
 }
 
+ACTOR Future<Void> triggerBulkLoading(Reference<DataDistributor> self, TriggerBulkLoadRequest req) {
+	state Database cx = self->txnProcessor->context();
+	state Transaction tr(cx);
+	state UID taskId;
+	try {
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				taskId = deterministicRandom()->randomUniqueID();
+				req.bulkLoadTask.setTaskId(taskId);
+				wait(krmSetRange(&tr, bulkLoadPrefix, req.bulkLoadTask.range, bulkLoadStateValue(req.bulkLoadTask)));
+				wait(tr.commit());
+				TraceEvent(SevInfo, "BulkLoadTriggerTask", self->ddId)
+				    .detail("BulkLoadState", req.bulkLoadTask.toString());
+				req.reply.send(taskId);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevWarn, "BulkLoadTriggerTaskError", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("BulkLoadState", req.bulkLoadTask.toString());
+	}
+	return Void();
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -3946,6 +3977,9 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 					continue;
 				}
 				actors.add(auditStorage(self, req));
+			}
+			when(TriggerBulkLoadRequest req = waitNext(di.triggerBulkLoad.getFuture())) {
+				actors.add(triggerBulkLoading(self, req));
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));

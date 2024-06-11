@@ -74,6 +74,7 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef("\xff\xff/actor_profiler_conf/"_sr, "\xff\xff/actor_profiler_conf0"_sr) },
 	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange("\xff\xff/cluster_id"_sr) },
+	{ SpecialKeySpace::MODULE::BULKLOADING, KeyRangeRef("\xff\xff/bulk_loading/"_sr, "\xff\xff/bulk_loading0"_sr) },
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -2715,6 +2716,45 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 		}
 	}
 	return msg;
+}
+
+BulkLoadModeImpl::BulkLoadModeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> BulkLoadModeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	throw not_implemented();
+}
+
+void BulkLoadModeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	throw not_implemented();
+}
+
+void BulkLoadModeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	throw not_implemented();
+}
+
+void BulkLoadModeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	Key modeKey = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin.withSuffix("mode"_sr);
+	ryw->getSpecialKeySpaceWriteMap().insert(modeKey, std::make_pair(true, value));
+	TraceEvent("BulkLoadSetMode").detail("Value", value.toString());
+}
+
+Future<Optional<std::string>> BulkLoadModeImpl::commit(ReadYourWritesTransaction* ryw) {
+	KeyRangeRef kr = getKeyRange();
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (!iter->value().first)
+			continue;
+		if (iter->value().second.present()) {
+			ASSERT(iter->range() == kr);
+			int mode = BinaryReader::fromStringRef<int>(iter->value().second.get(), Unversioned());
+			ryw->getTransaction().set(bulkLoadModeKey, BinaryWriter::toValue(mode, Unversioned()));
+			TraceEvent("BulkLoadSetModeCommit").detail("Value", mode);
+		}
+	}
+	TraceEvent("BulkLoadSetModeCommitDone").detail("KR", kr.toString());
+	return Optional<std::string>();
 }
 
 // Clears the special management api keys excludeLocality and failedLocality.

@@ -2193,6 +2193,47 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 	}
 }
 
+ACTOR Future<Void> triggerBulkLoad(ClusterControllerData* self, TriggerBulkLoadRequest req) {
+	state UID bulkLoadId;
+	try {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		       !self->db.serverInfo->get().distributor.present()) {
+			wait(self->db.serverInfo->onChange());
+		}
+		TraceEvent(SevVerbose, "CCTriggerBulkLoadBegin", self->id)
+		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		TriggerBulkLoadRequest fReq(req.bulkLoadTask);
+		UID bulkLoadId_ = wait(self->db.serverInfo->get().distributor.get().triggerBulkLoad.getReply(fReq));
+		bulkLoadId = bulkLoadId_;
+		TraceEvent(SevVerbose, "CCTriggerBulkLoadEnd", self->id)
+		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		req.reply.send(bulkLoadId);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevInfo, "CCTriggerBulkLoadFailed", self->id)
+		    .errorUnsuppressed(e)
+		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		req.reply.sendError(bulkload_task_failed());
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> handleTriggerBulkLoad(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	loop {
+		TriggerBulkLoadRequest req = waitNext(interf.clientInterface.triggerBulkLoad.getFuture());
+		TraceEvent(SevVerbose, "CCTriggerBulkLoadReceived", self->id)
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("Task", req.bulkLoadTask.toString());
+		self->addActor.send(triggerBulkLoad(self, req));
+	}
+}
+
 ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
@@ -3163,6 +3204,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleTriggerAuditStorage(&self, interf));
+	self.addActor.send(handleTriggerBulkLoad(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));

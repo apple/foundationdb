@@ -2325,6 +2325,23 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 	}
 }
 
+ACTOR Future<Void> setBulkLoadMode(Database cx, int mode) {
+	state ReadYourWritesTransaction tr(cx);
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr.set("\xff\xff/bulk_loading/mode"_sr, wr.toValue());
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                                    std::set<AddressExclusion>* exclusions,
                                                    std::set<NetworkAddress>* inProgressExclusion) {
@@ -2791,6 +2808,32 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 	}
 
 	return auditId;
+}
+
+ACTOR Future<UID> triggerBulkLoad(Reference<IClusterConnectionRecord> clusterFile,
+                                  BulkLoadState bulkLoadTask,
+                                  double timeoutSeconds) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevVerbose, "ManagementAPITriggerBulkLoad").detail("BulkLoadTask", bulkLoadTask.toString());
+	state UID taskId;
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		TraceEvent(SevVerbose, "ManagementAPITriggerBulkLoadBegin").detail("BulkLoadTask", bulkLoadTask.toString());
+		TriggerBulkLoadRequest req(bulkLoadTask);
+		UID taskId_ = wait(timeoutError(clusterInterface->get().get().triggerBulkLoad.getReply(req), timeoutSeconds));
+		taskId = taskId_;
+		TraceEvent(SevVerbose, "ManagementAPITriggerBulkLoadEnd").detail("BulkLoadTask", bulkLoadTask.toString());
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ManagementAPITriggerBulkLoadError")
+		    .errorUnsuppressed(e)
+		    .detail("BulkLoadTask", bulkLoadTask.toString());
+		throw e;
+	}
+
+	return taskId;
 }
 
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {

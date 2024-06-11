@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BulkLoading.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
@@ -72,22 +73,26 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	ACTOR Future<Void> setBulkLoadMode(Database cx, bool on) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.set(bulkLoadModeKey, BinaryWriter::toValue(on ? "1"_sr : "0"_sr, Unversioned()));
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+	ACTOR Future<Void> issueBulkLoadTasksFdbcli(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+		state int i = 0;
+		for (; i < tasks.size(); i++) {
+			loop {
+				try {
+					UID taskId_ = wait(triggerBulkLoad(cx->getConnectionRecord(), tasks[i], /*timeoutSecond=*/300));
+					TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks[i]));
+					break;
+				} catch (Error& e) {
+					TraceEvent("BulkLoadingIssueBulkLoadTaskError")
+					    .errorUnsuppressed(e)
+					    .detail("BulkLoadStates", describe(tasks));
+					wait(delay(5.0));
+				}
 			}
 		}
 		return Void();
 	}
 
-	ACTOR Future<Void> issueBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+	ACTOR Future<Void> issueBulkLoadTasksTr(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -104,6 +109,15 @@ struct BulkLoading : TestWorkload {
 				    .detail("BulkLoadStates", describe(tasks));
 				wait(tr.onError(e));
 			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> issueBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+		if (deterministicRandom()->coinflip()) {
+			wait(self->issueBulkLoadTasksTr(self, cx, tasks));
+		} else {
+			wait(self->issueBulkLoadTasksFdbcli(self, cx, tasks));
 		}
 		return Void();
 	}
@@ -252,7 +266,7 @@ struct BulkLoading : TestWorkload {
 	                              std::string folder,
 	                              std::string dataFile,
 	                              std::string bytesSampleFile) {
-		BulkLoadState bulkLoadTask(range, BulkLoadType::ShardedRocksDB, folder);
+		BulkLoadState bulkLoadTask(range, BulkLoadType::SST, folder);
 		ASSERT(bulkLoadTask.addDataFile(joinPath(folder, dataFile)));
 		ASSERT(bulkLoadTask.setByteSampleFile(joinPath(folder, bytesSampleFile)));
 		ASSERT(bulkLoadTask.setTransportMethod(BulkLoadTransportMethod::CP)); // local file copy
@@ -277,12 +291,12 @@ struct BulkLoading : TestWorkload {
 		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
 		self->produceFilesToLoad(taskUnit);
 
-		wait(self->setBulkLoadMode(cx, /*on=*/true));
+		wait(setBulkLoadMode(cx, 1));
 		wait(self->issueBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
 		TraceEvent("BulkLoadingWorkLoadAllComplete");
-		wait(self->setBulkLoadMode(cx, /*on=*/false));
+		wait(setBulkLoadMode(cx, 0));
 
 		wait(self->checkData(cx, taskUnit.data));
 		TraceEvent("BulkLoadingWorkLoadCheckedData");

@@ -34,9 +34,7 @@ enum class BulkLoadPhase : uint8_t {
 
 enum class BulkLoadType : uint8_t {
 	Invalid = 0,
-	SQLite = 1,
-	RocksDB = 2,
-	ShardedRocksDB = 3,
+	SST = 1,
 };
 
 enum class BulkLoadAckType : uint8_t {
@@ -47,9 +45,6 @@ enum class BulkLoadAckType : uint8_t {
 enum class BulkLoadTransportMethod : uint8_t {
 	Invalid = 0,
 	CP = 1,
-	SCP = 2,
-	Blob = 3,
-	S3 = 4,
 };
 
 struct BulkLoadState {
@@ -136,6 +131,21 @@ struct BulkLoadState {
 	UID taskId;
 	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
 	// TODO(Zhe): add file checksum
+};
+
+struct TriggerBulkLoadRequest {
+	constexpr static FileIdentifier file_identifier = 1384500;
+
+	TriggerBulkLoadRequest() = default;
+	TriggerBulkLoadRequest(BulkLoadState bulkLoadTask) : bulkLoadTask(bulkLoadTask) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, bulkLoadTask, reply);
+	}
+
+	BulkLoadState bulkLoadTask;
+	ReplyPromise<UID> reply;
 };
 
 #endif
