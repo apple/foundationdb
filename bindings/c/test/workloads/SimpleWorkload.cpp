@@ -256,7 +256,7 @@ struct SimpleWorkload final : FDBWorkload {
 		}
 	};
 
-	std::string description() const override { return name; }
+	// std::string description() const override { return name; }
 	bool init(FDBWorkloadContext* context) override {
 		this->context = context;
 		context->trace(FDBSeverity::Info, "SimpleWorkloadInit", {});
