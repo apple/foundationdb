@@ -227,6 +227,7 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 // callback(true) will be called 3 times.
 void ConfigureSSLStream(Reference<TLSPolicy> policy,
                         boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
+                        const NetworkAddress& peerAddress,
                         std::function<void(bool)> callback);
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
@@ -241,7 +242,7 @@ public:
 
 	static std::string ErrorString(boost::system::error_code e);
 
-	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx);
+	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx, const NetworkAddress& peerAddress);
 
 	std::string toString() const;
 
