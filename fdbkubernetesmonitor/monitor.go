@@ -35,22 +35,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/utils/pointer"
-
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/utils/pointer"
 )
 
-// errorBackoffSeconds is the time to wait after a process fails before starting
-// another process.
-// This delay will only be applied when there has been more than one failure
-// within this time window.
-const errorBackoffSeconds = 60
+// maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
+// The actual delay will be based on the observed errors and will increase until maxErrorBackoffSeconds is hit.
+const maxErrorBackoffSeconds = 60 * time.Second
 
 // Monitor provides the main monitor loop
 type Monitor struct {
@@ -114,6 +111,7 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		Logger:                  logger,
 		CustomEnvironment:       customEnvironment,
 		ProcessCount:            processCount,
+		ProcessIDs:              make([]int, processCount+1),
 		CurrentContainerVersion: currentContainerVersion,
 	}
 
@@ -213,16 +211,13 @@ func checkOwnerExecutable(path string) error {
 func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
-	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 
-	if monitor.ProcessIDs == nil {
-		monitor.ProcessIDs = make([]int, monitor.ProcessCount+1)
-	} else {
-		for len(monitor.ProcessIDs) <= monitor.ProcessCount {
-			monitor.ProcessIDs = append(monitor.ProcessIDs, 0)
-		}
+	// If the configuration hasn't changed ignore those events to prevent noisy logging.
+	if equality.Semantic.DeepEqual(monitor.ActiveConfiguration, configuration) {
+		return
 	}
 
+	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 	monitor.ActiveConfiguration = configuration
 	monitor.ActiveConfigurationBytes = configurationBytes
 	monitor.LastConfigurationTime = time.Now()
@@ -243,20 +238,44 @@ func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 	}
 }
 
+// getBackoffDuration returns the backoff duration. The backoff time will increase exponential with a maximum of 60 seconds.
+func getBackoffDuration(errorCounter int) time.Duration {
+	timeToBackoff := time.Duration(errorCounter*errorCounter) * time.Second
+	if timeToBackoff > maxErrorBackoffSeconds {
+		return maxErrorBackoffSeconds
+	}
+
+	return timeToBackoff
+}
+
 // RunProcess runs a loop to continually start and watch a process.
 func (monitor *Monitor) RunProcess(processNumber int) {
 	pid := 0
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "RunProcess")
 	logger.Info("Starting run loop")
+	startTime := time.Now()
+	// Counts the successive errors that occurred during process start up. Based on the error count the backoff time
+	// will be calculated.
+	var errorCounter int
+
 	for {
-		if !monitor.checkProcessRequired(processNumber) {
+		if !monitor.processRequired(processNumber) {
 			return
+		}
+
+		durationSinceLastStart := time.Since(startTime)
+		// If for more than 5 minutes no error have occurred we reset the error counter to reset the backoff time.
+		if durationSinceLastStart > 5*time.Minute {
+			errorCounter = 0
 		}
 
 		arguments, err := monitor.ActiveConfiguration.GenerateArguments(processNumber, monitor.CustomEnvironment)
 		if err != nil {
-			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration)
-			time.Sleep(errorBackoffSeconds * time.Second)
+			backoffDuration := getBackoffDuration(errorCounter)
+			logger.Error(err, "Error generating arguments for subprocess", "configuration", monitor.ActiveConfiguration, "errorCounter", errorCounter, "backoffDuration", backoffDuration.String())
+			time.Sleep(backoffDuration)
+			errorCounter++
+			continue
 		}
 		cmd := exec.Cmd{
 			Path: arguments[0],
@@ -277,8 +296,10 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 
 		err = cmd.Start()
 		if err != nil {
-			logger.Error(err, "Error starting subprocess")
-			time.Sleep(errorBackoffSeconds * time.Second)
+			backoffDuration := getBackoffDuration(errorCounter)
+			logger.Error(err, "Error starting subprocess", "backoffDuration", backoffDuration.String())
+			time.Sleep(backoffDuration)
+			errorCounter++
 			continue
 		}
 
@@ -291,7 +312,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			logger.Error(nil, "No Process information available for subprocess")
 		}
 
-		startTime := time.Now()
+		startTime = time.Now()
 		logger.Info("Subprocess started", "PID", pid)
 
 		monitor.updateProcessID(processNumber, pid)
@@ -323,32 +344,36 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
 
-		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid)
-
-		endTime := time.Now()
+		processDuration := time.Since(startTime)
+		logger.Info("Subprocess terminated", "exitCode", exitCode, "PID", pid, "lastExecutionDurationSeconds", processDuration.String())
 		monitor.updateProcessID(processNumber, -1)
 
-		processDuration := endTime.Sub(startTime)
-		if processDuration.Seconds() < errorBackoffSeconds {
-			logger.Info("Backing off from restarting subprocess", "backOffTimeSeconds", errorBackoffSeconds, "lastExecutionDurationSeconds", processDuration)
-			time.Sleep(errorBackoffSeconds * time.Second)
+		// Only backoff if the exit code is non-zero.
+		if exitCode != 0 {
+			backoffDuration := getBackoffDuration(errorCounter)
+			logger.Info("Backing off from restarting subprocess", "backoffDuration", backoffDuration.String(), "lastExecutionDurationSeconds", processDuration.String(), "errorCounter", errorCounter, "exitCode", exitCode)
+			time.Sleep(backoffDuration)
+			errorCounter++
 		}
 	}
 }
 
-// checkProcessRequired determines if the latest configuration requires that a
+// processRequired determines if the latest configuration requires that a
 // process stay running.
 // If the process is no longer desired, this will remove it from the process ID
 // list and return false. If the process is still desired, this will return
 // true.
-func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
+func (monitor *Monitor) processRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
-	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
+	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "processRequired")
 	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
 	if monitor.ProcessCount < processNumber || !runProcesses {
-		logger.Info("Terminating run loop")
-		monitor.ProcessIDs[processNumber] = 0
+		if monitor.ProcessIDs[processNumber] != 0 {
+			logger.Info("Terminating run loop")
+			monitor.ProcessIDs[processNumber] = 0
+		}
+
 		return false
 	}
 
@@ -402,19 +427,21 @@ func (monitor *Monitor) Run() {
 		// Reset the ProcessCount to 0 to make sure the monitor doesn't try to restart the processes.
 		monitor.ProcessCount = 0
 		for processNumber, processID := range monitor.ProcessIDs {
-			if processID > 0 {
-				subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
-				process, err := os.FindProcess(processID)
-				if err != nil {
-					subprocessLogger.Error(err, "Error finding subprocess")
-					continue
-				}
-				subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
-				err = process.Signal(latestSignal)
-				if err != nil {
-					subprocessLogger.Error(err, "Error signaling subprocess")
-					continue
-				}
+			if processID <= 0 {
+				continue
+			}
+
+			subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
+			process, err := os.FindProcess(processID)
+			if err != nil {
+				subprocessLogger.Error(err, "Error finding subprocess")
+				continue
+			}
+			subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
+			err = process.Signal(latestSignal)
+			if err != nil {
+				subprocessLogger.Error(err, "Error signaling subprocess")
+				continue
 			}
 		}
 
