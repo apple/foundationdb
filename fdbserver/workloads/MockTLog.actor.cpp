@@ -20,6 +20,7 @@
 
 #include "fdbserver/workloads/MockTLog.actor.h"
 
+#include <filesystem>
 #include <vector>
 
 #include "fdbrpc/Locality.h"
@@ -36,9 +37,9 @@
 // the TLog commit interface directly and another using the LogSystem's push interface.
 // The later supports a single log group made up of "numLogServers" servers and
 // "numTagsPerServer" tags per log server.
+// A third test exercises tLog recovery.
 //
-// The test's purpose is to help with microbenchmarks and experimentation.
-// The storage server is assumed to run at infinite speed.
+// These test's purpose is to help with microbenchmarks and experimentation.
 
 // build test state.
 std::shared_ptr<TLogDriverContext> initTLogDriverContext(TestTLogDriverOptions tLogOptions, int locality = 0) {
@@ -59,7 +60,8 @@ std::shared_ptr<TLogDriverContext> initTLogDriverContext(TestTLogDriverOptions t
 	return context;
 }
 
-// run a single tLog.
+// run a single tLog. If optional parmeters are set, the tLog is a new generation of "tLogID"
+// as described in initReq. Otherwise, it is a generation 0 tLog.
 ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TLogDriverContext> pTLogDriverContext,
                                       TestTLogDriverOptions tLogOptions,
                                       uint16_t processID,
@@ -71,7 +73,10 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TLogDriverContext> pTLogDr
 	pTLogContext->tagProcessID = processID;
 
 	pTLogContext->tLogID = tLogID != UID(0, 0) ? tLogID : deterministicRandom()->randomUniqueID();
-	TraceEvent("EnterGetTLogCreateActor", pTLogContext->tLogID);
+
+	TraceEvent("MockTLogTestEnterGetTLogCreateActor", pTLogContext->tLogID).detail("Epoch", pTLogDriverContext->epoch);
+
+	std::filesystem::create_directory(tLogOptions.dataFolder);
 
 	// create persistent storage
 	std::string diskQueueBasename = pTLogDriverContext->diskQueueBasename + "." + pTLogContext->tLogID.toString() +
@@ -385,31 +390,6 @@ ACTOR Future<Void> getTLogGroupActor(std::shared_ptr<TLogDriverContext> pTLogDri
 	return Void();
 }
 
-ACTOR Future<Void> startLogRouter(std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
-	TraceEvent("MockTLogEnterStartLogRouter");
-
-	Standalone<StringRef> machineID = StringRef("machine");
-	Optional<Standalone<StringRef>> processID = StringRef("LogRouter");
-	LocalityData locality(
-	    Optional<Standalone<StringRef>>(), pTLogDriverContext->zoneID, machineID, pTLogDriverContext->dcID);
-	TLogInterface interface(locality);
-	InitializeLogRouterRequest req;
-	req.startVersion = 1;
-	req.locality = 0;
-	req.tLogLocalities.resize(pTLogDriverContext->numLogServers);
-	req.tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
-	int tagID = 0;
-	req.routerTag = Tag(tagLocalityLogRouter, tagID);
-	pTLogDriverContext->dbInfo.logSystemConfig.oldTLogs[0].tLogs[0].logRouters.push_back(
-	    OptionalInterface<TLogInterface>(interface));
-	pTLogDriverContext->dbInfoRef = makeReference<AsyncVar<ServerDBInfo>>(pTLogDriverContext->dbInfo);
-	wait(logRouter(interface, req, pTLogDriverContext->dbInfoRef));
-
-	// set this logSystemChanged
-	TraceEvent("MockTLogExitStartLogRouter");
-	return Void();
-}
-
 // wait for all tLogs to be created. Then start actor to do push, then
 // start actors to do peeks, then signal transactions can start.
 ACTOR Future<Void> runTestsTLogGroupActors(std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
@@ -494,67 +474,6 @@ ACTOR Future<Void> buildTLogSet(std::shared_ptr<TLogDriverContext> pTLogDriverCo
 	return Void();
 }
 
-ACTOR Future<Void> runTestsTLogRecoveryActorsPre(std::shared_ptr<TLogDriverContext> pTLogDriverContext) {
-
-	TraceEvent("MockTLogEnterTLogRecoveryActorsPre");
-
-	// wait for tLogs to be created, and signal pushes can start
-	wait(buildTLogSet(pTLogDriverContext));
-
-	PromiseStream<Future<Void>> promises;
-	pTLogDriverContext->ls =
-	    ILogSystem::fromServerDBInfo(pTLogDriverContext->logID, pTLogDriverContext->dbInfo, false, promises);
-
-	std::vector<Future<Void>> actors;
-
-	// start push actor
-	actors.emplace_back(pTLogDriverContext->sendPushMessages());
-
-	wait(waitForAll(actors));
-
-	TraceEvent("MockTLogExitTLogRecoveryActorsPre");
-
-	return Void();
-}
-
-ACTOR Future<Void> runTestsTLogRecoveryActorsPost(std::shared_ptr<TLogDriverContext> pOldTLogDriverContext,
-                                                  std::shared_ptr<TLogDriverContext> pNewTLogDriverContext) {
-	TraceEvent("MockTLogEnterTLogRecoveryActorsPost");
-	state uint16_t processID = 0;
-	// lock tlogs
-	for (; processID < pOldTLogDriverContext->numLogServers; processID++) {
-		TLogLockResult data =
-		    wait(pOldTLogDriverContext->pTLogContextList[processID]->MockTLogInterface.lock.getReply<TLogLockResult>());
-		TraceEvent("MockTLogLockResult").detail("K", data.knownCommittedVersion);
-	}
-
-	// copy tlogs to old log system, define old epoch
-	TLogSet oldTLogSet = pOldTLogDriverContext->dbInfo.logSystemConfig.tLogs.back();
-	// pOldTLogDriverContext->dbInfo.logSystemConfig.tLogs.pop_back();
-	OldTLogConf oldTLogConf;
-	oldTLogConf.tLogs.push_back(oldTLogSet);
-	oldTLogConf.epochBegin = 1;
-	oldTLogConf.epochEnd = pOldTLogDriverContext->numCommits;
-	oldTLogConf.recoverAt = pOldTLogDriverContext->numCommits;
-	oldTLogConf.epoch = 1;
-
-	// create new log system
-	pNewTLogDriverContext->dbInfo.logSystemConfig.recoveredAt = 2;
-	pNewTLogDriverContext->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
-	// pNewTLogDriverContext->dbInfo.logSystemConfig.tLogs.clear();   WTF?
-	state Future<Void> lr = startLogRouter(pNewTLogDriverContext); // create new epoch tlogs
-
-	wait(lr);
-
-	// tell tLog actors to initiate shutdown.
-	for (uint16_t processID = 0; processID < pOldTLogDriverContext->numLogServers; processID++) {
-		pNewTLogDriverContext->pTLogContextList[processID]->MockTLogTestCompleted.send(true);
-	}
-	TraceEvent("MockTLogExitTLogRecoveryActorsPost");
-
-	return Void();
-}
-
 // create actors and return them in a list.
 std::vector<Future<Void>> startTLogTestActors(const UnitTestParameters& params) {
 	TraceEvent("MockTLogTestEnterStartTestActors");
@@ -595,43 +514,71 @@ std::vector<Future<Void>> startTLogGroupActors(const UnitTestParameters& params)
 	return actors;
 }
 
-// create actors and return them in a list.
+// This test creates tLogs and pushes data to them. The tLogs are then locked. A new "generation"
+// of tLogs is then created. These enter recover mode and pull data from the old generation.
+// The data is peeked from the new generation and validated.
+
 ACTOR Future<Void> startTestsTLogRecoveryActors(UnitTestParameters params) {
 	state std::vector<Future<Void>> tLogActors;
-	state std::shared_ptr<TLogDriverContext> pTLogDriverContext = initTLogDriverContext(TestTLogDriverOptions(params));
-	pTLogDriverContext->epoch++;
+	state std::shared_ptr<TLogDriverContext> pTLogDriverContextEpochOne =
+	    initTLogDriverContext(TestTLogDriverOptions(params));
+	const TestTLogDriverOptions& tLogOptions = pTLogDriverContextEpochOne->tLogOptions;
+	state uint16_t instanceIndex = 0;
 
 	TraceEvent("MockTLogTestEnterTLogRecoveryActors");
 
-	for (int processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
-		std::shared_ptr<TLogContext> pTLogContext(new TLogContext(processID));
-		pTLogDriverContext->pTLogContextList.push_back(pTLogContext);
-	}
-	const TestTLogDriverOptions& tLogOptions = pTLogDriverContext->tLogOptions;
-	for (int processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
-		tLogActors.emplace_back(getTLogCreateActor(pTLogDriverContext, tLogOptions, processID));
-	}
+	// Create the first "old" generation of tLogs
+	std::shared_ptr<TLogContext> pTLogContext(new TLogContext(instanceIndex));
+	pTLogDriverContextEpochOne->pTLogContextList.push_back(pTLogContext);
+	tLogActors.emplace_back(getTLogCreateActor(pTLogDriverContextEpochOne, tLogOptions, instanceIndex));
 
-	state std::vector<Future<Void>> preActors;
+	// wait for tLogs to be created, and signal pushes can start
+	wait(buildTLogSet(pTLogDriverContextEpochOne));
 
-	// create actors to push commits.
-	preActors.emplace_back(runTestsTLogRecoveryActorsPre(pTLogDriverContext));
-	wait(waitForAll(preActors));
+	PromiseStream<Future<Void>> promises;
+	pTLogDriverContextEpochOne->ls = ILogSystem::fromServerDBInfo(
+	    pTLogDriverContextEpochOne->logID, pTLogDriverContextEpochOne->dbInfo, false, promises);
 
-	state std::shared_ptr<TLogDriverContext> pNewTLogDriverContext =
+	// Push commits, but do not peek from them. They will be peeked by the next
+	// generation of tLogs.
+	wait(pTLogDriverContextEpochOne->sendPushMessages());
+
+	// Done with old generation. Lock the old generation of tLogs.
+	TLogLockResult data = wait(
+	    pTLogDriverContextEpochOne->pTLogContextList[instanceIndex]->MockTLogInterface.lock.getReply<TLogLockResult>());
+	TraceEvent("MockTLogLockResult").detail("KCV", data.knownCommittedVersion);
+
+	// Setup configuration for a new generation of tLogs
+	state std::shared_ptr<TLogDriverContext> pTLogDriverContextEpochTwo =
 	    initTLogDriverContext(TestTLogDriverOptions(params), 0);
-	TLogInterface oldInterface = pTLogDriverContext->pTLogContextList[0].get()->MockTLogInterface;
 
-	// Initiate recovery
-	state uint16_t processID = 0;
-	for (; processID < pTLogDriverContext->numLogServers; processID++) {
-		TLogLockResult data =
-		    wait(pTLogDriverContext->pTLogContextList[processID]->MockTLogInterface.lock.getReply<TLogLockResult>());
-		TraceEvent("MockTLogLockResult").detail("K", data.knownCommittedVersion);
-	}
+	// next epoch
+	pTLogDriverContextEpochTwo->epoch = pTLogDriverContextEpochOne->epoch + 1;
 
+	std::shared_ptr<TLogContext> pNewTLogContext(new TLogContext(instanceIndex));
+	pTLogDriverContextEpochTwo->pTLogContextList.push_back(pNewTLogContext);
+
+	// The InitializeTLogRequest includes what versions should be recovered from
+	// the previous generation. Those values are manually set here.
+	InitializeTLogRequest req;
+	req.recruitmentID = pTLogDriverContextEpochTwo->dbInfo.logSystemConfig.recruitmentID;
+	req.recoverAt = 3;
+	req.startVersion = 2;
+	req.remoteTag = Tag(tagLocalityRemoteLog, 0);
+	req.recoveryTransactionVersion = 1;
+	req.knownCommittedVersion = 1;
+	req.epoch = pTLogDriverContextEpochTwo->epoch;
+	req.logVersion = TLogVersion::V6;
+	req.locality = 0;
+	req.isPrimary = true;
+	req.logRouterTags = 0; // the number of LR, not spun up for recovery
+	req.recoverTags = { Tag(0, 0) };
+	req.recoverFrom = pTLogDriverContextEpochOne->dbInfo.logSystemConfig;
+	req.recoverFrom.logRouterTags = 0; // move
+
+	// Describe the old log generation. There is one such structure for each generation.
 	OldTLogConf oldTLogConf;
-	oldTLogConf.tLogs = pTLogDriverContext->dbInfo.logSystemConfig.tLogs;
+	oldTLogConf.tLogs = pTLogDriverContextEpochOne->dbInfo.logSystemConfig.tLogs;
 	oldTLogConf.tLogs[0].locality = 0;
 	oldTLogConf.tLogs[0].isLocal = true;
 	oldTLogConf.epochBegin = 1;
@@ -639,56 +586,33 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(UnitTestParameters params) {
 	oldTLogConf.logRouterTags = 0;
 	oldTLogConf.recoverAt = 1; // recoverAt version for old epoch, not new one
 	oldTLogConf.epoch = 1; // old epoch, not new one
+	pTLogDriverContextEpochTwo->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
+	pTLogDriverContextEpochTwo->tagLocality = 0;
 
-	for (int processID = 0; processID < pTLogDriverContext->numLogServers; processID++) {
-		std::shared_ptr<TLogContext> pTLogContext(new TLogContext(processID));
-		pNewTLogDriverContext->pTLogContextList.push_back(pTLogContext);
-	}
+	const TestTLogDriverOptions& tLogOptions = pTLogDriverContextEpochTwo->tLogOptions;
 
-	const TestTLogDriverOptions& tLogOptions = pNewTLogDriverContext->tLogOptions;
-	InitializeTLogRequest req;
-	req.recruitmentID = pNewTLogDriverContext->dbInfo.logSystemConfig.recruitmentID;
-	req.recoverAt = 3;
-	req.startVersion = 2;
-	req.remoteTag = Tag(tagLocalityRemoteLog, 0);
-	req.recoveryTransactionVersion = 1;
-	req.knownCommittedVersion = 1;
-	req.epoch = 2;
-	req.logVersion = TLogVersion::V6;
-	req.locality = 0;
-	req.isPrimary = true;
-	req.logRouterTags = 0; // the number of LR, not spun up for recovery
-	req.recoverTags = { Tag(0, 0) };
-	pNewTLogDriverContext->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
-	pNewTLogDriverContext->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
+	// Create the new generation's tLogs
+	tLogActors.emplace_back(getTLogCreateActor(pTLogDriverContextEpochTwo,
+	                                           tLogOptions,
+	                                           instanceIndex,
+	                                           &req,
+	                                           pTLogDriverContextEpochOne->pTLogContextList[instanceIndex]->tLogID));
 
-	req.recoverFrom = pTLogDriverContext->dbInfo.logSystemConfig;
-
-	req.recoverFrom.logRouterTags = 0; // move
-	for (int processID = 0; processID < pNewTLogDriverContext->numLogServers; processID++) {
-		tLogActors.emplace_back(getTLogCreateActor(pNewTLogDriverContext,
-		                                           tLogOptions,
-		                                           processID,
-		                                           &req,
-		                                           pTLogDriverContext->pTLogContextList[processID]->tLogID));
-	}
-	state std::shared_ptr<TLogContext> pTLogContext = pNewTLogDriverContext->pTLogContextList[0];
+	state std::shared_ptr<TLogContext> pTLogContext = pTLogDriverContextEpochTwo->pTLogContextList[0];
 	bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
 	ASSERT_EQ(isCreated, true);
 	pTLogContext->TLogStarted.send(true);
 
 	TraceEvent("MockTLogStartTestsTLogRecovery");
 
-	pNewTLogDriverContext->tagLocality = 0;
+	// read data from old generation of tLogs
+	wait(pTLogDriverContextEpochTwo->peekCommitMessages(0, 0));
 
-	state Future<Void> peek = pNewTLogDriverContext->peekCommitMessages(0, 0);
-	wait(peek);
+	// signal that the old tLogs can be destroyed
+	pTLogDriverContextEpochTwo->pTLogContextList[instanceIndex]->MockTLogTestCompleted.send(true);
+	pTLogDriverContextEpochOne->pTLogContextList[instanceIndex]->MockTLogTestCompleted.send(true);
 
-	for (uint16_t processID = 0; processID < pNewTLogDriverContext->numLogServers; processID++) {
-		pNewTLogDriverContext->pTLogContextList[processID]->MockTLogTestCompleted.send(true);
-		pTLogDriverContext->pTLogContextList[processID]->MockTLogTestCompleted.send(true);
-	}
-
+	// wait for the tLogs to destruct
 	wait(waitForAll(tLogActors));
 
 	TraceEvent("MockTLogTestExitTLogRecoveryActors");
