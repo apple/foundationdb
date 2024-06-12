@@ -366,9 +366,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_MAXIMUM_LARGE_TEAM_CLEANUP,                       10000 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAM_CLEANUP = 10;
 	init( DD_LARGE_TEAM_DELAY,                                  60.0 );
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
-	init( DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC,                  30.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC = 5.0;
-	init( DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC,                  30.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC = 5.0;
-	init( DD_BULKLOAD_TASK_TIMEOUT,                            300.0 );
+	
+	// BulkLoading
 	init( DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX,                50 );
 	init( BULKLOAD_FILE_BYTES_MAX,                  1*1024*1024*1024 ); // 1GB
 	init( DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC,          10.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC = 5.0;

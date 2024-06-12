@@ -1864,21 +1864,26 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end) {
 					if (bulkLoadState.present()) {
 						RangeResult bulkLoadRes = wait(krmGetRanges(&tr, bulkLoadPrefix, bulkLoadState.get().range));
-						BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
+						state BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
 						if (bulkLoadState.get().taskId != existBulkLoad.taskId) {
 							TraceEvent(SevWarn, "StartMoveShardsConflictWithExistingTask", relocationIntervalId)
-							    .detail("ExistBulkLoad", existBulkLoad.toString())
-							    .detail("CurrentBulkLoad", bulkLoadState.get().toString())
+							    .detail("PersistedBulkLoad", existBulkLoad.toString())
+							    .detail("BulkLoadTask", bulkLoadState.get().toString())
 							    .detail("DataMove", dataMove.toString());
-							// Let data move solve the conflict
+							if (bulkLoadState.get().launchAck.canBeSet()) {
+								bulkLoadState.get().launchAck.sendError(bulkload_task_outdated());
+							}
+							cancelDataMove = true;
+							throw retry();
 						}
 						// Only place to set it running to metadata
-						bulkLoadState.get().phase = BulkLoadPhase::Running;
-						bulkLoadState.get().setDataMoveId(dataMoveId);
-						wait(krmSetRange(
-						    &tr, bulkLoadPrefix, bulkLoadState.get().range, bulkLoadStateValue(bulkLoadState.get())));
+						existBulkLoad.phase = BulkLoadPhase::Running;
+						existBulkLoad.setDataMoveId(dataMoveId);
+						existBulkLoad.startTime = now();
+						existBulkLoad.triggerTime = bulkLoadState.get().triggerTime;
+						wait(krmSetRange(&tr, bulkLoadPrefix, existBulkLoad.range, bulkLoadStateValue(existBulkLoad)));
 						TraceEvent(SevInfo, "DDBulkLoadTaskRunningPersist", relocationIntervalId)
-						    .detail("BulkLoadTask", bulkLoadState.get().toString());
+						    .detail("BulkLoadTask", existBulkLoad.toString());
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
 					complete = true;
@@ -2359,25 +2364,28 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							// Check if the current bulk load task is outdated, if not, update phase
 							RangeResult bulkLoadRes =
 							    wait(krmGetRanges(&tr, bulkLoadPrefix, bulkLoadState.get().range));
-							BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
+							state BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
 							if (bulkLoadState.get().taskId != existBulkLoad.taskId) {
 								TraceEvent(SevWarn, "FinishMoveShardsConflictWithExistingTask", relocationIntervalId)
-								    .detail("ExistBulkLoad", existBulkLoad.toString())
-								    .detail("CurrentBulkLoad", bulkLoadState.get().toString())
+								    .detail("PersistedBulkLoad", existBulkLoad.toString())
+								    .detail("BulkLoadTask", bulkLoadState.get().toString())
 								    .detail("DataMove", dataMove.toString());
-								// Let data move solve the conflict
+								if (bulkLoadState.get().launchAck.canBeSet()) {
+									bulkLoadState.get().launchAck.sendError(bulkload_task_outdated());
+								}
+								cancelDataMove = true;
+								throw retry();
 							} else {
 								ASSERT(existBulkLoad.dataMoveId.present() &&
 								       existBulkLoad.dataMoveId.get() == dataMoveId);
 							}
 							// Only place to set it complete to metadata
-							bulkLoadState.get().phase = BulkLoadPhase::Complete;
-							wait(krmSetRange(&tr,
-							                 bulkLoadPrefix,
-							                 bulkLoadState.get().range,
-							                 bulkLoadStateValue(bulkLoadState.get())));
+							existBulkLoad.phase = BulkLoadPhase::Complete;
+							existBulkLoad.completeTime = now();
+							wait(krmSetRange(
+							    &tr, bulkLoadPrefix, existBulkLoad.range, bulkLoadStateValue(existBulkLoad)));
 							TraceEvent(SevInfo, "PersistBulkLoadFinish", relocationIntervalId)
-							    .detail("BulkLoadTask", bulkLoadState.get().toString())
+							    .detail("BulkLoadTask", existBulkLoad.toString())
 							    .detail("DataMove", dataMove.toString());
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));

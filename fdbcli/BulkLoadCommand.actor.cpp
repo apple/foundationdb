@@ -32,50 +32,82 @@
 
 namespace fdb_cli {
 
-ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clusterFile, std::vector<StringRef> tokens) {
-	if (tokens.size() < 2) {
-		printUsage(tokens[0]);
-		return UID();
-	}
-	BulkLoadType type = BulkLoadType::Invalid;
-	if (tokencmp(tokens[1], "sst")) {
-		type = BulkLoadType::SST;
+ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                       Database localDb,
+                                       std::vector<StringRef> tokens) {
+	if (tokencmp(tokens[1], "mode")) {
+		if (tokens.size() != 3) { // TODO(Zhe): check by ID
+			printUsage(tokens[0]);
+			return UID();
+		}
+		if (tokencmp(tokens[2], "on")) {
+			wait(setBulkLoadMode(localDb, 1));
+			return UID();
+		} else if (tokencmp(tokens[2], "off")) {
+			wait(setBulkLoadMode(localDb, 0));
+			return UID();
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+
+	} else if (tokencmp(tokens[1], "task")) {
+		if (tokens.size() < 10) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		BulkLoadType type = BulkLoadType::Invalid;
+		if (tokencmp(tokens[2], "sst")) {
+			type = BulkLoadType::SST;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
+		if (tokencmp(tokens[3], "cp")) {
+			transportMethod = BulkLoadTransportMethod::CP;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		BulkLoadInjectMethod injectMethod = BulkLoadInjectMethod::Invalid;
+		if (tokencmp(tokens[4], "file")) {
+			injectMethod = BulkLoadInjectMethod::File;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		Key rangeBegin = tokens[5];
+		Key rangeEnd = tokens[6];
+		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		std::string folder = tokens[7].toString();
+		std::string dataFile = tokens[8].toString();
+		std::string byteSampleFile = tokens[9].toString();
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		BulkLoadState bulkLoadTask(range, type, folder);
+		bulkLoadTask.setTransportMethod(transportMethod);
+		bulkLoadTask.setInjectMethod(injectMethod);
+		bulkLoadTask.addDataFile(dataFile);
+		bulkLoadTask.setByteSampleFile(byteSampleFile);
+		UID taskId = wait(triggerBulkLoad(clusterFile, bulkLoadTask, /*timeoutSeconds=*/60));
+		if (!taskId.isValid()) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		return taskId;
+
 	} else {
 		printUsage(tokens[0]);
 		return UID();
 	}
-	BulkLoadTransportMethod method = BulkLoadTransportMethod::Invalid;
-	if (tokencmp(tokens[2], "cp")) {
-		method = BulkLoadTransportMethod::CP;
-	} else {
-		printUsage(tokens[0]);
-		return UID();
-	}
-	Key rangeBegin = tokens[3];
-	Key rangeEnd = tokens[4];
-	if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
-		printUsage(tokens[0]);
-		return UID();
-	}
-	std::string folder = tokens[5].toString();
-	std::string dataFile = tokens[6].toString();
-	std::string byteSampleFile = tokens[7].toString();
-	KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-	BulkLoadState bulkLoadTask(range, type, folder);
-	bulkLoadTask.setTransportMethod(method);
-	bulkLoadTask.addDataFile(dataFile);
-	bulkLoadTask.setByteSampleFile(byteSampleFile);
-	UID taskId = wait(triggerBulkLoad(clusterFile, bulkLoadTask, /*timeoutSeconds=*/60));
-	if (!taskId.isValid()) {
-		printUsage(tokens[0]);
-		return UID();
-	}
-	return taskId;
 }
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp("bulkload <Type> <Method> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
+    CommandHelp("bulkload <mode|task> <Type> <Method> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
                 "Start a bulk load task",
                 "Specify `Type' (only `sst' is supported currently), and\n"
                 "Specify `Method' (only `cp' is supported currently).\n"));

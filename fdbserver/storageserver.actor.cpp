@@ -9120,7 +9120,6 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	    .detail("Folder", abspath(dir));
 
 	state double fetchStartTime = now();
-	state bool scanWholeFile = false;
 
 	// Step 1: Fetch data to dir
 	state SSBulkLoadFileSet fileSetToLoad;
@@ -9140,9 +9139,10 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	    .detail("FileSetToLoad", fileSetToLoad.toString());
 
 	// Step 2: Validation
+	// TODO(Zhe): Validate all files specified in fileSetToLoad exist
 	// TODO(Zhe): Check file checksum
 	// TODO(Zhe): Check file data all in the moveInShard range
-	// checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	// TODO(Zhe): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
 	if (!fileSetToLoad.bytesSampleFile.present()) {
 		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
 		    .detail("BulkLoadState", bulkLoadState.toString())
@@ -9150,7 +9150,6 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 		Optional<std::string> bytesSampleFile_ =
 		    wait(getBytesSamplingFromSSTFiles(fileSetToLoad.folder, fileSetToLoad.dataFileList, data->thisServerID));
 		fileSetToLoad.bytesSampleFile = bytesSampleFile_;
-		scanWholeFile = true;
 	}
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileValidated", data->thisServerID)
 	    .detail("BulkLoadTask", bulkLoadState.toString())
@@ -9178,6 +9177,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 			    .detail("MoveInShard", moveInShard->toString())
 			    .detail("FileSetToLoad", fileSetToLoad.toString());
 		}
+		// TODO(Zhe): set loading file size --- logging purpose
 		cpFile.range = coalesceRanges[0];
 		rcp.fetchedFiles.push_back(cpFile);
 	}
@@ -9197,8 +9197,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	    .detail("FileSetToLoad", fileSetToLoad.toString())
 	    .detail("Duration", duration)
 	    .detail("TotalBytes", totalBytes)
-	    .detail("Rate", (double)totalBytes / duration)
-	    .detail("ScanWholeFile", scanWholeFile);
+	    .detail("Rate", (double)totalBytes / duration);
 
 	// Step 4: Update the moveInShard phase
 	moveInShard->setPhase(MoveInPhase::Ingesting);
@@ -9595,8 +9594,10 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 	state Optional<BulkLoadState> bulkLoadState;
 	wait(store(bulkLoadState, getBulkLoadState(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
-	if (bulkLoadState.present() && !g_network->isSimulated()) {
-		throw not_implemented();
+	if (bulkLoadState.present()) {
+		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("BulkLoadTask", bulkLoadState.get().toString());
 	}
 
 	loop {

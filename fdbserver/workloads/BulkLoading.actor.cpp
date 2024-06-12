@@ -270,7 +270,95 @@ struct BulkLoading : TestWorkload {
 		ASSERT(bulkLoadTask.addDataFile(joinPath(folder, dataFile)));
 		ASSERT(bulkLoadTask.setByteSampleFile(joinPath(folder, bytesSampleFile)));
 		ASSERT(bulkLoadTask.setTransportMethod(BulkLoadTransportMethod::CP)); // local file copy
+		ASSERT(bulkLoadTask.setInjectMethod(BulkLoadInjectMethod::File)); // directly inject file to storage engine
 		return bulkLoadTask;
+	}
+
+	BulkLoadTaskTestUnit produceBulkLoadTaskUnit(BulkLoading* self,
+	                                             const std::vector<Key>& keyCharList,
+	                                             KeyRange range,
+	                                             std::string folderName) {
+		std::string dataFileName = generateRandomBulkLoadDataFileName();
+		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
+		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
+		BulkLoadTaskTestUnit taskUnit;
+		taskUnit.bulkLoadTask = self->newBulkLoadTask(range, folder, dataFileName, bytesSampleFileName);
+		size_t dataSize = deterministicRandom()->randomInt(10, 1000);
+		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
+		self->produceFilesToLoad(taskUnit);
+		return taskUnit;
+	}
+
+	std::vector<KeyValue> generateSortedKVS(StringRef prefix, size_t count) {
+		std::vector<KeyValue> res;
+		for (int i = 0; i < count; i++) {
+			UID keyId = deterministicRandom()->randomUniqueID();
+			Value key = Standalone(StringRef(keyId.toString())).withPrefix(prefix);
+			UID valueId = deterministicRandom()->randomUniqueID();
+			Value val = Standalone(StringRef(valueId.toString()));
+			res.push_back(Standalone(KeyValueRef(key, val)));
+		}
+		std::sort(res.begin(), res.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
+		return res;
+	}
+
+	void produceLargeDataToLoad(const BulkLoadTaskTestUnit& task, int count) {
+		std::string folder = task.bulkLoadTask.folder;
+		platform::eraseDirectoryRecursive(folder);
+		ASSERT(platform::createDirectory(folder));
+		std::string bytesSampleFile = task.bulkLoadTask.bytesSampleFile.get();
+		std::string dataFile = *(task.bulkLoadTask.dataFiles.begin());
+
+		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+		sstWriter->open(abspath(dataFile));
+		std::vector<KeyValue> bytesSample;
+		int insertedKeyCount = 0;
+		for (int i = 0; i < 10; i++) {
+			std::string idxStr = std::to_string(i);
+			Key prefix = Standalone(StringRef(idxStr)).withPrefix(task.bulkLoadTask.range.begin);
+			std::vector<KeyValue> kvs = generateSortedKVS(prefix, std::max(count / 10, 1));
+			for (const auto& kv : kvs) {
+				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
+				if (sampleInfo.inSample) {
+					Key sampleKey = kv.key;
+					Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
+					bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
+				}
+				sstWriter->write(kv.key, kv.value);
+				insertedKeyCount++;
+			}
+		}
+		TraceEvent("BulkLoadingDataProduced")
+		    .detail("LoadKeyCount", insertedKeyCount)
+		    .detail("BytesSampleSize", bytesSample.size())
+		    .detail("Folder", folder)
+		    .detail("DataFile", dataFile)
+		    .detail("BytesSampleFile", bytesSampleFile);
+		ASSERT(sstWriter->finish());
+
+		if (bytesSample.size() > 0) {
+			sstWriter->open(abspath(bytesSampleFile));
+			for (const auto& kv : bytesSample) {
+				sstWriter->write(kv.key, kv.value);
+			}
+			TraceEvent("BulkLoadingByteSampleProduced")
+			    .detail("LoadKeyCount", task.data.size())
+			    .detail("BytesSampleSize", bytesSample.size())
+			    .detail("Folder", folder)
+			    .detail("DataFile", dataFile)
+			    .detail("BytesSampleFile", bytesSampleFile);
+			ASSERT(sstWriter->finish());
+		}
+	}
+
+	void produceDataSet(BulkLoading* self, KeyRange range, std::string folderName) {
+		std::string dataFileName = generateRandomBulkLoadDataFileName();
+		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
+		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
+		BulkLoadTaskTestUnit taskUnit;
+		taskUnit.bulkLoadTask = self->newBulkLoadTask(range, folder, dataFileName, bytesSampleFileName);
+		self->produceLargeDataToLoad(taskUnit, 5000000);
+		return;
 	}
 
 	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
@@ -280,29 +368,40 @@ struct BulkLoading : TestWorkload {
 
 		std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
 
-		std::string dataFileName = generateRandomBulkLoadDataFileName();
-		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
-		KeyRange range = Standalone(KeyRangeRef("1"_sr, "2"_sr));
-		std::string folder = joinPath(simulationBulkLoadFolder, "1");
-
-		state BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = self->newBulkLoadTask(range, folder, dataFileName, bytesSampleFileName);
-		size_t dataSize = deterministicRandom()->randomInt(10, 10000);
-		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
-		self->produceFilesToLoad(taskUnit);
+		std::string folderName1 = "1";
+		KeyRange range1 = Standalone(KeyRangeRef("1"_sr, "2"_sr));
+		state BulkLoadTaskTestUnit taskUnit1 = self->produceBulkLoadTaskUnit(self, keyCharList, range1, folderName1);
+		std::string folderName2 = "2";
+		KeyRange range2 = Standalone(KeyRangeRef("2"_sr, "3"_sr));
+		state BulkLoadTaskTestUnit taskUnit2 = self->produceBulkLoadTaskUnit(self, keyCharList, range2, folderName2);
+		std::string folderName3 = "4";
+		KeyRange range3 = Standalone(KeyRangeRef("4"_sr, "5"_sr));
+		state BulkLoadTaskTestUnit taskUnit3 = self->produceBulkLoadTaskUnit(self, keyCharList, range3, folderName3);
 
 		wait(setBulkLoadMode(cx, 1));
-		wait(self->issueBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
+		wait(self->issueBulkLoadTasks(
+		    self, cx, { taskUnit1.bulkLoadTask, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask }));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
 		TraceEvent("BulkLoadingWorkLoadAllComplete");
 		wait(setBulkLoadMode(cx, 0));
 
-		wait(self->checkData(cx, taskUnit.data));
+		wait(self->checkData(cx, taskUnit1.data));
+		wait(self->checkData(cx, taskUnit2.data));
+		wait(self->checkData(cx, taskUnit3.data));
 		TraceEvent("BulkLoadingWorkLoadCheckedData");
 
 		TraceEvent("BulkLoadingWorkLoadComplete");
 
+		/*std::string folderName1 = "1";
+		KeyRange range1 = Standalone(KeyRangeRef("1"_sr, "2"_sr));
+		self->produceDataSet(self, range1, folderName1);
+		std::string folderName2 = "2";
+		KeyRange range2 = Standalone(KeyRangeRef("2"_sr, "3"_sr));
+		self->produceDataSet(self, range2, folderName2);
+		std::string folderName3 = "4";
+		KeyRange range3 = Standalone(KeyRangeRef("4"_sr, "5"_sr));
+		self->produceDataSet(self, range3, folderName3);*/
 		return Void();
 	}
 };

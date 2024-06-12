@@ -519,6 +519,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
 	int mode;
+	int bulkLoadMode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;

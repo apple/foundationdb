@@ -47,6 +47,11 @@ enum class BulkLoadTransportMethod : uint8_t {
 	CP = 1,
 };
 
+enum class BulkLoadInjectMethod : uint8_t {
+	Invalid = 0,
+	File = 1,
+};
+
 struct BulkLoadState {
 	constexpr static FileIdentifier file_identifier = 1384499;
 
@@ -61,10 +66,15 @@ struct BulkLoadState {
 	bool isValid() const { return loadType != BulkLoadType::Invalid; }
 
 	std::string toString() const {
-		std::string res = "BulkLoadState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		                  ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
-		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
-		                  ", [DataFiles]: " + describe(dataFiles);
+		std::string res =
+		    "BulkLoadState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		    ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
+		    ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
+		    ", [InjectMethod]: " + std::to_string(static_cast<uint8_t>(injectMethod)) +
+		    ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
+		    ", [DataFiles]: " + describe(dataFiles) + ", [SubmitTime]: " + std::to_string(submitTime) +
+		    ", [TriggerTime]: " + std::to_string(triggerTime) + ", [StartTime]: " + std::to_string(startTime) +
+		    ", [CompleteTime]: " + std::to_string(completeTime) + ", [RestartCount]: " + std::to_string(restartCount);
 		if (bytesSampleFile.present()) {
 			res = res + ", [ByteSampleFile]: " + bytesSampleFile.get();
 		}
@@ -88,11 +98,23 @@ struct BulkLoadState {
 	}
 
 	bool setTransportMethod(BulkLoadTransportMethod method) {
-		transportMethod = method;
 		// TODO(Zhe): do some validation between method and path
 		if (method == BulkLoadTransportMethod::Invalid) {
 			return false;
 		} else if (method == BulkLoadTransportMethod::CP) {
+			transportMethod = method;
+			return true;
+		} else {
+			throw not_implemented();
+		}
+	}
+
+	bool setInjectMethod(BulkLoadInjectMethod method) {
+		// TODO(Zhe): do some validation between method and type
+		if (method == BulkLoadInjectMethod::Invalid) {
+			return false;
+		} else if (method == BulkLoadInjectMethod::File) {
+			injectMethod = method;
 			return true;
 		} else {
 			throw not_implemented();
@@ -115,22 +137,46 @@ struct BulkLoadState {
 		return true;
 	}
 
+	bool isValid() { return !dataFiles.empty(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, loadType, transportMethod, phase, folder, dataFiles, bytesSampleFile, dataMoveId, taskId);
+		serializer(ar,
+		           range,
+		           loadType,
+		           transportMethod,
+		           injectMethod,
+		           phase,
+		           folder,
+		           dataFiles,
+		           bytesSampleFile,
+		           dataMoveId,
+		           taskId,
+		           submitTime,
+		           triggerTime,
+		           startTime,
+		           completeTime,
+		           restartCount);
 	}
 
 	KeyRange range;
 	BulkLoadType loadType;
 	BulkLoadTransportMethod transportMethod;
+	BulkLoadInjectMethod injectMethod;
 	BulkLoadPhase phase;
 	std::string folder; // Used by SS to inject files
 	std::unordered_set<std::string> dataFiles; // Used by SS to inject files
 	Optional<std::string> bytesSampleFile; // Used by SS to inject files
 	Optional<UID> dataMoveId;
 	UID taskId;
-	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
+	double submitTime = 0;
+	double triggerTime = 0;
+	double startTime = 0;
+	double completeTime = 0;
+	int restartCount = -1;
 	// TODO(Zhe): add file checksum
+
+	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
 };
 
 struct TriggerBulkLoadRequest {

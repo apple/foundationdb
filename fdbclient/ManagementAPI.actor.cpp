@@ -2331,8 +2331,16 @@ ACTOR Future<Void> setBulkLoadMode(Database cx, int mode) {
 	wr << mode;
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tr.set("\xff\xff/bulk_loading/mode"_sr, wr.toValue());
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
+			tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			tr.set(bulkLoadModeKey, wr.toValue());
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

@@ -137,7 +137,7 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 					KeyValue kv = reader->next();
 					ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 					if (sampleInfo.inSample) {
-						sstWriter->write(kv.key, kv.value); // TODO(Zhe): kv should be sorted
+						sstWriter->write(kv.key, kv.value); // TODO(Zhe): validate if kvs are sorted
 						anySampled = true;
 					}
 				}

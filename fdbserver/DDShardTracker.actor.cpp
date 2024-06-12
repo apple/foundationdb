@@ -1025,6 +1025,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	    .detail("BulkLoadTask", bulkLoadState.toString());
 	self->bulkLoadingMap.insert(keys, std::make_pair(bulkLoadState.taskId, commitVersion));
 	bulkLoadState.launchAck = launchAck; // Used to propagate launchAck signal in DDQueue
+	bulkLoadState.triggerTime = now();
 	self->output.send(RelocateShard(
 	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState));
 	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has triggered bulk loading
