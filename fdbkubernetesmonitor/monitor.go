@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,9 +44,16 @@ import (
 	"k8s.io/utils/pointer"
 )
 
-// maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
-// The actual delay will be based on the observed errors and will increase until maxErrorBackoffSeconds is hit.
-const maxErrorBackoffSeconds = 60 * time.Second
+const (
+	// maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
+	// The actual delay will be based on the observed errors and will increase until maxErrorBackoffSeconds is hit.
+	maxErrorBackoffSeconds = 60 * time.Second
+
+	// fdbClusterFilePath defines the default path to the fdb cluster file that contains the current connection string.
+	// This file is managed by the fdbserver processes itself and they will automatically update the file if the
+	// coordinators have changed.
+	fdbClusterFilePath = "/var/fdb/data/fdb.cluster"
+)
 
 // Monitor provides the main monitor loop
 type Monitor struct {
@@ -378,15 +386,16 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			monitor.Logger.Info("Detected event on monitor conf file", "event", event)
+
+			monitor.Logger.Info("Detected event on monitor conf file or cluster file", "event", event)
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-				monitor.LoadConfiguration()
+				monitor.handleFileChange(event.Name)
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
-				err := watcher.Add(monitor.ConfigFile)
+				err := watcher.Add(event.Name)
 				if err != nil {
 					panic(err)
 				}
-				monitor.LoadConfiguration()
+				monitor.handleFileChange(event.Name)
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -395,6 +404,19 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 			monitor.Logger.Error(err, "Error watching for file system events")
 		}
 	}
+}
+
+// handleFileChange will perform the required action based on the changed/modified file.
+func (monitor *Monitor) handleFileChange(changedFile string) {
+	if changedFile == fdbClusterFilePath {
+		err := monitor.PodClient.updateFdbClusterTimestampAnnotation()
+		if err != nil {
+			monitor.Logger.Error(err, fmt.Sprintf("could not update %s annotation", ClusterFileChangeDetectedAnnotation))
+		}
+		return
+	}
+
+	monitor.LoadConfiguration()
 }
 
 // Run runs the monitor loop.
@@ -447,6 +469,7 @@ func (monitor *Monitor) Run() {
 	if err != nil {
 		panic(err)
 	}
+	monitor.Logger.Info("adding watch for file", "path", path.Base(monitor.ConfigFile))
 	err = watcher.Add(monitor.ConfigFile)
 	if err != nil {
 		panic(err)
@@ -459,6 +482,25 @@ func (monitor *Monitor) Run() {
 		}
 	}(watcher)
 	go func() { monitor.WatchConfiguration(watcher) }()
+
+	// The cluster file will be created and managed by the fdbserver processes, so we have to wait until the fdbserver
+	// processes have been started. Except for the initial cluster creation his file should be present as soon as the
+	// monitor starts the processes.
+	for {
+		_, err = os.Stat(fdbClusterFilePath)
+		if errors.Is(err, os.ErrNotExist) {
+			monitor.Logger.Info("waiting for file to be created", "path", fdbClusterFilePath)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		monitor.Logger.Info("adding watch for file", "path", fdbClusterFilePath)
+		err = watcher.Add(fdbClusterFilePath)
+		if err != nil {
+			panic(err)
+		}
+		break
+	}
 
 	<-done
 }
