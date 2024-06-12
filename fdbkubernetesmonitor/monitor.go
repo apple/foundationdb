@@ -39,6 +39,8 @@ import (
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/pointer"
@@ -98,6 +100,9 @@ type Monitor struct {
 
 	// Logger is the logger instance for this monitor.
 	Logger logr.Logger
+
+	// metrics represents the prometheus monitor metrics.
+	metrics *metrics
 }
 
 // StartMonitor starts the monitor loop.
@@ -136,8 +141,15 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	}
 
+	reg := prometheus.NewRegistry()
+	// Enable the default go metrics.
+	reg.MustRegister(collectors.NewGoCollector())
+	monitorMetrics := registerMetrics(reg)
+	monitor.metrics = monitorMetrics
+	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+
 	// Add Prometheus support
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promHandler)
 	go func() {
 		err := http.ListenAndServe(listenAddr, mux)
 		if err != nil {
@@ -217,6 +229,8 @@ func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 	monitor.ActiveConfiguration = configuration
 	monitor.ActiveConfigurationBytes = configurationBytes
 	monitor.LastConfigurationTime = time.Now()
+	// Update the prometheus metrics.
+	monitor.metrics.registerConfigurationChange(configuration.Version)
 
 	for processNumber := 1; processNumber <= monitor.ProcessCount; processNumber++ {
 		if monitor.ProcessIDs[processNumber] == 0 {
@@ -296,6 +310,9 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			errorCounter++
 			continue
 		}
+
+		// Update the prometheus metrics for the process.
+		monitor.metrics.registerProcessStartup(processNumber, monitor.ActiveConfiguration.Version)
 
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
