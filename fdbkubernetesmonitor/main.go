@@ -22,9 +22,9 @@ package main
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 
@@ -132,7 +132,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(context.Background(), logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof, currentContainerVersion)
+		StartMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof, currentContainerVersion)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
