@@ -2296,7 +2296,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	return Void();
 }
 
-void net2_test() {
+void net2_test(){
 	/*
 	g_network = newNet2();  // for promise serialization below
 
