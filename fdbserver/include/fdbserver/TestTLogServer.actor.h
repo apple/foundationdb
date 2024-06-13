@@ -1,9 +1,9 @@
 /*
- * MockTLog.actor.h
+ * TestTLogServer.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TEST_MockTLog_ACTOR_G_H)
-#define FDBSERVER_TEST_MockTLog_ACTOR_G_H
-#include "fdbserver/workloads/MockTLog.actor.g.h"
-#elif !defined(FDBSERVER_TEST_MockTLog_ACTOR_H)
-#define FDBSERVER_TEST_MockTLog_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TEST_TLOG_ACTOR_G_H)
+#define FDBSERVER_TEST_TLOG_ACTOR_G_H
+#include "fdbserver/TestTLogServer.actor.g.h"
+#elif !defined(FDBSERVER_TEST_TLOG_ACTOR_H)
+#define FDBSERVER_TEST_TLOG_ACTOR_H
 
 #include <memory>
 #include <unordered_map>
@@ -38,7 +38,7 @@
 
 #pragma once
 
-struct TestTLogDriverOptions {
+struct TestTLogOptions {
 	std::string diskQueueBasename;
 	std::string diskQueueExtension;
 	std::string kvStoreFilename;
@@ -48,8 +48,10 @@ struct TestTLogDriverOptions {
 	int numTagsPerServer;
 	int numLogServers;
 	int numCommits;
+	int initVersion;
+	int recover;
 
-	explicit TestTLogDriverOptions(const UnitTestParameters& params) {
+	explicit TestTLogOptions(const UnitTestParameters& params) {
 		diskQueueBasename = params.get("diskQueueBasename").orDefault("folder");
 		diskQueueExtension = params.get("diskQueueFileExtension").orDefault("ext");
 		kvStoreExtension = params.get("diskQueueFileExtension").orDefault("fdr");
@@ -59,13 +61,15 @@ struct TestTLogDriverOptions {
 		numTagsPerServer = params.getInt("numTagsPerServer").orDefault(1);
 		numLogServers = params.getInt("numLogServers").orDefault(1);
 		numCommits = params.getInt("numCommits").orDefault(3);
+		initVersion = params.getInt("initVersion").orDefault(1);
+		recover = params.getInt("recover").orDefault(1);
 	}
 };
 
-// state maintained for a single tlog.
-struct TLogContext {
+// single tLog state
+struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	UID tLogID;
-	::TLogInterface MockTLogInterface;
+	::TLogInterface TestTLogInterface;
 	::TLogInterface MockLogRouterInterface;
 	PromiseStream<InitializeTLogRequest> init;
 	uint16_t tagProcessID;
@@ -75,46 +79,45 @@ struct TLogContext {
 	// test states
 	Promise<bool> TLogCreated;
 	Promise<bool> TLogStarted;
-	Promise<bool> MockTLogTestCompleted;
+	Promise<bool> TestTLogServerCompleted;
 
 	TLogContext(int inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
-// state maintained for all tlogs.
-struct TLogDriverContext {
+// test state
+struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 
-	ACTOR static Future<Void> sendPushMessages_impl(TLogDriverContext* pTLogDriverContext);
+	ACTOR static Future<Void> sendPushMessages(TLogTestContext* pTLogTestContext);
 
-	Future<Void> sendPushMessages() { return sendPushMessages_impl(this); }
+	Future<Void> sendPushMessages() { return sendPushMessages(this); }
 
-	ACTOR static Future<Void> sendCommitMessages_impl(TLogDriverContext* pTLogDriverContext, uint16_t processID);
+	ACTOR static Future<Void> sendCommitMessages(TLogTestContext* pTLogTestContext, uint16_t processID);
 
-	Future<Void> sendCommitMessages(uint16_t processID = 0) { return sendCommitMessages_impl(this, processID); }
+	Future<Void> sendCommitMessages(uint16_t processID = 0) { return sendCommitMessages(this, processID); }
 
 	Future<Void> peekCommitMessages(uint16_t logGroupID = 0, uint32_t tag = 0) {
-		return peekCommitMessages_impl(this, logGroupID, tag);
+		return peekCommitMessages(this, logGroupID, tag);
 	}
 
-	ACTOR static Future<Void> peekCommitMessages_impl(TLogDriverContext* pTLogDriverContext,
-	                                                  uint16_t logGroupID,
-	                                                  uint32_t tag);
+	ACTOR static Future<Void> peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t logGroupID, uint32_t tag);
 
-	TLogDriverContext(TestTLogDriverOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
-
-	UID logID;
-	UID workerID;
+	TLogTestContext(TestTLogOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
 
 	// paramaters
 	std::string diskQueueBasename;
 	int numCommits;
 	int numTagsPerServer;
 	int numLogServers;
+	int initVersion;
+	int recover;
 
-	// test driver state
-	std::vector<std::shared_ptr<TLogContext>> pTLogContextList;
-	TestTLogDriverOptions tLogOptions;
+	// tLog state
+	std::vector<Reference<TLogContext>> pTLogContextList;
+	TestTLogOptions tLogOptions;
 
-	// fdb state
+	// system state
+	UID logID;
+	UID workerID;
 	Reference<ILogSystem> ls;
 	ServerDBInfo dbInfo;
 	Reference<AsyncVar<ServerDBInfo>> dbInfoRef;
@@ -123,7 +126,8 @@ struct TLogDriverContext {
 	Optional<Standalone<StringRef>> zoneID;
 	int8_t tagLocality;
 	int epoch;
+	const int primaryLocality = 0;
 };
 
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_TEST_MockTLog_ACTOR_H
+#endif // FDBSERVER_TEST_TLOG_ACTOR_G_H
