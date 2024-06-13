@@ -21,9 +21,10 @@ package main
 
 import (
 	"context"
-	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"strconv"
 	"time"
+
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
