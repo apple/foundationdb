@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/go-logr/logr"
@@ -55,6 +56,9 @@ const (
 	// The FDB Kubernetes monitor will always shutdown all fdbserver processes, independent of this setting.
 	// The value of this annotation must be a duration like "60s".
 	DelayShutdownAnnotation = "foundationdb.org/delay-shutdown"
+
+	// ClusterFileChangeDetectedAnnotation is the annotation that will be updated if the fdb.cluster file is updated.
+	ClusterFileChangeDetectedAnnotation = "foundationdb.org/cluster-file-change"
 )
 
 // PodClient is a wrapper around the pod API.
@@ -191,12 +195,31 @@ func (podClient *PodClient) UpdateAnnotations(monitor *Monitor) error {
 		return err
 	}
 
+	return podClient.updateAnnotationsOnPod(map[string]string{
+		CurrentConfigurationAnnotation: string(monitor.ActiveConfigurationBytes),
+		EnvironmentAnnotation:          string(jsonEnvironment),
+	})
+}
+
+// updateFdbClusterTimestampAnnotation updates the ClusterFileChangeDetectedAnnotation annotation on the pod
+// after a change to the fdb.cluster file was detected, e.g. because the coordinators were changed.
+func (podClient *PodClient) updateFdbClusterTimestampAnnotation() error {
+	return podClient.updateAnnotationsOnPod(map[string]string{
+		ClusterFileChangeDetectedAnnotation: strconv.FormatInt(time.Now().Unix(), 10),
+	})
+}
+
+// updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
+// will be updated if the annotation is absent it will be added.
+func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
 	annotations := podClient.metadata.Annotations
-	if len(annotations) > 0 {
+	if len(annotations) == 0 {
 		annotations = map[string]string{}
 	}
-	annotations[CurrentConfigurationAnnotation] = string(monitor.ActiveConfigurationBytes)
-	annotations[EnvironmentAnnotation] = string(jsonEnvironment)
+
+	for key, val := range annotationChanges {
+		annotations[key] = val
+	}
 
 	return podClient.Patch(context.Background(), &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
@@ -237,7 +260,7 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 		return
 	}
 
-	podClient.Logger.Info("Got event for OnAdd", "name", pod.Name, "namespace", pod.Namespace, "generation", pod.Generation)
+	podClient.Logger.Info("Got event for OnUpdate", "name", pod.Name, "namespace", pod.Namespace, "generation", pod.Generation)
 
 	podClient.metadata = &metav1.PartialObjectMetadata{
 		TypeMeta:   pod.TypeMeta,

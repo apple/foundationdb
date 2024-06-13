@@ -1,4 +1,4 @@
-#/bin/bash
+#!/usr/bin/env bash
 SCRIPTDIR=$( cd "${BASH_SOURCE[0]%\/*}" && pwd )
 cwd="$(pwd)"
 BINDIR="${BINDIR:-${SCRIPTDIR}}"

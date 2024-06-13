@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 SCRIPTDIR="${SCRIPTDIR:-$( cd "${BASH_SOURCE[0]%\/*}" && pwd )}"
 DEBUGLEVEL="${DEBUGLEVEL:-1}"
 WORKDIR="${WORKDIR:-${SCRIPTDIR}/tmp/fdb.work}"

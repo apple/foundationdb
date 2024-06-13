@@ -22,9 +22,9 @@ package main
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 
@@ -110,14 +110,13 @@ func main() {
 		panic(err)
 	}
 	currentContainerVersion := strings.TrimSpace(string(versionBytes))
-
-	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+	mode := executionMode(executionModeString)
+	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
 	if err != nil {
 		logger.Error(err, "Error getting list of files to copy")
 		os.Exit(1)
 	}
 
-	mode := executionMode(executionModeString)
 	switch mode {
 	case executionModeLauncher:
 		customEnvironment, err := loadAdditionalEnvironment(logger)
@@ -125,7 +124,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(context.Background(), logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof, currentContainerVersion)
+		StartMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof, currentContainerVersion)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
