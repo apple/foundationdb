@@ -145,6 +145,9 @@ ACTOR Future<bool> handlePopCommand(Database localDb, std::vector<StringRef> tok
 
 namespace fdb_cli {
 
+using CommandHandler = Future<bool> (*)(Database localDb, std::vector<StringRef> tokens, Future<Void> warn);
+using CommandMap = std::unordered_map<std::string_view, CommandHandler>;
+
 ACTOR Future<bool> changeFeedCommandActor(Database localDb,
                                           Optional<TenantMapEntry> tenantEntry,
                                           std::vector<StringRef> tokens,
@@ -153,49 +156,47 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb,
 		printUsage(tokens[0]);
 		return false;
 	}
-	if (tokencmp(tokens[1], "list")) {
-		if (tokens.size() != 2) {
-			printUsage(tokens[0]);
-			return false;
-		}
-		wait(changeFeedList(localDb));
-		return true;
-	} else if (tokencmp(tokens[1], "register")) {
-		if (tokens.size() != 5) {
-			printUsage(tokens[0]);
-			return false;
-		}
 
-		KeyRange range;
-		if (tenantEntry.present()) {
-			range = KeyRangeRef(tokens[3], tokens[4]).withPrefix(tenantEntry.get().prefix);
-		} else {
-			range = KeyRangeRef(tokens[3], tokens[4]);
-		}
+	const CommandMap commandHandlers = {
+		{"list", [](Database db, std::vector<StringRef> tokens, Future<Void> warn) {
+			if (tokens.size() != 2) {
+				printUsage(tokens[0]);
+				return Future<bool>(false);
+			}
+			return changeFeedList(db);
+		}},
+		{"register", [](Database db, std::vector<StringRef> tokens, Future<Void> warn) {
+			if (tokens.size() != 5) {
+				printUsage(tokens[0]);
+				return Future<bool>(false);
+			}
+			KeyRange range = KeyRangeRef(tokens[3], tokens[4]);
+			return updateChangeFeed(db, tokens[2], ChangeFeedStatus::CHANGE_FEED_CREATE, range);
+		}},
+		{"stop", [](Database db, std::vector<StringRef> tokens, Future<Void> warn) {
+			if (tokens.size() != 3) {
+				printUsage(tokens[0]);
+				return Future<bool>(false);
+			}
+			return updateChangeFeed(db, tokens[2], ChangeFeedStatus::CHANGE_FEED_STOP);
+		}},
+		{"destroy", [](Database db, std::vector<StringRef> tokens, Future<Void> warn) {
+			if (tokens.size() != 3) {
+				printUsage(tokens[0]);
+				return Future<bool>(false);
+			}
+			return updateChangeFeed(db, tokens[2], ChangeFeedStatus::CHANGE_FEED_DESTROY);
+		}},
+		{"stream", handleStreamCommand},
+		{"pop", handlePopCommand}
+	};
 
-		wait(updateChangeFeed(localDb, tokens[2], ChangeFeedStatus::CHANGE_FEED_CREATE, range));
-		return true;
-	} else if (tokencmp(tokens[1], "stop")) {
-		if (tokens.size() != 3) {
-			printUsage(tokens[0]);
-			return false;
-		}
-		wait(updateChangeFeed(localDb, tokens[2], ChangeFeedStatus::CHANGE_FEED_STOP));
-		return true;
-	} else if (tokencmp(tokens[1], "destroy")) {
-		if (tokens.size() != 3) {
-			printUsage(tokens[0]);
-			return false;
-		}
-		wait(updateChangeFeed(localDb, tokens[2], ChangeFeedStatus::CHANGE_FEED_DESTROY));
-		return true;
-	} else if (tokencmp(tokens[1], "stream")) {
-		return handleStreamCommand(localDb, tokens, warn);
-	} else if (tokencmp(tokens[1], "pop")) {
-		return handlePopCommand(localDb, tokens);
+	auto commandHandlerIt = commandHandlers.find(tokens[1].toString());
+	if (commandHandlerIt != commandHandlers.end()) {
+		return commandHandlerIt->second(localDb, tokens, warn);
 	} else {
 		printUsage(tokens[0]);
-		return false;
+		return Future<bool>(false);
 	}
 }
 
