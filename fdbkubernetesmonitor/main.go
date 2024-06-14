@@ -110,7 +110,7 @@ func parseFlagsAndSetEnvDefaults() error {
 
 func main() {
 	var copyFiles, copyBinaries, copyLibraries, requiredCopyFiles []string
-	var inputDir, copyPrimaryLibrary, binaryOutputDirectory, certPath, keyPath, rootCaPath string
+	var inputDir, copyPrimaryLibrary, binaryOutputDirectory, certPath, keyPath string
 
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
 	pflag.StringVar(&fdbserverPath, "fdbserver-path", "/usr/bin/fdbserver", "Path to the fdbserver binary")
@@ -134,9 +134,6 @@ func main() {
 	pflag.BoolVar(&enableNodeWatch, "enable-node-watch", false, "Enables the fdb-kubernetes-monitor to watch the node resource where the current Pod is running. This can be used to read node labels")
 	pflag.StringVar(&certPath, "certificate-path", "", "The path of a PEM cert for the prometheus/pprof HTTP server")
 	pflag.StringVar(&keyPath, "certificate-key-path", "", "The path of a PEM key for the prometheus/pprof HTTP server")
-	pflag.Parse()
-	pflag.StringVar(&certFile, "cert-file", "", "The location of a PEM cert for the prometheus HTTP server")
-	pflag.StringVar(&keyFile, "key-file", "", "The location of a PEM key for the prometheus HTTP server")
 	err := parseFlagsAndSetEnvDefaults()
 	if err != nil {
 		panic(err)
