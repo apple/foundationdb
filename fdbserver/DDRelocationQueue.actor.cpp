@@ -977,9 +977,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			    .detail("CanSignalOut", it.bulkLoadState.get().launchAck.canBeSet());
 			if (it.bulkLoadState.get().launchAck.canBeSet()) {
 				if (it.bulkLoadState.present()) {
-					rd.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
+					it.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
 				} else {
-					rd.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
+					it.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
 				}
 			}
 		}

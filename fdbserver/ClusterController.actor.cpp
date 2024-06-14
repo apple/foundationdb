@@ -2193,28 +2193,26 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 	}
 }
 
-ACTOR Future<Void> triggerBulkLoad(ClusterControllerData* self, TriggerBulkLoadRequest req) {
-	state UID bulkLoadId;
+ACTOR Future<Void> submitBulkLoadTask(ClusterControllerData* self, TriggerBulkLoadRequest req) {
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
-		TraceEvent(SevVerbose, "CCTriggerBulkLoadBegin", self->id)
+		TraceEvent(SevVerbose, "CCSubmitBulkLoadTaskBegin", self->id)
 		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
 		TriggerBulkLoadRequest fReq(req.bulkLoadTask);
-		UID bulkLoadId_ = wait(self->db.serverInfo->get().distributor.get().triggerBulkLoad.getReply(fReq));
-		bulkLoadId = bulkLoadId_;
-		TraceEvent(SevVerbose, "CCTriggerBulkLoadEnd", self->id)
+		wait(self->db.serverInfo->get().distributor.get().triggerBulkLoad.getReply(fReq));
+		TraceEvent(SevVerbose, "CCSubmitBulkLoadTaskEnd", self->id)
 		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
-		req.reply.send(bulkLoadId);
+		req.reply.send(Void());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "CCTriggerBulkLoadFailed", self->id)
+		TraceEvent(SevInfo, "CCSubmitBulkLoadTaskFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
@@ -2224,13 +2222,13 @@ ACTOR Future<Void> triggerBulkLoad(ClusterControllerData* self, TriggerBulkLoadR
 	return Void();
 }
 
-ACTOR Future<Void> handleTriggerBulkLoad(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+ACTOR Future<Void> handleBulkLoadRequest(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		TriggerBulkLoadRequest req = waitNext(interf.clientInterface.triggerBulkLoad.getFuture());
-		TraceEvent(SevVerbose, "CCTriggerBulkLoadReceived", self->id)
+		TraceEvent(SevVerbose, "CCBulkLoadTaskRequestReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Task", req.bulkLoadTask.toString());
-		self->addActor.send(triggerBulkLoad(self, req));
+		self->addActor.send(submitBulkLoadTask(self, req));
 	}
 }
 
@@ -3204,7 +3202,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleTriggerAuditStorage(&self, interf));
-	self.addActor.send(handleTriggerBulkLoad(&self, interf));
+	self.addActor.send(handleBulkLoadRequest(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));

@@ -9592,7 +9592,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	wait(data->coreStarted.getFuture() && data->durableVersion.whenAtLeast(moveInShard->meta->createVersion + 1));
 	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
-	state Optional<BulkLoadState> bulkLoadState;
+	state Optional<BulkLoadState> bulkLoadState; // TODO(Zhe): avoid check this all time
 	wait(store(bulkLoadState, getBulkLoadState(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
 	if (bulkLoadState.present()) {
 		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)

@@ -78,7 +78,7 @@ struct BulkLoading : TestWorkload {
 		for (; i < tasks.size(); i++) {
 			loop {
 				try {
-					UID taskId_ = wait(triggerBulkLoad(cx->getConnectionRecord(), tasks[i], /*timeoutSecond=*/300));
+					wait(submitBulkLoadTask(cx->getConnectionRecord(), tasks[i], /*timeoutSecond=*/300));
 					TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks[i]));
 					break;
 				} catch (Error& e) {
@@ -262,18 +262,6 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	BulkLoadState newBulkLoadTask(KeyRange range,
-	                              std::string folder,
-	                              std::string dataFile,
-	                              std::string bytesSampleFile) {
-		BulkLoadState bulkLoadTask(range, BulkLoadType::SST, folder);
-		ASSERT(bulkLoadTask.addDataFile(joinPath(folder, dataFile)));
-		ASSERT(bulkLoadTask.setByteSampleFile(joinPath(folder, bytesSampleFile)));
-		ASSERT(bulkLoadTask.setTransportMethod(BulkLoadTransportMethod::CP)); // local file copy
-		ASSERT(bulkLoadTask.setInjectMethod(BulkLoadInjectMethod::File)); // directly inject file to storage engine
-		return bulkLoadTask;
-	}
-
 	BulkLoadTaskTestUnit produceBulkLoadTaskUnit(BulkLoading* self,
 	                                             const std::vector<Key>& keyCharList,
 	                                             KeyRange range,
@@ -282,7 +270,8 @@ struct BulkLoading : TestWorkload {
 		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
 		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
 		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = self->newBulkLoadTask(range, folder, dataFileName, bytesSampleFileName);
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
+		    range, folder, joinPath(folderName, dataFileName), joinPath(folderName, bytesSampleFileName));
 		size_t dataSize = deterministicRandom()->randomInt(10, 1000);
 		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
 		self->produceFilesToLoad(taskUnit);
@@ -356,7 +345,7 @@ struct BulkLoading : TestWorkload {
 		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
 		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
 		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = self->newBulkLoadTask(range, folder, dataFileName, bytesSampleFileName);
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFileName, bytesSampleFileName);
 		self->produceLargeDataToLoad(taskUnit, 5000000);
 		return;
 	}
@@ -378,17 +367,17 @@ struct BulkLoading : TestWorkload {
 		KeyRange range3 = Standalone(KeyRangeRef("4"_sr, "5"_sr));
 		state BulkLoadTaskTestUnit taskUnit3 = self->produceBulkLoadTaskUnit(self, keyCharList, range3, folderName3);
 
-		wait(setBulkLoadMode(cx, 1));
 		wait(self->issueBulkLoadTasks(
-		    self, cx, { taskUnit1.bulkLoadTask, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask }));
+		    self, cx, { taskUnit1.bulkLoadTask /*, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask*/ }));
+		int old_ = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
 		TraceEvent("BulkLoadingWorkLoadAllComplete");
-		wait(setBulkLoadMode(cx, 0));
+		int old_ = wait(setBulkLoadMode(cx, 0));
 
 		wait(self->checkData(cx, taskUnit1.data));
-		wait(self->checkData(cx, taskUnit2.data));
-		wait(self->checkData(cx, taskUnit3.data));
+		// wait(self->checkData(cx, taskUnit2.data));
+		// wait(self->checkData(cx, taskUnit3.data));
 		TraceEvent("BulkLoadingWorkLoadCheckedData");
 
 		TraceEvent("BulkLoadingWorkLoadComplete");

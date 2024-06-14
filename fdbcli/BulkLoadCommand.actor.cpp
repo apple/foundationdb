@@ -41,63 +41,34 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 		if (tokencmp(tokens[2], "on")) {
-			wait(setBulkLoadMode(localDb, 1));
+			int old_ = wait(setBulkLoadMode(localDb, 1));
 			return UID();
 		} else if (tokencmp(tokens[2], "off")) {
-			wait(setBulkLoadMode(localDb, 0));
+			int old_ = wait(setBulkLoadMode(localDb, 0));
 			return UID();
 		} else {
 			printUsage(tokens[0]);
 			return UID();
 		}
 
-	} else if (tokencmp(tokens[1], "task")) {
-		if (tokens.size() < 10) {
+	} else if (tokencmp(tokens[1], "localtask")) {
+		if (tokens.size() < 7) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		BulkLoadType type = BulkLoadType::Invalid;
-		if (tokencmp(tokens[2], "sst")) {
-			type = BulkLoadType::SST;
-		} else {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
-		if (tokencmp(tokens[3], "cp")) {
-			transportMethod = BulkLoadTransportMethod::CP;
-		} else {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		BulkLoadInjectMethod injectMethod = BulkLoadInjectMethod::Invalid;
-		if (tokencmp(tokens[4], "file")) {
-			injectMethod = BulkLoadInjectMethod::File;
-		} else {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		Key rangeBegin = tokens[5];
-		Key rangeEnd = tokens[6];
+		Key rangeBegin = tokens[2];
+		Key rangeEnd = tokens[3];
 		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		std::string folder = tokens[7].toString();
-		std::string dataFile = tokens[8].toString();
-		std::string byteSampleFile = tokens[9].toString();
+		std::string folder = tokens[4].toString();
+		std::string dataFile = tokens[5].toString();
+		std::string byteSampleFile = tokens[6].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		BulkLoadState bulkLoadTask(range, type, folder);
-		bulkLoadTask.setTransportMethod(transportMethod);
-		bulkLoadTask.setInjectMethod(injectMethod);
-		bulkLoadTask.addDataFile(dataFile);
-		bulkLoadTask.setByteSampleFile(byteSampleFile);
-		UID taskId = wait(triggerBulkLoad(clusterFile, bulkLoadTask, /*timeoutSeconds=*/60));
-		if (!taskId.isValid()) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		return taskId;
+		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
+		wait(submitBulkLoadTask(clusterFile, bulkLoadTask, /*timeoutSeconds=*/60));
+		return bulkLoadTask.taskId;
 
 	} else {
 		printUsage(tokens[0]);

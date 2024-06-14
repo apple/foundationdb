@@ -238,7 +238,6 @@ struct GetMetricsListRequest {
 
 struct BulkLoadShardRequest {
 	BulkLoadState bulkLoadState;
-	Version commitVersion;
 	Promise<BulkLoadAckType> triggerAck;
 	Promise<BulkLoadAckType> launchAck;
 	Promise<BulkLoadAckType> finishAck;
@@ -246,14 +245,12 @@ struct BulkLoadShardRequest {
 
 	BulkLoadShardRequest() {}
 	BulkLoadShardRequest(BulkLoadState const& bulkLoadState,
-	                     Version commitVersion,
 	                     Promise<BulkLoadAckType> triggerAck,
 	                     Promise<BulkLoadAckType> launchAck)
-	  : bulkLoadState(bulkLoadState), commitVersion(commitVersion), triggerAck(triggerAck), launchAck(launchAck),
-	    terminate(false) {}
+	  : bulkLoadState(bulkLoadState), triggerAck(triggerAck), launchAck(launchAck), terminate(false) {}
 
 	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<BulkLoadAckType> finishAck)
-	  : bulkLoadState(bulkLoadState), commitVersion(invalidVersion), finishAck(finishAck), terminate(true) {}
+	  : bulkLoadState(bulkLoadState), finishAck(finishAck), terminate(true) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution

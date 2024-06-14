@@ -85,7 +85,7 @@ public:
 	// be accessed
 	bool* trackerCancelled = nullptr;
 
-	KeyRangeMap<std::pair<UID, Version>> bulkLoadingMap; // BulkLoadTaskID, BulkLoadTaskCommitVerison
+	KeyRangeMap<UID> bulkLoadingMap; // BulkLoadTaskRange, BulkLoadTaskID
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker

@@ -85,16 +85,23 @@ struct BulkLoadState {
 		return res;
 	}
 
-	void setTaskId(UID id) { taskId = id; }
+	bool setTaskId(UID id) {
+		if (taskId.isValid() && taskId != id) {
+			return false;
+		}
+		taskId = id;
+		return true;
+	}
 
-	void setDataMoveId(UID id) {
+	bool setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
 			TraceEvent(SevError, "DDBulkLoadTaskSetDataMoveError")
 			    .detail("NewId", id)
 			    .detail("BulkLoadTask", this->toString());
-			ASSERT(false);
+			return false;
 		}
 		dataMoveId = id;
+		return true;
 	}
 
 	bool setTransportMethod(BulkLoadTransportMethod method) {
@@ -179,6 +186,11 @@ struct BulkLoadState {
 	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
 };
 
+BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
+                                      std::string folder,
+                                      std::string dataFile,
+                                      std::string bytesSampleFile);
+
 struct TriggerBulkLoadRequest {
 	constexpr static FileIdentifier file_identifier = 1384500;
 
@@ -191,7 +203,7 @@ struct TriggerBulkLoadRequest {
 	}
 
 	BulkLoadState bulkLoadTask;
-	ReplyPromise<UID> reply;
+	ReplyPromise<Void> reply;
 };
 
 #endif

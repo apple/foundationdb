@@ -380,12 +380,6 @@ public:
 	                            // requested
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
-	double DD_BULKLOAD_MIN_SCHEDULE_PERIOD_SEC; // the minimal period of seconds that bulk load scheduler restarts
-	                                            // looking up bulk loading task keys to find new tasks to do
-	double DD_BULKLOAD_MODE_MONITOR_PERIOD_SEC; // the period of seconds that bulk load looks up bulk load mode key
-	                                            // to see if bulk load mode is on. After that, bulk load starts
-	                                            // schedule tasks
-	double DD_BULKLOAD_TASK_TIMEOUT;
 	int DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX;
 	int BULKLOAD_FILE_BYTES_MAX;
 	double DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC;

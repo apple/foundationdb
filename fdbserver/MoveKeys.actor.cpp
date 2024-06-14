@@ -1878,12 +1878,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						}
 						// Only place to set it running to metadata
 						existBulkLoad.phase = BulkLoadPhase::Running;
-						existBulkLoad.setDataMoveId(dataMoveId);
+						ASSERT(existBulkLoad.setDataMoveId(dataMoveId));
 						existBulkLoad.startTime = now();
 						existBulkLoad.triggerTime = bulkLoadState.get().triggerTime;
 						wait(krmSetRange(&tr, bulkLoadPrefix, existBulkLoad.range, bulkLoadStateValue(existBulkLoad)));
 						TraceEvent(SevInfo, "DDBulkLoadTaskRunningPersist", relocationIntervalId)
 						    .detail("BulkLoadTask", existBulkLoad.toString());
+						dataMove.bulkLoadState = existBulkLoad;
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
 					complete = true;
@@ -1899,8 +1900,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveRange", keys)
 					    .detail("NewDataMoveMetaData", dataMove.toString());
 				}
-
-				dataMove.bulkLoadState = bulkLoadState;
 
 				tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 
