@@ -39,7 +39,7 @@ import (
 	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
-	"github.com/apple/foundationdb/fdbkubernetesmonitor/certloader"
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/internal/certloader"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
