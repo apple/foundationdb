@@ -63,8 +63,11 @@ const (
 
 // PodClient is a wrapper around the pod API.
 type PodClient struct {
-	// metadata is the latest metadata that was seen by the fdb-kubernetes-monitor for the according Pod.
-	metadata *metav1.PartialObjectMetadata
+	// podMetadata is the latest metadata that was seen by the fdb-kubernetes-monitor for the according Pod.
+	podMetadata *metav1.PartialObjectMetadata
+
+	// nodeMetadata is the latest metadata that was seen by the fdb-kubernetes-monitor for the according node that hosts the Pod.
+	nodeMetadata *metav1.PartialObjectMetadata
 
 	// TimestampFeed is a channel where the pod client will send updates with
 	// the values from OutdatedConfigMapAnnotation.
@@ -77,17 +80,16 @@ type PodClient struct {
 	client.Client
 }
 
-// CreatePodClient creates a new client for working with the pod object.
-func CreatePodClient(ctx context.Context, logger logr.Logger) (*PodClient, error) {
+func setupCache(namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	scheme := runtime.NewScheme()
 	err = clientgoscheme.AddToScheme(scheme)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Create the new client for writes. This client will also be used to setup the cache.
@@ -95,11 +97,8 @@ func CreatePodClient(ctx context.Context, logger logr.Logger) (*PodClient, error
 		Scheme: scheme,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	namespace := os.Getenv("FDB_POD_NAMESPACE")
-	podName := os.Getenv("FDB_POD_NAME")
 
 	internalCache, err := cache.New(config, cache.Options{
 		Scheme:    scheme,
@@ -109,28 +108,57 @@ func CreatePodClient(ctx context.Context, logger logr.Logger) (*PodClient, error
 			&corev1.Pod{}: {
 				Field: fields.OneTermEqualSelector(metav1.ObjectNameField, podName),
 			},
+			&corev1.Node{}: {
+				Field: fields.OneTermEqualSelector(metav1.ObjectNameField, nodeName),
+			},
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Fetch the informer for the FoundationDBCluster resource
-	informer, err := internalCache.GetInformer(ctx, &corev1.Pod{})
-	if err != nil {
-		return nil, err
-	}
+	return internalClient, internalCache, nil
+}
 
+// CreatePodClient creates a new client for working with the pod object.
+func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher bool, setupCache func(string, string, string) (client.WithWatch, cache.Cache, error)) (*PodClient, error) {
+	namespace := os.Getenv("FDB_POD_NAMESPACE")
+	podName := os.Getenv("FDB_POD_NAME")
+	nodeName := os.Getenv("FDB_NODE_NAME")
+
+	internalClient, internalCache, err := setupCache(namespace, podName, nodeName)
 	podClient := &PodClient{
-		metadata:      nil,
+		podMetadata:   nil,
+		nodeMetadata:  nil,
 		TimestampFeed: make(chan int64, 10),
 		Logger:        logger,
 	}
 
-	// Setup an event handler to make sue we get events for new clusters and directly reload.
-	_, err = informer.AddEventHandler(podClient)
+	// Fetch the informer for the Pod resource.
+	podInformer, err := internalCache.GetInformer(ctx, &corev1.Pod{})
 	if err != nil {
 		return nil, err
+	}
+
+	// Setup an event handler to make sure we get events for the Pod and directly reload the information.
+	_, err = podInformer.AddEventHandler(podClient)
+	if err != nil {
+		return nil, err
+	}
+
+	if enableNodeWatcher {
+		var nodeInformer cache.Informer
+		// Fetch the informer for the node resource.
+		nodeInformer, err = internalCache.GetInformer(ctx, &corev1.Node{})
+		if err != nil {
+			return nil, err
+		}
+
+		// Setup an event handler to make sure we get events for the node and directly reload the information.
+		_, err = nodeInformer.AddEventHandler(podClient)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Make sure the internal cache is started.
@@ -154,14 +182,27 @@ func CreatePodClient(ctx context.Context, logger logr.Logger) (*PodClient, error
 	podClient.Client = controllerClient
 
 	// Fetch the current metadata before returning the PodClient
-	currentMetadata := &metav1.PartialObjectMetadata{}
-	currentMetadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
-	err = podClient.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: podName}, currentMetadata)
+	currentPodMetadata := &metav1.PartialObjectMetadata{}
+	currentPodMetadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
+	err = podClient.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: podName}, currentPodMetadata)
 	if err != nil {
 		return nil, err
 	}
 
-	podClient.metadata = currentMetadata
+	podClient.podMetadata = currentPodMetadata
+
+	// Only if the fdb-kubernetes-monitor should update the node information, add the watcher here by fetching the node
+	// information once during start up.
+	if enableNodeWatcher {
+		currentNodeMetadata := &metav1.PartialObjectMetadata{}
+		currentNodeMetadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Node"))
+		err = podClient.Client.Get(ctx, client.ObjectKey{Name: nodeName}, currentNodeMetadata)
+		if err != nil {
+			return nil, err
+		}
+
+		podClient.nodeMetadata = currentNodeMetadata
+	}
 
 	return podClient, nil
 }
@@ -212,7 +253,7 @@ func (podClient *PodClient) updateFdbClusterTimestampAnnotation() error {
 // updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
 // will be updated if the annotation is absent it will be added.
 func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
-	annotations := podClient.metadata.Annotations
+	annotations := podClient.podMetadata.Annotations
 	if len(annotations) == 0 {
 		annotations = map[string]string{}
 	}
@@ -227,8 +268,8 @@ func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   podClient.metadata.Namespace,
-			Name:        podClient.metadata.Name,
+			Namespace:   podClient.podMetadata.Namespace,
+			Name:        podClient.podMetadata.Name,
 			Annotations: annotations,
 		},
 	}, client.Apply, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
@@ -236,53 +277,57 @@ func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]
 
 // OnAdd is called when an object is added.
 func (podClient *PodClient) OnAdd(obj interface{}) {
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		return
-	}
-
-	podClient.Logger.Info("Got event for OnAdd", "name", pod.Name, "namespace", pod.Namespace)
-	podClient.metadata = &metav1.PartialObjectMetadata{
-		TypeMeta:   pod.TypeMeta,
-		ObjectMeta: pod.ObjectMeta,
+	switch castedObj := obj.(type) {
+	case *corev1.Pod:
+		podClient.Logger.Info("Got event for OnAdd for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
+		podClient.podMetadata = &metav1.PartialObjectMetadata{
+			TypeMeta:   castedObj.TypeMeta,
+			ObjectMeta: castedObj.ObjectMeta,
+		}
+	case *corev1.Node:
+		podClient.Logger.Info("Got event for OnAdd for Node resource", "name", castedObj.Name)
+		podClient.nodeMetadata = &metav1.PartialObjectMetadata{
+			TypeMeta:   castedObj.TypeMeta,
+			ObjectMeta: castedObj.ObjectMeta,
+		}
 	}
 }
 
-// OnUpdate is called when an object is modified. Note that oldObj is the
-// last known state of the object-- it is possible that several changes
-// were combined together, so you can't use this to see every single
-// change. OnUpdate is also called when a re-list happens, and it will
+// OnUpdate is also called when a re-list happens, and it will
 // get called even if nothing changed. This is useful for periodically
 // evaluating or syncing something.
 func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
-	pod, ok := newObj.(*corev1.Pod)
-	if !ok {
-		return
+	switch castedObj := newObj.(type) {
+	case *corev1.Pod:
+		podClient.Logger.Info("Got event for OnUpdate for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace, "generation", castedObj.Generation)
+		podClient.podMetadata = &metav1.PartialObjectMetadata{
+			TypeMeta:   castedObj.TypeMeta,
+			ObjectMeta: castedObj.ObjectMeta,
+		}
+
+		if podClient.podMetadata.Annotations == nil {
+			return
+		}
+
+		annotation := podClient.podMetadata.Annotations[OutdatedConfigMapAnnotation]
+		if annotation == "" {
+			return
+		}
+
+		timestamp, err := strconv.ParseInt(annotation, 10, 64)
+		if err != nil {
+			podClient.Logger.Error(err, "Error parsing annotation", "key", OutdatedConfigMapAnnotation, "rawAnnotation", annotation)
+			return
+		}
+
+		podClient.TimestampFeed <- timestamp
+	case *corev1.Node:
+		podClient.Logger.Info("Got event for OnUpdate for Node resource", "name", castedObj.Name)
+		podClient.nodeMetadata = &metav1.PartialObjectMetadata{
+			TypeMeta:   castedObj.TypeMeta,
+			ObjectMeta: castedObj.ObjectMeta,
+		}
 	}
-
-	podClient.Logger.Info("Got event for OnUpdate", "name", pod.Name, "namespace", pod.Namespace, "generation", pod.Generation)
-
-	podClient.metadata = &metav1.PartialObjectMetadata{
-		TypeMeta:   pod.TypeMeta,
-		ObjectMeta: pod.ObjectMeta,
-	}
-
-	if podClient.metadata == nil {
-		return
-	}
-
-	annotation := podClient.metadata.Annotations[OutdatedConfigMapAnnotation]
-	if annotation == "" {
-		return
-	}
-
-	timestamp, err := strconv.ParseInt(annotation, 10, 64)
-	if err != nil {
-		podClient.Logger.Error(err, "Error parsing annotation", "key", OutdatedConfigMapAnnotation, "rawAnnotation", annotation)
-		return
-	}
-
-	podClient.TimestampFeed <- timestamp
 }
 
 // OnDelete will get the final state of the item if it is known, otherwise
@@ -290,15 +335,12 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 // happen if the watch is closed and misses the delete event and we don't
 // notice the deletion until the subsequent re-list.
 func (podClient *PodClient) OnDelete(obj interface{}) {
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		return
-	}
-
-	podClient.Logger.Info("Got event for OnDelete", "name", pod.Name, "namespace", pod.Namespace)
-
-	podClient.metadata = &metav1.PartialObjectMetadata{
-		TypeMeta:   pod.TypeMeta,
-		ObjectMeta: pod.ObjectMeta,
+	switch castedObj := obj.(type) {
+	case *corev1.Pod:
+		podClient.Logger.Info("Got event for OnDelete for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
+		podClient.podMetadata = nil
+	case *corev1.Node:
+		podClient.Logger.Info("Got event for OnDelete for Node resource", "name", castedObj.Name)
+		podClient.nodeMetadata = nil
 	}
 }
