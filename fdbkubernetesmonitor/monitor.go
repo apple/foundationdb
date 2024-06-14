@@ -22,6 +22,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,7 @@ import (
 	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/certloader"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -107,7 +109,7 @@ type Monitor struct {
 }
 
 type httpConfig struct {
-	listenAddr, certFile, keyFile string
+	listenAddr, certPath, keyPath, rootCaPath string
 }
 
 // StartMonitor starts the monitor loop.
@@ -156,8 +158,17 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	// Add Prometheus support
 	mux.Handle("/metrics", promHandler)
 	go func() {
-		if promConfig.keyFile != "" || promConfig.certFile != "" {
-			err := http.ListenAndServeTLS(promConfig.listenAddr, promConfig.certFile, promConfig.keyFile, mux)
+		if promConfig.keyPath != "" || promConfig.certPath != "" {
+			certLoader := certloader.NewCertLoader(logger, promConfig.certPath, promConfig.keyPath)
+			tlsConfig := &tls.Config{
+				GetCertificate: certLoader.GetCertificate,
+			}
+			server := &http.Server{
+				Addr:      promConfig.listenAddr,
+				Handler:   mux,
+				TLSConfig: tlsConfig,
+			}
+			err = server.ListenAndServeTLS("", "")
 			if err != nil {
 				logger.Error(err, "could not start HTTPS server")
 				os.Exit(1)
