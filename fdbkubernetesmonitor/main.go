@@ -79,6 +79,35 @@ func initLogger(logPath string) *zap.Logger {
 	return zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(logWriter), zapcore.InfoLevel))
 }
 
+func convertEnvironmentVariableNameToFlagName(s string) string {
+	return strings.ReplaceAll(strings.ToLower(s), "_", "-")
+}
+
+// parseFlagsAndSetEnvDefaults will parse the provided flags. The following order will be taken:
+// 1. If the flag is provided, take this value
+// 2. If an environment variable with the same name as the flag (just upper case and an underscore instead of a hyphen).
+// 3. Use the default value.
+func parseFlagsAndSetEnvDefaults() error {
+	for _, env := range os.Environ() {
+		envSplit := strings.SplitN(env, "=", 2)
+		envName := envSplit[0]
+		envValue := envSplit[1]
+		flag := pflag.CommandLine.Lookup(convertEnvironmentVariableNameToFlagName(envName))
+		// If no flag with that name is present or the flag is already specified with another value than the default one
+		// ignore the value from the env variable.
+		if flag == nil || flag.Changed {
+			continue
+		}
+
+		if err := flag.Value.Set(envValue); err != nil {
+			return err
+		}
+	}
+	pflag.Parse()
+
+	return nil
+}
+
 func main() {
 	var copyFiles, copyBinaries, copyLibraries, requiredCopyFiles []string
 	var inputDir, copyPrimaryLibrary, binaryOutputDirectory string
@@ -103,10 +132,12 @@ func main() {
 	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
 	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
 	pflag.BoolVar(&enableNodeWatch, "enable-node-watch", false, "Enables the fdb-kubernetes-monitor to watch the node resource where the current Pod is running. This can be used to read node labels")
-	pflag.Parse()
+	err := parseFlagsAndSetEnvDefaults()
+	if err != nil {
+		panic(err)
+	}
 
 	logger := zapr.NewLogger(initLogger(logPath))
-
 	versionBytes, err := os.ReadFile(versionFilePath)
 	if err != nil {
 		panic(err)
