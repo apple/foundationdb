@@ -271,7 +271,7 @@ struct BulkLoading : TestWorkload {
 		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
-		    range, folder, joinPath(folderName, dataFileName), joinPath(folderName, bytesSampleFileName));
+		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
 		size_t dataSize = deterministicRandom()->randomInt(10, 1000);
 		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
 		self->produceFilesToLoad(taskUnit);
