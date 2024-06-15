@@ -22,6 +22,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,7 @@ import (
 	"time"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/internal/certloader"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -106,8 +108,12 @@ type Monitor struct {
 	metrics *metrics
 }
 
+type httpConfig struct {
+	listenAddr, certPath, keyPath, rootCaPath string
+}
+
 // StartMonitor starts the monitor loop.
-func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, promConfig httpConfig, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
 	podClient, err := CreatePodClient(ctx, logger, enableNodeWatcher, setupCache)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
@@ -152,7 +158,23 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	// Add Prometheus support
 	mux.Handle("/metrics", promHandler)
 	go func() {
-		err := http.ListenAndServe(listenAddr, mux)
+		if promConfig.keyPath != "" || promConfig.certPath != "" {
+			certLoader := certloader.NewCertLoader(logger, promConfig.certPath, promConfig.keyPath)
+			tlsConfig := &tls.Config{
+				GetCertificate: certLoader.GetCertificate,
+			}
+			server := &http.Server{
+				Addr:      promConfig.listenAddr,
+				Handler:   mux,
+				TLSConfig: tlsConfig,
+			}
+			err = server.ListenAndServeTLS("", "")
+			if err != nil {
+				logger.Error(err, "could not start HTTPS server")
+				os.Exit(1)
+			}
+		}
+		err := http.ListenAndServe(promConfig.listenAddr, mux)
 		if err != nil {
 			logger.Error(err, "could not start HTTP server")
 			os.Exit(1)

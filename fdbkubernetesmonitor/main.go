@@ -110,7 +110,7 @@ func parseFlagsAndSetEnvDefaults() error {
 
 func main() {
 	var copyFiles, copyBinaries, copyLibraries, requiredCopyFiles []string
-	var inputDir, copyPrimaryLibrary, binaryOutputDirectory string
+	var inputDir, copyPrimaryLibrary, binaryOutputDirectory, certPath, keyPath string
 
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
 	pflag.StringVar(&fdbserverPath, "fdbserver-path", "/usr/bin/fdbserver", "Path to the fdbserver binary")
@@ -132,6 +132,8 @@ func main() {
 	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
 	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
 	pflag.BoolVar(&enableNodeWatch, "enable-node-watch", false, "Enables the fdb-kubernetes-monitor to watch the node resource where the current Pod is running. This can be used to read node labels")
+	pflag.StringVar(&certPath, "certificate-path", "", "The path of a PEM cert for the prometheus/pprof HTTP server")
+	pflag.StringVar(&keyPath, "certificate-key-path", "", "The path of a PEM key for the prometheus/pprof HTTP server")
 	err := parseFlagsAndSetEnvDefaults()
 	if err != nil {
 		panic(err)
@@ -157,7 +159,12 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof, currentContainerVersion, enableNodeWatch)
+		promConfig := httpConfig{
+			listenAddr: listenAddress,
+			certPath:   certPath,
+			keyPath:    keyPath,
+		}
+		StartMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, currentContainerVersion, enableNodeWatch)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
