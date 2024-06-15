@@ -78,8 +78,6 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp("bulkload <mode|task> <Type> <Method> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
-                "Start a bulk load task",
-                "Specify `Type' (only `sst' is supported currently), and\n"
-                "Specify `Method' (only `cp' is supported currently).\n"));
+    CommandHelp("bulkload <mode|localtask> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
+                "Start a bulk load task"));
 } // namespace fdb_cli
