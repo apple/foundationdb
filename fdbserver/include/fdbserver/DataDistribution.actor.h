@@ -238,18 +238,16 @@ struct GetMetricsListRequest {
 
 struct BulkLoadShardRequest {
 	BulkLoadState bulkLoadState;
-	Promise<BulkLoadAckType> triggerAck;
-	Promise<BulkLoadAckType> launchAck;
-	Promise<BulkLoadAckType> finishAck;
+	Promise<Void> triggerAck;
+	Promise<Void> completeAck;
+	Promise<Void> finishAck;
 	bool terminate = false;
 
 	BulkLoadShardRequest() {}
-	BulkLoadShardRequest(BulkLoadState const& bulkLoadState,
-	                     Promise<BulkLoadAckType> triggerAck,
-	                     Promise<BulkLoadAckType> launchAck)
-	  : bulkLoadState(bulkLoadState), triggerAck(triggerAck), launchAck(launchAck), terminate(false) {}
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<Void> triggerAck, Promise<Void> completeAck)
+	  : bulkLoadState(bulkLoadState), triggerAck(triggerAck), completeAck(completeAck), terminate(false) {}
 
-	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<BulkLoadAckType> finishAck)
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<Void> finishAck)
 	  : bulkLoadState(bulkLoadState), finishAck(finishAck), terminate(true) {}
 };
 

@@ -425,8 +425,10 @@ std::string Busyness::toString() {
 
 // find the "workFactor" for this, were it launched now
 int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
-	if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
-	    relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
+	if (relocation.bulkLoadState.present())
+		return 0;
+	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
+	         relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
 		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
@@ -540,7 +542,7 @@ void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destB
 }
 
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
-	ASSERT(relocation.workFactor > 0);
+	ASSERT(relocation.bulkLoadState.present() || relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
 
@@ -801,9 +803,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 		// If there is a queued job that wants data relocation which we are about to cancel/modify,
 		//  make sure that we keep the relocation intent for the job that we queue up
-		// If the new/old relocation is a bulk loading relocation, we do not inherit settings from the queued job
-		if ((foundActiveFetching || foundActiveRelocation) &&
-		    (!rrs.bulkLoadState.present() && !rd.bulkLoadState.present())) {
+		if (foundActiveFetching || foundActiveRelocation) {
 			rd.wantsNewServers |= rrs.wantsNewServers;
 			rd.startTime = std::min(rd.startTime, rrs.startTime);
 			if (!hasHealthPriority) {
@@ -815,43 +815,23 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			rd.priority = std::max(rd.priority, std::max(rd.boundaryPriority, rd.healthPriority));
 		}
 
-		// New job cancels old queued jobs
+		// If there is a queued job carrying a bulk load task
+		// the new job takes over the bulk load task if the new one
+		// is not a bulk load data move
+		// If the new one is a bulk load task, discard the old one
+		if (rrs.bulkLoadState.present() && rrs.bulkLoadState.get().completeAck.canBeSet() &&
+		    !rd.bulkLoadState.present()) {
+			ASSERT(rd.keys == rrs.keys);
+			ASSERT(rrs.keys == rrs.bulkLoadState.get().range);
+			rd.bulkLoadState = rrs.bulkLoadState;
+		}
+
 		if (rd.keys.contains(rrs.keys)) {
 			if (foundActiveFetching) {
-				if (rrs.bulkLoadState.present()) {
-					TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed")
-					    .detail("Reason", "Overwritten by other data move 1")
-					    .detail("OldDataMove", rrs.bulkLoadState.get().toString())
-					    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
-					    .detail("NewDataMovePriority", rd.priority)
-					    .detail("CanSignalOut", rrs.bulkLoadState.get().launchAck.canBeSet());
-					if (rrs.bulkLoadState.get().launchAck.canBeSet()) {
-						if (rd.bulkLoadState.present()) {
-							rrs.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
-						} else {
-							rrs.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
-						}
-					}
-				}
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
 			} else if (foundActiveRelocation) {
 				firstQueue->erase(firstRelocationItr);
 				for (int i = 1; i < rrs.src.size(); i++) {
-					if (rrs.bulkLoadState.present()) {
-						TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed")
-						    .detail("Reason", "Overwritten by other data move 2")
-						    .detail("OldDataMove", rrs.bulkLoadState.get().toString())
-						    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
-						    .detail("NewDataMovePriority", rd.priority)
-						    .detail("CanSignalOut", rrs.bulkLoadState.get().launchAck.canBeSet());
-						if (rrs.bulkLoadState.get().launchAck.canBeSet()) {
-							if (rd.bulkLoadState.present()) {
-								rrs.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
-							} else {
-								rrs.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
-							}
-						}
-					}
 					queue[rrs.src[i]].erase(rrs);
 				}
 			}
@@ -923,21 +903,6 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 				auto& serverQueue = queue[rrs.src[i]];
 
 				if (serverQueue.erase(rrs) > 0) {
-					if (rrs.bulkLoadState.present()) {
-						TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed")
-						    .detail("Reason", "Overwritten by other data move 3")
-						    .detail("OldDataMove", rrs.bulkLoadState.get().toString())
-						    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
-						    .detail("NewDataMovePriority", rd.priority)
-						    .detail("CanSignalOut", rrs.bulkLoadState.get().launchAck.canBeSet());
-						if (rrs.bulkLoadState.get().launchAck.canBeSet()) {
-							if (rd.bulkLoadState.present()) {
-								rrs.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
-							} else {
-								rrs.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
-							}
-						}
-					}
 					if (!foundActiveRelocation) {
 						newData.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
@@ -968,21 +933,6 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	}
 
 	for (auto it : delayDelete) {
-		if (it.bulkLoadState.present()) {
-			TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed")
-			    .detail("Reason", "Overwritten by other data move 4")
-			    .detail("OldDataMove", it.bulkLoadState.get().toString())
-			    .detail("NewDataMove", rd.bulkLoadState.present() ? rd.bulkLoadState.get().toString() : "")
-			    .detail("NewDataMovePriority", it.priority)
-			    .detail("CanSignalOut", it.bulkLoadState.get().launchAck.canBeSet());
-			if (it.bulkLoadState.get().launchAck.canBeSet()) {
-				if (it.bulkLoadState.present()) {
-					it.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
-				} else {
-					it.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
-				}
-			}
-		}
 		fetchingSourcesQueue.erase(it);
 	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
@@ -1146,7 +1096,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				    .detail("DataMoveID", rd.dataMoveId)
 				    .detail("RandomID", rd.randomId)
 				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-				// Remove later since bulk load does not care source servers
+				// TODO(Zhe): Remove later since bulk load does not care source servers
 			}
 			continue;
 		}
@@ -1167,10 +1117,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 
 			// now we are launching: remove this entry from the queue of all the src servers
 			for (int i = 0; i < rd.src.size(); i++) {
-				if (rd.bulkLoadState.present()) {
-					TraceEvent(SevInfo, "DDBulkLoadTaskRelocationLaunching", distributorId)
-					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-				}
 				ASSERT(queue[rd.src[i]].erase(rd));
 			}
 		}
@@ -1181,14 +1127,13 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		for (auto it = f.begin(); it != f.end(); ++it) {
 			if (inFlightActors.liveActorAt(it->range().begin)) {
 				rd.wantsNewServers |= it->value().wantsNewServers;
-				if (it->value().bulkLoadState.present()) {
-					if (it->value().bulkLoadState.get().launchAck.canBeSet()) {
-						if (rd.bulkLoadState.present()) {
-							it->value().bulkLoadState.get().launchAck.sendError(bulkload_task_launch_overwritten());
-						} else {
-							it->value().bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
-						}
-					}
+				// If the alive job has a bulk load task, the new data move takes over the bulk load task
+				// if the new one is not a bulk load data move.
+				// If the new one is a bulk load data move, the old job is discarded
+				if (it->value().bulkLoadState.present() && it->value().bulkLoadState.get().completeAck.canBeSet() &&
+				    !rd.bulkLoadState.present()) {
+					ASSERT(it->value().bulkLoadState.get().range == rd.keys);
+					rd.bulkLoadState = it->value().bulkLoadState.get();
 				}
 			}
 		}
@@ -1476,7 +1421,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
-	if (rd.bulkLoadState.present()) {
+	state bool doBulkLoading = rd.bulkLoadState.present();
+
+	if (doBulkLoading) {
 		TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorStart", self->distributorId)
 		    .detail("DataMoveID", rd.dataMoveId)
 		    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
@@ -1507,6 +1454,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			inFlightRange.value().cancellable = false;
 
 			wait(prevCleanup);
+
+			if (doBulkLoading) {
+				TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorPrevCleanupComplete", self->distributorId)
+				    .detail("DataMoveID", rd.dataMoveId)
+				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+			}
 
 			auto f = self->dataMoves.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1543,6 +1496,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			wait(store(metrics, metricsF) && store(parentMetrics, parentMetricsF));
 		} else {
 			wait(store(metrics, metricsF));
+		}
+
+		if (doBulkLoading) {
+			TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorMetricsReceived", self->distributorId)
+			    .detail("DataMoveID", rd.dataMoveId)
+			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
 		}
 
 		state std::unordered_set<uint64_t> excludedDstPhysicalShards;
@@ -1593,8 +1552,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						}
 						anyHealthy = true;
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
-						if (rd.bulkLoadState.present()) {
-							TraceEvent("DDBulkLoadTaskSelectDestTeam")
+						if (doBulkLoading) {
+							TraceEvent(SevInfo, "DDBulkLoadTaskSelectDestTeam", self->distributorId)
 							    .detail("Context", "Restore")
 							    .detail("SrcIds", describe(rd.src))
 							    .detail("DestIds", bestTeam.first.get()->getServerIDs())
@@ -1638,7 +1597,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
 						req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
-						req.findTeamForBulkLoad = rd.bulkLoadState.present();
+						req.findTeamForBulkLoad = doBulkLoading;
 
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
@@ -1668,6 +1627,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
 						bestTeamReady = fbestTeam.isReady();
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+						if (doBulkLoading) {
+							TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorBestTeamReceived", self->distributorId)
+							    .detail("DataMoveID", rd.dataMoveId)
+							    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
+							    .detail("BestTeamReady", bestTeamReady);
+						}
 						if (tciIndex > 0 && !bestTeamReady) {
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
 							// getting the destination team or we could miss failure notifications for the storage
@@ -1764,8 +1729,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							}
 						} else {
 							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
-							if (rd.bulkLoadState.present()) {
-								TraceEvent("DDBulkLoadTaskSelectDestTeam")
+							if (doBulkLoading) {
+								TraceEvent(SevInfo, "DDBulkLoadTaskSelectDestTeam", self->distributorId)
 								    .detail("Context", "New")
 								    .detail("SrcIds", describe(rd.src))
 								    .detail("DestIds", bestTeam.first.get()->getServerIDs())
@@ -1827,8 +1792,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size());
 					if (rd.isRestore() && stuckCount > 50) {
-						throw data_move_dest_team_not_found();
-					} else if (rd.bulkLoadState.present() && stuckCount > 50) {
 						throw data_move_dest_team_not_found();
 					}
 					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
@@ -1900,7 +1863,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 
 				// TODO(psm): Make DataMoveMetaData aware of the two-step data move optimization.
-				if (allHealthy && anyWithSource && !bestTeams[i].second && !rd.bulkLoadState.present()) {
+				if (allHealthy && anyWithSource && !bestTeams[i].second && !doBulkLoading) {
 					// When all servers in bestTeams[i] do not hold the shard (!bestTeams[i].second), it indicates
 					// the bestTeams[i] is in a new DC where data has not been replicated to.
 					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data movement
@@ -1928,15 +1891,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			}
 
 			// Sanity check for bulk loading data move
-			if (rd.bulkLoadState.present()) {
+			if (doBulkLoading) {
 				if (rd.priority != SERVER_KNOBS->PRIORITY_BULK_LOADING) {
-					TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", self->distributorId)
-					    .detail("Reason", "Wrong data move priority")
+					TraceEvent(SevInfo, "DDBulkLoadTaskLaunchByNormalDatamove", self->distributorId)
 					    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
 					    .detail("DataMovePriority", rd.priority)
 					    .detail("DataMoveId", rd.dataMoveId);
-					throw movekeys_conflict();
-					// Very important invariant. If this error appears, check the logic
 				}
 				if (rd.keys != rd.bulkLoadState.get().range) {
 					TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", self->distributorId)
@@ -1957,8 +1917,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
 						    .detail("DataMovePriority", rd.priority)
 						    .detail("DataMoveId", rd.dataMoveId)
-						    .detail("RelocatorRange", rd.keys)
-						    .detail("CanSignalOut", rd.bulkLoadState.get().launchAck.canBeSet());
+						    .detail("RelocatorRange", rd.keys);
 						throw movekeys_conflict();
 					}
 				}
@@ -2191,17 +2150,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
 					}
 
-					if (rd.bulkLoadState.present()) {
-						if (rd.bulkLoadState.get().launchAck.canBeSet()) {
-							rd.bulkLoadState.get().launchAck.send(BulkLoadAckType::Succeed);
-							TraceEvent(SevInfo, "DDBulkLoadTaskLaunched", self->distributorId)
-							    .detail("Dests", describe(destIds))
+					if (doBulkLoading) {
+						if (!rd.bulkLoadState.get().completeAck.canBeSet()) {
+							TraceEvent(SevError, "DDBulkLoadStateError1")
 							    .detail("Task", rd.bulkLoadState.get().toString());
-						} else {
-							TraceEvent(SevInfo, "BDDulkLoadTaskLaunchedWithoutAck", self->distributorId)
-							    .detail("Dests", describe(destIds))
-							    .detail("Task", rd.bulkLoadState.get().toString());
+							ASSERT(false);
 						}
+						rd.bulkLoadState.get().completeAck.send(Void());
+						TraceEvent(SevInfo, "DDBulkLoadTaskComplete", self->distributorId)
+						    .detail("Dests", describe(destIds))
+						    .detail("Task", rd.bulkLoadState.get().toString());
 					}
 
 					return Void();
@@ -2244,15 +2202,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 		relocationComplete.send(rd);
 
-		if (rd.bulkLoadState.present() && e.code() != error_code_actor_cancelled) {
-			TraceEvent(SevInfo, "DDBulkLoadTaskLaunchFailed", self->distributorId)
+		if (doBulkLoading && e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskRelocatorFailed", self->distributorId)
 			    .errorUnsuppressed(e)
-			    .detail("Reason", "Relocator Error")
-			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
-			    .detail("CanSignalOut", rd.bulkLoadState.get().launchAck.canBeSet());
-			if (rd.bulkLoadState.get().launchAck.canBeSet()) {
-				rd.bulkLoadState.get().launchAck.sendError(bulkload_task_launch_failed());
-			}
+			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
+			// If this bulk load task does not finish, we are expecting that there is a new data move on
+			// the same range which makes this relocator failed. The bulk load task continues with the new data move.
+			// Or, DD restarts and DD will triger a new bulk load task on the same range with the same task id.
+			// Therefore, we do not need to trigger DD to restart the bulk load task
 		}
 
 		if (err.code() == error_code_data_move_dest_team_not_found) {

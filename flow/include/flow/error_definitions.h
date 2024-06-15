@@ -153,14 +153,8 @@ ERROR( audit_storage_task_outdated, 1234, "Audit task is scheduled by an outdate
 ERROR( transaction_throttled_hot_shard, 1235, "Transaction throttled due to hot shard" )
 ERROR( storage_replica_comparison_error, 1236, "Storage replicas not consistent" )
 ERROR( unreachable_storage_replica, 1237, "Storage replica cannot be reached" )
-
-ERROR( bulkload_task_failed, 1300, "Bulk load task is failed")
-ERROR( bulkload_task_outdated, 1301, "Bulk load task is outdated" )
-ERROR( bulkload_task_trigger_failed, 1302, "Bulk load task is failed to trigger" ) // TODO(Zhe): Too many error types here
-ERROR( bulkload_task_launch_failed, 1303, "Bulk load task is failed to launch" )
-ERROR( bulkload_task_launch_overwritten, 1304, "Bulk load task is failed to launch due to new bulk load" )
-ERROR( bulkload_task_terminate_failed, 1305, "Bulk load task is failed to terminate" )
-ERROR( bulkload_task_launch_failed_for_remote_recovery, 1306, "Bulk load task is failed to launch due to remote recovery")
+ERROR( bulkload_task_failed, 1238, "Bulk load task is failed")
+ERROR( bulkload_task_outdated, 1239, "Bulk load task is outdated" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

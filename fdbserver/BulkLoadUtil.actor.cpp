@@ -36,6 +36,7 @@ std::string generateRandomBulkLoadBytesSampleFileName() {
 }
 
 ACTOR Future<Optional<BulkLoadState>> getBulkLoadState(Database cx, UID dataMoveId, UID logId) {
+	// TODO(Zhe): check if bulk load task is outdated
 	loop {
 		state Transaction tr(cx);
 		try {

@@ -258,18 +258,26 @@ public:
 		Optional<Reference<IDataDistributionTeam>> res;
 		if (candidateTeams.size() >= 1) {
 			res = deterministicRandom()->randomChoice(candidateTeams);
-		}
-		TraceEvent e(SevInfo, "DDBulkLoadTaskGetTeamReply", self->distributorId);
-		e.detail("TCReady", self->readyToStart.isReady());
-		e.detail("SrcIds", describe(req.src));
-		e.detail("Primary", self->isPrimary());
-		e.detail("TeamSize", self->teams.size());
-		e.detail("CandidateSize", candidateTeams.size());
-		e.detail("UnhealthyTeamCount", unhealthyTeamCount);
-		e.detail("DuplicatedCount", duplicatedCount);
-		if (res.present()) {
-			e.detail("DestIds", describe(res.get()->getServerIDs()));
-			e.detail("DestTeam", res.get()->getTeamID());
+			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReply", self->distributorId)
+			    .detail("TCReady", self->readyToStart.isReady())
+			    .detail("SrcIds", describe(req.src))
+			    .detail("Primary", self->isPrimary())
+			    .detail("TeamSize", self->teams.size())
+			    .detail("CandidateSize", candidateTeams.size())
+			    .detail("UnhealthyTeamCount", unhealthyTeamCount)
+			    .detail("DuplicatedCount", duplicatedCount)
+			    .detail("DestIds", describe(res.get()->getServerIDs()))
+			    .detail("DestTeam", res.get()->getTeamID());
+		} else {
+			// TODO(Zhe): build more team
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskGetTeamFailedToFindValidTeam", self->distributorId)
+			    .detail("TCReady", self->readyToStart.isReady())
+			    .detail("SrcIds", describe(req.src))
+			    .detail("Primary", self->isPrimary())
+			    .detail("TeamSize", self->teams.size())
+			    .detail("CandidateSize", candidateTeams.size())
+			    .detail("UnhealthyTeamCount", unhealthyTeamCount)
+			    .detail("DuplicatedCount", duplicatedCount);
 		}
 		req.reply.send(std::make_pair(res, false));
 		return Void();

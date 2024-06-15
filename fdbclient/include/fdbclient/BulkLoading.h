@@ -37,11 +37,6 @@ enum class BulkLoadType : uint8_t {
 	SST = 1,
 };
 
-enum class BulkLoadAckType : uint8_t {
-	Failed = 0,
-	Succeed = 1,
-};
-
 enum class BulkLoadTransportMethod : uint8_t {
 	Invalid = 0,
 	CP = 1,
@@ -81,6 +76,9 @@ struct BulkLoadState {
 		if (dataMoveId.present()) {
 			res = res + ", [DataMoveId]: " + dataMoveId.get().toString();
 		}
+		if (commitVersion.present()) {
+			res = res + ", [CommitVersion]: " + std::to_string(commitVersion.get());
+		}
 		res = res + ", [TaskId]: " + taskId.toString();
 		return res;
 	}
@@ -93,15 +91,13 @@ struct BulkLoadState {
 		return true;
 	}
 
-	bool setDataMoveId(UID id) {
+	void setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
-			TraceEvent(SevError, "DDBulkLoadTaskSetDataMoveError")
+			TraceEvent(SevWarn, "DDBulkLoadTaskUpdateDataMoveId")
 			    .detail("NewId", id)
 			    .detail("BulkLoadTask", this->toString());
-			return false;
 		}
 		dataMoveId = id;
-		return true;
 	}
 
 	bool setTransportMethod(BulkLoadTransportMethod method) {
@@ -166,6 +162,7 @@ struct BulkLoadState {
 		           restartCount);
 	}
 
+	// Set by users
 	KeyRange range;
 	BulkLoadType loadType;
 	BulkLoadTransportMethod transportMethod;
@@ -174,6 +171,8 @@ struct BulkLoadState {
 	std::string folder; // Used by SS to inject files
 	std::unordered_set<std::string> dataFiles; // Used by SS to inject files
 	Optional<std::string> bytesSampleFile; // Used by SS to inject files
+
+	// Set by DD
 	Optional<UID> dataMoveId;
 	UID taskId;
 	double submitTime = 0;
@@ -183,7 +182,9 @@ struct BulkLoadState {
 	int restartCount = -1;
 	// TODO(Zhe): add file checksum
 
-	Promise<BulkLoadAckType> launchAck; // Used in DDQueue to propagate task launch signal out. Do not serialize
+	// Do not serialize
+	Promise<Void> completeAck; // Used in DDQueue to propagate task complete signal out
+	Optional<Version> commitVersion; // Used in DDTracker to decide the latest bulk load task
 };
 
 BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,

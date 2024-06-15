@@ -829,9 +829,18 @@ ACTOR Future<Void> tenantCreationHandling(DataDistributionTracker* self, TenantC
 	return Void();
 }
 
-bool existBulkLoading(const KeyRangeMap<UID>& bulkLoadingMap, KeyRange keys) {
+// Return true if there exists a bulk load task since the given commit version
+bool existBulkLoading(const KeyRangeMap<Optional<BulkLoadState>>& bulkLoadingMap,
+                      KeyRange keys,
+                      Version sinceCommitVersion = invalidVersion) {
 	for (auto it : bulkLoadingMap.intersectingRanges(keys)) {
-		if (it->value().isValid()) { // In case BulkLoadTask id is valid
+		if (!it->value().present()) {
+			continue;
+		}
+		ASSERT(it->value().get().commitVersion.present());
+		ASSERT(it->value().get().commitVersion.get() != invalidVersion);
+		ASSERT(it->value().get().commitVersion.get() != sinceCommitVersion);
+		if (it->value().get().commitVersion.get() > sinceCommitVersion) {
 			return true;
 		}
 	}
@@ -927,6 +936,7 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
+	// TODO(Zhe): do not check if dd bulk load mode is off
 	if (existBulkLoading(self->bulkLoadingMap, nextRange)) {
 		TraceEvent(SevWarn, "ShardCanForwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
@@ -961,14 +971,26 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 // Must be atomic
 void createShardToBulkLoad(DataDistributionTracker* self,
                            BulkLoadState bulkLoadState,
-                           Promise<BulkLoadAckType> triggerAck,
-                           Promise<BulkLoadAckType> launchAck) {
+                           Promise<Void> triggerAck,
+                           Promise<Void> completeAck) {
+	KeyRange keys = bulkLoadState.range;
+	ASSERT(bulkLoadState.commitVersion.present());
+	Version commitVersion = bulkLoadState.commitVersion.get();
+	ASSERT(!keys.empty() && commitVersion != invalidVersion);
+	if (existBulkLoading(self->bulkLoadingMap, keys, commitVersion)) {
+		TraceEvent(SevInfo, "DDBulkLoadTaskTriggerOutdated", self->distributorId)
+		    .detail("TaskId", bulkLoadState.taskId)
+		    .detail("BulkLoadRange", keys)
+		    .detail("CommitVersion", commitVersion);
+		triggerAck.sendError(bulkload_task_outdated());
+		return;
+	}
 	TraceEvent e(SevInfo, "DDBulkLoadTaskTriggered", self->distributorId);
 	e.detail("TaskId", bulkLoadState.taskId);
-	e.detail("BulkLoadRange", bulkLoadState.range);
+	e.detail("BulkLoadRange", keys);
+	e.detail("CommitVersion", commitVersion);
 	// Create shards at the two ends and do not data move for those shards
 	// Create a new shard and trigger data move for bulk loading on the new shard
-	KeyRange keys = bulkLoadState.range;
 	auto rangeMap = self->shards->intersectingRanges(keys);
 	KeyRange firstOverlapRange;
 	KeyRange lastOverlapRange;
@@ -998,23 +1020,23 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap", self->distributorId)
 	    .detail("Context", "Start")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
-	self->bulkLoadingMap.insert(keys, bulkLoadState.taskId);
-	bulkLoadState.launchAck = launchAck; // Used to propagate launchAck signal in DDQueue
+	bulkLoadState.commitVersion = commitVersion;
+	self->bulkLoadingMap.insert(keys, bulkLoadState);
+	bulkLoadState.completeAck = completeAck; // Used to propagate completeAck signal in DDQueue
 	bulkLoadState.triggerTime = now();
 	self->output.send(RelocateShard(
 	    keys, DataMovementReason::BULKLOAD, RelocateReason::BULKLOAD, bulkLoadState.taskId, bulkLoadState));
-	triggerAck.send(BulkLoadAckType::Succeed); // Indicating DDTracker has triggered bulk loading
+	triggerAck.send(Void()); // Indicating DDTracker has triggered bulk loading
+	return;
 }
 
-void terminateShardBulkLoad(DataDistributionTracker* self,
-                            BulkLoadState bulkLoadState,
-                            Promise<BulkLoadAckType> terminateAck) {
+void terminateShardBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoadState, Promise<Void> terminateAck) {
 	for (auto it : self->bulkLoadingMap.intersectingRanges(bulkLoadState.range)) {
-		if (it->value() != bulkLoadState.taskId) {
+		if (!it->value().present() || it->value().get().taskId != bulkLoadState.taskId) {
 			TraceEvent(SevWarn, "DDBulkLoadTaskOutdated")
 			    .detail("Context", "Terminate")
 			    .detail("BulkLoadState", bulkLoadState.toString())
-			    .detail("ExistingBulkLoadTaskID", it->value());
+			    .detail("ExistingBulkLoadTaskID", it->value().present() ? it->value().get().taskId.toString() : "");
 			terminateAck.sendError(bulkload_task_outdated());
 			return;
 		}
@@ -1022,8 +1044,8 @@ void terminateShardBulkLoad(DataDistributionTracker* self,
 	TraceEvent(SevInfo, "DDBulkLoadTaskUpdateBulkLoadMap", self->distributorId)
 	    .detail("Context", "Terminate")
 	    .detail("BulkLoadTask", bulkLoadState.toString());
-	self->bulkLoadingMap.insert(bulkLoadState.range, UID());
-	terminateAck.send(BulkLoadAckType::Succeed);
+	self->bulkLoadingMap.insert(bulkLoadState.range, Optional<BulkLoadState>());
+	terminateAck.send(Void());
 }
 
 Future<Void> shardMerger(DataDistributionTracker* self,
@@ -1676,7 +1698,7 @@ struct DataDistributionTrackerImpl {
 				}
 				when(BulkLoadShardRequest req = waitNext(self->triggerShardBulkLoading)) {
 					if (!req.terminate) {
-						createShardToBulkLoad(self, req.bulkLoadState, req.triggerAck, req.launchAck);
+						createShardToBulkLoad(self, req.bulkLoadState, req.triggerAck, req.completeAck);
 					} else {
 						terminateShardBulkLoad(self, req.bulkLoadState, req.finishAck);
 					}
@@ -1717,7 +1739,7 @@ Future<Void> DataDistributionTracker::run(
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
 	self->triggerShardBulkLoading = triggerShardBulkLoading;
 	self->userRangeConfig = initData->userRangeConfig;
-	self->bulkLoadingMap.insert(allKeys, UID());
+	self->bulkLoadingMap.insert(allKeys, Optional<BulkLoadState>());
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

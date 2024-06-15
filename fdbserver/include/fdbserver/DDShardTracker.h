@@ -85,7 +85,7 @@ public:
 	// be accessed
 	bool* trackerCancelled = nullptr;
 
-	KeyRangeMap<UID> bulkLoadingMap; // BulkLoadTaskRange, BulkLoadTaskID
+	KeyRangeMap<Optional<BulkLoadState>> bulkLoadingMap; // BulkLoadTaskRange, BulkLoadTaskID
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
