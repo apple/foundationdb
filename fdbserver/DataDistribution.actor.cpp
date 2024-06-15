@@ -1128,10 +1128,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 				runBulkLoadTaskAsync(self, range);
 			}
 		} else {
-			TraceEvent(SevWarn, "DDBulkLoadTaskDoBulkLoadTaskFailed", self->ddId)
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoBulkLoadTaskFailed", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("Range", range);
-			ASSERT_WE_THINK(e.code() == error_code_movekeys_conflict);
 			throw e;
 		}
 	}

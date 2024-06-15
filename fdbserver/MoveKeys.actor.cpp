@@ -1761,12 +1761,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									    .detail("OwnerIds", describe(owners))
 									    .detail("DataMove", dataMove.toString());
 									cancelDataMove = true;
-									if (!bulkLoadState.get().completeAck.canBeSet()) {
-										TraceEvent(SevError, "DDBulkLoadStateError2")
-										    .detail("Task", bulkLoadState.get().toString());
-										ASSERT(false);
-									}
-									bulkLoadState.get().completeAck.sendError(bulkload_task_failed());
 									throw retry();
 								}
 							}
@@ -1874,6 +1868,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						state BulkLoadState existBulkLoad = decodeBulkLoadState(bulkLoadRes[0].value);
 						if (bulkLoadState.get().taskId != existBulkLoad.taskId) {
 							TraceEvent(SevWarn, "DDBulkLoadTaskOutdatedStartMoveShard", relocationIntervalId)
+							    .detail("PersistedBulkLoad", existBulkLoad.toString())
+							    .detail("BulkLoadTask", bulkLoadState.get().toString())
+							    .detail("DataMove", dataMove.toString());
+							cancelDataMove = true;
+							throw retry();
+						} else if (existBulkLoad.phase == BulkLoadPhase::Complete) {
+							TraceEvent(SevWarn, "DDBulkLoadTaskHasCompletedStartMoveShard", relocationIntervalId)
 							    .detail("PersistedBulkLoad", existBulkLoad.toString())
 							    .detail("BulkLoadTask", bulkLoadState.get().toString())
 							    .detail("DataMove", dataMove.toString());

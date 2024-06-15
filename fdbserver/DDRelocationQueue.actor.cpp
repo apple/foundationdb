@@ -824,6 +824,11 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			ASSERT(rd.keys == rrs.keys);
 			ASSERT(rrs.keys == rrs.bulkLoadState.get().range);
 			rd.bulkLoadState = rrs.bulkLoadState;
+			TraceEvent(SevInfo, "DDBulkLoadTaskOnNormalDataMove", this->distributorId)
+			    .detail("Context", "queue")
+			    .detail("NewDataMovePriority", rd.priority)
+			    .detail("NewDataMoveRange", rd.keys)
+			    .detail("BulkLoadTask", rrs.bulkLoadState.get().toString());
 		}
 
 		if (rd.keys.contains(rrs.keys)) {
@@ -1134,6 +1139,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				    !rd.bulkLoadState.present()) {
 					ASSERT(it->value().bulkLoadState.get().range == rd.keys);
 					rd.bulkLoadState = it->value().bulkLoadState.get();
+					TraceEvent(SevInfo, "DDBulkLoadTaskOnNormalDataMove", this->distributorId)
+					    .detail("Context", "launch")
+					    .detail("NewDataMovePriority", rd.priority)
+					    .detail("NewDataMoveRange", rd.keys)
+					    .detail("BulkLoadTask", it->value().bulkLoadState.get().toString());
 				}
 			}
 		}
@@ -1912,7 +1922,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end()) {
 						// In this case, getTeam has to select src as dest when remote team collection is not ready
 						// This is not expected
-						TraceEvent(SevWarnAlways, "DDBulkLoadTaskLaunchFailed", self->distributorId)
+						TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", self->distributorId)
 						    .detail("Reason", "Conflict src and destd due to remote recovery")
 						    .detail("BulkLoadTask", rd.bulkLoadState.get().toString())
 						    .detail("DataMovePriority", rd.priority)
@@ -2151,15 +2161,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					if (doBulkLoading) {
-						if (!rd.bulkLoadState.get().completeAck.canBeSet()) {
-							TraceEvent(SevError, "DDBulkLoadStateError1")
+						if (rd.bulkLoadState.get().completeAck.canBeSet()) {
+							rd.bulkLoadState.get().completeAck.send(Void());
+							TraceEvent(SevInfo, "DDBulkLoadTaskComplete", self->distributorId)
+							    .detail("Dests", describe(destIds))
 							    .detail("Task", rd.bulkLoadState.get().toString());
-							ASSERT(false);
+						} else {
+							TraceEvent(SevWarnAlways, "DDBulkLoadTaskCompleteHasBeenSet", self->distributorId)
+							    .detail("Task", rd.bulkLoadState.get().toString());
+							ASSERT_WE_THINK(false);
 						}
-						rd.bulkLoadState.get().completeAck.send(Void());
-						TraceEvent(SevInfo, "DDBulkLoadTaskComplete", self->distributorId)
-						    .detail("Dests", describe(destIds))
-						    .detail("Task", rd.bulkLoadState.get().toString());
 					}
 
 					return Void();
@@ -2202,14 +2213,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 		relocationComplete.send(rd);
 
-		if (doBulkLoading && e.code() != error_code_actor_cancelled) {
+		if (doBulkLoading && e.code() != error_code_actor_cancelled && e.code() != error_code_movekeys_conflict) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskRelocatorFailed", self->distributorId)
 			    .errorUnsuppressed(e)
 			    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-			// If this bulk load task does not finish, we are expecting that there is a new data move on
-			// the same range which makes this relocator failed. The bulk load task continues with the new data move.
-			// Or, DD restarts and DD will triger a new bulk load task on the same range with the same task id.
-			// Therefore, we do not need to trigger DD to restart the bulk load task
 		}
 
 		if (err.code() == error_code_data_move_dest_team_not_found) {

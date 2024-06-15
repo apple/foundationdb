@@ -197,90 +197,82 @@ public:
 
 	// Random selection for load balance
 	ACTOR static Future<Void> getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
-		wait(self->checkBuildTeams());
+		try {
+			wait(self->checkBuildTeams());
 
-		if (!self->primary && !self->readyToStart.isReady()) {
-			// When remote DC is not ready, DD shouldn't reply with a new team because
-			// a data movement to that team can't be completed and such a move
-			// may block the primary DC from reaching "storage_recovered".
-			auto team = self->findTeamFromServers(req.completeSources, /*wantHealthy=*/false);
-			TraceEvent(SevWarn, "DDBulkLoadTaskGetTeamRemoteDCNotReady", self->distributorId)
-			    .suppressFor(1.0)
-			    .detail("Primary", self->primary)
-			    .detail("Team", team.present() ? describe(team.get()->getServerIDs()) : "");
-			req.reply.send(std::make_pair(team, true));
-			return Void();
-		}
-
-		std::vector<Reference<TCTeamInfo>> candidateTeams;
-		int unhealthyTeamCount = 0;
-		int duplicatedCount = 0;
-		for (const auto& dest : self->teams) {
-			if (!dest->isHealthy()) {
-				TraceEvent(SevDebug, "DDBulkLoadTaskGetTeamSkipTeam", self->distributorId)
+			if (!self->primary && !self->readyToStart.isReady()) {
+				// When remote DC is not ready, DD shouldn't reply with a new team because
+				// a data movement to that team can't be completed and such a move
+				// may block the primary DC from reaching "storage_recovered".
+				auto team = self->findTeamFromServers(req.completeSources, /*wantHealthy=*/false);
+				TraceEvent(SevWarn, "DDBulkLoadTaskGetTeamRemoteDCNotReady", self->distributorId)
 				    .suppressFor(1.0)
-				    .detail("Reason", "Team unhealthy")
-				    .detail("TCReady", self->readyToStart.isReady())
-				    .detail("Primary", self->isPrimary())
-				    .detail("TeamCount", self->teams.size())
-				    .detail("SrcIds", describe(req.src))
-				    .detail("DestIds", describe(dest->getServerIDs()));
-				unhealthyTeamCount++;
-				continue;
+				    .detail("Primary", self->primary)
+				    .detail("Team", team.present() ? describe(team.get()->getServerIDs()) : "");
+				req.reply.send(std::make_pair(team, true));
+				return Void();
 			}
-			bool ok = true;
-			for (const auto& srcId : req.src) {
-				std::vector<UID> serverIds = dest->getServerIDs();
-				for (const auto& serverId : serverIds) {
-					if (serverId == srcId) {
-						ok = false; // Do not select a team that has a server owning the bulk loading range
+
+			self->updateTeamPivotValues();
+
+			std::vector<Reference<TCTeamInfo>> candidateTeams;
+			int unhealthyTeamCount = 0;
+			int duplicatedCount = 0;
+			for (const auto& dest : self->teams) {
+				if (!dest->isHealthy()) {
+					unhealthyTeamCount++;
+					continue;
+				}
+				bool ok = true;
+				for (const auto& srcId : req.src) {
+					std::vector<UID> serverIds = dest->getServerIDs();
+					for (const auto& serverId : serverIds) {
+						if (serverId == srcId) {
+							ok = false; // Do not select a team that has a server owning the bulk loading range
+							break;
+						}
+					}
+					if (!ok) {
 						break;
 					}
 				}
 				if (!ok) {
-					break;
+					duplicatedCount++;
+					continue;
 				}
+				candidateTeams.push_back(dest);
 			}
-			if (!ok) {
-				TraceEvent(SevDebug, "DDBulkLoadTaskGetTeamSkipTeam", self->distributorId)
-				    .suppressFor(1.0)
-				    .detail("Reason", "Duplicated server")
+			Optional<Reference<IDataDistributionTeam>> res;
+			if (candidateTeams.size() >= 1) {
+				res = deterministicRandom()->randomChoice(candidateTeams);
+				TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReply", self->distributorId)
 				    .detail("TCReady", self->readyToStart.isReady())
-				    .detail("Primary", self->isPrimary())
-				    .detail("TeamCount", self->teams.size())
 				    .detail("SrcIds", describe(req.src))
-				    .detail("DestIds", describe(dest->getServerIDs()));
-				duplicatedCount++;
-				continue;
+				    .detail("Primary", self->isPrimary())
+				    .detail("TeamSize", self->teams.size())
+				    .detail("CandidateSize", candidateTeams.size())
+				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
+				    .detail("DuplicatedCount", duplicatedCount)
+				    .detail("DestIds", describe(res.get()->getServerIDs()))
+				    .detail("DestTeam", res.get()->getTeamID());
+			} else {
+				// TODO(Zhe): build more team
+				TraceEvent(SevWarnAlways, "DDBulkLoadTaskGetTeamFailedToFindValidTeam", self->distributorId)
+				    .detail("TCReady", self->readyToStart.isReady())
+				    .detail("SrcIds", describe(req.src))
+				    .detail("Primary", self->isPrimary())
+				    .detail("TeamSize", self->teams.size())
+				    .detail("CandidateSize", candidateTeams.size())
+				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
+				    .detail("DuplicatedCount", duplicatedCount);
 			}
-			candidateTeams.push_back(dest);
+			req.reply.send(std::make_pair(res, false));
+			return Void();
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled && req.reply.canBeSet())
+				req.reply.sendError(e);
+			throw;
 		}
-		Optional<Reference<IDataDistributionTeam>> res;
-		if (candidateTeams.size() >= 1) {
-			res = deterministicRandom()->randomChoice(candidateTeams);
-			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReply", self->distributorId)
-			    .detail("TCReady", self->readyToStart.isReady())
-			    .detail("SrcIds", describe(req.src))
-			    .detail("Primary", self->isPrimary())
-			    .detail("TeamSize", self->teams.size())
-			    .detail("CandidateSize", candidateTeams.size())
-			    .detail("UnhealthyTeamCount", unhealthyTeamCount)
-			    .detail("DuplicatedCount", duplicatedCount)
-			    .detail("DestIds", describe(res.get()->getServerIDs()))
-			    .detail("DestTeam", res.get()->getTeamID());
-		} else {
-			// TODO(Zhe): build more team
-			TraceEvent(SevWarnAlways, "DDBulkLoadTaskGetTeamFailedToFindValidTeam", self->distributorId)
-			    .detail("TCReady", self->readyToStart.isReady())
-			    .detail("SrcIds", describe(req.src))
-			    .detail("Primary", self->isPrimary())
-			    .detail("TeamSize", self->teams.size())
-			    .detail("CandidateSize", candidateTeams.size())
-			    .detail("UnhealthyTeamCount", unhealthyTeamCount)
-			    .detail("DuplicatedCount", duplicatedCount);
-		}
-		req.reply.send(std::make_pair(res, false));
-		return Void();
 	}
 
 	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
