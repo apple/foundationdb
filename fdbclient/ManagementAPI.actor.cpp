@@ -2326,7 +2326,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 }
 
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
-	state ReadYourWritesTransaction tr(cx);
+	state Transaction tr(cx);
 	state BinaryWriter wr(Unversioned());
 	wr << mode;
 	loop {

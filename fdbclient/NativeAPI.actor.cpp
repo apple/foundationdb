@@ -1611,10 +1611,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    std::make_unique<FaultToleranceMetricsImpl>(
 		        singleKeyRange("fault_tolerance_metrics_json"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METRICS).begin)));
-		registerSpecialKeysImpl(SpecialKeySpace::MODULE::BULKLOADING,
-		                        SpecialKeySpace::IMPLTYPE::READWRITE,
-		                        std::make_unique<BulkLoadModeImpl>(singleKeyRange("mode"_sr).withPrefix(
-		                            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::BULKLOADING).begin)));
 	}
 
 	if (apiVersion.version() >= 700) {

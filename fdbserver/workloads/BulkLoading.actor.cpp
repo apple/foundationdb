@@ -43,17 +43,7 @@ struct BulkLoading : TestWorkload {
 	// We disable failure injection because there is an irrelevant issue:
 	// Remote tLog is failed to rejoin to CC
 	// Once this issue is fixed, we should be able to enable the failure injection
-	// This workload is not compatible with following workload because they will race in changing the DD mode
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert({ "RandomMoveKeys",
-		             "DataLossRecovery",
-		             "IDDTxnProcessorApiCorrectness",
-		             "PerpetualWiggleStatsWorkload",
-		             "PhysicalShardMove",
-		             "StorageCorruption",
-		             "StorageServerCheckpointRestoreTest",
-		             "Attrition" });
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert({ "Attrition" }); }
 
 	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
 
