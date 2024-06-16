@@ -378,11 +378,13 @@ struct BulkLoading : TestWorkload {
 
 		wait(self->issueBulkLoadTasks(
 		    self, cx, { taskUnit1.bulkLoadTask, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask }));
-		int old_ = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
+		int old1 = wait(setBulkLoadMode(cx, 1));
+		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old1).detail("NewMode", 1);
 		wait(self->waitUntilAllComplete(self, cx));
 		TraceEvent("BulkLoadingWorkLoadAllComplete");
-		int old_ = wait(setBulkLoadMode(cx, 0));
+		int old2 = wait(setBulkLoadMode(cx, 0));
+		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old2).detail("NewMode", 0);
 
 		wait(self->checkData(cx, taskUnit1.data));
 		wait(self->checkData(cx, taskUnit2.data));
