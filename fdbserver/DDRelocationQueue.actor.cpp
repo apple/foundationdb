@@ -147,10 +147,10 @@ RelocateData::RelocateData(RelocateShard const& rs)
     healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), dmReason(rs.moveReason),
     startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
     dataMoveId(rs.dataMoveId), workFactor(0),
-    wantsNewServers(
-        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
-        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
-        rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE || rs.moveReason == DataMovementReason::BULKLOAD),
+    wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
+                    rs.moveReason == DataMovementReason::SPLIT_SHARD ||
+                    rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
+                    rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE),
     cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove), bulkLoadState(rs.bulkLoadState) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
@@ -832,13 +832,12 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 
 		if (rd.keys.contains(rrs.keys)) {
-			if (foundActiveFetching) {
+			if (foundActiveFetching)
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
-			} else if (foundActiveRelocation) {
+			else if (foundActiveRelocation) {
 				firstQueue->erase(firstRelocationItr);
-				for (int i = 1; i < rrs.src.size(); i++) {
+				for (int i = 1; i < rrs.src.size(); i++)
 					queue[rrs.src[i]].erase(rrs);
-				}
 			}
 		}
 
@@ -1095,13 +1094,12 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 		if (!rd.isRestore() && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 			// logRelocation( rd, "SkippingQueuedRelocation" );
-			if (rd.bulkLoadState.present()) {
-				TraceEvent(SevWarn, "DDBulkLoadTaskLaunchDelayed", distributorId)
+			if (rd.bulkLoadState.present()) { // unexpected
+				TraceEvent(SevError, "DDBulkLoadTaskLaunchDelayed", distributorId)
 				    .detail("Reason", "Source server Busy")
 				    .detail("DataMoveID", rd.dataMoveId)
 				    .detail("RandomID", rd.randomId)
 				    .detail("BulkLoadTask", rd.bulkLoadState.get().toString());
-				// TODO(Zhe): Remove later since bulk load does not care source servers
 			}
 			continue;
 		}
@@ -2167,9 +2165,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    .detail("Dests", describe(destIds))
 							    .detail("Task", rd.bulkLoadState.get().toString());
 						} else {
-							TraceEvent(SevWarnAlways, "DDBulkLoadTaskCompleteHasBeenSet", self->distributorId)
+							TraceEvent(SevError, "DDBulkLoadTaskCompleteHasBeenSet", self->distributorId)
 							    .detail("Task", rd.bulkLoadState.get().toString());
-							ASSERT_WE_THINK(false);
+							throw movekeys_conflict();
 						}
 					}
 

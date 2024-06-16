@@ -2349,6 +2349,7 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 				tr.set(bulkLoadModeKey, wr.toValue());
 				wait(tr.commit());
+				TraceEvent("DDBulkLoadModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
 			}
 			return oldMode;
 		} catch (Error& e) {
