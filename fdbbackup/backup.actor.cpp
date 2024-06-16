@@ -21,6 +21,7 @@
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
 #include "fdbbackup/BackupTLSConfig.h"
+#include "fdbbackup/Decode.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
 #include "flow/ArgParseUtil.h"
@@ -3847,12 +3848,26 @@ int main(int argc, char* argv[]) {
 			case OPT_DESCRIBE_TIMESTAMPS:
 				describeTimestamps = true;
 				break;
-			case OPT_PREFIX_ADD:
-				addPrefix = args->OptionArg();
+			case OPT_PREFIX_ADD: {
+				bool err = false;
+				addPrefix = decode_hex_string(args->OptionArg(), err);
+				if (err) {
+					fprintf(stderr, "ERROR: Could not parse add prefix\n");
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
 				break;
-			case OPT_PREFIX_REMOVE:
-				removePrefix = args->OptionArg();
+			}
+			case OPT_PREFIX_REMOVE: {
+				bool err = false;
+				removePrefix = decode_hex_string(args->OptionArg(), err);
+				if (err) {
+					fprintf(stderr, "ERROR: Could not parse remove prefix\n");
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
 				break;
+			}
 			case OPT_ERRORLIMIT: {
 				const char* a = args->OptionArg();
 				if (!sscanf(a, "%d", &maxErrors)) {
