@@ -40,6 +40,21 @@ struct BulkLoading : TestWorkload {
 	const bool enabled;
 	bool pass;
 
+	// We disable failure injection because there is an irrelevant issue:
+	// Remote tLog is failed to rejoin to CC
+	// Once this issue is fixed, we should be able to enable the failure injection
+	// This workload is not compatible with following workload because they will race in changing the DD mode
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys",
+		             "DataLossRecovery",
+		             "IDDTxnProcessorApiCorrectness",
+		             "PerpetualWiggleStatsWorkload",
+		             "PhysicalShardMove",
+		             "StorageCorruption",
+		             "StorageServerCheckpointRestoreTest",
+		             "Attrition" });
+	}
+
 	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -272,7 +287,7 @@ struct BulkLoading : TestWorkload {
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
 		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
-		size_t dataSize = deterministicRandom()->randomInt(10, 1000);
+		size_t dataSize = deterministicRandom()->randomInt(10, 100);
 		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
 		self->produceFilesToLoad(taskUnit);
 		return taskUnit;
@@ -355,6 +370,10 @@ struct BulkLoading : TestWorkload {
 			return Void();
 		}
 
+		if (g_network->isSimulated()) {
+			disableConnectionFailures("BulkLoading");
+		}
+
 		std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
 
 		std::string folderName1 = "1";
@@ -368,7 +387,7 @@ struct BulkLoading : TestWorkload {
 		state BulkLoadTaskTestUnit taskUnit3 = self->produceBulkLoadTaskUnit(self, keyCharList, range3, folderName3);
 
 		wait(self->issueBulkLoadTasks(
-		    self, cx, { taskUnit1.bulkLoadTask /*, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask*/ }));
+		    self, cx, { taskUnit1.bulkLoadTask, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask }));
 		int old_ = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
@@ -376,8 +395,8 @@ struct BulkLoading : TestWorkload {
 		int old_ = wait(setBulkLoadMode(cx, 0));
 
 		wait(self->checkData(cx, taskUnit1.data));
-		// wait(self->checkData(cx, taskUnit2.data));
-		// wait(self->checkData(cx, taskUnit3.data));
+		wait(self->checkData(cx, taskUnit2.data));
+		wait(self->checkData(cx, taskUnit3.data));
 		TraceEvent("BulkLoadingWorkLoadCheckedData");
 
 		TraceEvent("BulkLoadingWorkLoadComplete");
