@@ -35,17 +35,19 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx, KeyRange rangeToRead) {
 	state Key readEnd = rangeToRead.end;
 	state int64_t finishCount = 0;
 	state int64_t unfinishedCount = 0;
+	state RangeResult res;
 	while (readBegin < readEnd) {
 		state int retryCount = 0;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state RangeResult res = wait(krmGetRanges(&tr,
-				                                          bulkLoadPrefix,
-				                                          KeyRangeRef(readBegin, readEnd),
-				                                          CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                                          CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				RangeResult res_ = wait(krmGetRanges(&tr,
+				                                     bulkLoadPrefix,
+				                                     KeyRangeRef(readBegin, readEnd),
+				                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				res = res_;
 				break;
 			} catch (Error& e) {
 				if (retryCount > 30) {
