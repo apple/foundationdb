@@ -26,7 +26,7 @@ package main
 
 // Importing module enable .note.gnu.build-id insertion in the ELF executable.
 // Few drawbacks of the scheme are:
-// 1. Potentialy slower builds
+// 1. Potentially slower builds
 // 2. No cross-compilation support
 // 3. Limited `go tools` availability.
 // TODO: Replace with a better scheme if possible.
