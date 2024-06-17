@@ -30,7 +30,7 @@ const (
 	// processLabel represents the process label for the prometheus metrics.
 	processLabel = "process"
 	// namespace is the prometheus namespace for the metrics
-	namespace = "fdbkubernetesmonitor"
+	prometheusNamespace = "fdbkubernetesmonitor"
 	// restartCountMetricName represents the name of the restart metric.
 	restartCountMetricName = "restart_count"
 	// configurationChangeCountMetricName represents the configuration_change_count metric.
@@ -98,32 +98,32 @@ func registerMetrics(reg prometheus.Registerer) *metrics {
 	monitorMetrics := &metrics{
 		restartCount: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: namespace,
+				Namespace: prometheusNamespace,
 				Name:      restartCountMetricName,
 				Help:      "Number of fdbserver process restarts in total.",
 			}, []string{processLabel}),
 		configurationChangeCount: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: namespace,
+			Namespace: prometheusNamespace,
 			Name:      configurationChangeCountMetricName,
 			Help:      "Number of observed configuration changes.",
 		}),
 		lastAppliedConfigurationTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: namespace,
+			Namespace: prometheusNamespace,
 			Name:      lastAppliedConfigurationTimestampMetricName,
 			Help:      "Timestamp when the last time the configuration was applied.",
 		}),
 		startTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: namespace,
+			Namespace: prometheusNamespace,
 			Name:      startTimestampMetricName,
 			Help:      "Timestamp when the last time the configuration was applied.",
 		}, []string{processLabel}),
 		runningVersion: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: namespace,
+			Namespace: prometheusNamespace,
 			Name:      runningVersionMetricName,
 			Help:      "The current running version of the fdbserver processes started by this monitor.",
 		}, []string{versionLabel}),
 		desiredVersion: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: namespace,
+			Namespace: prometheusNamespace,
 			Name:      desiredVersionMetricName,
 			Help:      "The desired running version of the fdbserver processes started by this monitor.",
 		}, []string{versionLabel}),

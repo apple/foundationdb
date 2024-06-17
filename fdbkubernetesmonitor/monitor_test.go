@@ -20,7 +20,12 @@
 package main
 
 import (
+	"os"
+	"path"
 	"time"
+
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
+	"k8s.io/apimachinery/pkg/util/json"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -98,4 +103,90 @@ var _ = Describe("Testing FDB Kubernetes Monitor", func() {
 			60*time.Second,
 		),
 	)
+
+	When("reading the configuration file", func() {
+		var monitor *Monitor
+		var configurationFilePath string
+		var configuration *api.ProcessConfiguration
+		var configurationBytes []byte
+		defaultVersion := "7.1.51"
+
+		BeforeEach(func() {
+			tmpDir := GinkgoT().TempDir()
+			// Set the fdbserverPath to make sure the executable check works.
+			fdbserverPath = path.Join(tmpDir, "fdberver")
+			Expect(os.WriteFile(fdbserverPath, []byte(""), 0700)).NotTo(HaveOccurred())
+			configurationFilePath = path.Join(tmpDir, "config.json")
+			monitor = &Monitor{
+				Logger:                  GinkgoLogr,
+				ConfigFile:              configurationFilePath,
+				CustomEnvironment:       map[string]string{},
+				PodClient:               &PodClient{},
+				CurrentContainerVersion: defaultVersion,
+			}
+		})
+
+		JustBeforeEach(func() {
+			configuration, configurationBytes = monitor.readConfiguration()
+		})
+
+		When("the configuration file is empty", func() {
+			BeforeEach(func() {
+				Expect(os.WriteFile(configurationFilePath, []byte("{}"), 0600)).NotTo(HaveOccurred())
+			})
+
+			It("should return an empty configuration", func() {
+				Expect(configuration).To(BeNil())
+				Expect(configurationBytes).To(BeNil())
+			})
+		})
+
+		When("the configuration is valid", func() {
+			var out []byte
+
+			BeforeEach(func() {
+				config := &api.ProcessConfiguration{
+					Version: defaultVersion,
+				}
+
+				var err error
+				out, err = json.Marshal(config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(os.WriteFile(configurationFilePath, out, 0600)).NotTo(HaveOccurred())
+			})
+
+			It("should return the configuration", func() {
+				Expect(configuration).NotTo(BeNil())
+				Expect(configuration.Version).To(Equal(defaultVersion))
+				Expect(configuration.BinaryPath).To(Equal(fdbserverPath))
+				Expect(configuration.RunServers).To(BeNil())
+				Expect(configuration.Arguments).To(BeEmpty())
+				Expect(configurationBytes).To(Equal(out))
+			})
+
+			When("the pod has the isolate annotation set to true", func() {
+				BeforeEach(func() {
+					monitor.PodClient = &PodClient{
+						podMetadata: &metav1.PartialObjectMetadata{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									IsolateProcessGroupAnnotation: "true",
+								},
+							},
+						},
+					}
+				})
+
+				It("should return the configuration with runServers set to false", func() {
+					Expect(configuration).NotTo(BeNil())
+					Expect(configuration.Version).To(Equal(defaultVersion))
+					Expect(configuration.BinaryPath).To(Equal(fdbserverPath))
+					Expect(configuration.RunServers).NotTo(BeNil())
+					Expect(*configuration.RunServers).To(BeFalse())
+					Expect(configuration.Arguments).To(BeEmpty())
+					Expect(configurationBytes).To(Equal(out))
+				})
+			})
+		})
+	})
 })

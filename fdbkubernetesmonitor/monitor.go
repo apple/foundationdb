@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -215,12 +216,12 @@ func (monitor *Monitor) updateCustomEnvironmentFromNodeMetadata() {
 	}
 }
 
-// LoadConfiguration loads the latest configuration from the config file.
-func (monitor *Monitor) LoadConfiguration() {
+// readConfiguration reads the latest configuration from the monitor file.
+func (monitor *Monitor) readConfiguration() (*api.ProcessConfiguration, []byte) {
 	file, err := os.Open(monitor.ConfigFile)
 	if err != nil {
 		monitor.Logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.ConfigFile)
-		return
+		return nil, nil
 	}
 	defer func() {
 		err := file.Close()
@@ -234,7 +235,7 @@ func (monitor *Monitor) LoadConfiguration() {
 	err = json.Unmarshal(configurationBytes, configuration)
 	if err != nil {
 		monitor.Logger.Error(err, "Error parsing monitor configuration", "rawConfiguration", string(configurationBytes))
-		return
+		return nil, nil
 	}
 
 	if monitor.CurrentContainerVersion == configuration.Version {
@@ -246,17 +247,30 @@ func (monitor *Monitor) LoadConfiguration() {
 	err = checkOwnerExecutable(configuration.BinaryPath)
 	if err != nil {
 		monitor.Logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return
+		return nil, nil
 	}
 
 	monitor.updateCustomEnvironmentFromNodeMetadata()
-
 	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment)
 	if err != nil {
 		monitor.Logger.Error(err, "Error generating arguments for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
-		return
+		return nil, nil
 	}
 
+	if configuration.ShouldRunServers() {
+		// In case that the process is isolated we don't want to start the servers and we should terminate the running fdbserver
+		// instances.
+		if monitor.processIsIsolated() {
+			configuration.RunServers = pointer.Bool(false)
+		}
+	}
+
+	return configuration, configurationBytes
+}
+
+// LoadConfiguration loads the latest configuration from the config file.
+func (monitor *Monitor) LoadConfiguration() {
+	configuration, configurationBytes := monitor.readConfiguration()
 	monitor.acceptConfiguration(configuration, configurationBytes)
 }
 
@@ -291,12 +305,21 @@ func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 	// Update the prometheus metrics.
 	monitor.metrics.registerConfigurationChange(configuration.Version)
 
+	var hasRunningProcesses bool
 	for processNumber := 1; processNumber <= monitor.ProcessCount; processNumber++ {
 		if monitor.ProcessIDs[processNumber] == 0 {
 			monitor.ProcessIDs[processNumber] = -1
 			tempNumber := processNumber
 			go func() { monitor.RunProcess(tempNumber) }()
+			continue
 		}
+
+		hasRunningProcesses = true
+	}
+
+	// If the monitor has running processes but the processes shouldn't be running, kill them with SIGTERM.
+	if hasRunningProcesses && !monitor.ActiveConfiguration.ShouldRunServers() {
+		monitor.sendSignalToProcesses(syscall.SIGTERM)
 	}
 
 	err := monitor.PodClient.UpdateAnnotations(monitor)
@@ -434,7 +457,7 @@ func (monitor *Monitor) processRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "processRequired")
-	if monitor.ProcessCount < processNumber || !pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true) {
+	if monitor.ProcessCount < processNumber || !monitor.ActiveConfiguration.ShouldRunServers() {
 		if monitor.ProcessIDs[processNumber] != 0 {
 			logger.Info("Terminating run loop")
 			monitor.ProcessIDs[processNumber] = 0
@@ -444,6 +467,30 @@ func (monitor *Monitor) processRequired(processNumber int) bool {
 	}
 
 	return true
+}
+
+// processIsIsolated returns true if the IsolateProcessGroupAnnotation is set to "true".
+func (monitor *Monitor) processIsIsolated() bool {
+	if monitor.PodClient.podMetadata == nil {
+		return false
+	}
+
+	if monitor.PodClient.podMetadata.Annotations == nil {
+		return false
+	}
+
+	val, ok := monitor.PodClient.podMetadata.Annotations[IsolateProcessGroupAnnotation]
+	if !ok {
+		return false
+	}
+
+	isolated, err := strconv.ParseBool(val)
+	if err != nil {
+		monitor.Logger.Error(err, "could not parse the value of the %s annotation", IsolateProcessGroupAnnotation)
+		return false
+	}
+
+	return isolated
 }
 
 // updateProcessID records a new Process ID from a newly launched process.
@@ -494,6 +541,27 @@ func (monitor *Monitor) handleFileChange(changedFile string) {
 	monitor.LoadConfiguration()
 }
 
+func (monitor *Monitor) sendSignalToProcesses(signal os.Signal) {
+	for processNumber, processID := range monitor.ProcessIDs {
+		if processID <= 0 {
+			continue
+		}
+
+		subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
+		process, err := os.FindProcess(processID)
+		if err != nil {
+			subprocessLogger.Error(err, "Error finding subprocess")
+			continue
+		}
+		subprocessLogger.Info("Sending signal to subprocess", "signal", signal)
+		err = process.Signal(signal)
+		if err != nil {
+			subprocessLogger.Error(err, "Error signaling subprocess")
+			continue
+		}
+	}
+}
+
 // Run runs the monitor loop.
 func (monitor *Monitor) Run() {
 	done := make(chan bool, 1)
@@ -506,24 +574,7 @@ func (monitor *Monitor) Run() {
 
 		// Reset the ProcessCount to 0 to make sure the monitor doesn't try to restart the processes.
 		monitor.ProcessCount = 0
-		for processNumber, processID := range monitor.ProcessIDs {
-			if processID <= 0 {
-				continue
-			}
-
-			subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
-			process, err := os.FindProcess(processID)
-			if err != nil {
-				subprocessLogger.Error(err, "Error finding subprocess")
-				continue
-			}
-			subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
-			err = process.Signal(latestSignal)
-			if err != nil {
-				subprocessLogger.Error(err, "Error signaling subprocess")
-				continue
-			}
-		}
+		monitor.sendSignalToProcesses(latestSignal)
 
 		annotations := monitor.PodClient.podMetadata.Annotations
 		if len(annotations) > 0 {

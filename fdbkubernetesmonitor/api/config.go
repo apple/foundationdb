@@ -25,6 +25,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"k8s.io/utils/pointer"
 )
 
 // ProcessConfiguration models the configuration for starting a FoundationDB
@@ -182,4 +184,13 @@ func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, 
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// ShouldRunServers returns true if RunServers is unset or set to true.
+func (configuration *ProcessConfiguration) ShouldRunServers() bool {
+	if configuration == nil {
+		return false
+	}
+
+	return pointer.BoolDeref(configuration.RunServers, true)
 }

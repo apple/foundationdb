@@ -63,6 +63,11 @@ const (
 
 	// ClusterFileChangeDetectedAnnotation is the annotation that will be updated if the fdb.cluster file is updated.
 	ClusterFileChangeDetectedAnnotation = "foundationdb.org/cluster-file-change"
+
+	// IsolateProcessGroupAnnotation is the annotation that defines if the current Pod should be isolated. Isolated
+	// process groups will shutdown the fdbserver instance but keep the Pod and other Kubernetes resources running
+	// for debugging purpose.
+	IsolateProcessGroupAnnotation = "foundationdb.org/isolate-process-group"
 )
 
 // PodClient is a wrapper around the pod API.
@@ -328,12 +333,28 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 	switch castedObj := newObj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnUpdate for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace, "generation", castedObj.Generation)
+		var previousAnnotations map[string]string
+		if podClient.podMetadata != nil {
+			previousAnnotations = podClient.podMetadata.Annotations
+		}
+
 		podClient.podMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
 		}
 
 		if podClient.podMetadata.Annotations == nil {
+			return
+		}
+
+		// If the IsolateProcessGroupAnnotation changes force a reload of the configuration to make sure the processes
+		// will be shutdown.
+		previousIsolateProcessGroupAnnotationValue := previousAnnotations[IsolateProcessGroupAnnotation]
+		newIsolateProcessGroupAnnotationValue := podClient.podMetadata.Annotations[IsolateProcessGroupAnnotation]
+		if previousIsolateProcessGroupAnnotationValue != newIsolateProcessGroupAnnotationValue {
+			podClient.Logger.Info("Got change in isolate process group annotation", "previous", previousIsolateProcessGroupAnnotationValue, "new", newIsolateProcessGroupAnnotationValue)
+			podClient.TimestampFeed <- time.Now().Unix()
+			// In this case we can return as the timestamp feed already has a new value.
 			return
 		}
 
