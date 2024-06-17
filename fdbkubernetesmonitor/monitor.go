@@ -2,7 +2,7 @@
 //
 // This source file is part of the FoundationDB open source project
 //
-// Copyright 2021 Apple Inc. and the FoundationDB project authors
+// Copyright 2021-2024 Apple Inc. and the FoundationDB project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,21 +32,31 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/utils/pointer"
-
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/utils/pointer"
 )
 
-// maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
-// The actual delay will be based on the observed errors and will increase until maxErrorBackoffSeconds is hit.
-const maxErrorBackoffSeconds = 60 * time.Second
+const (
+	// maxErrorBackoffSeconds is the maximum time to wait after a process fails before starting another process.
+	// The actual delay will be based on the observed errors and will increase until maxErrorBackoffSeconds is hit.
+	maxErrorBackoffSeconds = 60 * time.Second
+
+	// fdbClusterFilePath defines the default path to the fdb cluster file that contains the current connection string.
+	// This file is managed by the fdbserver processes itself and they will automatically update the file if the
+	// coordinators have changed.
+	fdbClusterFilePath = "/var/fdb/data/fdb.cluster"
+)
 
 // Monitor provides the main monitor loop
 type Monitor struct {
@@ -90,11 +101,14 @@ type Monitor struct {
 
 	// Logger is the logger instance for this monitor.
 	Logger logr.Logger
+
+	// metrics represents the prometheus monitor metrics.
+	metrics *metrics
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string) {
-	podClient, err := CreatePodClient(ctx, logger)
+func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
+	podClient, err := CreatePodClient(ctx, logger, enableNodeWatcher, setupCache)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
 		os.Exit(1)
@@ -106,6 +120,7 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		Logger:                  logger,
 		CustomEnvironment:       customEnvironment,
 		ProcessCount:            processCount,
+		ProcessIDs:              make([]int, processCount+1),
 		CurrentContainerVersion: currentContainerVersion,
 	}
 
@@ -127,8 +142,15 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	}
 
+	reg := prometheus.NewRegistry()
+	// Enable the default go metrics.
+	reg.MustRegister(collectors.NewGoCollector())
+	monitorMetrics := registerMetrics(reg)
+	monitor.metrics = monitorMetrics
+	promHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+
 	// Add Prometheus support
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promHandler)
 	go func() {
 		err := http.ListenAndServe(listenAddr, mux)
 		if err != nil {
@@ -140,6 +162,37 @@ func StartMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 	monitor.Run()
 }
 
+// updateCustomEnvironment will add the node labels and their values to the custom environment map. All the generated
+// environment variables will start with NODE_LABEL and "/" and "." will be replaced in the key as "_", e.g. from the
+// label "foundationdb.org/testing = awesome" the env variables NODE_LABEL_FOUNDATIONDB_ORG_TESTING = awesome" will be
+// generated.
+func (monitor *Monitor) updateCustomEnvironmentFromNodeMetadata() {
+	if monitor.PodClient.nodeMetadata == nil {
+		return
+	}
+
+	nodeLabels := monitor.PodClient.nodeMetadata.Labels
+	for key, value := range nodeLabels {
+		sanitizedKey := strings.ReplaceAll(key, "/", "_")
+		sanitizedKey = strings.ReplaceAll(sanitizedKey, ".", "_")
+		envKey := "NODE_LABEL_" + strings.ToUpper(sanitizedKey)
+		currentValue, ok := monitor.CustomEnvironment[envKey]
+		if !ok {
+			monitor.Logger.Info("adding new custom environment variable from node labels", "key", envKey, "value", value)
+			monitor.CustomEnvironment[envKey] = value
+			continue
+		}
+
+		if currentValue == value {
+			continue
+		}
+
+		monitor.Logger.Info("update custom environment variable from node labels", "key", envKey, "newValue", value, "currentValue", currentValue)
+		monitor.CustomEnvironment[envKey] = value
+		continue
+	}
+}
+
 // LoadConfiguration loads the latest configuration from the config file.
 func (monitor *Monitor) LoadConfiguration() {
 	file, err := os.Open(monitor.ConfigFile)
@@ -147,7 +200,10 @@ func (monitor *Monitor) LoadConfiguration() {
 		monitor.Logger.Error(err, "Error reading monitor config file", "monitorConfigPath", monitor.ConfigFile)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		monitor.Logger.Error(err, "Error could not close file", "monitorConfigPath", monitor.ConfigFile)
+	}()
 	configuration := &api.ProcessConfiguration{}
 	configurationBytes, err := io.ReadAll(file)
 	if err != nil {
@@ -170,6 +226,8 @@ func (monitor *Monitor) LoadConfiguration() {
 		monitor.Logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return
 	}
+
+	monitor.updateCustomEnvironmentFromNodeMetadata()
 
 	_, err = configuration.GenerateArguments(1, monitor.CustomEnvironment)
 	if err != nil {
@@ -198,19 +256,18 @@ func checkOwnerExecutable(path string) error {
 func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
-	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 
-	if monitor.ProcessIDs == nil {
-		monitor.ProcessIDs = make([]int, monitor.ProcessCount+1)
-	} else {
-		for len(monitor.ProcessIDs) <= monitor.ProcessCount {
-			monitor.ProcessIDs = append(monitor.ProcessIDs, 0)
-		}
+	// If the configuration hasn't changed ignore those events to prevent noisy logging.
+	if equality.Semantic.DeepEqual(monitor.ActiveConfiguration, configuration) {
+		return
 	}
 
+	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 	monitor.ActiveConfiguration = configuration
 	monitor.ActiveConfigurationBytes = configurationBytes
 	monitor.LastConfigurationTime = time.Now()
+	// Update the prometheus metrics.
+	monitor.metrics.registerConfigurationChange(configuration.Version)
 
 	for processNumber := 1; processNumber <= monitor.ProcessCount; processNumber++ {
 		if monitor.ProcessIDs[processNumber] == 0 {
@@ -247,7 +304,7 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 	var errorCounter int
 
 	for {
-		if !monitor.checkProcessRequired(processNumber) {
+		if !monitor.processRequired(processNumber) {
 			return
 		}
 
@@ -290,6 +347,9 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 			errorCounter++
 			continue
 		}
+
+		// Update the prometheus metrics for the process.
+		monitor.metrics.registerProcessStartup(processNumber, monitor.ActiveConfiguration.Version)
 
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
@@ -343,19 +403,21 @@ func (monitor *Monitor) RunProcess(processNumber int) {
 	}
 }
 
-// checkProcessRequired determines if the latest configuration requires that a
+// processRequired determines if the latest configuration requires that a
 // process stay running.
 // If the process is no longer desired, this will remove it from the process ID
 // list and return false. If the process is still desired, this will return
 // true.
-func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
+func (monitor *Monitor) processRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
-	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
-	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
-	if monitor.ProcessCount < processNumber || !runProcesses {
-		logger.Info("Terminating run loop")
-		monitor.ProcessIDs[processNumber] = 0
+	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "processRequired")
+	if monitor.ProcessCount < processNumber || !pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true) {
+		if monitor.ProcessIDs[processNumber] != 0 {
+			logger.Info("Terminating run loop")
+			monitor.ProcessIDs[processNumber] = 0
+		}
+
 		return false
 	}
 
@@ -377,15 +439,16 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			monitor.Logger.Info("Detected event on monitor conf file", "event", event)
+
+			monitor.Logger.Info("Detected event on monitor conf file or cluster file", "event", event)
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-				monitor.LoadConfiguration()
+				monitor.handleFileChange(event.Name)
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
-				err := watcher.Add(monitor.ConfigFile)
+				err := watcher.Add(event.Name)
 				if err != nil {
 					panic(err)
 				}
-				monitor.LoadConfiguration()
+				monitor.handleFileChange(event.Name)
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -394,6 +457,19 @@ func (monitor *Monitor) WatchConfiguration(watcher *fsnotify.Watcher) {
 			monitor.Logger.Error(err, "Error watching for file system events")
 		}
 	}
+}
+
+// handleFileChange will perform the required action based on the changed/modified file.
+func (monitor *Monitor) handleFileChange(changedFile string) {
+	if changedFile == fdbClusterFilePath {
+		err := monitor.PodClient.updateFdbClusterTimestampAnnotation()
+		if err != nil {
+			monitor.Logger.Error(err, fmt.Sprintf("could not update %s annotation", ClusterFileChangeDetectedAnnotation))
+		}
+		return
+	}
+
+	monitor.LoadConfiguration()
 }
 
 // Run runs the monitor loop.
@@ -409,23 +485,25 @@ func (monitor *Monitor) Run() {
 		// Reset the ProcessCount to 0 to make sure the monitor doesn't try to restart the processes.
 		monitor.ProcessCount = 0
 		for processNumber, processID := range monitor.ProcessIDs {
-			if processID > 0 {
-				subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
-				process, err := os.FindProcess(processID)
-				if err != nil {
-					subprocessLogger.Error(err, "Error finding subprocess")
-					continue
-				}
-				subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
-				err = process.Signal(latestSignal)
-				if err != nil {
-					subprocessLogger.Error(err, "Error signaling subprocess")
-					continue
-				}
+			if processID <= 0 {
+				continue
+			}
+
+			subprocessLogger := monitor.Logger.WithValues("processNumber", processNumber, "PID", processID)
+			process, err := os.FindProcess(processID)
+			if err != nil {
+				subprocessLogger.Error(err, "Error finding subprocess")
+				continue
+			}
+			subprocessLogger.Info("Sending signal to subprocess", "signal", latestSignal)
+			err = process.Signal(latestSignal)
+			if err != nil {
+				subprocessLogger.Error(err, "Error signaling subprocess")
+				continue
 			}
 		}
 
-		annotations := monitor.PodClient.metadata.Annotations
+		annotations := monitor.PodClient.podMetadata.Annotations
 		if len(annotations) > 0 {
 			delayValue, ok := annotations[DelayShutdownAnnotation]
 			if ok {
@@ -444,6 +522,7 @@ func (monitor *Monitor) Run() {
 	if err != nil {
 		panic(err)
 	}
+	monitor.Logger.Info("adding watch for file", "path", path.Base(monitor.ConfigFile))
 	err = watcher.Add(monitor.ConfigFile)
 	if err != nil {
 		panic(err)
@@ -456,6 +535,25 @@ func (monitor *Monitor) Run() {
 		}
 	}(watcher)
 	go func() { monitor.WatchConfiguration(watcher) }()
+
+	// The cluster file will be created and managed by the fdbserver processes, so we have to wait until the fdbserver
+	// processes have been started. Except for the initial cluster creation his file should be present as soon as the
+	// monitor starts the processes.
+	for {
+		_, err = os.Stat(fdbClusterFilePath)
+		if errors.Is(err, os.ErrNotExist) {
+			monitor.Logger.Info("waiting for file to be created", "path", fdbClusterFilePath)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		monitor.Logger.Info("adding watch for file", "path", fdbClusterFilePath)
+		err = watcher.Add(fdbClusterFilePath)
+		if err != nil {
+			panic(err)
+		}
+		break
+	}
 
 	<-done
 }
