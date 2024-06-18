@@ -559,7 +559,7 @@ func (monitor *Monitor) Run() {
 	go func() { monitor.WatchConfiguration(watcher) }()
 
 	// The cluster file will be created and managed by the fdbserver processes, so we have to wait until the fdbserver
-	// processes have been started. Except for the initial cluster creation his file should be present as soon as the
+	// processes have been started. Except for the initial cluster creation this file should be present as soon as the
 	// monitor starts the processes.
 	for {
 		_, err = os.Stat(fdbClusterFilePath)
