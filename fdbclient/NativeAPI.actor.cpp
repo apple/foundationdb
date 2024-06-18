@@ -5058,7 +5058,7 @@ static Future<Void> tssStreamComparison(Request request,
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
-					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
+					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get(), TSS_COMPARISON);
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 					           "Tracing Full TSS Mismatch in stream comparison",

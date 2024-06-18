@@ -199,7 +199,7 @@ Future<Void> tssComparison(Req req,
 					    .detail("TeamCheckMatchNeither", numMatchNeither);
 				}
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
-					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get());
+					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get(), TSS_COMPARISON);
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL, "Tracing Full TSS Mismatch");
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
@@ -381,7 +381,8 @@ Future<Void> replicaComparison(Req req,
 								mismatchEvent.detail("ReplicaFetchErrors", numError)
 								    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
 								// Re-use TSS trace mechanism to log replica mismatch information.
-								TSS_traceMismatch(mismatchEvent, req, src.get(), f.get().get().get());
+								TSS_traceMismatch(
+								    mismatchEvent, req, src.get(), f.get().get().get(), REPLICA_COMPARISON);
 							}
 							if (++successfulReplies == requiredReplicas) {
 								break;
