@@ -22,14 +22,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"strconv"
 	"time"
 
+	"k8s.io/client-go/util/retry"
+
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -253,26 +257,50 @@ func (podClient *PodClient) updateFdbClusterTimestampAnnotation() error {
 // updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
 // will be updated if the annotation is absent it will be added.
 func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
-	annotations := podClient.podMetadata.Annotations
-	if len(annotations) == 0 {
-		annotations = map[string]string{}
+	if podClient.podMetadata == nil {
+		return fmt.Errorf("pod client has no metadata present")
 	}
 
-	for key, val := range annotationChanges {
-		annotations[key] = val
+	if !podClient.podMetadata.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("pod is marked for deletion, cannot update annotations")
 	}
 
-	return podClient.Patch(context.Background(), &corev1.Pod{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Pod",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   podClient.podMetadata.Namespace,
-			Name:        podClient.podMetadata.Name,
-			Annotations: annotations,
-		},
-	}, client.Apply, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
+	// If any error occurs during the update of the annotations, make sure we retry it.
+	return retry.OnError(retry.DefaultRetry, func(err error) bool {
+		podClient.Logger.Error(err, "could not update annotations of pod")
+		// If the pod is marked for deletion, we don't have to retry the patch.
+		if !podClient.podMetadata.DeletionTimestamp.IsZero() {
+			return false
+		}
+
+		// If the resource is not found or the process is forbidden to update the metadata, don't retry it.
+		if k8serrors.IsNotFound(err) || k8serrors.IsForbidden(err) {
+			return false
+		}
+
+		return true
+	}, func() error {
+		annotations := podClient.podMetadata.Annotations
+		if len(annotations) == 0 {
+			annotations = map[string]string{}
+		}
+
+		for key, val := range annotationChanges {
+			annotations[key] = val
+		}
+
+		return podClient.Patch(context.Background(), &corev1.Pod{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Pod",
+				APIVersion: "v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:   podClient.podMetadata.Namespace,
+				Name:        podClient.podMetadata.Name,
+				Annotations: annotations,
+			},
+		}, client.Apply, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
+	})
 }
 
 // OnAdd is called when an object is added.
