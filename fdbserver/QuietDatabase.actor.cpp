@@ -1087,6 +1087,12 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			auto check = checker.startIteration(phase);
 
 			std::string evtType = "QuietDatabase" + phase;
+			if (tLogQueueInfo.get().second > maxPoppedVersionLag) {
+				TraceEvent("Hfu5MaxTLogPopVersionLag")
+				    .detail("Value", tLogQueueInfo.get().second)
+				    .detail("Threshold", maxPoppedVersionLag)
+				    .log();
+			}
 			TraceEvent evt(evtType.c_str());
 			check.add(evt, "DataInFlight", dataInFlight.get(), dataInFlightGate)
 			    .add(evt, "MaxTLogQueueSize", tLogQueueInfo.get().first, maxTLogQueueGate)

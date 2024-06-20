@@ -879,7 +879,8 @@ public:
 	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true when all backup workers for saving mutation logs have been started.
-	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }
+	// configSpace::pack() returns a Key, how can we return a `KeyBackedProperty`
+	KeyBackedProperty<Version> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Each backup worker adds its (epoch, tag.id) to this property.
 	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
