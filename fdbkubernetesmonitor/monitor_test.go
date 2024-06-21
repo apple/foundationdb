@@ -146,7 +146,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 
 			BeforeEach(func() {
 				config := &api.ProcessConfiguration{
-					Version: defaultVersion,
+					Version: &defaultVersion,
 				}
 
 				var err error
@@ -157,7 +157,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 
 			It("should return the configuration", func() {
 				Expect(configuration).NotTo(BeNil())
-				Expect(configuration.Version).To(Equal(defaultVersion))
+				Expect(configuration.Version).To(Equal(&defaultVersion))
 				Expect(configuration.BinaryPath).To(Equal(fdbserverPath))
 				Expect(configuration.RunServers).To(BeNil())
 				Expect(configuration.Arguments).To(BeEmpty())
@@ -179,7 +179,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 
 				It("should return the configuration with runServers set to false", func() {
 					Expect(configuration).NotTo(BeNil())
-					Expect(configuration.Version).To(Equal(defaultVersion))
+					Expect(configuration.Version).To(Equal(&defaultVersion))
 					Expect(configuration.BinaryPath).To(Equal(fdbserverPath))
 					Expect(configuration.RunServers).NotTo(BeNil())
 					Expect(*configuration.RunServers).To(BeFalse())

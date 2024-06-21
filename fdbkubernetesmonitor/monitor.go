@@ -238,9 +238,14 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 		return nil, nil
 	}
 
+	if configuration.Version == nil {
+		monitor.logger.Error(err, "Error could not parse configured version", "rawConfiguration", string(configurationBytes))
+		return nil, nil
+	}
+
 	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes will
 	// cannot restart when a process crashes during a patch upgrade.
-	if monitor.currentContainerVersion.IsProtocolCompatible(configuration.Version) {
+	if monitor.currentContainerVersion.IsProtocolCompatible(*configuration.Version) {
 		configuration.BinaryPath = fdbserverPath
 	} else {
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version.String(), "fdbserver")

@@ -54,7 +54,6 @@ var _ = Describe("[api] FDBVersion", func() {
 			version, err := ParseFdbVersion("6.2.11")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(version).To(Equal(Version{Major: 6, Minor: 2, Patch: 11}))
-			Expect(version.HasSeparatedProxies()).To(BeFalse())
 
 			version, err = ParseFdbVersion("prerelease-6.2.11")
 			Expect(err).NotTo(HaveOccurred())
@@ -67,7 +66,6 @@ var _ = Describe("[api] FDBVersion", func() {
 			version, err = ParseFdbVersion("7.0.0")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(version).To(Equal(Version{Major: 7, Minor: 0, Patch: 0, ReleaseCandidate: 0}))
-			Expect(version.HasSeparatedProxies()).To(BeTrue())
 
 			version, err = ParseFdbVersion("7.0.0-rc1")
 			Expect(err).NotTo(HaveOccurred())
@@ -76,7 +74,6 @@ var _ = Describe("[api] FDBVersion", func() {
 			version, err = ParseFdbVersion("7.1.0-rc39")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(version).To(Equal(Version{Major: 7, Minor: 1, Patch: 0, ReleaseCandidate: 39}))
-			Expect(version.HasSeparatedProxies()).To(BeTrue())
 
 			_, err = ParseFdbVersion("6.2")
 			Expect(err).To(HaveOccurred())
@@ -121,43 +118,5 @@ var _ = Describe("[api] FDBVersion", func() {
 			version = Version{Major: 7, Minor: 1, Patch: 0}
 			Expect(version.IsAtLeast(Version{Major: 7, Minor: 1, Patch: 0, ReleaseCandidate: 1})).To(BeTrue())
 		})
-	})
-
-	When("checking if the version has support for non-blocking exclude commands", func() {
-		type testCase struct {
-			version                Version
-			useNonBlockingExcludes bool
-			expectedResult         bool
-		}
-
-		DescribeTable("should return if non-blocking excludes are enabled",
-			func(tc testCase) {
-				Expect(tc.version.HasNonBlockingExcludes(tc.useNonBlockingExcludes)).To(Equal(tc.expectedResult))
-			},
-			Entry("When version is below 6.3.5 and useNonBlockingExcludes is false",
-				testCase{
-					version:                Version{Major: 6, Minor: 3, Patch: 0},
-					useNonBlockingExcludes: false,
-					expectedResult:         false,
-				}),
-			Entry("When version is below 6.3.5 and useNonBlockingExcludes is true",
-				testCase{
-					version:                Version{Major: 6, Minor: 3, Patch: 0},
-					useNonBlockingExcludes: false,
-					expectedResult:         false,
-				}),
-			Entry("When version is atleast 6.3.5 and useNonBlockingExcludes is false",
-				testCase{
-					version:                Version{Major: 6, Minor: 3, Patch: 5},
-					useNonBlockingExcludes: false,
-					expectedResult:         false,
-				}),
-			Entry("When version is atleast 6.3.5 and useNonBlockingExcludes is true",
-				testCase{
-					version:                Version{Major: 6, Minor: 3, Patch: 6},
-					useNonBlockingExcludes: true,
-					expectedResult:         true,
-				}),
-		)
 	})
 })

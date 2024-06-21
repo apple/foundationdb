@@ -47,7 +47,7 @@ var _ = Describe("Testing FDB Kubernetes Monitor API", func() {
 		BeforeEach(func() {
 			var err error
 			config := loadConfigFromFile(".testdata/default_config.json")
-			Expect(config.Version).To(Equal(Version{Major: 6, Minor: 3, Patch: 15}))
+			Expect(config.Version).To(Equal(&Version{Major: 6, Minor: 3, Patch: 15}))
 			arguments, err = config.GenerateArguments(1, map[string]string{
 				"FDB_PUBLIC_IP":   "10.0.0.1",
 				"FDB_POD_IP":      "192.168.0.1",
@@ -244,6 +244,28 @@ var _ = Describe("Testing FDB Kubernetes Monitor API", func() {
 				Expect(err.Error()).To(Equal("unsupported IP family 5"))
 				Expect(argument).To(BeEmpty())
 			})
+		})
+	})
+
+	When("marshalling a process configuration", func() {
+		var out string
+
+		BeforeEach(func() {
+			config := &ProcessConfiguration{
+				Version: &Version{
+					Major: 7,
+					Minor: 1,
+					Patch: 57,
+				},
+			}
+
+			data, err := json.Marshal(config)
+			Expect(err).NotTo(HaveOccurred())
+			out = string(data)
+		})
+
+		It("should parse it correct", func() {
+			Expect(out).To(Equal("{\"version\":\"7.1.57\"}"))
 		})
 	})
 })

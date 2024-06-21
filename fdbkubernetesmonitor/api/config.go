@@ -33,7 +33,7 @@ import (
 // process.
 type ProcessConfiguration struct {
 	// Version provides the version of FoundationDB the process should run.
-	Version Version `json:"version"`
+	Version *Version `json:"version"`
 
 	// RunServers defines whether we should run the server processes.
 	// This defaults to true, but you can set it to false to prevent starting
