@@ -47,6 +47,7 @@ var _ = Describe("Testing FDB Kubernetes Monitor API", func() {
 		BeforeEach(func() {
 			var err error
 			config := loadConfigFromFile(".testdata/default_config.json")
+			Expect(config.Version).To(Equal(Version{Major: 6, Minor: 3, Patch: 15}))
 			arguments, err = config.GenerateArguments(1, map[string]string{
 				"FDB_PUBLIC_IP":   "10.0.0.1",
 				"FDB_POD_IP":      "192.168.0.1",

@@ -109,7 +109,7 @@ var _ = Describe("Testing FDB Kubernetes monitor", func() {
 		var configurationFilePath string
 		var configuration *api.ProcessConfiguration
 		var configurationBytes []byte
-		defaultVersion := "7.1.51"
+		defaultVersion := api.Version{Major: 7, Minor: 1, Patch: 51}
 
 		BeforeEach(func() {
 			tmpDir := GinkgoT().TempDir()

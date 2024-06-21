@@ -28,6 +28,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
+
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
@@ -164,7 +166,13 @@ func main() {
 			certPath:   certPath,
 			keyPath:    keyPath,
 		}
-		startMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, currentContainerVersion, enableNodeWatch)
+
+		parsedVersion, err := api.ParseFdbVersion(currentContainerVersion)
+		if err != nil {
+			logger.Error(err, "Error parsing container version", "currentContainerVersion", currentContainerVersion)
+			os.Exit(1)
+		}
+		startMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, parsedVersion, enableNodeWatch)
 	case executionModeInit:
 		err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {

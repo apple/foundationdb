@@ -67,7 +67,7 @@ type monitor struct {
 	configFile string
 
 	// currentContainerVersion defines the version of the container. This will be the same as the fdbserver version.
-	currentContainerVersion string
+	currentContainerVersion api.Version
 
 	// customEnvironment defines the custom environment variables to use when
 	// interpreting the monitor configuration.
@@ -114,7 +114,7 @@ type httpConfig struct {
 }
 
 // startMonitor starts the monitor loop.
-func startMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, promConfig httpConfig, enableDebug bool, currentContainerVersion string, enableNodeWatcher bool) {
+func startMonitor(ctx context.Context, logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, promConfig httpConfig, enableDebug bool, currentContainerVersion api.Version, enableNodeWatcher bool) {
 	client, err := createPodClient(ctx, logger, enableNodeWatcher, setupCache)
 	if err != nil {
 		logger.Error(err, "could not create Pod client")
@@ -238,10 +238,12 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 		return nil, nil
 	}
 
-	if monitor.currentContainerVersion == configuration.Version {
+	// If the versions are protocol compatible don't try to point to another binary path. Otherwise, the processes will
+	// cannot restart when a process crashes during a patch upgrade.
+	if monitor.currentContainerVersion.IsProtocolCompatible(configuration.Version) {
 		configuration.BinaryPath = fdbserverPath
 	} else {
-		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version, "fdbserver")
+		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version.String(), "fdbserver")
 	}
 
 	err = checkOwnerExecutable(configuration.BinaryPath)
@@ -271,6 +273,10 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 // loadConfiguration loads the latest configuration from the config file.
 func (monitor *monitor) loadConfiguration() {
 	configuration, configurationBytes := monitor.readConfiguration()
+	if configuration == nil || len(configurationBytes) == 0 {
+		return
+	}
+
 	monitor.acceptConfiguration(configuration, configurationBytes)
 }
 
@@ -303,7 +309,7 @@ func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 	monitor.activeConfigurationBytes = configurationBytes
 	monitor.lastConfigurationTime = time.Now()
 	// Update the prometheus metrics.
-	monitor.metrics.registerConfigurationChange(configuration.Version)
+	monitor.metrics.registerConfigurationChange(configuration.Version.String())
 
 	var hasRunningProcesses bool
 	for processNumber := 1; processNumber <= monitor.processCount; processNumber++ {
@@ -394,7 +400,7 @@ func (monitor *monitor) runProcess(processNumber int) {
 		}
 
 		// Update the prometheus metrics for the process.
-		monitor.metrics.registerProcessStartup(processNumber, monitor.activeConfiguration.Version)
+		monitor.metrics.registerProcessStartup(processNumber, monitor.activeConfiguration.Version.String())
 
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
