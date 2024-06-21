@@ -45,7 +45,7 @@ const (
 	desiredVersionMetricName = "desired_version"
 )
 
-// metrics represents the custom prometheus metrics for the Monitor.
+// metrics represents the custom prometheus metrics for the monitor.
 type metrics struct {
 	// restartCount represents the total number of fdbserver process restarts.
 	restartCount *prometheus.CounterVec

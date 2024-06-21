@@ -32,34 +32,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var _ = Describe("Testing FDB Kubernetes Monitor", func() {
+var _ = Describe("Testing FDB Kubernetes monitor", func() {
 	When("updating the custom environment variables from the node metadata", func() {
-		var monitor *Monitor
+		var mon *monitor
 
 		BeforeEach(func() {
-			monitor = &Monitor{
-				Logger: GinkgoLogr,
-				CustomEnvironment: map[string]string{
+			mon = &monitor{
+				logger: GinkgoLogr,
+				customEnvironment: map[string]string{
 					"testing": "testing",
 				},
-				PodClient: &PodClient{},
+				podClient: &kubernetesClient{},
 			}
 		})
 
 		JustBeforeEach(func() {
-			monitor.updateCustomEnvironmentFromNodeMetadata()
+			mon.updateCustomEnvironmentFromNodeMetadata()
 		})
 
 		When("no node metadata is present", func() {
 			It("shouldn't add new entries", func() {
-				Expect(monitor.CustomEnvironment).To(HaveLen(1))
-				Expect(monitor.CustomEnvironment).To(HaveKeyWithValue("testing", "testing"))
+				Expect(mon.customEnvironment).To(HaveLen(1))
+				Expect(mon.customEnvironment).To(HaveKeyWithValue("testing", "testing"))
 			})
 		})
 
 		When("node metadata is present", func() {
 			BeforeEach(func() {
-				monitor.PodClient.nodeMetadata = &metav1.PartialObjectMetadata{
+				mon.podClient.nodeMetadata = &metav1.PartialObjectMetadata{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
 							// Examples are taken from: https://kubernetes.io/docs/reference/labels-annotations-taints/
@@ -71,10 +71,10 @@ var _ = Describe("Testing FDB Kubernetes Monitor", func() {
 			})
 
 			It("should add the new entries", func() {
-				Expect(monitor.CustomEnvironment).To(HaveLen(3))
-				Expect(monitor.CustomEnvironment).To(HaveKeyWithValue("testing", "testing"))
-				Expect(monitor.CustomEnvironment).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
-				Expect(monitor.CustomEnvironment).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "ip-172-20-114-199.ec2.internal"))
+				Expect(mon.customEnvironment).To(HaveLen(3))
+				Expect(mon.customEnvironment).To(HaveKeyWithValue("testing", "testing"))
+				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_TOPOLOGY_KUBERNETES_IO_ZONE", "us-east-1c"))
+				Expect(mon.customEnvironment).To(HaveKeyWithValue("NODE_LABEL_KUBERNETES_IO_HOSTNAME", "ip-172-20-114-199.ec2.internal"))
 			})
 		})
 	})
@@ -105,7 +105,7 @@ var _ = Describe("Testing FDB Kubernetes Monitor", func() {
 	)
 
 	When("reading the configuration file", func() {
-		var monitor *Monitor
+		var mon *monitor
 		var configurationFilePath string
 		var configuration *api.ProcessConfiguration
 		var configurationBytes []byte
@@ -117,17 +117,17 @@ var _ = Describe("Testing FDB Kubernetes Monitor", func() {
 			fdbserverPath = path.Join(tmpDir, "fdberver")
 			Expect(os.WriteFile(fdbserverPath, []byte(""), 0700)).NotTo(HaveOccurred())
 			configurationFilePath = path.Join(tmpDir, "config.json")
-			monitor = &Monitor{
-				Logger:                  GinkgoLogr,
-				ConfigFile:              configurationFilePath,
-				CustomEnvironment:       map[string]string{},
-				PodClient:               &PodClient{},
-				CurrentContainerVersion: defaultVersion,
+			mon = &monitor{
+				logger:                  GinkgoLogr,
+				configFile:              configurationFilePath,
+				customEnvironment:       map[string]string{},
+				podClient:               &kubernetesClient{},
+				currentContainerVersion: defaultVersion,
 			}
 		})
 
 		JustBeforeEach(func() {
-			configuration, configurationBytes = monitor.readConfiguration()
+			configuration, configurationBytes = mon.readConfiguration()
 		})
 
 		When("the configuration file is empty", func() {
@@ -166,11 +166,11 @@ var _ = Describe("Testing FDB Kubernetes Monitor", func() {
 
 			When("the pod has the isolate annotation set to true", func() {
 				BeforeEach(func() {
-					monitor.PodClient = &PodClient{
+					mon.podClient = &kubernetesClient{
 						podMetadata: &metav1.PartialObjectMetadata{
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
-									IsolateProcessGroupAnnotation: "true",
+									api.IsolateProcessGroupAnnotation: "true",
 								},
 							},
 						},

@@ -35,6 +35,11 @@ type ProcessConfiguration struct {
 	// Version provides the version of FoundationDB the process should run.
 	Version string `json:"version"`
 
+	// InitialStartVersion provides the version of FoundationDB the process should be initially started. In most cases
+	// this will be the same as Version. Only during Version incompatible upgrade those versions will be different to
+	// make sure the
+	InitialStartVersion string `json:"initialStartVersion"`
+
 	// RunServers defines whether we should run the server processes.
 	// This defaults to true, but you can set it to false to prevent starting
 	// new fdbserver processes.
