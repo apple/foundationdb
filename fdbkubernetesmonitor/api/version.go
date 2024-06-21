@@ -161,18 +161,6 @@ func (version Version) IsProtocolCompatible(other Version) bool {
 	return version.Major == other.Major && version.Minor == other.Minor && version.ReleaseCandidate == other.ReleaseCandidate
 }
 
-// HasNonBlockingExcludes determines if a version has support for non-blocking
-// exclude commands.
-func (version Version) HasNonBlockingExcludes(useNonBlockingExcludes bool) bool {
-	return version.IsAtLeast(Version{Major: 6, Minor: 3, Patch: 5}) && useNonBlockingExcludes
-}
-
-// HasSeparatedProxies determines if a version has support for separate
-// grv/commit proxies
-func (version Version) HasSeparatedProxies() bool {
-	return version.IsAtLeast(Version{Major: 7, Minor: 0, Patch: 0})
-}
-
 // NextMajorVersion returns the next major version of FoundationDB.
 func (version Version) NextMajorVersion() Version {
 	return Version{Major: version.Major + 1, Minor: 0, Patch: 0}
