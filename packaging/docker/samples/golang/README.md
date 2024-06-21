@@ -14,7 +14,7 @@ This will start:
 
 * 1 coordinator,
 * 2 fdbservers,
-* a golang application. 
+* a golang application.
 
 You can now head to [http://localhost:8080/counter](http://localhost:8080/counter) and see the counter rising-up after each refresh.
 
