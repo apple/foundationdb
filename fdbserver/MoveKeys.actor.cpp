@@ -1998,7 +1998,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 	state bool runPreCheck = true;
 	state bool skipTss = false;
-
+	state double ssReadyTime = std::numeric_limits<double>::max();
 	ASSERT(!destinationTeam.empty());
 
 	try {
@@ -2014,8 +2014,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 			state std::unordered_set<UID> allServers;
 			state KeyRange range;
 			state Transaction tr(occ);
-			state double ssReadyTime = std::numeric_limits<double>::max();
-			complete = false;
+
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
