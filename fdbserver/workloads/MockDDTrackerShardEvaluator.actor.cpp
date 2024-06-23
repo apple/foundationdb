@@ -96,6 +96,7 @@ public:
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
+		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>();
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(
@@ -105,6 +106,7 @@ public:
 		                                       .output = output,
 		                                       .shardsAffectedByTeamFailure = ddcx.shardsAffectedByTeamFailure,
 		                                       .physicalShardCollection = physicalShardCollection,
+		                                       .bulkLoadTaskCollection = bulkLoadTaskCollection,
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,

@@ -193,8 +193,6 @@ public:
 	// Priority when a physical shard is oversize or anonymous. When DD enable physical shard, the shard created before
 	// it are default to be 'anonymous' for compatibility.
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
-	// Priority for bulk load data move.
-	int PRIORITY_BULK_LOADING;
 
 	// Data fetching rate is throttled if its priority is STRICTLY LOWER than this value. The rate limit is set as
 	// STORAGE_FETCH_KEYS_RATE_LIMIT.

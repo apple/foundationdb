@@ -136,22 +136,12 @@ struct RelocateShard {
 
 	UID traceId; // track the lifetime of this relocate shard
 
-	Optional<BulkLoadState> bulkLoadState;
-
 	// Initialization when define is a better practice. We should avoid assignment of member after definition.
 	// static RelocateShard emptyRelocateShard() { return {}; }
 
 	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
 	    reason(reason), moveReason(moveReason), traceId(traceId) {}
-
-	RelocateShard(KeyRange const& keys,
-	              DataMovementReason moveReason,
-	              RelocateReason reason,
-	              UID traceId,
-	              BulkLoadState bulkLoadState)
-	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
-	    reason(reason), moveReason(moveReason), traceId(traceId), bulkLoadState(bulkLoadState) {}
 
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
@@ -238,17 +228,9 @@ struct GetMetricsListRequest {
 
 struct BulkLoadShardRequest {
 	BulkLoadState bulkLoadState;
-	Promise<Void> triggerAck;
-	Promise<Void> completeAck;
-	Promise<Void> finishAck;
-	bool terminate = false;
 
 	BulkLoadShardRequest() {}
-	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<Void> triggerAck, Promise<Void> completeAck)
-	  : bulkLoadState(bulkLoadState), triggerAck(triggerAck), completeAck(completeAck), terminate(false) {}
-
-	BulkLoadShardRequest(BulkLoadState const& bulkLoadState, Promise<Void> finishAck)
-	  : bulkLoadState(bulkLoadState), finishAck(finishAck), terminate(true) {}
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState) : bulkLoadState(bulkLoadState) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution
@@ -633,6 +615,149 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 			return true;
 		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
 	}
+};
+
+struct DDBulkLoadTask {
+	BulkLoadState coreState;
+	Version commitVersion;
+	Promise<Void> completeAck;
+	Optional<UID> dataMoveId;
+
+	DDBulkLoadTask() = default;
+
+	DDBulkLoadTask(BulkLoadState coreState, Version commitVersion, Promise<Void> completeAck)
+	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
+
+	std::string toString() const {
+		return coreState.toString() + ", [CommitVersion]: " + std::to_string(commitVersion);
+	}
+};
+
+class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
+public:
+	BulkLoadTaskCollection() { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadTask>()); }
+
+	// Return true if there exists a bulk load task since the given commit version
+	bool overlappingTask(KeyRange range) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
+			if (!it->value().present()) {
+				continue;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	bool overlappingTaskSince(KeyRange range, Version sinceCommitVersion) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
+			if (!it->value().present()) {
+				continue;
+			}
+			if (it->value().get().commitVersion > sinceCommitVersion) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// called by DD bulk load core
+	bool publishTask(BulkLoadState bulkLoadState, Version commitVersion, Promise<Void> completeAck) {
+		if (overlappingTaskSince(bulkLoadState.range, commitVersion)) {
+			return true;
+		}
+		DDBulkLoadTask task(bulkLoadState, commitVersion, completeAck);
+		TraceEvent(SevDebug, "DDBulkLoadCollectionPublishTask")
+		    .detail("Range", bulkLoadState.range)
+		    .detail("Task", task.toString());
+		bulkLoadTaskMap.insert(bulkLoadState.range, task);
+		return false;
+	}
+
+	// called when relocator starts
+	bool startTask(BulkLoadState bulkLoadState, UID dataMoveId) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
+			if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+				return true;
+			}
+			it->value().get().dataMoveId = dataMoveId;
+			TraceEvent(SevDebug, "DDBulkLoadCollectionStartTask")
+			    .detail("Range", bulkLoadState.range)
+			    .detail("TaskRange", it->range())
+			    .detail("Task", it->value().get().toString());
+		}
+		return false;
+	}
+
+	// called when relocator succeeds
+	bool terminateTask(BulkLoadState bulkLoadState) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
+			if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+				return true;
+			}
+			if (!it->value().get().completeAck.canBeSet()) {
+				TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
+				    .detail("Range", bulkLoadState.range)
+				    .detail("TaskRange", it->range())
+				    .detail("Task", it->value().get().toString());
+				ASSERT(false);
+			}
+			it->value().get().completeAck.send(Void());
+			TraceEvent(SevDebug, "DDBulkLoadCollectionTerminateTask")
+			    .detail("Range", bulkLoadState.range)
+			    .detail("TaskRange", it->range())
+			    .detail("Task", it->value().get().toString());
+		}
+		bulkLoadTaskMap.insert(bulkLoadState.range, Optional<DDBulkLoadTask>());
+		return false;
+	}
+
+	// called when relocator failed
+	bool failTask(BulkLoadState bulkLoadState, const Error& error) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
+			if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+				return true;
+			}
+			if (!it->value().get().completeAck.canBeSet()) {
+				TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
+				    .errorUnsuppressed(error)
+				    .detail("Range", bulkLoadState.range)
+				    .detail("TaskRange", it->range())
+				    .detail("Task", it->value().get().toString());
+				ASSERT(false);
+			}
+			TraceEvent(SevDebug, "DDBulkLoadCollectionFailTask")
+			    .errorUnsuppressed(error)
+			    .detail("Range", bulkLoadState.range)
+			    .detail("TaskRange", it->range())
+			    .detail("Task", it->value().get().toString());
+		}
+		return false;
+	}
+
+	std::vector<DDBulkLoadTask> getPublishedTasks(KeyRange range) {
+		std::vector<DDBulkLoadTask> res;
+		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
+			if (!it->value().present()) {
+				continue;
+			}
+			DDBulkLoadTask bulkLoadTask = it->value().get();
+			TraceEvent(SevDebug, "DDBulkLoadCollectionGetPublishedTaskEach")
+			    .detail("Range", range)
+			    .detail("TaskRange", it->range())
+			    .detail("Task", bulkLoadTask.toString());
+			if (bulkLoadTask.coreState.range == range && (bulkLoadTask.coreState.phase == BulkLoadPhase::Triggered ||
+			                                              bulkLoadTask.coreState.phase == BulkLoadPhase::Running)) {
+				res.push_back(bulkLoadTask);
+			}
+		}
+		TraceEvent(SevDebug, "DDBulkLoadCollectionGetPublishedTask")
+		    .detail("Range", range)
+		    .detail("Tasks", describe(res));
+		return res;
+	}
+
+private:
+	KeyRangeMap<Optional<DDBulkLoadTask>> bulkLoadTaskMap;
 };
 
 #ifndef __INTEL_COMPILER

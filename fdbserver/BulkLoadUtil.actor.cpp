@@ -53,6 +53,26 @@ ACTOR Future<Optional<BulkLoadState>> getBulkLoadState(Database cx, UID dataMove
 	}
 }
 
+ACTOR Future<BulkLoadState> updateBulkLoadTaskPhase(Transaction* tr, KeyRange range, UID taskId, BulkLoadPhase phase) {
+	state BulkLoadState bulkLoadState;
+	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
+	if (result.size() > 2) {
+		throw bulkload_task_outdated();
+	} else if (result[0].value.empty()) {
+		throw bulkload_task_outdated();
+	}
+	bulkLoadState = decodeBulkLoadState(result[0].value);
+	ASSERT(bulkLoadState.taskId.isValid());
+	ASSERT(bulkLoadState.range == KeyRangeRef(result[0].key, result[1].key));
+	if (taskId != bulkLoadState.taskId || bulkLoadState.phase == BulkLoadPhase::Complete) {
+		// The taskId persisted on disk can be only updated by users
+		// We ignore any complete task
+		throw bulkload_task_outdated();
+	}
+	bulkLoadState.phase = phase;
+	return bulkLoadState;
+}
+
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
 	std::string content = readFileBytes(fromFile, fileBytesMax);
 	writeFile(toFile, content);

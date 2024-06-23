@@ -59,7 +59,7 @@ public:
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
 
-	Optional<BulkLoadState> bulkLoadState;
+	Optional<DDBulkLoadTask> bulkLoadTask;
 
 	RelocateData();
 	explicit RelocateData(RelocateShard const& rs);
@@ -111,6 +111,7 @@ struct DDQueueInitParams {
 	std::vector<TeamCollectionInterface> const& teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes;
 	int const& teamSize;
 	int const& singleRegionTeamSize;
@@ -244,6 +245,7 @@ public:
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;

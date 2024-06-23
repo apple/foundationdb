@@ -2212,10 +2212,7 @@ ACTOR Future<Void> submitBulkLoadTask(ClusterControllerData* self, TriggerBulkLo
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "CCSubmitBulkLoadTaskFailed", self->id)
-		    .errorUnsuppressed(e)
-		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
-		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		TraceEvent(SevInfo, "CCSubmitBulkLoadTaskFailed", self->id).errorUnsuppressed(e);
 		req.reply.sendError(bulkload_task_failed());
 	}
 
@@ -2310,6 +2307,12 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 	}
 
 	loop {
+		bool ddExist = self->db.serverInfo->get().distributor.present();
+		TraceEvent(SevInfo, "CCMonitorDataDistributor", self->id)
+		    .detail("Recruiting", self->recruitDistributor.get())
+		    .detail("Existing", ddExist)
+		    .detail("ExistingDD", ddExist ? self->db.serverInfo->get().distributor.get().id().toString() : "");
+
 		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,

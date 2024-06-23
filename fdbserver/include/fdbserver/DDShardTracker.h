@@ -44,6 +44,7 @@ struct DataDistributionTrackerInitParams {
 	PromiseStream<RelocateShard> const& output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
@@ -74,6 +75,9 @@ public:
 	// PhysicalShard Tracker
 	Reference<PhysicalShardCollection> physicalShardCollection;
 
+	// BulkLoadTask Tracker
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
@@ -84,8 +88,6 @@ public:
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
 	bool* trackerCancelled = nullptr;
-
-	KeyRangeMap<Optional<BulkLoadState>> bulkLoadingMap; // BulkLoadTaskRange, BulkLoadTaskID
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker

@@ -40,10 +40,17 @@ struct BulkLoading : TestWorkload {
 	const bool enabled;
 	bool pass;
 
-	// We disable failure injection because there is an irrelevant issue:
-	// Remote tLog is failed to rejoin to CC
-	// Once this issue is fixed, we should be able to enable the failure injection
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert({ "Attrition" }); }
+	// This workload is not compatible with following workload because they will race in changing the DD mode
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys",
+		             "DataLossRecovery",
+		             "IDDTxnProcessorApiCorrectness",
+		             "PerpetualWiggleStatsWorkload",
+		             "PhysicalShardMove",
+		             "StorageCorruption",
+		             "StorageServerCheckpointRestoreTest",
+		             "ValidateStorage" });
+	}
 
 	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
 
@@ -140,7 +147,7 @@ struct BulkLoading : TestWorkload {
 	std::vector<KeyValue> generateRandomData(KeyRange range, size_t count, const std::vector<Key>& keyCharList) {
 		std::set<Key> keys;
 		while (keys.size() < count) {
-			Key key = getRandomKey(keyCharList, 1, 100);
+			Key key = getRandomKey(keyCharList, 1, 1000);
 			if (!range.contains(key)) {
 				continue;
 			}
@@ -200,6 +207,25 @@ struct BulkLoading : TestWorkload {
 		return;
 	}
 
+	ACTOR Future<bool> checkDDEnabled(Database cx) {
+		loop {
+			state Transaction tr(cx);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			try {
+				state int ddMode = 1;
+				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					rd >> ddMode;
+				}
+				return ddMode == 1;
+
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> allComplete(Database cx) {
 		state Transaction tr(cx);
 		state Key beginKey = allKeys.begin;
@@ -234,6 +260,10 @@ struct BulkLoading : TestWorkload {
 			bool complete = wait(self->allComplete(cx));
 			if (complete) {
 				break;
+			}
+			bool ddEnabled = wait(self->checkDDEnabled(cx));
+			if (!ddEnabled) {
+				throw timed_out();
 			}
 			wait(delay(10.0));
 		}
@@ -361,6 +391,8 @@ struct BulkLoading : TestWorkload {
 		}
 
 		if (g_network->isSimulated()) {
+			// Network partition between CC and DD can cause DD no longer existing,
+			// which results in the bulk loading task never completes
 			disableConnectionFailures("BulkLoading");
 		}
 
@@ -379,10 +411,18 @@ struct BulkLoading : TestWorkload {
 		wait(self->issueBulkLoadTasks(
 		    self, cx, { taskUnit1.bulkLoadTask, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask }));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
+		int oldDDMode = wait(setDDMode(cx, 1));
+		TraceEvent("BulkLoadingWorkLoadSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
 		int old1 = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old1).detail("NewMode", 1);
-		wait(self->waitUntilAllComplete(self, cx));
-		TraceEvent("BulkLoadingWorkLoadAllComplete");
+		try {
+			wait(self->waitUntilAllComplete(self, cx));
+			TraceEvent("BulkLoadingWorkLoadAllComplete");
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				return Void();
+			}
+		}
 		int old2 = wait(setBulkLoadMode(cx, 0));
 		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old2).detail("NewMode", 0);
 

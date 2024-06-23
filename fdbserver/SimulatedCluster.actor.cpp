@@ -2722,6 +2722,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
 			gradualMigrationPossible = false;
 		}
+
+		TraceEvent("SimulatedClusterAssignMachineToDC")
+		    .detail("DC", dc)
+		    .detail("PossibleSS", possible_ss)
+		    .detail("Machines", machines)
+		    .detail("DcCoordinators", dcCoordinators);
 	}
 
 	g_simulator->desiredCoordinators = coordinatorCount;

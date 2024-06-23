@@ -49,6 +49,8 @@ std::string generateRandomBulkLoadBytesSampleFileName();
 
 ACTOR Future<Optional<BulkLoadState>> getBulkLoadState(Database cx, UID dataMoveId, UID logId);
 
+ACTOR Future<BulkLoadState> updateBulkLoadTaskPhase(Transaction* tr, KeyRange range, UID taskId, BulkLoadPhase phase);
+
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax);
 
 ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,

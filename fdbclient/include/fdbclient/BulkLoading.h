@@ -76,9 +76,6 @@ struct BulkLoadState {
 		if (dataMoveId.present()) {
 			res = res + ", [DataMoveId]: " + dataMoveId.get().toString();
 		}
-		if (commitVersion.present()) {
-			res = res + ", [CommitVersion]: " + std::to_string(commitVersion.get());
-		}
 		res = res + ", [TaskId]: " + taskId.toString();
 		return res;
 	}
@@ -181,10 +178,6 @@ struct BulkLoadState {
 	double completeTime = 0;
 	int restartCount = -1;
 	// TODO(Zhe): add file checksum
-
-	// Do not serialize
-	Promise<Void> completeAck; // Used in DDQueue to propagate task complete signal out
-	Optional<Version> commitVersion; // Used in DDTracker to decide the latest bulk load task
 };
 
 BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,

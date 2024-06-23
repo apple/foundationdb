@@ -1,9 +1,10 @@
 [configuration]
 config = 'triple'
 storageEngineType = 5
-processesPerMachine = 3
+processesPerMachine = 2
 coordinators = 3
-machineCount = 36
+machineCount = 40
+generateFearless = false # when generateFearless = false, we have 1 ~ 4 DCs
 tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. Therefore, disable tenant
 
 [[knobs]]

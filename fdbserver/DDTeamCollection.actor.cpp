@@ -198,7 +198,22 @@ public:
 	// Random selection for load balance
 	ACTOR static Future<Void> getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
 		try {
+			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReqReceived", self->distributorId)
+			    .detail("TCReady", self->readyToStart.isReady())
+			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
+			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
+			    .detail("SrcIds", describe(req.src))
+			    .detail("Primary", self->isPrimary())
+			    .detail("TeamSize", self->teams.size());
 			wait(self->checkBuildTeams());
+
+			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamCheckBuildTeamDone", self->distributorId)
+			    .detail("TCReady", self->readyToStart.isReady())
+			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
+			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
+			    .detail("SrcIds", describe(req.src))
+			    .detail("Primary", self->isPrimary())
+			    .detail("TeamSize", self->teams.size());
 
 			if (!self->primary && !self->readyToStart.isReady()) {
 				// When remote DC is not ready, DD shouldn't reply with a new team because
@@ -878,6 +893,15 @@ public:
 					    .detail("Debug", "Check information below");
 					// Debug: set true for traceAllInfo() to print out more information
 					self->traceAllInfo();
+				} else if (addedTeams <= 0) {
+					TraceEvent(SevWarn, "NoTeamAddedAfterBuildTeam", self->distributorId)
+					    .detail("Primary", self->primary)
+					    .detail("ServerTeamNum", self->teams.size());
+				} else if (addedTeams > 0) {
+					TraceEvent(SevInfo, "NewTeamAddedAfterBuildTeam", self->distributorId)
+					    .detail("Primary", self->primary)
+					    .detail("ServerTeamNum", self->teams.size())
+					    .detail("AddedTeams", addedTeams);
 				}
 			} else {
 				int totalHealthyMachineCount = self->calculateHealthyMachineCount();
