@@ -25,13 +25,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"k8s.io/utils/pointer"
 )
 
 // ProcessConfiguration models the configuration for starting a FoundationDB
 // process.
 type ProcessConfiguration struct {
 	// Version provides the version of FoundationDB the process should run.
-	Version string `json:"version"`
+	Version *Version `json:"version"`
 
 	// RunServers defines whether we should run the server processes.
 	// This defaults to true, but you can set it to false to prevent starting
@@ -182,4 +184,13 @@ func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, 
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// ShouldRunServers returns true if RunServers is unset or set to true.
+func (configuration *ProcessConfiguration) ShouldRunServers() bool {
+	if configuration == nil {
+		return false
+	}
+
+	return pointer.BoolDeref(configuration.RunServers, true)
 }

@@ -43,44 +43,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	// CurrentConfigurationAnnotation is the annotation we use to store the
-	// latest configuration.
-	CurrentConfigurationAnnotation = "foundationdb.org/launcher-current-configuration"
-
-	// EnvironmentAnnotation is the annotation we use to store the environment
-	// variables.
-	EnvironmentAnnotation = "foundationdb.org/launcher-environment"
-
-	// OutdatedConfigMapAnnotation is the annotation we read to get notified of
-	// outdated configuration.
-	OutdatedConfigMapAnnotation = "foundationdb.org/outdated-config-map-seen"
-
-	// DelayShutdownAnnotation defines how long the FDB Kubernetes monitor process should sleep before shutting itself down.
-	// The FDB Kubernetes monitor will always shutdown all fdbserver processes, independent of this setting.
-	// The value of this annotation must be a duration like "60s".
-	DelayShutdownAnnotation = "foundationdb.org/delay-shutdown"
-
-	// ClusterFileChangeDetectedAnnotation is the annotation that will be updated if the fdb.cluster file is updated.
-	ClusterFileChangeDetectedAnnotation = "foundationdb.org/cluster-file-change"
-)
-
-// PodClient is a wrapper around the pod API.
-type PodClient struct {
+// kubernetesClient is a wrapper around the Kubernetes API.
+type kubernetesClient struct {
 	// podMetadata is the latest metadata that was seen by the fdb-kubernetes-monitor for the according Pod.
 	podMetadata *metav1.PartialObjectMetadata
 
 	// nodeMetadata is the latest metadata that was seen by the fdb-kubernetes-monitor for the according node that hosts the Pod.
 	nodeMetadata *metav1.PartialObjectMetadata
 
-	// TimestampFeed is a channel where the pod client will send updates with
-	// the values from OutdatedConfigMapAnnotation.
+	// TimestampFeed is a channel where the kubernetes client will send updates with
+	// the values from api.OutdatedConfigMapAnnotation. If the api.IsolateProcessGroupAnnotation is changed the current
+	// timestamp will be sent to the channel to force the monitor to change its configuration accordingly.
 	TimestampFeed chan int64
 
 	// Logger is the logger we use for this client.
 	Logger logr.Logger
 
-	// Adds the controller runtime client to the PodClient.
+	// Adds the controller runtime client to the kubernetesClient.
 	client.Client
 }
 
@@ -124,14 +103,14 @@ func setupCache(namespace string, podName string, nodeName string) (client.WithW
 	return internalClient, internalCache, nil
 }
 
-// CreatePodClient creates a new client for working with the pod object.
-func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher bool, setupCache func(string, string, string) (client.WithWatch, cache.Cache, error)) (*PodClient, error) {
+// createPodClient creates a new client for working with the pod object.
+func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher bool, setupCache func(string, string, string) (client.WithWatch, cache.Cache, error)) (*kubernetesClient, error) {
 	namespace := os.Getenv("FDB_POD_NAMESPACE")
 	podName := os.Getenv("FDB_POD_NAME")
 	nodeName := os.Getenv("FDB_NODE_NAME")
 
 	internalClient, internalCache, err := setupCache(namespace, podName, nodeName)
-	podClient := &PodClient{
+	podClient := &kubernetesClient{
 		podMetadata:   nil,
 		nodeMetadata:  nil,
 		TimestampFeed: make(chan int64, 10),
@@ -185,7 +164,7 @@ func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 
 	podClient.Client = controllerClient
 
-	// Fetch the current metadata before returning the PodClient
+	// Fetch the current metadata before returning the kubernetesClient
 	currentPodMetadata := &metav1.PartialObjectMetadata{}
 	currentPodMetadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
 	err = podClient.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: podName}, currentPodMetadata)
@@ -213,9 +192,9 @@ func CreatePodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 
 // retrieveEnvironmentVariables extracts the environment variables we have for
 // an argument into a map.
-func retrieveEnvironmentVariables(monitor *Monitor, argument api.Argument, target map[string]string) {
+func retrieveEnvironmentVariables(monitor *monitor, argument api.Argument, target map[string]string) {
 	if argument.Source != "" {
-		value, err := argument.LookupEnv(monitor.CustomEnvironment)
+		value, err := argument.LookupEnv(monitor.customEnvironment)
 		if err == nil {
 			target[argument.Source] = value
 		}
@@ -227,38 +206,43 @@ func retrieveEnvironmentVariables(monitor *Monitor, argument api.Argument, targe
 	}
 }
 
-// UpdateAnnotations updates annotations on the pod after loading new
+// updateAnnotations updates annotations on the pod after loading new
 // configuration.
-func (podClient *PodClient) UpdateAnnotations(monitor *Monitor) error {
+func (podClient *kubernetesClient) updateAnnotations(monitor *monitor) error {
 	environment := make(map[string]string)
-	for _, argument := range monitor.ActiveConfiguration.Arguments {
+	for _, argument := range monitor.activeConfiguration.Arguments {
 		retrieveEnvironmentVariables(monitor, argument, environment)
 	}
-	environment["BINARY_DIR"] = path.Dir(monitor.ActiveConfiguration.BinaryPath)
+	environment["BINARY_DIR"] = path.Dir(monitor.activeConfiguration.BinaryPath)
 	jsonEnvironment, err := json.Marshal(environment)
 	if err != nil {
 		return err
 	}
 
 	return podClient.updateAnnotationsOnPod(map[string]string{
-		CurrentConfigurationAnnotation: string(monitor.ActiveConfigurationBytes),
-		EnvironmentAnnotation:          string(jsonEnvironment),
+		api.CurrentConfigurationAnnotation: string(monitor.activeConfigurationBytes),
+		api.EnvironmentAnnotation:          string(jsonEnvironment),
 	})
 }
 
 // updateFdbClusterTimestampAnnotation updates the ClusterFileChangeDetectedAnnotation annotation on the pod
 // after a change to the fdb.cluster file was detected, e.g. because the coordinators were changed.
-func (podClient *PodClient) updateFdbClusterTimestampAnnotation() error {
+func (podClient *kubernetesClient) updateFdbClusterTimestampAnnotation() error {
 	return podClient.updateAnnotationsOnPod(map[string]string{
-		ClusterFileChangeDetectedAnnotation: strconv.FormatInt(time.Now().Unix(), 10),
+		api.ClusterFileChangeDetectedAnnotation: strconv.FormatInt(time.Now().Unix(), 10),
 	})
 }
 
 // updateAnnotationsOnPod will update the annotations with the provided annotationChanges. If an annotation exists, it
 // will be updated if the annotation is absent it will be added.
-func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
+func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[string]string) error {
 	if podClient.podMetadata == nil {
 		return fmt.Errorf("pod client has no metadata present")
+	}
+	
+	annotations := podClient.podMetadata.Annotations
+	if len(annotations) == 0 {
+		annotations = map[string]string{}
 	}
 
 	if !podClient.podMetadata.DeletionTimestamp.IsZero() {
@@ -304,7 +288,7 @@ func (podClient *PodClient) updateAnnotationsOnPod(annotationChanges map[string]
 }
 
 // OnAdd is called when an object is added.
-func (podClient *PodClient) OnAdd(obj interface{}) {
+func (podClient *kubernetesClient) OnAdd(obj interface{}) {
 	switch castedObj := obj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnAdd for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
@@ -324,10 +308,15 @@ func (podClient *PodClient) OnAdd(obj interface{}) {
 // OnUpdate is also called when a re-list happens, and it will
 // get called even if nothing changed. This is useful for periodically
 // evaluating or syncing something.
-func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
+func (podClient *kubernetesClient) OnUpdate(_, newObj interface{}) {
 	switch castedObj := newObj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnUpdate for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace, "generation", castedObj.Generation)
+		var previousAnnotations map[string]string
+		if podClient.podMetadata != nil {
+			previousAnnotations = podClient.podMetadata.Annotations
+		}
+
 		podClient.podMetadata = &metav1.PartialObjectMetadata{
 			TypeMeta:   castedObj.TypeMeta,
 			ObjectMeta: castedObj.ObjectMeta,
@@ -337,14 +326,25 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 			return
 		}
 
-		annotation := podClient.podMetadata.Annotations[OutdatedConfigMapAnnotation]
+		// If the IsolateProcessGroupAnnotation changes force a reload of the configuration to make sure the processes
+		// will be shutdown.
+		previousIsolateProcessGroupAnnotationValue := previousAnnotations[api.IsolateProcessGroupAnnotation]
+		newIsolateProcessGroupAnnotationValue := podClient.podMetadata.Annotations[api.IsolateProcessGroupAnnotation]
+		if previousIsolateProcessGroupAnnotationValue != newIsolateProcessGroupAnnotationValue {
+			podClient.Logger.Info("Got change in isolate process group annotation", "previous", previousIsolateProcessGroupAnnotationValue, "new", newIsolateProcessGroupAnnotationValue)
+			podClient.TimestampFeed <- time.Now().Unix()
+			// In this case we can return as the timestamp feed already has a new value.
+			return
+		}
+
+		annotation := podClient.podMetadata.Annotations[api.OutdatedConfigMapAnnotation]
 		if annotation == "" {
 			return
 		}
 
 		timestamp, err := strconv.ParseInt(annotation, 10, 64)
 		if err != nil {
-			podClient.Logger.Error(err, "Error parsing annotation", "key", OutdatedConfigMapAnnotation, "rawAnnotation", annotation)
+			podClient.Logger.Error(err, "Error parsing annotation", "key", api.OutdatedConfigMapAnnotation, "rawAnnotation", annotation)
 			return
 		}
 
@@ -362,7 +362,7 @@ func (podClient *PodClient) OnUpdate(_, newObj interface{}) {
 // it will get an object of type DeletedFinalStateUnknown. This can
 // happen if the watch is closed and misses the delete event and we don't
 // notice the deletion until the subsequent re-list.
-func (podClient *PodClient) OnDelete(obj interface{}) {
+func (podClient *kubernetesClient) OnDelete(obj interface{}) {
 	switch castedObj := obj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnDelete for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
