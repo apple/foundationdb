@@ -33,5 +33,5 @@ import (
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
 	SetDefaultEventuallyTimeout(10 * time.Second)
-	RunSpecs(t, "FDB Kubernetes Monitor")
+	RunSpecs(t, "FDB Kubernetes monitor")
 }
