@@ -27,7 +27,7 @@ import (
 	"k8s.io/utils/pointer"
 )
 
-var _ = Describe("Testing Monitor metrics", func() {
+var _ = Describe("Testing monitor metrics", func() {
 	When("getting the copy details", func() {
 		sevenOneVersion := "7.1.57"
 		sevenThreeVersion := "7.3.37"

@@ -28,6 +28,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
+
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
@@ -109,7 +111,7 @@ func parseFlagsAndSetEnvDefaults() error {
 }
 
 func main() {
-	var copyFiles, copyBinaries, copyLibraries, requiredCopyFiles []string
+	var filesToCopy, copyBinaries, copyLibraries, requiredCopyFiles []string
 	var inputDir, copyPrimaryLibrary, binaryOutputDirectory, certPath, keyPath string
 
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
@@ -118,7 +120,7 @@ func main() {
 	pflag.StringVar(&monitorConfFile, "input-monitor-conf", "config.json", "Name of the file in the input directory that contains the monitor configuration")
 	pflag.StringVar(&logPath, "log-path", "", "Name of a file to send logs to. Logs will be sent to stdout in addition the file you pass in this argument. If this is blank, logs will only by sent to stdout")
 	pflag.StringVar(&outputDir, "output-dir", ".", "Directory to copy files into")
-	pflag.StringArrayVar(&copyFiles, "copy-file", nil, "A list of files to copy")
+	pflag.StringArrayVar(&filesToCopy, "copy-file", nil, "A list of files to copy")
 	pflag.StringArrayVar(&copyBinaries, "copy-binary", nil, "A list of binaries to copy from /usr/bin")
 	pflag.StringVar(&versionFilePath, "version-file", "/var/fdb/version", "Path to a file containing the current FDB version")
 	pflag.StringVar(&sharedBinaryDir, "shared-binary-dir", "/var/fdb/shared-binaries/bin", "A directory containing binaries that are copied from a sidecar process")
@@ -146,7 +148,7 @@ func main() {
 	}
 	currentContainerVersion := strings.TrimSpace(string(versionBytes))
 	mode := executionMode(executionModeString)
-	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
+	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, filesToCopy, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
 	if err != nil {
 		logger.Error(err, "Error getting list of files to copy")
 		os.Exit(1)
@@ -164,16 +166,22 @@ func main() {
 			certPath:   certPath,
 			keyPath:    keyPath,
 		}
-		StartMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, currentContainerVersion, enableNodeWatch)
+
+		parsedVersion, err := api.ParseFdbVersion(currentContainerVersion)
+		if err != nil {
+			logger.Error(err, "Error parsing container version", "currentContainerVersion", currentContainerVersion)
+			os.Exit(1)
+		}
+		startMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, parsedVersion, enableNodeWatch)
 	case executionModeInit:
-		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
+		err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
 			logger.Error(err, "Error copying files")
 			os.Exit(1)
 		}
 	case executionModeSidecar:
 		if mainContainerVersion != currentContainerVersion {
-			err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
+			err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
 			if err != nil {
 				logger.Error(err, "Error copying files")
 				os.Exit(1)
