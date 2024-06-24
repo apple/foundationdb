@@ -42,7 +42,7 @@ import (
 var _ = Describe("Testing FDB Pod client", func() {
 	var enableNodeWatcher bool
 	var fakeClient client.WithWatch
-	var podClient *PodClient
+	var podClient *kubernetesClient
 	var namespace, podName, nodeName string
 	var internalCache *informertest.FakeInformers
 
@@ -63,10 +63,10 @@ var _ = Describe("Testing FDB Pod client", func() {
 		internalCache.Scheme = fakeClient.Scheme()
 	})
 
-	When("the PodClient was started", func() {
+	When("the kubernetesClient was started", func() {
 		JustBeforeEach(func() {
 			var err error
-			podClient, err = CreatePodClient(context.Background(), GinkgoLogr, enableNodeWatcher, func(fncNamespace string, fncPodName string, fncNodeName string) (client.WithWatch, cache.Cache, error) {
+			podClient, err = createPodClient(context.Background(), GinkgoLogr, enableNodeWatcher, func(fncNamespace string, fncPodName string, fncNodeName string) (client.WithWatch, cache.Cache, error) {
 				Expect(fncNamespace).To(Equal(namespace))
 				Expect(fncPodName).To(Equal(podName))
 				Expect(fncNodeName).To(Equal(nodeName))
@@ -102,10 +102,10 @@ var _ = Describe("Testing FDB Pod client", func() {
 		})
 	})
 
-	When("the PodClient handles events", func() {
+	When("the kubernetesClient handles events", func() {
 		BeforeEach(func() {
 			var err error
-			podClient, err = CreatePodClient(context.Background(), GinkgoLogr, enableNodeWatcher, func(fncNamespace string, fncPodName string, fncNodeName string) (client.WithWatch, cache.Cache, error) {
+			podClient, err = createPodClient(context.Background(), GinkgoLogr, enableNodeWatcher, func(fncNamespace string, fncPodName string, fncNodeName string) (client.WithWatch, cache.Cache, error) {
 				Expect(fncNamespace).To(Equal(namespace))
 				Expect(fncPodName).To(Equal(podName))
 				Expect(fncNodeName).To(Equal(nodeName))
@@ -173,7 +173,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 				BeforeEach(func() {
 					timestamp = time.Now().Unix()
 					pod.Annotations = map[string]string{
-						OutdatedConfigMapAnnotation: strconv.FormatInt(timestamp, 10),
+						api.OutdatedConfigMapAnnotation: strconv.FormatInt(timestamp, 10),
 					}
 					fakeInformer.Update(nil, pod)
 				})
@@ -193,7 +193,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 			When("an UpdateEvent is handled that updates the OutdatedConfigMapAnnotation with a bad value", func() {
 				BeforeEach(func() {
 					pod.Annotations = map[string]string{
-						OutdatedConfigMapAnnotation: "boom!",
+						api.OutdatedConfigMapAnnotation: "boom!",
 					}
 					fakeInformer.Update(nil, pod)
 				})
@@ -282,12 +282,12 @@ var _ = Describe("Testing FDB Pod client", func() {
 		})
 	})
 
-	When("the PodClient should update the annotations", func() {
-		var monitor *Monitor
+	When("the kubernetesClient should update the annotations", func() {
+		var mon *monitor
 
 		JustBeforeEach(func() {
 			var err error
-			podClient, err = CreatePodClient(context.Background(), GinkgoLogr, enableNodeWatcher, func(fncNamespace string, fncPodName string, fncNodeName string) (client.WithWatch, cache.Cache, error) {
+			podClient, err = createPodClient(context.Background(), GinkgoLogr, enableNodeWatcher, func(fncNamespace string, fncPodName string, fncNodeName string) (client.WithWatch, cache.Cache, error) {
 				Expect(fncNamespace).To(Equal(namespace))
 				Expect(fncPodName).To(Equal(podName))
 				Expect(fncNodeName).To(Equal(nodeName))
@@ -314,13 +314,13 @@ var _ = Describe("Testing FDB Pod client", func() {
 			})).NotTo(HaveOccurred())
 
 			// Execute the update annotations.
-			Expect(podClient.UpdateAnnotations(monitor)).NotTo(HaveOccurred())
+			Expect(podClient.updateAnnotations(mon)).NotTo(HaveOccurred())
 		})
 
 		When("no additional env variables are set", func() {
 			BeforeEach(func() {
-				monitor = &Monitor{
-					ActiveConfiguration: &api.ProcessConfiguration{
+				mon = &monitor{
+					activeConfiguration: &api.ProcessConfiguration{
 						BinaryPath: "/usr/bin",
 					},
 				}
@@ -330,20 +330,20 @@ var _ = Describe("Testing FDB Pod client", func() {
 				pod := &corev1.Pod{}
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
-				Expect(pod.Annotations).To(HaveKeyWithValue(CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\"}"))
 			})
 		})
 
 		When("one flat additional env variable is set", func() {
 			BeforeEach(func() {
 				GinkgoT().Setenv("TEST", "test-value")
-				monitor = &Monitor{
-					ActiveConfiguration: &api.ProcessConfiguration{
+				mon = &monitor{
+					activeConfiguration: &api.ProcessConfiguration{
 						BinaryPath: "/usr/bin",
 						Arguments: []api.Argument{
 							{
-								ArgumentType: EnvironmentAnnotation,
+								ArgumentType: api.EnvironmentAnnotation,
 								Source:       "TEST",
 							},
 						},
@@ -355,16 +355,16 @@ var _ = Describe("Testing FDB Pod client", func() {
 				pod := &corev1.Pod{}
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
-				Expect(pod.Annotations).To(HaveKeyWithValue(CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
 			})
 		})
 
 		When("one nested flat additional env variable is set", func() {
 			BeforeEach(func() {
 				GinkgoT().Setenv("TEST", "test-value")
-				monitor = &Monitor{
-					ActiveConfiguration: &api.ProcessConfiguration{
+				mon = &monitor{
+					activeConfiguration: &api.ProcessConfiguration{
 						BinaryPath: "/usr/bin",
 						Arguments: []api.Argument{
 							{
@@ -385,8 +385,8 @@ var _ = Describe("Testing FDB Pod client", func() {
 				pod := &corev1.Pod{}
 				Expect(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: podName}, pod)).NotTo(HaveOccurred())
 
-				Expect(pod.Annotations).To(HaveKeyWithValue(CurrentConfigurationAnnotation, ""))
-				Expect(pod.Annotations).To(HaveKeyWithValue(EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.CurrentConfigurationAnnotation, ""))
+				Expect(pod.Annotations).To(HaveKeyWithValue(api.EnvironmentAnnotation, "{\"BINARY_DIR\":\"/usr\",\"TEST\":\"test-value\"}"))
 			})
 		})
 	})
