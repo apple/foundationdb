@@ -9595,9 +9595,17 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	state Optional<BulkLoadState> bulkLoadState; // TODO(Zhe): avoid check this all time
 	wait(store(bulkLoadState, getBulkLoadState(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
 	if (bulkLoadState.present()) {
-		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
-		    .detail("MoveInShard", moveInShard->toString())
-		    .detail("BulkLoadTask", bulkLoadState.get().toString());
+		if (bulkLoadState.get().dataMoveId != moveInShard->dataMoveId()) {
+			// unexpected error
+			TraceEvent(SevError, "FetchShardBeginReceivedBulkLoadTaskMoveIdMismatch", data->thisServerID)
+			    .detail("MoveInShard", moveInShard->toString())
+			    .detail("BulkLoadTask", bulkLoadState.get().toString());
+			moveInShard->setPhase(MoveInPhase::Cancel);
+		} else {
+			TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+			    .detail("MoveInShard", moveInShard->toString())
+			    .detail("BulkLoadTask", bulkLoadState.get().toString());
+		}
 	}
 
 	loop {
@@ -9607,7 +9615,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				if (bulkLoadState.present()) { // TODO(Zhe): Error handling -- cancel data move
+				if (bulkLoadState.present()) {
 					wait(fetchShardFetchBulkLoadSSTFiles(data, moveInShard, dir, bulkLoadState.get()));
 				} else {
 					wait(fetchShardCheckpoint(data, moveInShard, dir));

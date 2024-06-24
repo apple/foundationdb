@@ -420,9 +420,10 @@ public:
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
-	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
-	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1),
-	    auditStorageInitStarted(false), bulkLoadActors(true), bulkLoadEnabled(false) {}
+	    teamCollection(nullptr), bulkLoadTaskCollection(nullptr), auditStorageHaLaunchingLock(1),
+	    auditStorageReplicaLaunchingLock(1), auditStorageLocationMetadataLaunchingLock(1),
+	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadActors(true),
+	    bulkLoadEnabled(false) {}
 
 	// bootstrap steps
 

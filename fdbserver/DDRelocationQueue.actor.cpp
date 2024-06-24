@@ -424,8 +424,10 @@ std::string Busyness::toString() {
 
 // find the "workFactor" for this, were it launched now
 int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
-	if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
-	    relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
+	if (relocation.bulkLoadTask.present())
+		return 0;
+	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
+	         relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
 		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
@@ -462,6 +464,10 @@ bool canLaunchSrc(RelocateData& relocation,
 
 	// Blob migrator is backed by s3 so it can allow unlimited data movements
 	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
+		return true;
+	} else if (relocation.bulkLoadTask.present()) {
+		// workFactor for bulk load task on source is always 0, therefore, we can safely launch
+		// the data move with a bulk load task
 		return true;
 	}
 
@@ -1001,6 +1007,28 @@ DataMoveType newDataMoveType() {
 	return type;
 }
 
+bool runPendingBulkLoadTaskWithRelocateData(DDQueue* self, RelocateData& rd) {
+	bool doBulkLoading = false;
+	std::vector<DDBulkLoadTask> tasks = self->bulkLoadTaskCollection->getPublishedTasks(rd.keys);
+	ASSERT(tasks.size() == 0 || tasks.size() == 1);
+	if (tasks.size() == 1) {
+		rd.bulkLoadTask = tasks[0];
+		doBulkLoading = true;
+	}
+	if (doBulkLoading) {
+		bool outdated = self->bulkLoadTaskCollection->startTask(rd.bulkLoadTask.get().coreState, rd.dataMoveId);
+		if (outdated) {
+			TraceEvent(SevError, "DDBulkLoadTaskOutdatedWhenStartRelocator", self->distributorId) // unexpected
+			    .detail("NewDataMoveID", rd.dataMoveId)
+			    .detail("NewDataMovePriority", rd.priority)
+			    .detail("NewDataMoveRange", rd.keys)
+			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
+			throw movekeys_conflict();
+		}
+	}
+	return doBulkLoading;
+}
+
 // For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
 // with rd. If there exist, cancel them by cancelling their actors and reducing the src servers' busyness of those
 // canceled inflight relocateData. Launch the relocation for the rd.
@@ -1013,13 +1041,25 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	for (; it != combined.end(); it++) {
 		RelocateData rd(*it);
 
+		// If having a bulk load task overlapping the rd range,
+		// attach bulk load task to the input rd if rd is not a data move
+		// for unhealthy. Make the bulk load task visible on the global task map
+		bool doBulkLoading = runPendingBulkLoadTaskWithRelocateData(this, rd);
+		if (doBulkLoading) {
+			TraceEvent(SevInfo, "DDBulkLoadRunTaskWithRelocateData", this->distributorId)
+			    .detail("NewDataMoveId", rd.dataMoveId)
+			    .detail("NewDataMovePriority", rd.priority)
+			    .detail("NewDataMoveRange", rd.keys)
+			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
+		}
+
 		// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
 		bool overlappingInFlight = false;
 		auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
 		for (auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
 			if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
-			    ((!rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
-			      rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY))) {
+			    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
+			    rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 
 				DebugRelocationTraceEvent("OverlappingInFlight", distributorId)
 				    .detail("KeyBegin", it->value().keys.begin)
@@ -1053,6 +1093,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 		if (!rd.isRestore() && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 			// logRelocation( rd, "SkippingQueuedRelocation" );
+			if (rd.bulkLoadTask.present()) {
+				TraceEvent(SevError, "DDBulkLoadDelayedByBusySrc", this->distributorId)
+				    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
+			}
 			continue;
 		}
 
@@ -1339,39 +1383,6 @@ static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::v
 	return count;
 }
 
-bool runPendingBulkLoadTaskWithRelocateData(DDQueue* self, RelocateData& rd) {
-	bool doBulkLoading = false;
-	std::vector<DDBulkLoadTask> tasks = self->bulkLoadTaskCollection->getPublishedTasks(rd.keys);
-	ASSERT(tasks.size() == 0 || tasks.size() == 1);
-	if (tasks.size() == 1) {
-		rd.bulkLoadTask = tasks[0];
-		doBulkLoading = true;
-		TraceEvent(SevInfo, "DDBulkLoadTaskOnDataMove", self->distributorId)
-		    .detail("NewDataMoveId", rd.dataMoveId)
-		    .detail("NewDataMovePriority", rd.priority)
-		    .detail("NewDataMoveRange", rd.keys)
-		    .detail("BulkLoadTask", tasks[0].toString());
-	}
-	if (doBulkLoading) {
-		bool outdated = self->bulkLoadTaskCollection->startTask(rd.bulkLoadTask.get().coreState, rd.dataMoveId);
-		if (outdated) {
-			TraceEvent(SevError, "DDBulkLoadTaskOutdatedWhenStartRelocator", self->distributorId) // unexpected
-			    .detail("NewDataMoveID", rd.dataMoveId)
-			    .detail("NewDataMovePriority", rd.priority)
-			    .detail("NewDataMoveRange", rd.keys)
-			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
-			throw movekeys_conflict();
-		} else {
-			TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorStart", self->distributorId)
-			    .detail("NewDataMoveID", rd.dataMoveId)
-			    .detail("NewDataMovePriority", rd.priority)
-			    .detail("NewDataMoveRange", rd.keys)
-			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
-		}
-	}
-	return doBulkLoading;
-}
-
 void validateBulkLoadRelocateData(const RelocateData& rd, const std::vector<UID>& destIds, UID logId) {
 	if (rd.keys != rd.bulkLoadTask.get().coreState.range) {
 		TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", logId)
@@ -1425,18 +1436,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
-	state bool doBulkLoading = false;
+	state bool doBulkLoading = rd.bulkLoadTask.present();
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
 			relocateShardInterval.severity = SevDebug;
 			self->suppressIntervals++;
 		}
-
-		// If having a bulk load task overlapping the rd range,
-		// attach bulk load task to the input rd if rd is not a data move
-		// for unhealthy. Make the bulk load task visible on the global task map
-		doBulkLoading = runPendingBulkLoadTaskWithRelocateData(self, rd);
 
 		TraceEvent(relocateShardInterval.begin(), distributorId)
 		    .detail("KeyBegin", rd.keys.begin)
