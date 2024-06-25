@@ -396,20 +396,22 @@ struct BulkLoading : TestWorkload {
 			disableConnectionFailures("BulkLoading");
 		}
 
-		std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
+		state std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
 
-		std::string folderName1 = "1";
-		KeyRange range1 = Standalone(KeyRangeRef("1"_sr, "2"_sr));
-		state BulkLoadTaskTestUnit taskUnit1 = self->produceBulkLoadTaskUnit(self, keyCharList, range1, folderName1);
-		std::string folderName2 = "2";
-		KeyRange range2 = Standalone(KeyRangeRef("2"_sr, "3"_sr));
-		state BulkLoadTaskTestUnit taskUnit2 = self->produceBulkLoadTaskUnit(self, keyCharList, range2, folderName2);
-		std::string folderName3 = "4";
-		KeyRange range3 = Standalone(KeyRangeRef("4"_sr, "5"_sr));
-		state BulkLoadTaskTestUnit taskUnit3 = self->produceBulkLoadTaskUnit(self, keyCharList, range3, folderName3);
-
-		wait(self->issueBulkLoadTasks(
-		    self, cx, { taskUnit1.bulkLoadTask, taskUnit2.bulkLoadTask, taskUnit3.bulkLoadTask }));
+		state std::vector<BulkLoadState> bulkLoadStates;
+		state std::vector<std::vector<KeyValue>> bulkLoadDataList;
+		for (int i = 0; i < 3; i++) {
+			std::string strIdx = std::to_string(i);
+			std::string strIdxPlusOne = std::to_string(i + 1);
+			std::string folderName = strIdx;
+			Key beginKey = Standalone(StringRef(strIdx));
+			Key endKey = Standalone(StringRef(strIdxPlusOne));
+			KeyRange range = Standalone(KeyRangeRef(beginKey, endKey));
+			BulkLoadTaskTestUnit taskUnit = self->produceBulkLoadTaskUnit(self, keyCharList, range, folderName);
+			bulkLoadStates.push_back(taskUnit.bulkLoadTask);
+			bulkLoadDataList.push_back(taskUnit.data);
+		}
+		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
 		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
 		int oldDDMode = wait(setDDMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
@@ -423,14 +425,39 @@ struct BulkLoading : TestWorkload {
 				return Void();
 			}
 		}
+
+		bulkLoadStates.clear();
+		bulkLoadDataList.clear();
+		for (int i = 0; i < 3; i++) {
+			std::string strIdx = std::to_string(i);
+			std::string strIdxPlusOne = std::to_string(i + 1);
+			std::string folderName = strIdx;
+			Key beginKey = Standalone(StringRef(strIdx));
+			Key endKey = Standalone(StringRef(strIdxPlusOne));
+			KeyRange range = Standalone(KeyRangeRef(beginKey, endKey));
+			BulkLoadTaskTestUnit taskUnit = self->produceBulkLoadTaskUnit(self, keyCharList, range, folderName);
+			bulkLoadStates.push_back(taskUnit.bulkLoadTask);
+			bulkLoadDataList.push_back(taskUnit.data);
+		}
+		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
+		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
+
+		try {
+			wait(self->waitUntilAllComplete(self, cx));
+			TraceEvent("BulkLoadingWorkLoadAllComplete");
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				return Void();
+			}
+		}
+
 		int old2 = wait(setBulkLoadMode(cx, 0));
 		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old2).detail("NewMode", 0);
 
-		wait(self->checkData(cx, taskUnit1.data));
-		wait(self->checkData(cx, taskUnit2.data));
-		wait(self->checkData(cx, taskUnit3.data));
-		TraceEvent("BulkLoadingWorkLoadCheckedData");
-
+		state int j = 0;
+		for (; j < bulkLoadDataList.size(); j++) {
+			wait(self->checkData(cx, bulkLoadDataList[j]));
+		}
 		TraceEvent("BulkLoadingWorkLoadComplete");
 
 		/*std::string folderName1 = "1";

@@ -363,6 +363,7 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
                                     KeyRange rangeToSkip);
 
 void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, UID taskId);
+ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self);
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 public:
@@ -1145,7 +1146,11 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		}
 		wait(delay(1.0));
 	}
-	TraceEvent(SevInfo, "BulkLoadScheduleEnd", self->ddId);
+	TraceEvent(SevInfo, "DDBulkLoadScheduleEnd", self->ddId);
+
+	// Start a new one
+	wait(delay(5.0));
+	self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
 	return Void();
 }
 
@@ -1188,61 +1193,33 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			wait(delay(10.0));
+			wait(delay(1.0));
 		}
 	}
 	TraceEvent(SevInfo, "DDBulkLoadRestartTriggeredTasksComplete", self->ddId);
 	return Void();
 }
 
-ACTOR Future<Void> resumeBulkLoading(Reference<DataDistributor> self, Future<Void> readyToStart) {
-	loop {
-		try {
-			wait(readyToStart);
-			self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
-			TraceEvent(SevInfo, "DDBulkLoadTaskResumed", self->ddId);
-			wait(self->bulkLoadActors.getResult());
-			self->bulkLoadActors.clear(true);
-			TraceEvent(SevInfo, "DDBulkLoadResumeComplete", self->ddId);
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			TraceEvent(SevInfo, "DDBulkLoadResumeError", self->ddId).errorUnsuppressed(e);
-			if (e.code() == error_code_movekeys_conflict) {
-				throw e;
-			}
-			wait(delay(5.0));
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
-	TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Started");
-	state bool initialized = false;
+	wait(readyToStart);
+	self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
+	TraceEvent(SevInfo, "DDBulkLoadCoreInitialized", self->ddId);
+
 	loop {
 		try {
-			if (!initialized) {
-				wait(resumeBulkLoading(self, readyToStart));
-				TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Initialized");
-				initialized = true;
-			}
-			self->bulkLoadActors.add(scheduleBulkLoadTasks(self)); // TODO(Zhe): at most 1 scheduler at a time
+			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
 			wait(self->bulkLoadActors.getResult());
-			self->bulkLoadActors.clear(true);
-			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).detail("Status", "Round complete");
+			UNREACHABLE();
+
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevInfo, "DDBulkLoadCore", self->ddId).errorUnsuppressed(e).detail("Status", "Error");
+			TraceEvent(SevInfo, "DDBulkLoadCoreError", self->ddId).errorUnsuppressed(e);
 			if (e.code() == error_code_movekeys_conflict) {
 				throw e;
 			}
 		}
-		wait(delay(5.0));
 	}
 }
 

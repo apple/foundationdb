@@ -690,25 +690,27 @@ public:
 
 	// called when relocator succeeds
 	bool terminateTask(BulkLoadState bulkLoadState) {
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
-			if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
-				return true;
-			}
-			if (!it->value().get().completeAck.canBeSet()) {
-				TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
-				    .detail("Range", bulkLoadState.range)
-				    .detail("TaskRange", it->range())
-				    .detail("Task", it->value().get().toString());
-				ASSERT(false);
-			}
-			it->value().get().completeAck.send(Void());
-			TraceEvent(SevDebug, "DDBulkLoadCollectionTerminateTask")
-			    .detail("Range", bulkLoadState.range)
-			    .detail("TaskRange", it->range())
-			    .detail("Task", it->value().get().toString());
+		/* for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
+		    if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+		        return true;
+		    }
+		    if (!it->value().get().completeAck.canBeSet()) {
+		        TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
+		            .detail("Range", bulkLoadState.range)
+		            .detail("TaskRange", it->range())
+		            .detail("Task", it->value().get().toString());
+		        ASSERT(false);
+		    }
+		    it->value().get().completeAck.send(Void());
+		    TraceEvent(SevDebug, "DDBulkLoadCollectionTerminateTask")
+		        .detail("Range", bulkLoadState.range)
+		        .detail("TaskRange", it->range())
+		        .detail("Task", it->value().get().toString());
 		}
 		bulkLoadTaskMap.insert(bulkLoadState.range, Optional<DDBulkLoadTask>());
-		return false;
+		return false; */
+		// remove bulk load task from the task map when DD mode is set to off
+		return true;
 	}
 
 	// called when relocator failed
