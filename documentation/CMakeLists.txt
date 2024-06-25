@@ -67,6 +67,11 @@ endfunction()
 message(STATUS "Add html target")
 add_documentation_target(GENERATOR html)
 
+add_custom_target(CopyJavadoc
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${SPHINX_DOCUMENT_DIR}/javadoc ${CMAKE_BINARY_DIR}/docs/javadoc
+  COMMENT "Copying Javadoc to build directory"
+)
+
 set(DOCSERVER_PORT
     "-1"
     CACHE
@@ -116,3 +121,4 @@ add_custom_command(
 add_custom_target(package_html DEPENDS ${tar_file})
 add_dependencies(package_html html)
 add_dependencies(packages package_html)
+
