@@ -1,0 +1,13 @@
+[[test]]
+testTitle='ClientMetricRestartTest'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName='ClientMetric'
+    toSet=false
+    testDuration=500.0
+    trInfoSizeLimit=199123
+
+    [[test.workload]]
+    testName='RandomClogging'
+    testDuration=500.0
