@@ -311,7 +311,7 @@ var _ = Describe("Testing the copy methods", func() {
 					copyDetails, _, err := getCopyDetails("", "", "", nil, binaries, nil, nil, "7.1.43", executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(HaveLen(3))
-					Expect(CopyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+					Expect(copyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
 				})
 
 				It("should copy all the files", func() {
@@ -328,7 +328,7 @@ var _ = Describe("Testing the copy methods", func() {
 					copyDetails, _, err := getCopyDetails("", "", "", nil, binaries, nil, nil, "7.1.43", executionModeSidecar)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(HaveLen(3))
-					Expect(CopyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+					Expect(copyFiles(GinkgoLogr, outputBinaryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
 				})
 
 				It("should copy all the files", func() {
@@ -366,7 +366,7 @@ var _ = Describe("Testing the copy methods", func() {
 				copyDetails, _, err = getCopyDetails("", "", "", nil, nil, libraries, nil, "7.1.43", executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(HaveLen(3))
-				Expect(CopyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+				Expect(copyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
 			})
 
 			It("should copy all the files", func() {
@@ -384,7 +384,7 @@ var _ = Describe("Testing the copy methods", func() {
 				copyDetails, _, err = getCopyDetails("", "7.1", "", nil, nil, libraries, nil, "7.1.43", executionModeInit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(copyDetails).To(HaveLen(3))
-				Expect(CopyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+				Expect(copyFiles(GinkgoLogr, outputLibraryDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
 			})
 
 			It("should copy all the files", func() {
@@ -413,7 +413,7 @@ var _ = Describe("Testing the copy methods", func() {
 					copyDetails, _, err = getCopyDetails(testInputDir, "", "", []string{"testfile"}, nil, nil, nil, "7.1.43", executionModeInit)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(copyDetails).To(HaveLen(1))
-					Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
+					Expect(copyFiles(GinkgoLogr, testOutputDir, copyDetails, map[string]bool{})).NotTo(HaveOccurred())
 				})
 
 				It("should copy the file", func() {
@@ -434,7 +434,7 @@ var _ = Describe("Testing the copy methods", func() {
 
 				When("the file is empty", func() {
 					It("should not copy the file", func() {
-						Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, requiredFiles)).To(HaveOccurred())
+						Expect(copyFiles(GinkgoLogr, testOutputDir, copyDetails, requiredFiles)).To(HaveOccurred())
 						Expect(path.Join(testOutputDir, "testfile")).NotTo(BeAnExistingFile())
 					})
 				})
@@ -445,7 +445,7 @@ var _ = Describe("Testing the copy methods", func() {
 					})
 
 					It("should copy the file", func() {
-						Expect(CopyFiles(GinkgoLogr, testOutputDir, copyDetails, requiredFiles)).NotTo(HaveOccurred())
+						Expect(copyFiles(GinkgoLogr, testOutputDir, copyDetails, requiredFiles)).NotTo(HaveOccurred())
 						Expect(path.Join(testOutputDir, "testfile")).To(BeAnExistingFile())
 					})
 				})

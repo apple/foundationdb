@@ -81,7 +81,7 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 }
 
 // CopyFiles copies a list of files into the output directory.
-func CopyFiles(logger logr.Logger, outputDir string, copyDetails map[string]string, requiredCopies map[string]bool) error {
+func copyFiles(logger logr.Logger, outputDir string, copyDetails map[string]string, requiredCopies map[string]bool) error {
 	for inputPath, outputSubpath := range copyDetails {
 		if outputSubpath == "" {
 			outputSubpath = path.Base(inputPath)

@@ -174,7 +174,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD,                  0 ); if( randomize && BUGGIFY ) FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD = 700;
 
-	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT,    false);
+	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT,    true );
 	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,                     1 );
 
 	// Data distribution

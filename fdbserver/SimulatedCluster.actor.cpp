@@ -816,7 +816,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("CommandLine", "fdbserver -r simulation")
-			    .detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
+			    .detail("BuggifyEnabled", isGeneralBuggifyEnabled())
 			    .detail("Simulated", true)
 			    .trackLatest("ProgramStart");
 
@@ -1591,7 +1591,8 @@ void SimulationConfig::set_config(std::string config) {
 	// The only mechanism we have for turning "single" into what single means
 	// is buildConfiguration()... :/
 	std::map<std::string, std::string> hack_map;
-	ASSERT(buildConfiguration(config, hack_map) != ConfigurationResult::NO_OPTIONS_PROVIDED);
+	const auto buildResult = buildConfiguration(config, hack_map);
+	ASSERT(buildResult != ConfigurationResult::NO_OPTIONS_PROVIDED);
 	for (auto kv : hack_map)
 		db.set(kv.first, kv.second);
 }
@@ -2990,14 +2991,14 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		                                  defaultTenant,
 		                                  tenantsToCreate,
 		                                  rebooting);
-		wait(testConfig.longRunningTest ? runTestsF
-		                                : timeoutError(runTestsF,
-		                                               isBuggifyEnabled(BuggifyType::General)
-		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
+		wait(testConfig.longRunningTest
+		         ? runTestsF
+		         : timeoutError(runTestsF,
+		                        isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                                  : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
-		auto timeoutVal = isBuggifyEnabled(BuggifyType::General) ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                                         : testConfig.simulationNormalRunTestsTimeoutSeconds;
+		auto timeoutVal = isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                            : testConfig.simulationNormalRunTestsTimeoutSeconds;
 		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
 		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		TraceEvent(SevError, "SetupAndRunError").error(e);

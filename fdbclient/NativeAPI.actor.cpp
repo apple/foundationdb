@@ -2579,19 +2579,19 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		tlsConfig.setDisablePlainTextConnection(true);
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
-		enableBuggify(true, BuggifyType::Client);
+		enableClientBuggify();
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_DISABLE:
-		enableBuggify(false, BuggifyType::Client);
+		disableClientBuggify();
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY:
 		validateOptionValuePresent(value);
-		clearBuggifySections(BuggifyType::Client);
-		P_BUGGIFIED_SECTION_ACTIVATED[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
+		clearClientBuggifySections();
+		P_CLIENT_BUGGIFIED_SECTION_ACTIVATED = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY:
 		validateOptionValuePresent(value);
-		P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)] = double(extractIntOption(value, 0, 100)) / 100.0;
+		P_CLIENT_BUGGIFIED_SECTION_FIRES = double(extractIntOption(value, 0, 100)) / 100.0;
 		break;
 	case FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING:
 		validateOptionValueNotPresent(value);
@@ -5058,7 +5058,7 @@ static Future<Void> tssStreamComparison(Request request,
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
-					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
+					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get(), TSS_COMPARISON);
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 					           "Tracing Full TSS Mismatch in stream comparison",

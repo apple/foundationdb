@@ -1,9 +1,9 @@
 /*
- * suite_test.go
+ * Decode.h
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2023-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,12 @@
  * limitations under the License.
  */
 
-package main
+#ifndef FDBBACKUP_DECODE_H
+#define FDBBACKUP_DECODE_H
+#pragma once
 
-import (
-	"testing"
-	"time"
+#include <string>
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-)
+std::string decode_hex_string(std::string line, bool& err);
 
-// These tests use Ginkgo (BDD-style Go testing framework). Refer to
-// http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
-func TestAPIs(t *testing.T) {
-	RegisterFailHandler(Fail)
-	SetDefaultEventuallyTimeout(10 * time.Second)
-	RunSpecs(t, "FDB Kubernetes monitor")
-}
+#endif // FDBBACKUP_DECODE_H

@@ -199,7 +199,7 @@ Future<Void> tssComparison(Req req,
 					    .detail("TeamCheckMatchNeither", numMatchNeither);
 				}
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
-					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get());
+					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get(), TSS_COMPARISON);
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL, "Tracing Full TSS Mismatch");
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
@@ -254,11 +254,6 @@ Future<Void> waitForQuorumReplies(std::vector<Future<Optional<ErrorOr<Resp>>>>* 
 		for (auto& reply : (*replies)) {
 			if (!reply.isReady()) {
 				ongoingReplies.push_back(reply);
-			} else {
-				outstandingReplies--;
-				if (!reply.isError() && reply.get().present() && !reply.get().get().isError()) {
-					requiredReplies--;
-				}
 			}
 		}
 		ASSERT(ongoingReplies.size() == outstandingReplies);
@@ -268,6 +263,18 @@ Future<Void> waitForQuorumReplies(std::vector<Future<Optional<ErrorOr<Resp>>>>* 
 		}
 
 		wait(quorum(ongoingReplies, std::min(requiredReplies, outstandingReplies)));
+
+		for (auto& reply : ongoingReplies) {
+			if (reply.isReady()) {
+				outstandingReplies--;
+				if (!reply.isError() && reply.get().present() && !reply.get().get().isError()) {
+					Optional<LoadBalancedReply> lbReply = getLoadBalancedReply(&reply.get().get().get());
+					if (lbReply.present() && !lbReply.get().error.present()) {
+						requiredReplies--;
+					}
+				}
+			}
+		}
 	}
 
 	return Void();
@@ -319,7 +326,8 @@ Future<Void> replicaComparison(Req req,
 						        ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
 						        : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
 					} else if (requiredReplicas == ALL_REPLICAS) {
-						TraceEvent(SevError, "UnreachableStorageServer").detail("SSID", ssTeam->getInterface(i).id());
+						TraceEvent(SevWarnAlways, "UnreachableStorageServer")
+						    .detail("SSID", ssTeam->getInterface(i).id());
 						throw unreachable_storage_replica();
 					}
 				}
@@ -365,11 +373,16 @@ Future<Void> replicaComparison(Req req,
 							        src.get(),
 							        f.get().get().get())) { // re-use TSS compare logic to compare the replicas
 								numMismatch++;
-								TraceEvent mismatchEvent(SevError, LB_mismatchTraceName(req, REPLICA_COMPARISON));
+								TraceEvent mismatchEvent(
+								    (requiredReplicas == BEST_EFFORT || requiredReplicas == ALL_REPLICAS)
+								        ? SevError
+								        : SevWarnAlways,
+								    LB_mismatchTraceName(req, REPLICA_COMPARISON));
 								mismatchEvent.detail("ReplicaFetchErrors", numError)
 								    .detail("ReplicaFetchTimeouts", numFetchReplicaTimeout);
 								// Re-use TSS trace mechanism to log replica mismatch information.
-								TSS_traceMismatch(mismatchEvent, req, src.get(), f.get().get().get());
+								TSS_traceMismatch(
+								    mismatchEvent, req, src.get(), f.get().get().get(), REPLICA_COMPARISON);
 							}
 							if (++successfulReplies == requiredReplicas) {
 								break;
@@ -382,11 +395,17 @@ Future<Void> replicaComparison(Req req,
 			if (numMismatch) {
 				throw storage_replica_comparison_error();
 			} else if (((numError || numFetchReplicaTimeout) && (requiredReplicas == ALL_REPLICAS)) ||
-			           (successfulReplies != requiredReplicas && requiredReplicas > 0)) {
+			           (successfulReplies != requiredReplicas && requiredReplicas > 0 &&
+			            restOfTeamFutures.size() >= requiredReplicas)) {
 				const char* type = numError ? "ReplicaComparisonReadError" : "ReplicaComparisonTimeoutError";
-				TraceEvent(SevError, type).detail("SSError", replicaErrorCode);
+				TraceEvent(SevWarnAlways, type)
+				    .detail("TeamSize", restOfTeamFutures.size() + 1)
+				    .detail("RequiredReplies", requiredReplicas)
+				    .detail("SuccessfulReplies", successfulReplies)
+				    .detail("SSError", replicaErrorCode);
 
-				throw Error(replicaErrorCode);
+				throw Error((requiredReplicas == ALL_REPLICAS) ? replicaErrorCode
+				                                               : error_code_unreachable_storage_replica);
 			}
 		}
 	}

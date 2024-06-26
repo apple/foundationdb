@@ -2,7 +2,7 @@
 //
 // This source file is part of the FoundationDB open source project
 //
-// Copyright 2021 Apple Inc. and the FoundationDB project authors
+// Copyright 2021-2024 Apple Inc. and the FoundationDB project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,314 +22,250 @@ package api
 import (
 	"encoding/json"
 	"os"
-	"reflect"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func loadConfigFromFile(path string) (*ProcessConfiguration, error) {
+func loadConfigFromFile(path string) *ProcessConfiguration {
 	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+	Expect(err).NotTo(HaveOccurred())
+	defer func() {
+		Expect(file.Close()).NotTo(HaveOccurred())
+	}()
 	decoder := json.NewDecoder(file)
 	config := &ProcessConfiguration{}
-	err = decoder.Decode(config)
-	if err != nil {
-		return nil, err
-	}
-	return config, nil
+	Expect(decoder.Decode(config)).NotTo(HaveOccurred())
+
+	return config
 }
 
-func TestGeneratingArgumentsForDefaultConfig(t *testing.T) {
-	config, err := loadConfigFromFile(".testdata/default_config.json")
-	if err != nil {
-		t.Error(err)
-		return
-	}
+var _ = Describe("Testing FDB Kubernetes Monitor API", func() {
+	When("generating arguments for default config", func() {
+		var arguments []string
 
-	arguments, err := config.GenerateArguments(1, map[string]string{
-		"FDB_PUBLIC_IP":   "10.0.0.1",
-		"FDB_POD_IP":      "192.168.0.1",
-		"FDB_ZONE_ID":     "zone1",
-		"FDB_INSTANCE_ID": "storage-1",
+		BeforeEach(func() {
+			var err error
+			config := loadConfigFromFile(".testdata/default_config.json")
+			Expect(config.Version).To(Equal(&Version{Major: 6, Minor: 3, Patch: 15}))
+			arguments, err = config.GenerateArguments(1, map[string]string{
+				"FDB_PUBLIC_IP":   "10.0.0.1",
+				"FDB_POD_IP":      "192.168.0.1",
+				"FDB_ZONE_ID":     "zone1",
+				"FDB_INSTANCE_ID": "storage-1",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should generate the expected arguments", func() {
+			Expect(arguments).To(HaveExactElements([]string{
+				"--cluster-file", ".testdata/fdb.cluster",
+				"--public-address", "10.0.0.1:4501", "--listen-address", "192.168.0.1:4501",
+				"--datadir", ".testdata/data/1", "--class", "storage",
+				"--locality-zoneid", "zone1", "--locality-instance-id", "storage-1",
+				"--locality-process-id", "storage-1-1",
+			}))
+		})
 	})
-	if err != nil {
-		t.Error(err)
-		return
-	}
 
-	expectedArguments := []string{
-		"--cluster-file", ".testdata/fdb.cluster",
-		"--public-address", "10.0.0.1:4501", "--listen-address", "192.168.0.1:4501",
-		"--datadir", ".testdata/data/1", "--class", "storage",
-		"--locality-zoneid", "zone1", "--locality-instance-id", "storage-1",
-		"--locality-process-id", "storage-1-1",
-	}
+	When("generating arguments for default config with a binary path specified", func() {
+		var arguments []string
 
-	if !reflect.DeepEqual(arguments, expectedArguments) {
-		t.Logf("Expected arguments %v, but got arguments %v", expectedArguments, arguments)
-		t.Fail()
-	}
+		BeforeEach(func() {
+			var err error
+			config := loadConfigFromFile(".testdata/default_config.json")
+			Expect(err).NotTo(HaveOccurred())
+			config.BinaryPath = "/usr/bin/fdbserver"
 
-	config.BinaryPath = "/usr/bin/fdbserver"
+			arguments, err = config.GenerateArguments(1, map[string]string{
+				"FDB_PUBLIC_IP":   "10.0.0.1",
+				"FDB_POD_IP":      "192.168.0.1",
+				"FDB_ZONE_ID":     "zone1",
+				"FDB_INSTANCE_ID": "storage-1",
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-	arguments, err = config.GenerateArguments(1, map[string]string{
-		"FDB_PUBLIC_IP":   "10.0.0.1",
-		"FDB_POD_IP":      "192.168.0.1",
-		"FDB_ZONE_ID":     "zone1",
-		"FDB_INSTANCE_ID": "storage-1",
+		It("should generate the expected arguments", func() {
+			Expect(arguments).To(HaveExactElements([]string{
+				"/usr/bin/fdbserver",
+				"--cluster-file", ".testdata/fdb.cluster",
+				"--public-address", "10.0.0.1:4501", "--listen-address", "192.168.0.1:4501",
+				"--datadir", ".testdata/data/1", "--class", "storage",
+				"--locality-zoneid", "zone1", "--locality-instance-id", "storage-1",
+				"--locality-process-id", "storage-1-1",
+			}))
+		})
 	})
-	if err != nil {
-		t.Error(err)
-		return
-	}
 
-	expectedArguments = []string{
-		"/usr/bin/fdbserver",
-		"--cluster-file", ".testdata/fdb.cluster",
-		"--public-address", "10.0.0.1:4501", "--listen-address", "192.168.0.1:4501",
-		"--datadir", ".testdata/data/1", "--class", "storage",
-		"--locality-zoneid", "zone1", "--locality-instance-id", "storage-1",
-		"--locality-process-id", "storage-1-1",
-	}
+	When("generating arguments for environment variable", func() {
+		var argument string
+		var err error
+		var env map[string]string
 
-	if !reflect.DeepEqual(arguments, expectedArguments) {
-		t.Logf("Expected arguments %v, but got arguments %v", expectedArguments, arguments)
-		t.Fail()
-	}
-}
+		JustBeforeEach(func() {
+			testArgument := Argument{ArgumentType: EnvironmentArgumentType, Source: "FDB_ZONE_ID"}
+			argument, err = testArgument.GenerateArgument(1, env)
+		})
 
-func TestGeneratingArgumentForEnvironmentVariable(t *testing.T) {
-	argument := Argument{ArgumentType: EnvironmentArgumentType, Source: "FDB_ZONE_ID"}
+		When("the env variable is present", func() {
+			BeforeEach(func() {
+				env = map[string]string{"FDB_ZONE_ID": "zone1", "FDB_MACHINE_ID": "machine1"}
+			})
 
-	result, err := argument.GenerateArgument(1, map[string]string{"FDB_ZONE_ID": "zone1", "FDB_MACHINE_ID": "machine1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "zone1" {
-		t.Logf("Expected result zone1, but got result %v", result)
-		t.Fail()
-		return
-	}
+			It("should generate the expected arguments", func() {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(argument).To(Equal("zone1"))
+			})
+		})
 
-	_, err = argument.GenerateArgument(1, map[string]string{"FDB_MACHINE_ID": "machine1"})
-	if err == nil {
-		t.Logf("Expected error result, but did not get an error")
-		t.Fail()
-		return
-	}
-	expectedError := "missing environment variable FDB_ZONE_ID"
-	if err.Error() != expectedError {
-		t.Logf("Expected error %s, but got error %s", expectedError, err)
-		t.Fail()
-		return
-	}
-}
+		When("the env variable is absent", func() {
+			BeforeEach(func() {
+				env = map[string]string{"FDB_MACHINE_ID": "machine1"}
+			})
 
-func TestGeneratingArgumentForIPList(t *testing.T) {
-	argument := Argument{ArgumentType: IPListArgumentType, Source: "FDB_PUBLIC_IP", IPFamily: 4}
+			It("should generate the expected arguments", func() {
+				Expect(err).To(HaveOccurred())
+			})
+		})
 
-	result, err := argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "127.0.0.1,::1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "127.0.0.1" {
-		t.Logf("Expected result 127.0.0.1, but got result %v", result)
-		t.Fail()
-		return
-	}
+	})
 
-	result, err = argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "::1,127.0.0.1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "127.0.0.1" {
-		t.Logf("Expected result 127.0.0.1, but got result %v", result)
-		t.Fail()
-		return
-	}
+	When("generating arguments for IPList arguments", func() {
+		var argument string
+		var err error
+		var env map[string]string
+		var IPFamily int
 
-	argument.IPFamily = 6
+		JustBeforeEach(func() {
+			testArgument := Argument{ArgumentType: IPListArgumentType, Source: "FDB_PUBLIC_IP", IPFamily: IPFamily}
+			argument, err = testArgument.GenerateArgument(1, env)
+		})
 
-	result, err = argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "127.0.0.1,::1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "::1" {
-		t.Logf("Expected result ::1, but got result %v", result)
-		t.Fail()
-		return
-	}
+		When("using IP Family 4", func() {
+			BeforeEach(func() {
+				IPFamily = 4
+			})
 
-	result, err = argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "::1,127.0.0.1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "::1" {
-		t.Logf("Expected result ::1, but got result %v", result)
-		t.Fail()
-		return
-	}
+			When("the env variable is present and has one address with the right IP family", func() {
+				BeforeEach(func() {
+					env = map[string]string{"FDB_PUBLIC_IP": "127.0.0.1,::1"}
+				})
 
-	result, err = argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "bad,::1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "::1" {
-		t.Logf("Expected result ::1, but got result %v", result)
-		t.Fail()
-		return
-	}
+				It("should generate the expected arguments", func() {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(argument).To(Equal("127.0.0.1"))
+				})
+			})
 
-	_, err = argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "127.0.0.1"})
-	if err == nil {
-		t.Logf("Expected error, but did not get an error")
-		t.Fail()
-		return
-	}
-	expectedError := "could not find IP with family 6"
-	if err.Error() != expectedError {
-		t.Logf("Expected error %s, but got error %s", expectedError, err.Error())
-		t.Fail()
-		return
-	}
+			When("the env variable is present and has one address with the right IP family with IPv6 first", func() {
+				BeforeEach(func() {
+					env = map[string]string{"FDB_PUBLIC_IP": "::1,127.0.0.1"}
+				})
 
-	argument.IPFamily = 5
+				It("should generate the expected arguments", func() {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(argument).To(Equal("127.0.0.1"))
+				})
+			})
 
-	_, err = argument.GenerateArgument(1, map[string]string{"FDB_PUBLIC_IP": "127.0.0.1"})
-	if err == nil {
-		t.Logf("Expected error, but did not get an error")
-		t.Fail()
-		return
-	}
-	expectedError = "unsupported IP family 5"
-	if err.Error() != expectedError {
-		t.Logf("Expected error %s, but got error %s", expectedError, err.Error())
-		t.Fail()
-		return
-	}
-}
+			When("no IPv4 address is present", func() {
+				BeforeEach(func() {
+					env = map[string]string{"FDB_PUBLIC_IP": "::1"}
+				})
 
-func TestLookupEnvForEnvironmentVariable(t *testing.T) {
-	argument := Argument{ArgumentType: EnvironmentArgumentType, Source: "FDB_ZONE_ID"}
+				It("should return an error", func() {
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(Equal("could not find IP with family 4"))
+					Expect(argument).To(BeEmpty())
+				})
+			})
+		})
 
-	result, err := argument.LookupEnv(map[string]string{"FDB_ZONE_ID": "zone1", "FDB_MACHINE_ID": "machine1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "zone1" {
-		t.Logf("Expected result zone1, but got result %v", result)
-		t.Fail()
-		return
-	}
+		When("using IP Family 6", func() {
+			BeforeEach(func() {
+				IPFamily = 6
+			})
 
-	_, err = argument.LookupEnv(map[string]string{"FDB_MACHINE_ID": "machine1"})
-	if err == nil {
-		t.Logf("Expected error result, but did not get an error")
-		t.Fail()
-		return
-	}
-	expectedError := "missing environment variable FDB_ZONE_ID"
-	if err.Error() != expectedError {
-		t.Logf("Expected error %s, but got error %s", expectedError, err)
-		t.Fail()
-		return
-	}
-}
+			When("the env variable is present and has one address with the right IP family", func() {
+				BeforeEach(func() {
+					env = map[string]string{"FDB_PUBLIC_IP": "127.0.0.1,::1"}
+				})
 
-func TestLookupEnvForIPList(t *testing.T) {
-	argument := Argument{ArgumentType: IPListArgumentType, Source: "FDB_PUBLIC_IP", IPFamily: 4}
+				It("should generate the expected arguments", func() {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(argument).To(Equal("::1"))
+				})
+			})
 
-	result, err := argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "127.0.0.1,::1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "127.0.0.1" {
-		t.Logf("Expected result 127.0.0.1, but got result %v", result)
-		t.Fail()
-		return
-	}
+			When("the env variable is present and has one address with the right IP family with IPv6 first", func() {
+				BeforeEach(func() {
 
-	result, err = argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "::1,127.0.0.1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "127.0.0.1" {
-		t.Logf("Expected result 127.0.0.1, but got result %v", result)
-		t.Fail()
-		return
-	}
+					env = map[string]string{"FDB_PUBLIC_IP": "::1,127.0.0.1"}
+				})
 
-	argument.IPFamily = 6
+				It("should generate the expected arguments", func() {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(argument).To(Equal("::1"))
+				})
+			})
 
-	result, err = argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "127.0.0.1,::1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "::1" {
-		t.Logf("Expected result ::1, but got result %v", result)
-		t.Fail()
-		return
-	}
+			When("a bad address is present", func() {
+				BeforeEach(func() {
+					env = map[string]string{"FDB_PUBLIC_IP": "bad,::1"}
+				})
 
-	result, err = argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "::1,127.0.0.1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "::1" {
-		t.Logf("Expected result ::1, but got result %v", result)
-		t.Fail()
-		return
-	}
+				It("should generate the expected arguments", func() {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(argument).To(Equal("::1"))
+				})
+			})
 
-	result, err = argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "bad,::1"})
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if result != "::1" {
-		t.Logf("Expected result ::1, but got result %v", result)
-		t.Fail()
-		return
-	}
+			When("no IPv6 address is present", func() {
+				BeforeEach(func() {
+					env = map[string]string{"FDB_PUBLIC_IP": "127.0.0.1"}
+				})
 
-	_, err = argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "127.0.0.1"})
-	if err == nil {
-		t.Logf("Expected error, but did not get an error")
-		t.Fail()
-		return
-	}
-	expectedError := "could not find IP with family 6"
-	if err.Error() != expectedError {
-		t.Logf("Expected error %s, but got error %s", expectedError, err.Error())
-		t.Fail()
-		return
-	}
+				It("return an error", func() {
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(Equal("could not find IP with family 6"))
+					Expect(argument).To(BeEmpty())
+				})
+			})
+		})
 
-	argument.IPFamily = 5
+		When("using an invalid IP Family", func() {
+			BeforeEach(func() {
+				IPFamily = 5
+			})
 
-	_, err = argument.LookupEnv(map[string]string{"FDB_PUBLIC_IP": "127.0.0.1"})
-	if err == nil {
-		t.Logf("Expected error, but did not get an error")
-		t.Fail()
-		return
-	}
-	expectedError = "unsupported IP family 5"
-	if err.Error() != expectedError {
-		t.Logf("Expected error %s, but got error %s", expectedError, err.Error())
-		t.Fail()
-		return
-	}
-}
+			It("should return an error", func() {
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal("unsupported IP family 5"))
+				Expect(argument).To(BeEmpty())
+			})
+		})
+	})
+
+	When("marshalling a process configuration", func() {
+		var out string
+
+		BeforeEach(func() {
+			config := &ProcessConfiguration{
+				Version: &Version{
+					Major: 7,
+					Minor: 1,
+					Patch: 57,
+				},
+			}
+
+			data, err := json.Marshal(config)
+			Expect(err).NotTo(HaveOccurred())
+			out = string(data)
+		})
+
+		It("should parse it correct", func() {
+			Expect(out).To(Equal("{\"version\":\"7.1.57\"}"))
+		})
+	})
+})

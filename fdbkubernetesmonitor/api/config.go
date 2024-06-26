@@ -2,7 +2,7 @@
 //
 // This source file is part of the FoundationDB open source project
 //
-// Copyright 2021 Apple Inc. and the FoundationDB project authors
+// Copyright 2021-2024 Apple Inc. and the FoundationDB project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,13 +25,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"k8s.io/utils/pointer"
 )
 
 // ProcessConfiguration models the configuration for starting a FoundationDB
 // process.
 type ProcessConfiguration struct {
 	// Version provides the version of FoundationDB the process should run.
-	Version string `json:"version"`
+	Version *Version `json:"version"`
 
 	// RunServers defines whether we should run the server processes.
 	// This defaults to true, but you can set it to false to prevent starting
@@ -95,8 +97,7 @@ const (
 	IPListArgumentType = "IPList"
 )
 
-// GenerateArgument processes an argument and generates its string
-// representation.
+// GenerateArgument processes an argument and generates its string representation.
 func (argument Argument) GenerateArgument(processNumber int, env map[string]string) (string, error) {
 	switch argument.ArgumentType {
 	case "":
@@ -134,9 +135,11 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 	if env != nil {
 		value, present = env[argument.Source]
 	}
+
 	if !present {
 		value, present = os.LookupEnv(argument.Source)
 	}
+
 	if !present {
 		return "", fmt.Errorf("missing environment variable %s", argument.Source)
 	}
@@ -163,11 +166,11 @@ func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 		}
 		return "", fmt.Errorf("could not find IP with family %d", argument.IPFamily)
 	}
+
 	return value, nil
 }
 
-// GenerateArguments interprets the arguments in the process configuration and
-// generates a command invocation.
+// GenerateArguments interprets the arguments in the process configuration and generates a command invocation.
 func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string) ([]string, error) {
 	results := make([]string, 0, len(configuration.Arguments)+1)
 	if configuration.BinaryPath != "" {
@@ -181,4 +184,13 @@ func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, 
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// ShouldRunServers returns true if RunServers is unset or set to true.
+func (configuration *ProcessConfiguration) ShouldRunServers() bool {
+	if configuration == nil {
+		return false
+	}
+
+	return pointer.BoolDeref(configuration.RunServers, true)
 }

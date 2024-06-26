@@ -41,11 +41,13 @@
 #include "fdbclient/Tracing.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+/*
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
 // Unlike BUGGIFY, CLIENT_BUGGIFY can be enabled and disabled at runtime.
 #define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
-	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
+    (getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
+*/
 
 FDB_BOOLEAN_PARAM(UseProvisionalProxies);
 
