@@ -49,7 +49,9 @@ func (e Error) Error() string {
 // SOMEDAY: these (along with others) should be coming from fdb.options?
 
 var (
-	errNetworkNotSetup = Error{2008}
+	errNetworkNotSetup          = Error{2008}
+	errNetworkAlreadySetup      = Error{2009} // currently unused
+	errNetworkCannotBeRestarted = Error{2025} // currently unused
 
 	errAPIVersionUnset        = Error{2200}
 	errAPIVersionAlreadySet   = Error{2201}
