@@ -166,6 +166,24 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 // hidden commands, no help text for now
 CommandFactory getallCommandFactory("getall");
 
+std::string printStorageServerMachineInfo(const StorageServerInterface& server) {
+	std::string serverIp = server.address().toString();
+	std::string serverLocality = server.locality.toString();
+	return serverLocality + " " + serverIp;
+}
+
+std::string printAllStorageServerMachineInfo(const std::vector<StorageServerInterface>& servers) {
+	std::string res;
+	for (int i = 0; i < servers.size(); i++) {
+		if (i == 0) {
+			res = printStorageServerMachineInfo(servers[i]);
+		} else {
+			res = res + "; " + printStorageServerMachineInfo(servers[i]);
+		}
+	}
+	return res;
+}
+
 // check that all replies are the same. Update begin to the next key to check
 // checkResults keeps invariants:
 // (1) hasMore = true if any server has more data not read yet
@@ -184,6 +202,11 @@ bool checkResults(Version version,
 	for (int j = 0; j < replies.size(); j++) {
 		if (firstValidServer == -1) {
 			firstValidServer = j;
+			// Print full list of comparing servers and the reference server
+			// Used to check server info which does not produce an inconsistency log
+			printf("CheckResult: servers: %s, reference server: %s\n",
+			       printAllStorageServerMachineInfo(servers).c_str(),
+			       printStorageServerMachineInfo(servers[firstValidServer]).c_str());
 			continue; // always select the first server as reference
 		}
 		// compare reference and current
@@ -207,8 +230,8 @@ bool checkResults(Version version,
 				// have the key
 				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
 				       "%s\n",
-				       servers[firstValidServer].address().toString().c_str(),
-				       servers[j].address().toString().c_str(),
+				       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
+				       printStorageServerMachineInfo(servers[j]).c_str(),
 				       currentI,
 				       referenceI,
 				       version,
@@ -217,8 +240,8 @@ bool checkResults(Version version,
 			} else if (referenceI >= reference.data.size()) {
 				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
 				       "%s\n",
-				       servers[j].address().toString().c_str(),
-				       servers[firstValidServer].address().toString().c_str(),
+				       printStorageServerMachineInfo(servers[j]).c_str(),
+				       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
 				       currentI,
 				       referenceI,
 				       version,
@@ -232,8 +255,8 @@ bool checkResults(Version version,
 						printf("Inconsistency: MismatchValue, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
 						       "Version %ld, "
 						       "Key %s\n",
-						       servers[firstValidServer].address().toString().c_str(),
-						       servers[j].address().toString().c_str(),
+						       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
+						       printStorageServerMachineInfo(servers[j]).c_str(),
 						       currentI,
 						       referenceI,
 						       version,
@@ -244,8 +267,8 @@ bool checkResults(Version version,
 				} else if (currentKV.key < referenceKV.key) {
 					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
 					       "Key %s\n",
-					       servers[j].address().toString().c_str(),
-					       servers[firstValidServer].address().toString().c_str(),
+					       printStorageServerMachineInfo(servers[j]).c_str(),
+					       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
 					       currentI,
 					       referenceI,
 					       version,
@@ -254,8 +277,8 @@ bool checkResults(Version version,
 				} else {
 					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
 					       "Key %s\n",
-					       servers[firstValidServer].address().toString().c_str(),
-					       servers[j].address().toString().c_str(),
+					       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
+					       printStorageServerMachineInfo(servers[j]).c_str(),
 					       currentI,
 					       referenceI,
 					       version,
@@ -265,6 +288,7 @@ bool checkResults(Version version,
 			}
 		}
 	}
+
 	return allSame;
 }
 
