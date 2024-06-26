@@ -1975,6 +1975,11 @@ private:
 			TEST(vacuumTime > 0); // Time spent vacuuming
 			TEST(lazyDeleteTime > 0); // Time spent lazy deleting
 
+			TraceEvent("SQLiteCleanActionStats")
+			    .detail("LazyDeletePages", workPerformed.lazyDeletePages)
+			    .detail("VacuumedPage", workPerformed.vacuumedPages)
+			    .detail("VacuumTime", vacuumTime)
+			    .detail("LazyDeleteTime", lazyDeleteTime);
 			++springCleaningStats.springCleaningCount;
 			springCleaningStats.lazyDeletePages += workPerformed.lazyDeletePages;
 			springCleaningStats.vacuumedPages += workPerformed.vacuumedPages;
