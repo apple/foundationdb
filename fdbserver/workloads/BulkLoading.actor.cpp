@@ -385,19 +385,12 @@ struct BulkLoading : TestWorkload {
 		return;
 	}
 
-	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
-		if (self->clientId != 0) {
-			return Void();
-		}
-
-		if (g_network->isSimulated()) {
-			// Network partition between CC and DD can cause DD no longer existing,
-			// which results in the bulk loading task never completes
-			disableConnectionFailures("BulkLoading");
-		}
-
+	// Issue three non-overlapping tasks and check data consistency and correctness
+	// Repeat twice
+	ACTOR Future<Void> simpleTest(BulkLoading* self, Database cx) {
+		TraceEvent("BulkLoadingWorkLoadSimpleTestBegin");
 		state std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
-
+		// First round of issuing tasks
 		state std::vector<BulkLoadState> bulkLoadStates;
 		state std::vector<std::vector<KeyValue>> bulkLoadDataList;
 		for (int i = 0; i < 3; i++) {
@@ -412,20 +405,20 @@ struct BulkLoading : TestWorkload {
 			bulkLoadDataList.push_back(taskUnit.data);
 		}
 		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
-		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
+		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
 		int oldDDMode = wait(setDDMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
 		int old1 = wait(setBulkLoadMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old1).detail("NewMode", 1);
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
 		try {
 			wait(self->waitUntilAllComplete(self, cx));
-			TraceEvent("BulkLoadingWorkLoadAllComplete");
+			TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				return Void();
 			}
 		}
-
+		// Second round of issuing tasks
 		bulkLoadStates.clear();
 		bulkLoadDataList.clear();
 		for (int i = 0; i < 3; i++) {
@@ -440,27 +433,27 @@ struct BulkLoading : TestWorkload {
 			bulkLoadDataList.push_back(taskUnit.data);
 		}
 		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
-		TraceEvent("BulkLoadingWorkLoadIssuedTasks");
-
+		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
 		try {
 			wait(self->waitUntilAllComplete(self, cx));
-			TraceEvent("BulkLoadingWorkLoadAllComplete");
+			TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				return Void();
 			}
 		}
-
 		int old2 = wait(setBulkLoadMode(cx, 0));
-		TraceEvent("BulkLoadingWorkLoadSetMode").detail("OldMode", old2).detail("NewMode", 0);
-
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
 		state int j = 0;
 		for (; j < bulkLoadDataList.size(); j++) {
 			wait(self->checkData(cx, bulkLoadDataList[j]));
 		}
-		TraceEvent("BulkLoadingWorkLoadComplete");
+		TraceEvent("BulkLoadingWorkLoadSimpleTestComplete");
+		return Void();
+	}
 
-		/*std::string folderName1 = "1";
+	void produceLargeData(BulkLoading* self, Database cx) {
+		std::string folderName1 = "1";
 		KeyRange range1 = Standalone(KeyRangeRef("1"_sr, "2"_sr));
 		self->produceDataSet(self, range1, folderName1);
 		std::string folderName2 = "2";
@@ -468,7 +461,24 @@ struct BulkLoading : TestWorkload {
 		self->produceDataSet(self, range2, folderName2);
 		std::string folderName3 = "4";
 		KeyRange range3 = Standalone(KeyRangeRef("4"_sr, "5"_sr));
-		self->produceDataSet(self, range3, folderName3);*/
+		self->produceDataSet(self, range3, folderName3);
+		return;
+	}
+
+	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
+		if (self->clientId != 0) {
+			return Void();
+		}
+
+		if (g_network->isSimulated()) {
+			// Network partition between CC and DD can cause DD no longer existing,
+			// which results in the bulk loading task cannot complete
+			disableConnectionFailures("BulkLoading");
+		}
+
+		wait(self->simpleTest(self, cx));
+		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
+
 		return Void();
 	}
 };
