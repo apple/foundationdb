@@ -62,7 +62,7 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx, KeyRange rangeToRead) {
 			if (res[i].value.empty()) {
 				continue;
 			}
-			const BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
+			BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
 			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
 				printf("[Complete]: %s\n", bulkLoadState.toString().c_str());
 				++finishCount;
@@ -79,14 +79,12 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx, KeyRange rangeToRead) {
 				UNREACHABLE();
 			}
 			KeyRange range = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
-			ASSERT(range == bulkLoadState.range);
+			ASSERT(range == bulkLoadState.getRange());
 		}
 		readBegin = res.back().key;
 	}
 
-	printf("Finished range count: %ld\n", finishCount);
-	printf("Unfinished range count: %ld\n", unfinishedCount);
-
+	printf("Finished range count %ld of total %ld tasks\n", finishCount, finishCount + unfinishedCount);
 	return Void();
 }
 

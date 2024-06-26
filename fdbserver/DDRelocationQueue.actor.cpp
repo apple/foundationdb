@@ -1385,10 +1385,11 @@ static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::v
 }
 
 void validateBulkLoadRelocateData(const RelocateData& rd, const std::vector<UID>& destIds, UID logId) {
-	if (rd.keys != rd.bulkLoadTask.get().coreState.range) {
+	BulkLoadState bulkLoadState = rd.bulkLoadTask.get().coreState;
+	if (rd.keys != bulkLoadState.getRange()) {
 		TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", logId)
 		    .detail("Reason", "Wrong data move range")
-		    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
+		    .detail("BulkLoadTask", bulkLoadState.toString())
 		    .detail("DataMovePriority", rd.priority)
 		    .detail("DataMoveId", rd.dataMoveId)
 		    .detail("RelocatorRange", rd.keys);
@@ -1401,7 +1402,7 @@ void validateBulkLoadRelocateData(const RelocateData& rd, const std::vector<UID>
 			// This is not expected
 			TraceEvent(SevError, "DDBulkLoadTaskLaunchFailed", logId)
 			    .detail("Reason", "Conflict src and destd due to remote recovery")
-			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
+			    .detail("BulkLoadTask", bulkLoadState.toString())
 			    .detail("DataMovePriority", rd.priority)
 			    .detail("DataMoveId", rd.dataMoveId)
 			    .detail("RelocatorRange", rd.keys);

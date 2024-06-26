@@ -52,13 +52,19 @@ struct BulkLoadState {
 
 	BulkLoadState() = default;
 
-	BulkLoadState(BulkLoadType loadType, std::string folder)
-	  : loadType(loadType), folder(folder), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
-
-	BulkLoadState(KeyRange range, BulkLoadType loadType, std::string folder)
-	  : range(range), loadType(loadType), folder(folder), phase(BulkLoadPhase::Invalid), taskId(UID()) {}
-
-	bool isValid() const { return loadType != BulkLoadType::Invalid; }
+	BulkLoadState(UID taskId,
+	              KeyRange range,
+	              BulkLoadType loadType,
+	              BulkLoadTransportMethod transportMethod,
+	              BulkLoadInjectMethod injectMethod,
+	              std::string folder,
+	              std::unordered_set<std::string> dataFiles,
+	              Optional<std::string> bytesSampleFile)
+	  : taskId(taskId), range(range), loadType(loadType), transportMethod(transportMethod), injectMethod(injectMethod),
+	    folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Invalid) {
+		ASSERT(isValid());
+		// TODO(Zhe): do some validation between methods and files
+	}
 
 	std::string toString() const {
 		std::string res =
@@ -80,13 +86,17 @@ struct BulkLoadState {
 		return res;
 	}
 
-	bool setTaskId(UID id) {
-		if (taskId.isValid() && taskId != id) {
-			return false;
-		}
-		taskId = id;
-		return true;
-	}
+	KeyRange getRange() { return range; }
+
+	UID getTaskId() { return taskId; }
+
+	std::string getFolder() { return folder; }
+
+	BulkLoadTransportMethod getTransportMethod() { return transportMethod; }
+
+	std::unordered_set<std::string> getDataFiles() { return dataFiles; }
+
+	Optional<std::string> getBytesSampleFile() { return bytesSampleFile; }
 
 	void setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
@@ -97,47 +107,39 @@ struct BulkLoadState {
 		dataMoveId = id;
 	}
 
-	bool setTransportMethod(BulkLoadTransportMethod method) {
-		// TODO(Zhe): do some validation between method and path
-		if (method == BulkLoadTransportMethod::Invalid) {
+	bool isValid() {
+		if (!taskId.isValid()) {
 			return false;
-		} else if (method == BulkLoadTransportMethod::CP) {
-			transportMethod = method;
-			return true;
-		} else {
+		}
+		if (range.empty()) {
+			return false;
+		}
+		if (transportMethod == BulkLoadTransportMethod::Invalid) {
+			return false;
+		} else if (transportMethod != BulkLoadTransportMethod::CP) {
 			throw not_implemented();
 		}
-	}
-
-	bool setInjectMethod(BulkLoadInjectMethod method) {
-		// TODO(Zhe): do some validation between method and type
-		if (method == BulkLoadInjectMethod::Invalid) {
+		if (injectMethod == BulkLoadInjectMethod::Invalid) {
 			return false;
-		} else if (method == BulkLoadInjectMethod::File) {
-			injectMethod = method;
-			return true;
-		} else {
+		} else if (injectMethod != BulkLoadInjectMethod::File) {
 			throw not_implemented();
 		}
-	}
-
-	bool addDataFile(std::string filePath) {
-		if (filePath.substr(0, folder.size()) != folder) {
+		if (dataFiles.empty()) {
 			return false;
 		}
-		dataFiles.insert(filePath);
-		return true;
-	}
-
-	bool setByteSampleFile(std::string filePath) {
-		if (filePath.substr(0, folder.size()) != folder) {
-			return false;
+		for (const auto& filePath : dataFiles) {
+			if (filePath.substr(0, folder.size()) != folder) {
+				return false;
+			}
 		}
-		bytesSampleFile = filePath;
+		if (bytesSampleFile.present()) {
+			if (bytesSampleFile.get().substr(0, folder.size()) != folder) {
+				return false;
+			}
+		}
+
 		return true;
 	}
-
-	bool isValid() { return !dataFiles.empty(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -159,24 +161,26 @@ struct BulkLoadState {
 		           restartCount);
 	}
 
-	// Set by users
-	KeyRange range;
-	BulkLoadType loadType;
-	BulkLoadTransportMethod transportMethod;
-	BulkLoadInjectMethod injectMethod;
+	// Updated by DD
 	BulkLoadPhase phase;
-	std::string folder; // Used by SS to inject files
-	std::unordered_set<std::string> dataFiles; // Used by SS to inject files
-	Optional<std::string> bytesSampleFile; // Used by SS to inject files
-
-	// Set by DD
 	Optional<UID> dataMoveId;
-	UID taskId;
 	double submitTime = 0;
 	double triggerTime = 0;
 	double startTime = 0;
 	double completeTime = 0;
 	int restartCount = -1;
+
+private:
+	UID taskId; // Unique ID of the task
+	KeyRange range; // Load the key-value within this range "[begin, end)" from data file
+	// File inject config
+	BulkLoadType loadType;
+	BulkLoadTransportMethod transportMethod;
+	BulkLoadInjectMethod injectMethod;
+	// Files to inject
+	std::string folder;
+	std::unordered_set<std::string> dataFiles;
+	Optional<std::string> bytesSampleFile;
 	// TODO(Zhe): add file checksum
 };
 

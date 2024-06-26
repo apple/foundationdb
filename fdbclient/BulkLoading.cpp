@@ -24,11 +24,15 @@ BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
                                       std::string folder,
                                       std::string dataFile,
                                       std::string bytesSampleFile) {
-	BulkLoadState bulkLoadTask(range, BulkLoadType::SST, folder);
-	ASSERT(bulkLoadTask.setTaskId(deterministicRandom()->randomUniqueID()));
-	ASSERT(bulkLoadTask.addDataFile(dataFile));
-	ASSERT(bulkLoadTask.setByteSampleFile(bytesSampleFile));
-	ASSERT(bulkLoadTask.setTransportMethod(BulkLoadTransportMethod::CP)); // local file copy
-	ASSERT(bulkLoadTask.setInjectMethod(BulkLoadInjectMethod::File)); // directly inject file to storage engine
-	return bulkLoadTask;
+	UID taskId = deterministicRandom()->randomUniqueID();
+	std::unordered_set<std::string> dataFiles;
+	dataFiles.insert(dataFile);
+	return BulkLoadState(taskId,
+	                     range,
+	                     BulkLoadType::SST,
+	                     BulkLoadTransportMethod::CP,
+	                     BulkLoadInjectMethod::File,
+	                     folder,
+	                     dataFiles,
+	                     bytesSampleFile);
 }

@@ -1033,7 +1033,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 			newBulkLoadState.dataMoveId.reset();
 			newBulkLoadState.restartCount = newBulkLoadState.restartCount + 1;
 			newBulkLoadState.triggerTime = now();
-			wait(krmSetRange(&tr, bulkLoadPrefix, newBulkLoadState.range, bulkLoadStateValue(newBulkLoadState)));
+			wait(krmSetRange(&tr, bulkLoadPrefix, newBulkLoadState.getRange(), bulkLoadStateValue(newBulkLoadState)));
 			TraceEvent(SevInfo, "DDBulkLoadTaskTriggeredPersist", self->ddId)
 			    .detail("BulkLoadState", newBulkLoadState.toString());
 			wait(tr.commit());
@@ -1073,7 +1073,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 			    .detail("Task", triggeredBulkLoadTask.toString())
 			    .detail("CommitVersion", commitVersion);
 		}
-		ASSERT(triggeredBulkLoadTask.range == range);
+		ASSERT(triggeredBulkLoadTask.getRange() == range);
 
 		// Step 3: create bulk load shard and trigger data move and wait for task completion
 		// The completion of the task relies on the fact that a data move on a range is either
@@ -1120,7 +1120,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 				if (!result[i].value.empty()) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
-					if (range != bulkLoadState.range) {
+					if (range != bulkLoadState.getRange()) {
 						TraceEvent(SevWarn, "DDBulkLoadScheduleFailed", self->ddId)
 						    .detail("Reason", "Task boundary changed")
 						    .detail("BulkLoadTask", bulkLoadState.toString())
@@ -1129,7 +1129,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 						TraceEvent(SevInfo, "DDBulkLoadScheduleTask", self->ddId)
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("Range", range);
-						runBulkLoadTaskAsync(self, bulkLoadState.range, bulkLoadState.taskId);
+						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId());
 					} else {
 						ASSERT(bulkLoadState.phase == BulkLoadPhase::Triggered ||
 						       bulkLoadState.phase == BulkLoadPhase::Running ||
@@ -1168,7 +1168,7 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 				if (!result[i].value.empty()) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
-					if (range != bulkLoadState.range) {
+					if (range != bulkLoadState.getRange()) {
 						TraceEvent(SevWarn, "DDBulkLoadRestartTriggeredTaskFailed", self->ddId)
 						    .detail("Reason", "Task boundary changed")
 						    .detail("BulkLoadTask", bulkLoadState.toString())
@@ -1177,12 +1177,12 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 						TraceEvent(SevInfo, "DDBulkLoadRestartTriggeredTask", self->ddId)
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
-						runBulkLoadTaskAsync(self, bulkLoadState.range, bulkLoadState.taskId);
+						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId());
 					} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
 						TraceEvent(SevInfo, "DDBulkLoadRestartRunningTask", self->ddId)
 						    .detail("OldBulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
-						runBulkLoadTaskAsync(self, bulkLoadState.range, bulkLoadState.taskId);
+						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId());
 					} else {
 						TraceEvent(SevDebug, "DDBulkLoadRestartRangeNoTask", self->ddId).detail("RangeInSpace", range);
 					}
@@ -1231,7 +1231,8 @@ ACTOR Future<Void> submitBulkLoadTask(Reference<DataDistributor> self, TriggerBu
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				req.bulkLoadTask.submitTime = now();
-				wait(krmSetRange(&tr, bulkLoadPrefix, req.bulkLoadTask.range, bulkLoadStateValue(req.bulkLoadTask)));
+				wait(krmSetRange(
+				    &tr, bulkLoadPrefix, req.bulkLoadTask.getRange(), bulkLoadStateValue(req.bulkLoadTask)));
 				wait(tr.commit());
 				TraceEvent(SevInfo, "DDBulkLoadSubmitTaskReply", self->ddId)
 				    .detail("BulkLoadState", req.bulkLoadTask.toString());

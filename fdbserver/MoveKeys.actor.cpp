@@ -1869,8 +1869,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						try {
 							wait(store(newBulkLoadState,
 							           updateBulkLoadTaskPhase(&tr,
-							                                   bulkLoadState.get().range,
-							                                   bulkLoadState.get().taskId,
+							                                   bulkLoadState.get().getRange(),
+							                                   bulkLoadState.get().getTaskId(),
 							                                   BulkLoadPhase::Running)));
 						} catch (Error& e) {
 							if (e.code() == error_code_bulkload_task_outdated) {
@@ -1882,7 +1882,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						newBulkLoadState.setDataMoveId(dataMoveId);
 						newBulkLoadState.startTime = now();
 						wait(krmSetRange(
-						    &tr, bulkLoadPrefix, newBulkLoadState.range, bulkLoadStateValue(newBulkLoadState)));
+						    &tr, bulkLoadPrefix, newBulkLoadState.getRange(), bulkLoadStateValue(newBulkLoadState)));
 						TraceEvent(SevInfo, "DDBulkLoadTaskRunningPersist", relocationIntervalId)
 						    .detail("BulkLoadState", newBulkLoadState.toString());
 						dataMove.bulkLoadState = newBulkLoadState;
@@ -2322,8 +2322,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							try {
 								wait(store(newBulkLoadState,
 								           updateBulkLoadTaskPhase(&tr,
-								                                   bulkLoadState.get().range,
-								                                   bulkLoadState.get().taskId,
+								                                   bulkLoadState.get().getRange(),
+								                                   bulkLoadState.get().getTaskId(),
 								                                   BulkLoadPhase::Complete)));
 							} catch (Error& e) {
 								if (e.code() == error_code_bulkload_task_outdated) {
@@ -2334,8 +2334,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							}
 							ASSERT(newBulkLoadState.dataMoveId.present() && newBulkLoadState.dataMoveId == dataMoveId);
 							newBulkLoadState.completeTime = now();
-							wait(krmSetRange(
-							    &tr, bulkLoadPrefix, newBulkLoadState.range, bulkLoadStateValue(newBulkLoadState)));
+							wait(krmSetRange(&tr,
+							                 bulkLoadPrefix,
+							                 newBulkLoadState.getRange(),
+							                 bulkLoadStateValue(newBulkLoadState)));
 							TraceEvent(SevInfo, "DDBulkLoadTaskCompletePersist", relocationIntervalId)
 							    .detail("BulkLoadState", newBulkLoadState.toString());
 							dataMove.bulkLoadState = newBulkLoadState;

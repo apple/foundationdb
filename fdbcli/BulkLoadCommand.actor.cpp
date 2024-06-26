@@ -41,17 +41,20 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 		if (tokencmp(tokens[2], "on")) {
-			int old_ = wait(setBulkLoadMode(localDb, 1));
+			int old = wait(setBulkLoadMode(localDb, 1));
+			TraceEvent("SetBulkLoadModeCommand").detail("OldValue", old).detail("NewValue", 1);
 			return UID();
 		} else if (tokencmp(tokens[2], "off")) {
-			int old_ = wait(setBulkLoadMode(localDb, 0));
+			int old = wait(setBulkLoadMode(localDb, 0));
+			TraceEvent("SetBulkLoadModeCommand").detail("OldValue", old).detail("NewValue", 0);
 			return UID();
 		} else {
 			printUsage(tokens[0]);
 			return UID();
 		}
 
-	} else if (tokencmp(tokens[1], "localtask")) {
+	} else if (tokencmp(tokens[1], "local")) {
+		// Generate spec of bulk loading local files
 		if (tokens.size() < 7) {
 			printUsage(tokens[0]);
 			return UID();
@@ -68,7 +71,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
 		wait(submitBulkLoadTask(clusterFile, bulkLoadTask, /*timeoutSeconds=*/60));
-		return bulkLoadTask.taskId;
+		return bulkLoadTask.getTaskId();
 
 	} else {
 		printUsage(tokens[0]);
@@ -78,7 +81,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp("bulkload <mode|localtask> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
+    CommandHelp("bulkload <mode|local> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
                 "Start a bulk load task",
                 "Start a bulk load task"));
 } // namespace fdb_cli

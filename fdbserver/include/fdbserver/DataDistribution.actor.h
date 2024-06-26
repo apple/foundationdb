@@ -662,26 +662,26 @@ public:
 
 	// called by DD bulk load core
 	bool publishTask(BulkLoadState bulkLoadState, Version commitVersion, Promise<Void> completeAck) {
-		if (overlappingTaskSince(bulkLoadState.range, commitVersion)) {
+		if (overlappingTaskSince(bulkLoadState.getRange(), commitVersion)) {
 			return true;
 		}
 		DDBulkLoadTask task(bulkLoadState, commitVersion, completeAck);
 		TraceEvent(SevDebug, "DDBulkLoadCollectionPublishTask")
-		    .detail("Range", bulkLoadState.range)
+		    .detail("Range", bulkLoadState.getRange())
 		    .detail("Task", task.toString());
-		bulkLoadTaskMap.insert(bulkLoadState.range, task);
+		bulkLoadTaskMap.insert(bulkLoadState.getRange(), task);
 		return false;
 	}
 
 	// called when relocator starts
 	bool startTask(BulkLoadState bulkLoadState, UID dataMoveId) {
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
-			if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
 				return true;
 			}
 			it->value().get().dataMoveId = dataMoveId;
 			TraceEvent(SevDebug, "DDBulkLoadCollectionStartTask")
-			    .detail("Range", bulkLoadState.range)
+			    .detail("Range", bulkLoadState.getRange())
 			    .detail("TaskRange", it->range())
 			    .detail("Task", it->value().get().toString());
 		}
@@ -690,24 +690,24 @@ public:
 
 	// called when relocator succeeds
 	bool terminateTask(BulkLoadState bulkLoadState) {
-		/* for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
-		    if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+		/* for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+		    if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
 		        return true;
 		    }
 		    if (!it->value().get().completeAck.canBeSet()) {
 		        TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
-		            .detail("Range", bulkLoadState.range)
+		            .detail("Range", bulkLoadState.getRange())
 		            .detail("TaskRange", it->range())
 		            .detail("Task", it->value().get().toString());
 		        ASSERT(false);
 		    }
 		    it->value().get().completeAck.send(Void());
 		    TraceEvent(SevDebug, "DDBulkLoadCollectionTerminateTask")
-		        .detail("Range", bulkLoadState.range)
+		        .detail("Range", bulkLoadState.getRange())
 		        .detail("TaskRange", it->range())
 		        .detail("Task", it->value().get().toString());
 		}
-		bulkLoadTaskMap.insert(bulkLoadState.range, Optional<DDBulkLoadTask>());
+		bulkLoadTaskMap.insert(bulkLoadState.getRange(), Optional<DDBulkLoadTask>());
 		return false; */
 		// remove bulk load task from the task map when DD mode is set to off
 		return true;
@@ -715,21 +715,20 @@ public:
 
 	// called when relocator failed
 	bool failTask(BulkLoadState bulkLoadState, const Error& error) {
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.range)) {
-			if (!it->value().present() || it->value().get().coreState.taskId != bulkLoadState.taskId) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
 				return true;
 			}
 			if (!it->value().get().completeAck.canBeSet()) {
 				TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
 				    .errorUnsuppressed(error)
-				    .detail("Range", bulkLoadState.range)
+				    .detail("Range", bulkLoadState.getRange())
 				    .detail("TaskRange", it->range())
 				    .detail("Task", it->value().get().toString());
-				ASSERT(false);
 			}
 			TraceEvent(SevDebug, "DDBulkLoadCollectionFailTask")
 			    .errorUnsuppressed(error)
-			    .detail("Range", bulkLoadState.range)
+			    .detail("Range", bulkLoadState.getRange())
 			    .detail("TaskRange", it->range())
 			    .detail("Task", it->value().get().toString());
 		}
@@ -747,8 +746,9 @@ public:
 			    .detail("Range", range)
 			    .detail("TaskRange", it->range())
 			    .detail("Task", bulkLoadTask.toString());
-			if (bulkLoadTask.coreState.range == range && (bulkLoadTask.coreState.phase == BulkLoadPhase::Triggered ||
-			                                              bulkLoadTask.coreState.phase == BulkLoadPhase::Running)) {
+			if (bulkLoadTask.coreState.getRange() == range &&
+			    (bulkLoadTask.coreState.phase == BulkLoadPhase::Triggered ||
+			     bulkLoadTask.coreState.phase == BulkLoadPhase::Running)) {
 				res.push_back(bulkLoadTask);
 			}
 		}

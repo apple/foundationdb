@@ -109,8 +109,8 @@ struct BulkLoading : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				for (const auto& task : tasks) {
-					wait(krmSetRange(&tr, bulkLoadPrefix, task.range, bulkLoadStateValue(task)));
+				for (auto task : tasks) {
+					wait(krmSetRange(&tr, bulkLoadPrefix, task.getRange(), bulkLoadStateValue(task)));
 				}
 				wait(tr.commit());
 				TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks));
@@ -163,12 +163,12 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	void produceFilesToLoad(const BulkLoadTaskTestUnit& task) {
-		std::string folder = task.bulkLoadTask.folder;
+	void produceFilesToLoad(BulkLoadTaskTestUnit task) {
+		std::string folder = task.bulkLoadTask.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.bytesSampleFile.get();
-		std::string dataFile = *(task.bulkLoadTask.dataFiles.begin());
+		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
+		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
 
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 		sstWriter->open(abspath(dataFile));
@@ -326,12 +326,12 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	void produceLargeDataToLoad(const BulkLoadTaskTestUnit& task, int count) {
-		std::string folder = task.bulkLoadTask.folder;
+	void produceLargeDataToLoad(BulkLoadTaskTestUnit task, int count) {
+		std::string folder = task.bulkLoadTask.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.bytesSampleFile.get();
-		std::string dataFile = *(task.bulkLoadTask.dataFiles.begin());
+		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
+		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
 
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 		sstWriter->open(abspath(dataFile));
@@ -339,7 +339,7 @@ struct BulkLoading : TestWorkload {
 		int insertedKeyCount = 0;
 		for (int i = 0; i < 10; i++) {
 			std::string idxStr = std::to_string(i);
-			Key prefix = Standalone(StringRef(idxStr)).withPrefix(task.bulkLoadTask.range.begin);
+			Key prefix = Standalone(StringRef(idxStr)).withPrefix(task.bulkLoadTask.getRange().begin);
 			std::vector<KeyValue> kvs = generateSortedKVS(prefix, std::max(count / 10, 1));
 			for (const auto& kv : kvs) {
 				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);

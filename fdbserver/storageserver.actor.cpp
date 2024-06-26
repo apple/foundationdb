@@ -9132,8 +9132,8 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 
 	// Step 1: Fetch data to dir
 	state SSBulkLoadFileSet fileSetToLoad;
-	ASSERT(bulkLoadState.transportMethod != BulkLoadTransportMethod::Invalid);
-	if (bulkLoadState.transportMethod == BulkLoadTransportMethod::CP) {
+	ASSERT(bulkLoadState.getTransportMethod() != BulkLoadTransportMethod::Invalid);
+	if (bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP) {
 		wait(store(
 		    fileSetToLoad,
 		    bulkLoadTransportCP_impl(dir, bulkLoadState, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, data->thisServerID)));
@@ -9171,10 +9171,10 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	localRecord.checkpointID = UID();
 	localRecord.dir = abspath(fileSetToLoad.folder);
 	for (const auto& range : moveInShard->ranges()) {
-		ASSERT(bulkLoadState.range.contains(range));
+		ASSERT(bulkLoadState.getRange().contains(range));
 	}
 	localRecord.ranges = moveInShard->ranges();
-	RocksDBCheckpointKeyValues rcp({ bulkLoadState.range });
+	RocksDBCheckpointKeyValues rcp({ bulkLoadState.getRange() });
 	for (const auto& filePath : fileSetToLoad.dataFileList) {
 		CheckpointFile cpFile;
 		cpFile.path = abspath(filePath);

@@ -62,9 +62,9 @@ ACTOR Future<BulkLoadState> updateBulkLoadTaskPhase(Transaction* tr, KeyRange ra
 		throw bulkload_task_outdated();
 	}
 	bulkLoadState = decodeBulkLoadState(result[0].value);
-	ASSERT(bulkLoadState.taskId.isValid());
-	ASSERT(bulkLoadState.range == KeyRangeRef(result[0].key, result[1].key));
-	if (taskId != bulkLoadState.taskId || bulkLoadState.phase == BulkLoadPhase::Complete) {
+	ASSERT(bulkLoadState.getTaskId().isValid());
+	ASSERT(bulkLoadState.getRange() == KeyRangeRef(result[0].key, result[1].key));
+	if (taskId != bulkLoadState.getTaskId() || bulkLoadState.phase == BulkLoadPhase::Complete) {
 		// The taskId persisted on disk can be only updated by users
 		// We ignore any complete task
 		throw bulkload_task_outdated();
@@ -84,13 +84,13 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
                                                          BulkLoadState bulkLoadState,
                                                          size_t fileBytesMax,
                                                          UID logId) {
-	ASSERT(bulkLoadState.transportMethod == BulkLoadTransportMethod::CP);
+	ASSERT(bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP);
 	loop {
 		state std::string toFile;
 		state std::string fromFile;
 		state SSBulkLoadFileSet fileSet;
 		try {
-			fileSet.folder = abspath(joinPath(dir, bulkLoadState.folder));
+			fileSet.folder = abspath(joinPath(dir, bulkLoadState.getFolder()));
 
 			// Clear existing folder
 			platform::eraseDirectoryRecursive(fileSet.folder);
@@ -99,7 +99,7 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			}
 
 			// Move bulk load files to loading folder
-			for (const auto& filePath : bulkLoadState.dataFiles) {
+			for (const auto& filePath : bulkLoadState.getDataFiles()) {
 				fromFile = abspath(filePath);
 				toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadDataFileName()));
 				if (fileSet.dataFileList.find(toFile) != fileSet.dataFileList.end()) {
@@ -113,8 +113,8 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 				    .detail("FromFile", fromFile)
 				    .detail("ToFile", toFile);
 			}
-			if (bulkLoadState.bytesSampleFile.present()) {
-				fromFile = abspath(bulkLoadState.bytesSampleFile.get());
+			if (bulkLoadState.getBytesSampleFile().present()) {
+				fromFile = abspath(bulkLoadState.getBytesSampleFile().get());
 				if (fileExists(fromFile)) {
 					toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadBytesSampleFileName()));
 					bulkLoadFileCopy(fromFile, toFile, fileBytesMax);

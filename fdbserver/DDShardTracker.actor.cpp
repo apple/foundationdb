@@ -952,10 +952,10 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 
 // Must be atomic
 void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoadState) {
-	KeyRange keys = bulkLoadState.range;
+	KeyRange keys = bulkLoadState.getRange();
 	ASSERT(!keys.empty());
 	TraceEvent e(SevInfo, "DDBulkLoadCreateShardToBulkLoad", self->distributorId);
-	e.detail("TaskId", bulkLoadState.taskId);
+	e.detail("TaskId", bulkLoadState.getTaskId());
 	e.detail("BulkLoadRange", keys);
 	// Create shards at the two ends and do not data move for those shards
 	// Create a new shard and trigger data move for bulk loading on the new shard
@@ -986,7 +986,7 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 	}
 	self->shardsAffectedByTeamFailure->defineShard(keys);
 	self->output.send(
-	    RelocateShard(keys, DataMovementReason::TEAM_HEALTHY, RelocateReason::OTHER, bulkLoadState.taskId));
+	    RelocateShard(keys, DataMovementReason::TEAM_HEALTHY, RelocateReason::OTHER, bulkLoadState.getTaskId()));
 	return;
 }
 
