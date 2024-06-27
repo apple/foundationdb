@@ -84,7 +84,7 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx, KeyRange rangeToRead) {
 		readBegin = res.back().key;
 	}
 
-	printf("Finished range count %ld of total %ld tasks\n", finishCount, finishCount + unfinishedCount);
+	printf("Finished task count %ld of total %ld tasks\n", finishCount, finishCount + unfinishedCount);
 	return Void();
 }
 
