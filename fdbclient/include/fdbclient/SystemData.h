@@ -70,8 +70,7 @@ enum class DataMovementReason : uint8_t {
 	REBALANCE_STORAGE_QUEUE = 19,
 	ASSIGN_EMPTY_RANGE = 20, // dummy reason, no corresponding data move priority
 	SEED_SHARD_SERVER = 21, // dummy reason, no corresponding data move priority
-	BULKLOAD = 22,
-	NUMBER_OF_REASONS = 23, // dummy reason, no corresponding data move priority
+	NUMBER_OF_REASONS = 22, // dummy reason, no corresponding data move priority
 };
 
 // SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base

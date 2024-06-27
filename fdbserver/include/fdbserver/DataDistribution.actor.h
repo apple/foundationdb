@@ -60,7 +60,6 @@ public:
 		SIZE_SPLIT,
 		WRITE_SPLIT,
 		TENANT_SPLIT,
-		BULKLOAD,
 		__COUNT
 	};
 	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
@@ -83,8 +82,6 @@ public:
 			return "WriteSplit";
 		case TENANT_SPLIT:
 			return "TenantSplit";
-		case BULKLOAD:
-			return "BulkLoad";
 		case __COUNT:
 			ASSERT(false);
 		}

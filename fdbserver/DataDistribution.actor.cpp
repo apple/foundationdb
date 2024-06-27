@@ -1220,6 +1220,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				throw e;
 			}
 		}
+		wait(delay(5.0)); // avoid crash busy loop
 	}
 }
 
