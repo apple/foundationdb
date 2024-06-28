@@ -249,6 +249,7 @@ public:
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX; // Not available in urgent mode
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME; // Not available in urgent mode
+	int CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME; // Available in urgent mode
 	int CONSISTENCY_CHECK_BATCH_SHARD_COUNT; // Available in urgent mode
 	int CONSISTENCY_CHECK_RETRY_DEPTH_MAX; // Available in urgent mode
 	bool CONSISTENCY_CHECK_INIT_CLEAR_METADATA; // Available in urgent mode

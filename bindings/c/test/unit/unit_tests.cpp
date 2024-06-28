@@ -1062,7 +1062,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
-			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
+			const auto [key, value, begin, end, range_results] = result.mkvs[i];
 			CHECK(indexEntryKey(id).compare(key) == 0);
 			CHECK(EMPTY.compare(value) == 0);
 			CHECK(range_results.size() == SPLIT_SIZE);

@@ -36,6 +36,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/TLSConfig.actor.h"
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"
@@ -4098,6 +4099,14 @@ int main(int argc, char* argv[]) {
 			Optional<Database> result = connectToCluster(clusterFile, localities, quiet);
 			if (result.present()) {
 				db = result.get();
+				// Make sure we are setting a transaction timeout and retry limit to prevent cases
+				// where the fdbbackup command hangs infinitely. 60 seconds should be more than
+				// enough for all cases to finish and 5 retries should also be good enough for
+				// most cases.
+				db->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
+				              Optional<StringRef>(StringRef((const uint8_t*)60000, 8)));
+				db->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
+				              Optional<StringRef>(StringRef((const uint8_t*)5, 8)));
 			}
 
 			return result.present();
@@ -4114,6 +4123,14 @@ int main(int argc, char* argv[]) {
 			Optional<Database> result = connectToCluster(sourceClusterFile, localities, quiet);
 			if (result.present()) {
 				sourceDb = result.get();
+				// Make sure we are setting a transaction timeout and retry limit to prevent cases
+				// where the fdbbackup command hangs infinitely. 60 seconds should be more than
+				// enough for all cases to finish and 5 retries should also be good enough for
+				// most cases.
+				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
+				                    Optional<StringRef>(StringRef((const uint8_t*)60000, 8)));
+				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
+				                    Optional<StringRef>(StringRef((const uint8_t*)5, 8)));
 			}
 
 			return result.present();

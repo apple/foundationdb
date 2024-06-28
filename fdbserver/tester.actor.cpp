@@ -1211,8 +1211,11 @@ ACTOR Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
-			RangeResult readResult = wait(krmGetRanges(
-			    &tr, keyServersPrefix, rangeToRead, CLIENT_KNOBS->TOO_MANY, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			RangeResult readResult = wait(krmGetRanges(&tr,
+			                                           keyServersPrefix,
+			                                           rangeToRead,
+			                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+			                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 			for (int i = 0; i < readResult.size() - 1; ++i) {
 				KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
 				Value valueToCheck = Standalone(readResult[i].value);
@@ -1259,7 +1262,7 @@ ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optiona
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
+				TraceEvent(SevWarnAlways, "TesterRecruitmentTimeout").log();
 				throw timed_out();
 			}
 		}
@@ -1416,6 +1419,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	    SERVER_KNOBS->CONSISTENCY_CHECK_ID_MIN, SERVER_KNOBS->CONSISTENCY_CHECK_ID_MAX_PLUS_ONE);
 	state std::vector<KeyRange> rangesToCheck; // get from progress metadata
 	state std::vector<KeyRange> shardsToCheck; // get from keyServer metadata
+	state Optional<double> whenFailedToGetTesterStart;
 	state KeyRangeMap<bool> globalProgressMap; // used to keep track of progress when persisting metadata is not allowed
 	state std::unordered_map<int, std::vector<KeyRange>> assignment; // used to keep track of assignment of tasks
 	state std::vector<TesterInterface> ts; // used to store testers interface
@@ -1506,7 +1510,19 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			// Step 2: Get testers
 			ts.clear();
 			if (!testers.present()) {
-				wait(store(ts, getTesters(cc, minTestersExpected)));
+				try {
+					wait(store(ts, getTesters(cc, minTestersExpected)));
+					whenFailedToGetTesterStart.reset();
+				} catch (Error& e) {
+					if (e.code() == error_code_timed_out) {
+						if (!whenFailedToGetTesterStart.present()) {
+							whenFailedToGetTesterStart = now();
+						} else if (now() - whenFailedToGetTesterStart.get() > 3600 * 24) { // 1 day
+							TraceEvent(SevError, "TesterRecruitmentTimeout").log();
+						}
+					}
+					throw e;
+				}
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					throw operation_failed(); // Introduce random failure
 				}
@@ -2386,6 +2402,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	return Void();
 }
 
+ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
+                                                     Database cx,
+                                                     Optional<std::vector<TesterInterface>> testers,
+                                                     int minTestersExpected,
+                                                     TestSpec testSpec,
+                                                     Optional<TenantName> defaultTenant,
+                                                     Reference<AsyncVar<ServerDBInfo>> dbInf) {
+	loop {
+		wait(runConsistencyCheckerUrgentCore(cc, cx, testers, minTestersExpected, testSpec, defaultTenant, dbInf));
+		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME));
+	}
+}
+
 /**
  * \brief Set up testing environment and run the given tests on a cluster.
  *
@@ -2531,13 +2560,13 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
 		cx = openDBOnServer(dbInfo);
 		cx->defaultTenant = defaultTenant;
-		tests = reportErrors(runConsistencyCheckerUrgentCore(cc,
-		                                                     cx,
-		                                                     Optional<std::vector<TesterInterface>>(),
-		                                                     minTestersExpected,
-		                                                     testSet.testSpecs[0],
-		                                                     defaultTenant,
-		                                                     dbInfo),
+		tests = reportErrors(runConsistencyCheckerUrgentHolder(cc,
+		                                                       cx,
+		                                                       Optional<std::vector<TesterInterface>>(),
+		                                                       minTestersExpected,
+		                                                       testSet.testSpecs[0],
+		                                                       defaultTenant,
+		                                                       dbInfo),
 		                     "runConsistencyCheckerUrgentCore");
 	} else if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();

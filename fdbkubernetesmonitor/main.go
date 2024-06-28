@@ -21,7 +21,8 @@ package main
 
 import (
 	"bufio"
-	"fmt"
+	"context"
+	"io"
 	"os"
 	"path"
 	"regexp"
@@ -31,27 +32,24 @@ import (
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
-	inputDir                string
-	fdbserverPath           string
-	versionFilePath         string
-	sharedBinaryDir         string
-	monitorConfFile         string
-	logPath                 string
-	executionModeString     string
-	outputDir               string
-	copyFiles               []string
-	copyBinaries            []string
-	binaryOutputDirectory   string
-	copyLibraries           []string
-	copyPrimaryLibrary      string
-	requiredCopyFiles       []string
-	mainContainerVersion    string
-	currentContainerVersion string
-	additionalEnvFile       string
-	processCount            int
+	fdbserverPath        string
+	versionFilePath      string
+	sharedBinaryDir      string
+	monitorConfFile      string
+	logPath              string
+	executionModeString  string
+	outputDir            string
+	mainContainerVersion string
+	additionalEnvFile    string
+	listenAddress        string
+	processCount         int
+	enablePprof          bool
+	enableNodeWatch      bool
 )
 
 type executionMode string
@@ -62,7 +60,29 @@ const (
 	executionModeSidecar  executionMode = "sidecar"
 )
 
+func initLogger(logPath string) *zap.Logger {
+	var logWriter io.Writer
+
+	if logPath != "" {
+		lumberjackLogger := &lumberjack.Logger{
+			Filename:   logPath,
+			MaxSize:    100,
+			MaxAge:     7,
+			MaxBackups: 2,
+			Compress:   false,
+		}
+		logWriter = io.MultiWriter(os.Stdout, lumberjackLogger)
+	} else {
+		logWriter = os.Stdout
+	}
+
+	return zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(logWriter), zapcore.InfoLevel))
+}
+
 func main() {
+	var copyFiles, copyBinaries, copyLibraries, requiredCopyFiles []string
+	var inputDir, copyPrimaryLibrary, binaryOutputDirectory string
+
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
 	pflag.StringVar(&fdbserverPath, "fdbserver-path", "/usr/bin/fdbserver", "Path to the fdbserver binary")
 	pflag.StringVar(&inputDir, "input-dir", ".", "Directory containing input files")
@@ -80,31 +100,25 @@ func main() {
 	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "For sidecar mode, this specifies the version of the main container. If this is equal to the current container version, no files will be copied")
 	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
+	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
+	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
+	pflag.BoolVar(&enableNodeWatch, "enable-node-watch", false, "Enables the fdb-kubernetes-monitor to watch the node resource where the current Pod is running. This can be used to read node labels")
 	pflag.Parse()
 
-	zapConfig := zap.NewProductionConfig()
-	if logPath != "" {
-		zapConfig.OutputPaths = append(zapConfig.OutputPaths, logPath)
-	}
-	zapLogger, err := zapConfig.Build()
-	if err != nil {
-		panic(err)
-	}
+	logger := zapr.NewLogger(initLogger(logPath))
 
 	versionBytes, err := os.ReadFile(versionFilePath)
 	if err != nil {
 		panic(err)
 	}
-	currentContainerVersion = strings.TrimSpace(string(versionBytes))
-
-	logger := zapr.NewLogger(zapLogger)
-	copyDetails, requiredCopies, err := getCopyDetails()
+	currentContainerVersion := strings.TrimSpace(string(versionBytes))
+	mode := executionMode(executionModeString)
+	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
 	if err != nil {
 		logger.Error(err, "Error getting list of files to copy")
 		os.Exit(1)
 	}
 
-	mode := executionMode(executionModeString)
 	switch mode {
 	case executionModeLauncher:
 		customEnvironment, err := loadAdditionalEnvironment(logger)
@@ -112,7 +126,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount)
+		StartMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof, currentContainerVersion, enableNodeWatch)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
@@ -136,46 +150,21 @@ func main() {
 	}
 }
 
-func getCopyDetails() (map[string]string, map[string]bool, error) {
-	copyDetails := make(map[string]string, len(copyFiles)+len(copyBinaries))
-
-	for _, filePath := range copyFiles {
-		copyDetails[path.Join(inputDir, filePath)] = ""
-	}
-	if copyBinaries != nil {
-		if binaryOutputDirectory == "" {
-			binaryOutputDirectory = currentContainerVersion
-		}
-		for _, copyBinary := range copyBinaries {
-			copyDetails[fmt.Sprintf("/usr/bin/%s", copyBinary)] = path.Join("bin", binaryOutputDirectory, copyBinary)
-		}
-	}
-	for _, library := range copyLibraries {
-		copyDetails[fmt.Sprintf("/usr/lib/fdb/multiversion/libfdb_c_%s.so", library)] = path.Join("lib", "multiversion", fmt.Sprintf("libfdb_c_%s.so", library))
-	}
-	if copyPrimaryLibrary != "" {
-		copyDetails[fmt.Sprintf("/usr/lib/fdb/multiversion/libfdb_c_%s.so", copyPrimaryLibrary)] = path.Join("lib", "libfdb_c.so")
-	}
-	requiredCopyMap := make(map[string]bool, len(requiredCopyFiles))
-	for _, filePath := range requiredCopyFiles {
-		fullFilePath := path.Join(inputDir, filePath)
-		_, present := copyDetails[fullFilePath]
-		if !present {
-			return nil, nil, fmt.Errorf("File %s is required, but is not in the --copy-file list", filePath)
-		}
-		requiredCopyMap[fullFilePath] = true
-	}
-	return copyDetails, requiredCopyMap, nil
-}
-
 func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 	var customEnvironment = make(map[string]string)
-	environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
 	if additionalEnvFile != "" {
+		environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
+
 		file, err := os.Open(additionalEnvFile)
 		if err != nil {
 			return nil, err
 		}
+		defer func() {
+			err := file.Close()
+			if err != nil {
+				logger.Error(err, "error when closing file")
+			}
+		}()
 
 		envScanner := bufio.NewScanner(file)
 		for envScanner.Scan() {
@@ -188,5 +177,6 @@ func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 			customEnvironment[matches[1]] = matches[2]
 		}
 	}
+
 	return customEnvironment, nil
 }

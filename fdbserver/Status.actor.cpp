@@ -1531,13 +1531,6 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 							break;
 						}
 						existingRanges.insert(rangePair);
-					} else {
-						// This cleanup is done during status, because it should only be required once after upgrading
-						// to 6.2.7 or later. There is no other good location to detect that the metadata is mismatched.
-						TraceEvent(SevWarnAlways, "CleaningDestUidLookup")
-						    .detail("K", it.key.printable())
-						    .detail("V", it.value.printable());
-						tr.clear(it.key);
 					}
 				}
 				wait(tr.commit() || timeoutFuture);
