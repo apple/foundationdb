@@ -1,5 +1,5 @@
 /*
- * ClientWorkload.h
+ * CppWorkload.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,8 +19,8 @@
  */
 
 #pragma once
-#ifndef CLIENT_WORKLOAD_H
-#define CLIENT_WORKLOAD_H
+#ifndef CPP_WORKLOAD_H
+#define CPP_WORKLOAD_H
 #include <string>
 #include <vector>
 #include <functional>
@@ -90,7 +90,7 @@ struct FDBPerfMetric {
 
 class DLLEXPORT FDBWorkload {
 public:
-	virtual std::string description() const = 0;
+	// virtual std::string description() const = 0;
 	virtual bool init(FDBWorkloadContext* context) = 0;
 	virtual void setup(FDBDatabase* db, GenericPromise<bool> done) = 0;
 	virtual void start(FDBDatabase* db, GenericPromise<bool> done) = 0;
