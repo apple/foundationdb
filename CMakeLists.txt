@@ -27,7 +27,7 @@ project(foundationdb
   VERSION 7.4.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Swift)
+  LANGUAGES C CXX ASM)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -196,7 +196,7 @@ add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
 if(NOT WIN32)
-  if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+  if (NOT FOUNDATIONDB_CROSS_COMPILING)
     add_subdirectory(fdbmonitor)
   endif()
 else()
@@ -205,11 +205,11 @@ endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(metacluster)
 add_subdirectory(tests)
-if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+if (NOT FOUNDATIONDB_CROSS_COMPILING)
   add_subdirectory(flowbench EXCLUDE_FROM_ALL)
 endif()
 if(WITH_PYTHON AND WITH_C_BINDING)
-  if (NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when x-compiling.
+  if (NOT FOUNDATIONDB_CROSS_COMPILING)
     add_subdirectory(bindings)
   endif()
 endif()
@@ -240,11 +240,6 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
 	  COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
-
-  # A prebuild target ensures that all actors, Swift-generated headers, and Swift modules are built.
-  if (WITH_SWIFT)
-     add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
-  endif()
 endif()
 
 ################################################################################
@@ -254,5 +249,3 @@ endif()
 print_components()
 
 message(STATUS "CPACK_COMPONENTS_ALL ${CPACK_COMPONENTS_ALL}")
-
-

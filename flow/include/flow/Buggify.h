@@ -79,33 +79,4 @@ __GENERATE_BUGGIFY_VARIABLES(CLIENT, Client, client)
 	 deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_CLIENT_BUGGIFIED_SECTION_FIRES)
 
-namespace SwiftBridging {
-
-inline std::map<std::pair<std::string, int>, bool> SwiftGeneralSBVar;
-
-inline bool getGeneralSBVar(const char* file, const int line) {
-	const auto paired = std::make_pair(std::string(file), line);
-	if (SwiftGeneralSBVar.count(paired)) [[likely]] {
-		return SwiftGeneralSBVar[paired];
-	}
-
-	const double rand = deterministicRandom()->random01();
-	const bool activated = rand < P_GENERAL_BUGGIFIED_SECTION_ACTIVATED;
-	SwiftGeneralSBVar[paired] = activated;
-	g_traceBatch.addBuggify(activated, line, file);
-	if (g_network) [[likely]] {
-		g_traceBatch.dump();
-	}
-
-	return activated;
-}
-
-inline bool buggify(const char* _Nonnull filename, int line) {
-	// SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
-	return isGeneralBuggifyEnabled() && getGeneralSBVar(filename, line) &&
-	       deterministicRandom()->random01() < P_GENERAL_BUGGIFIED_SECTION_FIRES;
-}
-
-} // namespace SwiftBridging
-
 #endif // FLOW_BUGGIFY_H

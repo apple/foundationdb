@@ -23,7 +23,6 @@
 #pragma once
 
 #include "flow/ProtocolVersion.h"
-#include "flow/swift.h"
 
 #include "flow/NetworkAddress.h"
 #include "flow/IPAddress.h"
@@ -131,15 +130,12 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class TLSConfig;
 
-class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork;
+class INetwork;
 
 extern INetwork* g_network;
 extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
-inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool = false, bool useMetrics = false) {
-	return newNet2(*tlsConfig, useThreadPool, useMetrics);
-}
 
-class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork {
+class INetwork {
 public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
 	// on. Note that there are tools for disk access, scheduling, etc as well as networking, and that almost all access
@@ -189,8 +185,6 @@ public:
 
 	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic
-
-	virtual void _swiftEnqueue(void* task) = 0;
 
 	virtual Future<class Void> delay(double seconds, TaskPriority taskID) = 0;
 	// The given future will be set after seconds have elapsed
@@ -289,12 +283,5 @@ protected:
 
 	~INetwork() {} // Please don't try to delete through this interface!
 };
-
-/// A wrapper for `g_network` value  that lets you access global properties from Swift.
-namespace SwiftGNetwork {
-inline double timer() {
-	return g_network->timer();
-}
-} // namespace SwiftGNetwork
 
 #endif

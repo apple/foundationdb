@@ -244,8 +244,6 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 
 	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
-	void _swiftEnqueue(void* task) override { abort(); }
-
 	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0, taskID);
