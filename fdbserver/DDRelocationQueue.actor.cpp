@@ -1146,6 +1146,14 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		for (int r = 0; r < ranges.size(); r++) {
 			RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 			rrs.keys = ranges[r];
+			if (rrs.bulkLoadTask.present() && rrs.bulkLoadTask.get().coreState.getRange() != rrs.keys) {
+				// The new bulk load data move partially overwrites an old bulk load data move.
+				// In this case, the old bulk load task is cancelled.
+				// For the range that is not covered by the new data move, drop the bulk load task and
+				// run it as a normal data move.
+				ASSERT(rrs.bulkLoadTask.get().coreState.getRange().contains(rrs.keys));
+				rrs.bulkLoadTask.reset();
+			}
 			if (rd.keys == ranges[r] && rd.isRestore()) {
 				ASSERT(rd.dataMove != nullptr);
 				ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);

@@ -1121,10 +1121,8 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
 					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
 					if (range != bulkLoadState.getRange()) {
-						TraceEvent(SevWarn, "DDBulkLoadScheduleFailed", self->ddId)
-						    .detail("Reason", "Task boundary changed")
-						    .detail("BulkLoadTask", bulkLoadState.toString())
-						    .detail("Range", range);
+						// This task is outdated
+						continue;
 					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid) {
 						TraceEvent(SevInfo, "DDBulkLoadScheduleTask", self->ddId)
 						    .detail("BulkLoadTask", bulkLoadState.toString())
@@ -1146,7 +1144,6 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		}
 		wait(delay(1.0));
 	}
-	TraceEvent(SevInfo, "DDBulkLoadScheduleEnd", self->ddId);
 
 	// Start a new one
 	wait(delay(5.0));

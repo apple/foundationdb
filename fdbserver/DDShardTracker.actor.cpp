@@ -222,7 +222,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
-	DisabledTraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
+	TraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
 	    .detail("Keys", keys)
 	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
 	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
@@ -256,7 +256,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
-					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
+					TraceEvent("ShardSizeUpdate", self()->distributorId)
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.first.get().bytes)
 					    .detail("WriteBandwidth", metrics.first.get().bytesWrittenPerKSecond)
@@ -272,6 +272,12 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					            shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 					if (shardMetrics->get().present()) {
+						TraceEvent("TrackerChangeSizes")
+						    .detail("Context", "trackShardMetrics")
+						    .detail("Keys", keys)
+						    .detail("TotalSizeEstimate", self()->dbSizeEstimate->get())
+						    .detail("EndSizeOfOldShards", shardMetrics->get().get().metrics.bytes)
+						    .detail("StartingSizeOfNewShards", metrics.first.get().bytes);
 						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
 						                            shardMetrics->get().get().metrics.bytes);
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
@@ -367,7 +373,10 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 	}
 }
 
-ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize) {
+ACTOR Future<Void> changeSizes(DataDistributionTracker* self,
+                               KeyRange keys,
+                               int64_t oldShardsEndingSize,
+                               std::string context) {
 	state std::vector<Future<int64_t>> sizes;
 	state std::vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards->intersectingRanges(keys)) {
@@ -392,10 +401,12 @@ ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int
 	}
 
 	int64_t totalSizeEstimate = self->dbSizeEstimate->get();
-	/*TraceEvent("TrackerChangeSizes")
+	TraceEvent("TrackerChangeSizes")
+	    .detail("Context", "changeSizes when " + context)
+	    .detail("Keys", keys)
 	    .detail("TotalSizeEstimate", totalSizeEstimate)
 	    .detail("EndSizeOfOldShards", oldShardsEndingSize)
-	    .detail("StartingSizeOfNewShards", newShardsStartingSize);*/
+	    .detail("StartingSizeOfNewShards", newShardsStartingSize);
 	self->dbSizeEstimate->set(totalSizeEstimate + newShardsStartingSize - oldShardsEndingSize);
 	self->systemSizeEstimate += newSystemShardsStartingSize;
 	if (keys.begin >= systemKeys.begin) {
@@ -502,7 +513,7 @@ void executeShardSplit(DataDistributionTracker* self,
 		}
 	}
 
-	self->actors.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+	self->actors.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes, "ShardSplit"));
 }
 
 struct RangeToSplit {
@@ -959,34 +970,41 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 	e.detail("BulkLoadRange", keys);
 	// Create shards at the two ends and do not data move for those shards
 	// Create a new shard and trigger data move for bulk loading on the new shard
-	auto rangeMap = self->shards->intersectingRanges(keys);
-	KeyRange firstOverlapRange;
-	KeyRange lastOverlapRange;
-	if (rangeMap.begin().begin() != keys.begin) {
-		firstOverlapRange = Standalone(KeyRangeRef(rangeMap.begin().begin(), keys.begin));
+	// Step 1: split left without data move nor updating dbEstimate size (will be rebuilt after DD restarts)
+	for (auto it : self->shards->intersectingRanges(keys)) {
+		if (it->range().begin < keys.begin) {
+			KeyRange leftRange = Standalone(KeyRangeRef(it->range().begin, keys.begin));
+			restartShardTrackers(self, leftRange);
+			e.detail("FirstSplitShard", it->range());
+			break;
+		}
 	}
-	if (rangeMap.end().begin() != keys.end) {
-		lastOverlapRange = Standalone(KeyRangeRef(keys.end, rangeMap.end().begin()));
+
+	// Step 2: split right without data move nor updating dbEstimate size (will be rebuilt after DD restarts)
+	for (auto it : self->shards->intersectingRanges(keys)) {
+		if (it->range().end > keys.end) {
+			KeyRange rightRange = Standalone(KeyRangeRef(keys.end, it->range().end));
+			restartShardTrackers(self, rightRange);
+			e.detail("LastSplitShard", it->range());
+			break;
+		}
 	}
-	if (!firstOverlapRange.empty()) {
-		restartShardTrackers(self, firstOverlapRange);
-		e.detail("FirstSplitShard", firstOverlapRange);
+
+	// Step 3: merge with new data move
+	StorageMetrics oldStats;
+	int shardCount = 0;
+	for (auto it : self->shards->intersectingRanges(keys)) {
+		Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+		if (it->value().stats->get().present()) {
+			oldStats = oldStats + it->value().stats->get().get().metrics;
+			shardCount = shardCount + it->value().stats->get().get().shardCount;
+		}
 	}
-	if (!lastOverlapRange.empty()) {
-		restartShardTrackers(self, lastOverlapRange);
-		e.detail("LastSplitShard", lastOverlapRange);
-	}
-	restartShardTrackers(self, keys);
-	e.detail("NewShardToLoad", keys);
-	if (!firstOverlapRange.empty()) {
-		self->shardsAffectedByTeamFailure->defineShard(firstOverlapRange);
-	}
-	if (!lastOverlapRange.empty()) {
-		self->shardsAffectedByTeamFailure->defineShard(lastOverlapRange);
-	}
+	restartShardTrackers(self, keys, ShardMetrics(oldStats, now(), shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(keys);
 	self->output.send(
 	    RelocateShard(keys, DataMovementReason::TEAM_HEALTHY, RelocateReason::OTHER, bulkLoadState.getTaskId()));
+	e.detail("NewShardToLoad", keys);
 	return;
 }
 
@@ -1363,7 +1381,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
-	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0);
+	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0, "ShardInit");
 	self->readyToStart.send(Void());
 	wait(initialSize);
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);

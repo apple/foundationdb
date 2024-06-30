@@ -35,8 +35,7 @@ std::string generateRandomBulkLoadBytesSampleFileName() {
 	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
 }
 
-ACTOR Future<Optional<BulkLoadState>> getBulkLoadState(Database cx, UID dataMoveId, UID logId) {
-	// TODO(Zhe): check if bulk load task is outdated
+ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
 	loop {
 		state Transaction tr(cx);
 		try {
@@ -61,11 +60,20 @@ ACTOR Future<BulkLoadState> updateBulkLoadTaskPhase(Transaction* tr, KeyRange ra
 	} else if (result[0].value.empty()) {
 		throw bulkload_task_outdated();
 	}
+	ASSERT(result.size() == 2);
 	bulkLoadState = decodeBulkLoadState(result[0].value);
 	ASSERT(bulkLoadState.getTaskId().isValid());
-	ASSERT(bulkLoadState.getRange() == KeyRangeRef(result[0].key, result[1].key));
-	if (taskId != bulkLoadState.getTaskId() || bulkLoadState.phase == BulkLoadPhase::Complete) {
-		// The taskId persisted on disk can be only updated by users
+	if (taskId != bulkLoadState.getTaskId()) {
+		// This task is overwritten by a newer task
+		throw bulkload_task_outdated();
+	}
+	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
+	if (bulkLoadState.getRange() != currentRange) {
+		// This task is partially overwritten by a newer task
+		ASSERT(bulkLoadState.getRange().contains(currentRange));
+		throw bulkload_task_outdated();
+	}
+	if (bulkLoadState.phase == BulkLoadPhase::Complete) {
 		// We ignore any complete task
 		throw bulkload_task_outdated();
 	}

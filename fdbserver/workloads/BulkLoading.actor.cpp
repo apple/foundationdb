@@ -27,7 +27,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::string simulationBulkLoadFolder = "bulkLoad";
+const std::string simulationBulkLoadFolderForSimpleTest = "bulkLoadSimple";
+const std::string simulationBulkLoadFolderForLargeDataProduce = "bulkLoadLargeData";
+const std::string simulationBulkLoadFolderForComplexTest = "bulkLoadComplex";
 
 struct BulkLoadTaskTestUnit {
 	BulkLoadState bulkLoadTask;
@@ -242,6 +244,9 @@ struct BulkLoading : TestWorkload {
 					if (!res[i].value.empty()) {
 						BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
 						ASSERT(bulkLoadState.isValid());
+						if (bulkLoadState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
+							continue; // Ignore outdated task
+						}
 						if (bulkLoadState.phase != BulkLoadPhase::Complete) {
 							return false;
 						}
@@ -303,7 +308,7 @@ struct BulkLoading : TestWorkload {
 	                                             std::string folderName) {
 		std::string dataFileName = generateRandomBulkLoadDataFileName();
 		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
-		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
+		std::string folder = joinPath(simulationBulkLoadFolderForSimpleTest, folderName);
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
 		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
@@ -324,65 +329,6 @@ struct BulkLoading : TestWorkload {
 		}
 		std::sort(res.begin(), res.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
 		return res;
-	}
-
-	void produceLargeDataToLoad(BulkLoadTaskTestUnit task, int count) {
-		std::string folder = task.bulkLoadTask.getFolder();
-		platform::eraseDirectoryRecursive(folder);
-		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
-		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
-
-		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-		sstWriter->open(abspath(dataFile));
-		std::vector<KeyValue> bytesSample;
-		int insertedKeyCount = 0;
-		for (int i = 0; i < 10; i++) {
-			std::string idxStr = std::to_string(i);
-			Key prefix = Standalone(StringRef(idxStr)).withPrefix(task.bulkLoadTask.getRange().begin);
-			std::vector<KeyValue> kvs = generateSortedKVS(prefix, std::max(count / 10, 1));
-			for (const auto& kv : kvs) {
-				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
-				if (sampleInfo.inSample) {
-					Key sampleKey = kv.key;
-					Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
-					bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
-				}
-				sstWriter->write(kv.key, kv.value);
-				insertedKeyCount++;
-			}
-		}
-		TraceEvent("BulkLoadingDataProduced")
-		    .detail("LoadKeyCount", insertedKeyCount)
-		    .detail("BytesSampleSize", bytesSample.size())
-		    .detail("Folder", folder)
-		    .detail("DataFile", dataFile)
-		    .detail("BytesSampleFile", bytesSampleFile);
-		ASSERT(sstWriter->finish());
-
-		if (bytesSample.size() > 0) {
-			sstWriter->open(abspath(bytesSampleFile));
-			for (const auto& kv : bytesSample) {
-				sstWriter->write(kv.key, kv.value);
-			}
-			TraceEvent("BulkLoadingByteSampleProduced")
-			    .detail("LoadKeyCount", task.data.size())
-			    .detail("BytesSampleSize", bytesSample.size())
-			    .detail("Folder", folder)
-			    .detail("DataFile", dataFile)
-			    .detail("BytesSampleFile", bytesSampleFile);
-			ASSERT(sstWriter->finish());
-		}
-	}
-
-	void produceDataSet(BulkLoading* self, KeyRange range, std::string folderName) {
-		std::string dataFileName = generateRandomBulkLoadDataFileName();
-		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
-		std::string folder = joinPath(simulationBulkLoadFolder, folderName);
-		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFileName, bytesSampleFileName);
-		self->produceLargeDataToLoad(taskUnit, 5000000);
-		return;
 	}
 
 	// Issue three non-overlapping tasks and check data consistency and correctness
@@ -452,6 +398,172 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
+	std::string getStringWithFixedLength(int number, int length) {
+		std::string numStr = std::to_string(number);
+		int zeroCount = length - numStr.size();
+		std::string res;
+		for (int i = 0; i < zeroCount; i++) {
+			res = res + "0";
+		}
+		res = res + numStr;
+		return res;
+	}
+
+	BulkLoadTaskTestUnit produceRandomBulkLoadTaskUnit(BulkLoading* self, std::string rootPath, int index) {
+		std::string dataFileName = generateRandomBulkLoadDataFileName();
+		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
+		std::string randomKey1 = deterministicRandom()->randomUniqueID().toString();
+		std::string randomKey2 = deterministicRandom()->randomUniqueID().toString();
+		while (randomKey2 == randomKey1) {
+			randomKey2 = deterministicRandom()->randomUniqueID().toString();
+		}
+		StringRef randomKeyRef1 = StringRef(randomKey1);
+		StringRef randomKeyRef2 = StringRef(randomKey2);
+
+		StringRef firstKey = randomKeyRef1 < randomKeyRef2 ? randomKeyRef1 : randomKeyRef2;
+		StringRef lastKey = randomKeyRef1 < randomKeyRef2 ? randomKeyRef2 : randomKeyRef1;
+		KeyRange range = Standalone(KeyRangeRef(firstKey, lastKey.withSuffix("\xff"_sr)));
+		std::string folderName = getStringWithFixedLength(index, 6);
+		std::string folder = joinPath(rootPath, folderName);
+
+		BulkLoadTaskTestUnit taskUnit;
+		taskUnit.data.push_back(Standalone(KeyValueRef(firstKey, firstKey)));
+		std::set<std::string> middleKeys;
+		for (int i = 0; i < 20; i++) {
+			middleKeys.insert(deterministicRandom()->randomUniqueID().toString());
+		}
+		for (const auto& middleKey : middleKeys) {
+			Key key = firstKey.withSuffix(middleKey);
+			taskUnit.data.push_back(Standalone(KeyValueRef(key, key)));
+		}
+		taskUnit.data.push_back(Standalone(KeyValueRef(lastKey, lastKey)));
+
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
+		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
+		self->produceFilesToLoad(taskUnit);
+		return taskUnit;
+	}
+
+	ACTOR Future<Void> complexTest(BulkLoading* self, Database cx) {
+		int oldDDMode = wait(setDDMode(cx, 1));
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
+		int old1 = wait(setBulkLoadMode(cx, 1));
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
+
+		state KeyRangeMap<Optional<BulkLoadTaskTestUnit>> taskMap;
+		taskMap.insert(allKeys, Optional<BulkLoadTaskTestUnit>());
+		state int i = 0;
+		state int n = deterministicRandom()->randomInt(5, 10);
+		state int frequencyFactorForWaitAll = std::max(2, (int)(n * deterministicRandom()->random01()));
+		state int frequencyFactorForSwitchMode = std::max(2, (int)(n * deterministicRandom()->random01()));
+		try {
+			for (; i < n; i++) {
+				state BulkLoadTaskTestUnit taskUnit =
+				    self->produceRandomBulkLoadTaskUnit(self, simulationBulkLoadFolderForComplexTest, i);
+				taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
+				if (deterministicRandom()->coinflip()) {
+					wait(delay(deterministicRandom()->random01() * 10));
+				}
+				wait(self->issueBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
+				if (i % frequencyFactorForWaitAll == 0 && deterministicRandom()->coinflip()) {
+					wait(self->waitUntilAllComplete(self, cx));
+				}
+				if (i % frequencyFactorForSwitchMode == 0 && deterministicRandom()->coinflip()) {
+					int old2 = wait(setBulkLoadMode(cx, 0));
+					TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
+					wait(delay(deterministicRandom()->random01() * 5));
+					int old3 = wait(setBulkLoadMode(cx, 1));
+					TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old3).detail("NewMode", 1);
+				}
+			}
+			wait(self->waitUntilAllComplete(self, cx));
+			int old4 = wait(setBulkLoadMode(cx, 0)); // trigger DD restart
+			TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old4).detail("NewMode", 0);
+
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				// Throw this error only when DD mode is set off
+				TraceEvent("BulkLoadingWorkLoadComplexTestEarlyComplete");
+				return Void();
+			}
+		}
+
+		state std::vector<KeyValue> kvs;
+		for (auto& range : taskMap.ranges()) {
+			if (!range.value().present()) {
+				continue;
+			}
+			if (range.value().get().bulkLoadTask.getRange() != range.range()) {
+				continue; // outdated
+			}
+			std::vector<KeyValue> kvsToCheck = range.value().get().data;
+			kvs.insert(std::end(kvs), std::begin(kvsToCheck), std::end(kvsToCheck));
+		}
+		wait(self->checkData(cx, kvs));
+
+		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
+		return Void();
+	}
+
+	void produceLargeDataToLoad(BulkLoadTaskTestUnit task, int count) {
+		std::string folder = task.bulkLoadTask.getFolder();
+		platform::eraseDirectoryRecursive(folder);
+		ASSERT(platform::createDirectory(folder));
+		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
+		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
+
+		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+		sstWriter->open(abspath(dataFile));
+		std::vector<KeyValue> bytesSample;
+		int insertedKeyCount = 0;
+		for (int i = 0; i < 10; i++) {
+			std::string idxStr = std::to_string(i);
+			Key prefix = Standalone(StringRef(idxStr)).withPrefix(task.bulkLoadTask.getRange().begin);
+			std::vector<KeyValue> kvs = generateSortedKVS(prefix, std::max(count / 10, 1));
+			for (const auto& kv : kvs) {
+				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
+				if (sampleInfo.inSample) {
+					Key sampleKey = kv.key;
+					Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
+					bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
+				}
+				sstWriter->write(kv.key, kv.value);
+				insertedKeyCount++;
+			}
+		}
+		TraceEvent("BulkLoadingDataProduced")
+		    .detail("LoadKeyCount", insertedKeyCount)
+		    .detail("BytesSampleSize", bytesSample.size())
+		    .detail("Folder", folder)
+		    .detail("DataFile", dataFile)
+		    .detail("BytesSampleFile", bytesSampleFile);
+		ASSERT(sstWriter->finish());
+
+		if (bytesSample.size() > 0) {
+			sstWriter->open(abspath(bytesSampleFile));
+			for (const auto& kv : bytesSample) {
+				sstWriter->write(kv.key, kv.value);
+			}
+			TraceEvent("BulkLoadingByteSampleProduced")
+			    .detail("LoadKeyCount", task.data.size())
+			    .detail("BytesSampleSize", bytesSample.size())
+			    .detail("Folder", folder)
+			    .detail("DataFile", dataFile)
+			    .detail("BytesSampleFile", bytesSampleFile);
+			ASSERT(sstWriter->finish());
+		}
+	}
+
+	void produceDataSet(BulkLoading* self, KeyRange range, std::string folderName) {
+		std::string dataFileName = generateRandomBulkLoadDataFileName();
+		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
+		std::string folder = joinPath(simulationBulkLoadFolderForLargeDataProduce, folderName);
+		BulkLoadTaskTestUnit taskUnit;
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFileName, bytesSampleFileName);
+		self->produceLargeDataToLoad(taskUnit, 5000000);
+		return;
+	}
+
 	void produceLargeData(BulkLoading* self, Database cx) {
 		std::string folderName1 = "1";
 		KeyRange range1 = Standalone(KeyRangeRef("1"_sr, "2"_sr));
@@ -473,10 +585,17 @@ struct BulkLoading : TestWorkload {
 		if (g_network->isSimulated()) {
 			// Network partition between CC and DD can cause DD no longer existing,
 			// which results in the bulk loading task cannot complete
+			// So, this workload disable the network partition
 			disableConnectionFailures("BulkLoading");
 		}
 
-		wait(self->simpleTest(self, cx));
+		if (deterministicRandom()->coinflip()) {
+			// Inject data to three non-overlapping ranges
+			wait(self->simpleTest(self, cx));
+		} else {
+			// Inject data to many ranges and those ranges can be overlapping
+			wait(self->complexTest(self, cx));
+		}
 		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
 
 		return Void();

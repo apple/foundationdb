@@ -47,7 +47,7 @@ std::string generateRandomBulkLoadDataFileName();
 
 std::string generateRandomBulkLoadBytesSampleFileName();
 
-ACTOR Future<Optional<BulkLoadState>> getBulkLoadState(Database cx, UID dataMoveId, UID logId);
+ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, UID dataMoveId, UID logId);
 
 ACTOR Future<BulkLoadState> updateBulkLoadTaskPhase(Transaction* tr, KeyRange range, UID taskId, BulkLoadPhase phase);
 

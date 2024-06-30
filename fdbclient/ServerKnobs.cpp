@@ -367,7 +367,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
 	
 	// BulkLoading
-	init( DD_BULKLOAD_FINISH_MOVE_SHARD_RETRY_MAX,                50 );
 	init( BULKLOAD_FILE_BYTES_MAX,                  1*1024*1024*1024 ); // 1GB
 	init( DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC,          10.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC = 5.0;
 

@@ -9601,20 +9601,14 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	wait(data->coreStarted.getFuture() && data->durableVersion.whenAtLeast(moveInShard->meta->createVersion + 1));
 	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
+
 	state Optional<BulkLoadState> bulkLoadState; // TODO(Zhe): avoid check this all time
-	wait(store(bulkLoadState, getBulkLoadState(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
+	wait(store(bulkLoadState, getBulkLoadStateFromDataMove(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
 	if (bulkLoadState.present()) {
-		if (bulkLoadState.get().dataMoveId != moveInShard->dataMoveId()) {
-			// unexpected error
-			TraceEvent(SevError, "FetchShardBeginReceivedBulkLoadTaskMoveIdMismatch", data->thisServerID)
-			    .detail("MoveInShard", moveInShard->toString())
-			    .detail("BulkLoadTask", bulkLoadState.get().toString());
-			moveInShard->setPhase(MoveInPhase::Cancel);
-		} else {
-			TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
-			    .detail("MoveInShard", moveInShard->toString())
-			    .detail("BulkLoadTask", bulkLoadState.get().toString());
-		}
+		ASSERT(bulkLoadState.get().dataMoveId == moveInShard->dataMoveId());
+		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("BulkLoadTask", bulkLoadState.get().toString());
 	}
 
 	loop {
