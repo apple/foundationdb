@@ -1224,6 +1224,21 @@ const KeyRef moveKeysLockWriteKey = "\xff/moveKeysLock/Write"_sr;
 const KeyRef dataDistributionModeKey = "\xff/dataDistributionMode"_sr;
 const UID dataDistributionModeLock = UID(6345, 3425);
 
+// Bulk loading keys
+const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
+const KeyRef bulkLoadPrefix = "\xff/bulkLoad/"_sr;
+
+const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {
+	return ObjectWriter::toValue(bulkLoadState, IncludeVersion());
+}
+
+BulkLoadState decodeBulkLoadState(const ValueRef& value) {
+	BulkLoadState bulkLoadState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkLoadState);
+	return bulkLoadState;
+}
+
 // Keys to view and control tag throttling
 const KeyRangeRef tagThrottleKeys = KeyRangeRef("\xff\x02/throttledTags/tag/"_sr, "\xff\x02/throttledTags/tag0"_sr);
 const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;
