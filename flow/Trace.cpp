@@ -897,7 +897,7 @@ BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 	type = ev.type;
 	timeIndex = ev.timeIndex;
 
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < NUM_MAJOR_LEVELS_OF_EVENTS; i++) {
 		eventCounts[i] = ev.eventCounts[i];
 	}
 
@@ -925,7 +925,7 @@ BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 	type = ev.type;
 	timeIndex = ev.timeIndex;
 
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < NUM_MAJOR_LEVELS_OF_EVENTS; i++) {
 		eventCounts[i] = ev.eventCounts[i];
 	}
 
@@ -1014,8 +1014,6 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 
 	if (g_network && severity < FLOW_KNOBS->MIN_TRACE_SEVERITY)
 		enabled = BaseTraceEvent::State::disabled();
-
-	std::string_view typeSv(type);
 
 	// Backstop to throttle very spammy trace events
 	if (enabled.isSuppressible() && g_network && !g_network->isSimulated() && severity > SevDebug &&
