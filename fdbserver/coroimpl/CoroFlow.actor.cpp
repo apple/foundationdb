@@ -19,16 +19,20 @@
  */
 
 #include "fdbserver/CoroFlow.h"
-#include "flow/ActorCollection.h"
-#include "flow/TDMetric.actor.h"
-#include "fdbrpc/simulator.h"
-#include "fdbrpc/SimulatorProcessInfo.h"
+
+#include <functional>
+
 #include <boost/coroutine2/all.hpp>
 #include <boost/coroutine2/coroutine.hpp>
-#include <functional>
+
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
+#include "flow/ActorCollection.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "fdbrpc/SimulatorProcessInfo.h"
+#include "flow/TDMetric.actor.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 using coro_t = boost::coroutines2::coroutine<Future<Void>>;
