@@ -126,7 +126,7 @@ namespace actorcompiler
         public int End { get { return endPos; } }
         public Token First() {
             if (beginPos == endPos) throw new InvalidOperationException("Empty TokenRange");
-            return tokens[beginPos]; 
+            return tokens[beginPos];
         }
         public Token Last() {
             if (beginPos == endPos) throw new InvalidOperationException("Empty TokenRange");
@@ -339,7 +339,7 @@ namespace actorcompiler
                 {
                     throw new Exception("Internal error: Invalid source line (0)");
                 }
-                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "SWIFT_ACTOR" || tokens[i].Value == "TEST_CASE")
+                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "TEST_CASE")
                 {
                     var actor = ParseActor(i, out int end);
                     if (classContextStack.Count > 0)
@@ -457,9 +457,9 @@ namespace actorcompiler
         }
 
         void ParseDeclaration(TokenRange tokens,
-            out Token name, 
+            out Token name,
             out TokenRange type,
-            out TokenRange initializer, 
+            out TokenRange initializer,
             out bool constructorSyntax)
         {
             initializer = null;
@@ -483,7 +483,7 @@ namespace actorcompiler
                     // type name(initializer);
                     constructorSyntax = true;
                     beforeInitializer = range(tokens.Begin, paren.Position);
-                    initializer = 
+                    initializer =
                         range(paren.Position + 1, tokens.End)
                             .TakeWhile(t => t.ParenDepth > paren.ParenDepth);
                 } else {
@@ -602,7 +602,7 @@ namespace actorcompiler
 
             // Find the parameter list
             TokenRange paramRange = toks.Last(NonWhitespace)
-                .Assert("Unexpected tokens after actor parameter list.", 
+                .Assert("Unexpected tokens after actor parameter list.",
                         t => t.Value == ")" && t.ParenDepth == toks.First().ParenDepth)
                 .GetMatchingRangeIn(toks);
             actor.parameters = SplitParameterList(paramRange, ",")
@@ -660,7 +660,7 @@ namespace actorcompiler
 
         LoopStatement ParseLoopStatement(TokenRange toks)
         {
-            return new LoopStatement { 
+            return new LoopStatement {
                 body = ParseCompoundStatement( toks.Consume("loop") )
             };
         }
@@ -691,7 +691,7 @@ namespace actorcompiler
         StateDeclarationStatement ParseStateDeclaration(TokenRange toks)
         {
             toks = toks.Consume("state").RevSkipWhile(t => t.Value == ";");
-            return new StateDeclarationStatement { 
+            return new StateDeclarationStatement {
                 decl = ParseVarDeclaration(toks)
             };
         }
@@ -756,7 +756,7 @@ namespace actorcompiler
             if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration or standalone statement");
 
             var waitParams = initializer
-                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.1", 
+                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.1",
                         t=> {
                             if (t.Value=="wait") return true;
                             if (t.Value=="waitNext") { ws.isWaitNext = true; return true; }
@@ -787,13 +787,13 @@ namespace actorcompiler
 
         Statement ParseForStatement(TokenRange toks)
         {
-            var head = 
+            var head =
                 toks.Consume("for")
                     .First(NonWhitespace)
                     .Assert("Expected (", t => t.Value == "(")
                     .GetMatchingRangeIn(toks);
 
-            Token[] delim = 
+            Token[] delim =
                 head.Where(
                     t => t.ParenDepth == head.First().ParenDepth &&
                          t.BraceDepth == head.First().BraceDepth &&
@@ -1002,7 +1002,7 @@ namespace actorcompiler
             while (true)
             {
                 Token delim = toks
-                    .FirstOrDefault( 
+                    .FirstOrDefault(
                         t=> t.ParenDepth == toks.First().ParenDepth &&
                             t.BraceDepth == toks.First().BraceDepth &&
                             (t.Value==";" || t.Value == "}")
@@ -1048,7 +1048,7 @@ namespace actorcompiler
             actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
             if (actor.isForwardDeclaration) {
                 heading = toSemicolon;
-                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR") {
+                if (head_token.Value == "ACTOR") {
                     ParseActorHeading(actor, heading);
                 } else {
                     head_token.Assert("ACTOR expected!", t => false);
@@ -1058,7 +1058,7 @@ namespace actorcompiler
                 var body = range(heading.End+1, tokens.Length)
                     .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR")
+                if (head_token.Value == "ACTOR")
                 {
                     ParseActorHeading(actor, heading);
                 }

@@ -26,10 +26,6 @@
 
 #include "flow/Traceable.h"
 #include "flow/FileIdentifier.h"
-#include "flow/swift_support.h"
-#ifdef WITH_SWIFT
-#include <swift/bridging>
-#endif
 
 class Arena;
 class Void;
@@ -47,11 +43,7 @@ class Void;
 //    assertion failures are preferable. This is the main reason we
 //    don't intend to use std::optional directly.
 template <class T>
-class
-#ifdef WITH_SWIFT
-    SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowOptionalProtocol)
-#endif
-        Optional : public ComposedIdentifier<T, 4> {
+class Optional : public ComposedIdentifier<T, 4> {
 public:
 	using ValueType = T;
 	using Wrapped = T;

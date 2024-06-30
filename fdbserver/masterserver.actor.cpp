@@ -30,13 +30,8 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
-#include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/MasterData.actor.h"
-
-#ifdef WITH_SWIFT
-#include "SwiftModules/FDBServer"
-#endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -71,17 +66,6 @@ Version figureVersionCxx(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-#ifdef WITH_SWIFT
-Version figureVersion(Version current,
-                      double now,
-                      Version reference,
-                      int64_t toAdd,
-                      double maxVersionRateModifier,
-                      int64_t maxVersionRateOffset) {
-	auto impl = SERVER_KNOBS->FLOW_WITH_SWIFT ? fdbserver_swift::figureVersion : figureVersionCxx;
-	return impl(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
-}
-#else
 Version figureVersion(Version current,
                       double now,
                       Version reference,
@@ -90,26 +74,7 @@ Version figureVersion(Version current,
                       int64_t maxVersionRateOffset) {
 	return figureVersionCxx(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
 }
-#endif
 
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
-		wait(future);
-	} else {
-		state double startTime = now();
-		wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
-		double latency = now() - startTime;
-		self->waitForPrevLatencies->addMeasurement(latency);
-		++self->waitForPrevCommitRequests;
-		updateLiveCommittedVersion(self, req);
-		req.reply.send(Void());
-	}
-
-	return Void();
-}
-#else
 ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	state double startTime = now();
 	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
@@ -120,15 +85,6 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 
 	return Void();
 }
-#endif
-
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
-	auto future = self->swiftImpl->getVersion(self.getPtr(), req);
-	wait(future);
-	return Void();
-}
-#endif
 
 ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
@@ -217,22 +173,10 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 	return Void();
 }
 
-#ifdef WITH_SWIFT
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(getVersionSwift(self, req));
-		return Void();
-	} else {
-		wait(getVersionCxx(self, req));
-		return Void();
-	}
-}
-#else
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	wait(getVersionCxx(self, req));
 	return Void();
 }
-#endif
 
 CounterValue::CounterValue(std::string const& name, CounterCollection& collection)
   : value(std::make_shared<Counter>(name, collection)) {}
@@ -286,19 +230,7 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 		                                                       SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                                       SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 	}
-
-#ifdef WITH_SWIFT
-	using namespace fdbserver_swift;
-	// FIXME(swift): can we make a cleaner init?
-	swiftImpl.reset(new MasterDataActor((const MasterDataActor&)MasterDataActor::init()));
-#endif
 }
-
-#ifdef WITH_SWIFT
-void MasterData::setSwiftImpl(fdbserver_swift::MasterDataActor* impl) {
-	swiftImpl.reset(impl);
-}
-#endif
 
 MasterData::~MasterData() {}
 
@@ -313,36 +245,10 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> provideVersionsSwift(Reference<MasterData> self) {
-	auto future = self->swiftImpl->provideVersions(self.getPtr());
-	wait(future);
-	return Void();
-}
-#endif
-
-#ifdef WITH_SWIFT
-ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(provideVersionsSwift(self));
-	} else {
-		wait(provideVersionsCxx(self));
-	}
-
-	return Void();
-}
-#else
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	wait(provideVersionsCxx(self));
 	return Void();
 }
-#endif
-
-#ifdef WITH_SWIFT
-void updateLiveCommittedVersionSwift(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	fdbserver_swift::updateLiveCommittedVersion(self.getPtr(), req);
-}
-#endif
 
 void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
@@ -368,27 +274,9 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 	++self->reportLiveCommittedVersionRequests;
 }
 
-#ifdef WITH_SWIFT
-void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		return updateLiveCommittedVersionSwift(self, req);
-	} else {
-		return updateLiveCommittedVersionCxx(self, req);
-	}
-}
-#else
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	return updateLiveCommittedVersionCxx(self, req);
 }
-#endif
-
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> serveLiveCommittedVersionSwift(Reference<MasterData> self) {
-	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
-	wait(future);
-	return Void();
-}
-#endif
 
 ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 	loop {
@@ -430,29 +318,10 @@ ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 	}
 }
 
-#ifdef WITH_SWIFT
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(serveLiveCommittedVersionSwift(self));
-	} else {
-		wait(serveLiveCommittedVersionCxx(self));
-	}
-	return Void();
-}
-#else
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	wait(serveLiveCommittedVersionCxx(self));
 	return Void();
 }
-#endif
-
-#ifdef WITH_SWIFT
-SWIFT_ACTOR Future<Void> updateRecoveryDataSwift(Reference<MasterData> self) {
-	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
-	wait(future);
-	return Void();
-}
-#endif
 
 ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 	loop {
@@ -496,21 +365,10 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 	}
 }
 
-#ifdef WITH_SWIFT
-ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		wait(updateRecoveryDataSwift(self));
-	} else {
-		wait(updateRecoveryDataCxx(self));
-	}
-	return Void();
-}
-#else
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	wait(updateRecoveryDataCxx(self));
 	return Void();
 }
-#endif
 
 static std::set<int> const& normalMasterErrors() {
 	static std::set<int> s;
@@ -619,36 +477,6 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 	}
 }
 
-#ifdef WITH_SWIFT
-ACTOR Future<Void> masterServerImpl(MasterInterface mi,
-                                    Reference<AsyncVar<ServerDBInfo> const> db,
-                                    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                    ServerCoordinators coordinators,
-                                    LifetimeToken lifetime,
-                                    bool forceRecovery) {
-	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-		auto promise = Promise<Void>();
-		state PromiseStream<Future<Void>> addActor;
-		state Reference<MasterData> self(
-		    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
-		fdbserver_swift::masterServerSwift(
-		    mi,
-		    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
-		    const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
-		    coordinators,
-		    lifetime,
-		    forceRecovery,
-		    self.getPtr(),
-		    /*result=*/promise);
-		Future<Void> f = promise.getFuture();
-		wait(f);
-		return Void();
-	} else {
-		wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-		return Void();
-	}
-}
-#else
 ACTOR Future<Void> masterServerImpl(MasterInterface mi,
                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -658,7 +486,6 @@ ACTOR Future<Void> masterServerImpl(MasterInterface mi,
 	wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
 	return Void();
 }
-#endif
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,

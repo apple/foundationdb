@@ -24,7 +24,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/swift_support.h"
 #include <queue>
 
 template <class T>
