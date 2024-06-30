@@ -86,15 +86,6 @@ _java_cmd = "java -ea -cp %s:%s com.apple.foundationdb.test." % (
 testers = {
     "python": Tester(
         "python",
-        "python " + _absolute_path("python/tests/tester.py"),
-        2040,
-        23,
-        MAX_API_VERSION,
-        types=ALL_TYPES,
-        tenants_enabled=True,
-    ),
-    "python3": Tester(
-        "python3",
         "python3 " + _absolute_path("python/tests/tester.py"),
         2040,
         23,

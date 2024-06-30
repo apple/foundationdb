@@ -25,7 +25,6 @@ import struct
 import threading
 
 from fdb import impl as _impl
-from fdb import six
 import fdb.tuple
 from .subspace_impl import Subspace
 
@@ -35,7 +34,7 @@ class AllocatorTransactionState:
         self.lock = threading.Lock()
 
 
-class HighContentionAllocator(object):
+class HighContentionAllocator:
     def __init__(self, subspace):
         self.counters = subspace[0]
         self.recent = subspace[1]
@@ -131,7 +130,7 @@ class HighContentionAllocator(object):
         return 8192
 
 
-class Directory(object):
+class Directory:
     def __init__(self, directory_layer, path=(), layer=b""):
         self._directory_layer = directory_layer
         self._path = path
@@ -613,17 +612,17 @@ class DirectoryLayer(Directory):
 
 def _to_unicode_path(path):
     if isinstance(path, bytes):
-        path = six.text_type(path)
+        path = path.decode()
 
-    if isinstance(path, six.text_type):
+    if isinstance(path, str):
         return (path,)
 
     if isinstance(path, tuple):
         path = list(path)
         for i, name in enumerate(path):
             if isinstance(name, bytes):
-                path[i] = six.text_type(path[i])
-            elif not isinstance(name, six.text_type):
+                path[i] = path[i].decode()
+            elif not isinstance(name, str):
                 raise ValueError(
                     "Invalid path: must be a unicode string or a tuple of unicode strings"
                 )
