@@ -10136,15 +10136,14 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				} else {
 					ASSERT(shard->adding != nullptr || shard->moveInShard != nullptr);
 					if (shard->desiredShardId != desiredId) {
-						TraceEvent(SevError, "CSKConflictingMoveInShards", data->thisServerID)
+						TraceEvent(SevWarnAlways, "CSKConflictingMoveInShards", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
 						    .detailf("TargetShard", "%016llx", desiredId)
 						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
 						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
-						// TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
-						ASSERT(false);
+						throw data_move_conflict();
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
