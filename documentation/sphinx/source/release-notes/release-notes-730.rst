@@ -130,6 +130,27 @@ Release Notes
 * Fixed perpetual wiggle locality match regex. `(PR#10973) <https://github.com/apple/foundationdb/pull/10973>`_
 * Added a knob to throttle perpetual wiggle data move. `(PR#10957) <https://github.com/apple/foundationdb/pull/10957>`_
 
+7.3.23
+======
+* Same as 7.3.22 release with AVX enabled.
+
+7.3.22
+======
+* No code change, only version bumped.
+
+7.3.21
+======
+* Same as 7.3.20 release with AVX enabled.
+
+7.3.20
+======
+* Wiggling data moves are now throttled. `(PR #10953) <https://github.com/apple/foundationdb/pull/10953>`_ `(PR #10957) <<https://github.com/apple/foundationdb/pull/10957>`_
+* AdutiStorage will check all DC replicas. `(PR #10955) <https://github.com/apple/foundationdb/pull/10955>`_ `(PR #10966) <<https://github.com/apple/foundationdb/pull/10966>`_
+* Large shards are now allowed. `(PR #10961) <https://github.com/apple/foundationdb/pull/10961>`_ `(PR #10965) <https://github.com/apple/foundationdb/pull/10965>`_ 
+* Fixed bugs for locality-based exclusion. `(PR #10623) <https://github.com/apple/foundationdb/pull/10623>`_
+* Fixed various memory-related bugs. `(PR #10952) <https://github.com/apple/foundationdb/pull/10952>`_ `(PR #10969) <https://github.com/apple/foundationdb/pull/10969>`_ 
+* Fixed perpetual wiggling locality match regex. `(PR #10967) <https://github.com/apple/foundationdb/pull/10967>`_ 
+
 7.3.19
 ======
 * Same as 7.3.18 release with AVX enabled.
