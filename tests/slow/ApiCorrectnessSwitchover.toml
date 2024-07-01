@@ -5,6 +5,13 @@ tenantModes = ['disabled', 'optional']
 storageEngineExcludeTypes = [5]
 
 [[test]]
+testTitle = 'Cached'
+
+    [[test.workload]]
+    testName = 'Cache'
+    keyPrefix = 'apiworkload/cached/' # Partial KeyRange caching in storageCache
+
+[[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = false
 simBackupAgents = 'BackupToDB'

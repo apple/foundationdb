@@ -9,6 +9,13 @@ rocksdb_read_value_prefix_timeout=300.0
 rocksdb_read_range_timeout=300.0
 
 [[test]]
+testTitle = 'Cached'
+
+    [[test.workload]]
+    testName = 'Cache'
+    keyPrefix = 'apiworkload/cached/' # Partial KeyRange caching in storageCache
+
+[[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
