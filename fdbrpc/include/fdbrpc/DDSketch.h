@@ -91,7 +91,7 @@ public:
 		if (sample <= EPS) {
 			zeroPopulationSize++;
 		} else {
-			size_t index = static_cast<Impl*>(this)->getIndex(sample);
+			int index = static_cast<Impl*>(this)->getIndex(sample);
 			ASSERT(index >= 0 && index < buckets.size());
 			try {
 				buckets.at(index)++;
@@ -210,7 +210,10 @@ protected:
 	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
 	std::vector<uint32_t> buckets;
 	T minValue, maxValue, sum;
-	void setBucketSize(size_t capacity) { buckets.resize(capacity, 0); }
+	void setBucketSize(int capacity) {
+		ASSERT_WE_THINK(capacity > 0);
+		buckets.resize(capacity, 0);
+	}
 };
 
 // DDSketch with fast log implementation for float numbers
@@ -226,19 +229,16 @@ public:
 		this->setBucketSize(2 * offset);
 	}
 
-	size_t getIndex(T sample) {
+	int getIndex(T sample) {
 		static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 		return ceil(fastLogger::fastlog(sample) * multiplier) + offset;
 	}
 
-	T getValue(size_t index) {
-		return fastLogger::reverseLog((static_cast<double>(index) - static_cast<double>(offset)) / multiplier) * 2.0 /
-		       (1 + gamma);
-	}
+	T getValue(int index) { return fastLogger::reverseLog((index - offset) / multiplier) * 2.0 / (1 + gamma); }
 
 private:
 	double gamma, multiplier;
-	size_t offset = 0;
+	int offset = 0;
 };
 
 // DDSketch with <cmath> log. Slow and only use this when others doesn't work.
@@ -252,15 +252,13 @@ public:
 		this->setBucketSize(2 * offset);
 	}
 
-	size_t getIndex(T sample) { return ceil(log(sample) / logGamma) + offset; }
+	int getIndex(T sample) { return ceil(log(sample) / logGamma) + offset; }
 
-	T getValue(size_t index) {
-		return (T)(2.0 * pow(gamma, (static_cast<double>(index) - static_cast<double>(offset))) / (1 + gamma));
-	}
+	T getValue(int index) { return (T)(2.0 * pow(gamma, (index - offset)) / (1 + gamma)); }
 
 private:
 	double gamma, logGamma;
-	size_t offset = 0;
+	int offset = 0;
 };
 
 // DDSketch for unsigned int. Faster than the float version. Fixed accuracy.
