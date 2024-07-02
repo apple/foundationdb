@@ -199,6 +199,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeConfig.actor.cpp
   workloads/ChangeFeeds.actor.cpp
   workloads/ClearSingleRange.actor.cpp
+  workloads/ClientMetric.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/ClogSingleConnection.actor.cpp
   workloads/ClogTlog.actor.cpp
