@@ -52,6 +52,10 @@ struct BulkLoadState {
 
 	BulkLoadState() = default;
 
+	// for acknowledging a completed task, where only taskId and range are used
+	BulkLoadState(UID taskId, KeyRange range) : taskId(taskId), range(range) {}
+
+	// for submitting a task
 	BulkLoadState(UID taskId,
 	              KeyRange range,
 	              BulkLoadType loadType,
@@ -189,18 +193,32 @@ BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
                                       std::string dataFile,
                                       std::string bytesSampleFile);
 
+enum class TriggerBulkLoadRequestType : uint8_t {
+	Invalid = 0,
+	New = 1,
+	Acknowledge = 2,
+};
+
 struct TriggerBulkLoadRequest {
 	constexpr static FileIdentifier file_identifier = 1384500;
 
 	TriggerBulkLoadRequest() = default;
-	TriggerBulkLoadRequest(BulkLoadState bulkLoadTask) : bulkLoadTask(bulkLoadTask) {}
+	TriggerBulkLoadRequest(BulkLoadState bulkLoadTask, TriggerBulkLoadRequestType type)
+	  : bulkLoadTask(bulkLoadTask), type(type) {}
+
+	std::string toString() const {
+		return "TriggerBulkLoadRequest: [BulkLoadState]: " + bulkLoadTask.toString() +
+		       ", [Type]: " + std::to_string(static_cast<uint8_t>(type));
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bulkLoadTask, reply);
+		serializer(ar, bulkLoadTask, type, reply);
 	}
 
 	BulkLoadState bulkLoadTask;
+	TriggerBulkLoadRequestType type;
+
 	ReplyPromise<Void> reply;
 };
 

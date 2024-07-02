@@ -87,18 +87,29 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	ACTOR Future<Void> issueBulkLoadTasksFdbcli(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+	ACTOR Future<Void> issueBulkLoadTasksFdbcli(BulkLoading* self,
+	                                            Database cx,
+	                                            std::vector<BulkLoadState> tasks,
+	                                            TriggerBulkLoadRequestType type) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
 			loop {
 				try {
-					wait(submitBulkLoadTask(cx->getConnectionRecord(), tasks[i], /*timeoutSecond=*/300));
-					TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks[i]));
+					wait(submitBulkLoadTask(cx->getConnectionRecord(), tasks[i], type, /*timeoutSecond=*/300));
+					TraceEvent("BulkLoadingIssueBulkLoadTask")
+					    .detail("BulkLoadStates", describe(tasks[i]))
+					    .detail("RequestType", type);
 					break;
 				} catch (Error& e) {
 					TraceEvent("BulkLoadingIssueBulkLoadTaskError")
 					    .errorUnsuppressed(e)
-					    .detail("BulkLoadStates", describe(tasks));
+					    .detail("BulkLoadStates", describe(tasks))
+					    .detail("RequestType", type);
+					if (type == TriggerBulkLoadRequestType::Acknowledge) {
+						if (e.code() == error_code_bulkload_task_outdated) {
+							break;
+						}
+					}
 					wait(delay(5.0));
 				}
 			}
@@ -131,7 +142,7 @@ struct BulkLoading : TestWorkload {
 		if (deterministicRandom()->coinflip()) {
 			wait(self->issueBulkLoadTasksTr(self, cx, tasks));
 		} else {
-			wait(self->issueBulkLoadTasksFdbcli(self, cx, tasks));
+			wait(self->issueBulkLoadTasksFdbcli(self, cx, tasks, TriggerBulkLoadRequestType::New));
 		}
 		return Void();
 	}
@@ -331,6 +342,43 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
+	ACTOR Future<Void> checkBulkLoadMetadataCleared(BulkLoading* self, Database cx) {
+		state Key beginKey = allKeys.begin;
+		state Key endKey = allKeys.end;
+		state KeyRange rangeToRead;
+		while (beginKey < endKey) {
+			try {
+				state Transaction tr(cx);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+				RangeResult res = wait(krmGetRanges(&tr,
+				                                    bulkLoadPrefix,
+				                                    allKeys,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				beginKey = res.back().key;
+				int emptyCount = 0;
+				int nonEmptyCount = 0;
+				for (int i = 0; i < res.size() - 1; i++) {
+					if (!res[i].value.empty()) {
+						BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
+						KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
+						ASSERT(bulkLoadState.getRange() != currentRange);
+						ASSERT(bulkLoadState.getRange().contains(currentRange));
+						nonEmptyCount++;
+					} else {
+						emptyCount++;
+					}
+				}
+				ASSERT(emptyCount - 1 - 1 <= nonEmptyCount);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
 	// Issue three non-overlapping tasks and check data consistency and correctness
 	// Repeat twice
 	ACTOR Future<Void> simpleTest(BulkLoading* self, Database cx) {
@@ -394,6 +442,8 @@ struct BulkLoading : TestWorkload {
 		for (; j < bulkLoadDataList.size(); j++) {
 			wait(self->checkData(cx, bulkLoadDataList[j]));
 		}
+		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));
+		wait(self->checkBulkLoadMetadataCleared(self, cx));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestComplete");
 		return Void();
 	}
@@ -489,6 +539,7 @@ struct BulkLoading : TestWorkload {
 		}
 
 		state std::vector<KeyValue> kvs;
+		state std::vector<BulkLoadState> bulkLoadStates;
 		for (auto& range : taskMap.ranges()) {
 			if (!range.value().present()) {
 				continue;
@@ -498,9 +549,11 @@ struct BulkLoading : TestWorkload {
 			}
 			std::vector<KeyValue> kvsToCheck = range.value().get().data;
 			kvs.insert(std::end(kvs), std::begin(kvsToCheck), std::end(kvsToCheck));
+			bulkLoadStates.push_back(range.value().get().bulkLoadTask);
 		}
 		wait(self->checkData(cx, kvs));
-
+		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));
+		wait(self->checkBulkLoadMetadataCleared(self, cx));
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
 		return Void();
 	}

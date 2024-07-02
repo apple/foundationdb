@@ -2828,22 +2828,30 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 
 ACTOR Future<Void> submitBulkLoadTask(Reference<IClusterConnectionRecord> clusterFile,
                                       BulkLoadState bulkLoadTask,
+                                      TriggerBulkLoadRequestType type,
                                       double timeoutSeconds) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-	TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTask").detail("BulkLoadTask", bulkLoadTask.toString());
+	TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTask")
+	    .detail("BulkLoadTask", bulkLoadTask.toString())
+	    .detail("TaskType", type);
 	try {
 		while (!clusterInterface->get().present()) {
 			wait(clusterInterface->onChange());
 		}
-		TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTaskBegin").detail("BulkLoadTask", bulkLoadTask.toString());
-		TriggerBulkLoadRequest req(bulkLoadTask);
+		TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTaskBegin")
+		    .detail("BulkLoadTask", bulkLoadTask.toString())
+		    .detail("TaskType", type);
+		TriggerBulkLoadRequest req(bulkLoadTask, type);
 		wait(timeoutError(clusterInterface->get().get().triggerBulkLoad.getReply(req), timeoutSeconds));
-		TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTaskEnd").detail("BulkLoadTask", bulkLoadTask.toString());
+		TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTaskEnd")
+		    .detail("BulkLoadTask", bulkLoadTask.toString())
+		    .detail("TaskType", type);
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "ManagementAPISubmitBulkLoadTaskError")
 		    .errorUnsuppressed(e)
-		    .detail("BulkLoadTask", bulkLoadTask.toString());
+		    .detail("BulkLoadTask", bulkLoadTask.toString())
+		    .detail("TaskType", type);
 		throw e;
 	}
 

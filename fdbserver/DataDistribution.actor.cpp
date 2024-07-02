@@ -1227,6 +1227,7 @@ ACTOR Future<Void> submitBulkLoadTask(Reference<DataDistributor> self, TriggerBu
 	try {
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				req.bulkLoadTask.submitTime = now();
 				wait(krmSetRange(
@@ -1247,6 +1248,37 @@ ACTOR Future<Void> submitBulkLoadTask(Reference<DataDistributor> self, TriggerBu
 		TraceEvent(SevWarn, "DDBulkLoadSubmitTaskReplyError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("BulkLoadState", req.bulkLoadTask.toString());
+		req.reply.sendError(e);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> acknowledgeBulkLoadTask(Reference<DataDistributor> self, TriggerBulkLoadRequest req) {
+	state Database cx = self->txnProcessor->context();
+	state Transaction tr(cx);
+	try {
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(eraseBulkLoadTaskIfComplete(&tr, req.bulkLoadTask.getRange(), req.bulkLoadTask.getTaskId()));
+				wait(tr.commit());
+				TraceEvent(SevInfo, "DDBulkLoadAcknowledgeTaskReply", self->ddId)
+				    .detail("BulkLoadRequest", req.toString());
+				req.reply.send(Void());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevWarn, "DDBulkLoadAcknowledgeTaskReplyError", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("BulkLoadRequest", req.toString());
+		req.reply.sendError(e);
 	}
 	return Void();
 }
@@ -3755,7 +3787,13 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 				actors.add(auditStorage(self, req));
 			}
 			when(TriggerBulkLoadRequest req = waitNext(di.triggerBulkLoad.getFuture())) {
-				actors.add(submitBulkLoadTask(self, req));
+				if (req.type == TriggerBulkLoadRequestType::New) {
+					actors.add(submitBulkLoadTask(self, req));
+				} else if (req.type == TriggerBulkLoadRequestType::Acknowledge) {
+					actors.add(acknowledgeBulkLoadTask(self, req));
+				} else {
+					UNREACHABLE();
+				}
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));

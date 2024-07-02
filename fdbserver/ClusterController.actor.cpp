@@ -2200,12 +2200,12 @@ ACTOR Future<Void> submitBulkLoadTask(ClusterControllerData* self, TriggerBulkLo
 			wait(self->db.serverInfo->onChange());
 		}
 		TraceEvent(SevVerbose, "CCSubmitBulkLoadTaskBegin", self->id)
-		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
+		    .detail("BulkLoadRequest", req.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
-		TriggerBulkLoadRequest fReq(req.bulkLoadTask);
+		TriggerBulkLoadRequest fReq(req.bulkLoadTask, req.type);
 		wait(self->db.serverInfo->get().distributor.get().triggerBulkLoad.getReply(fReq));
 		TraceEvent(SevVerbose, "CCSubmitBulkLoadTaskEnd", self->id)
-		    .detail("BulkLoadRequest", req.bulkLoadTask.toString())
+		    .detail("BulkLoadRequest", req.toString())
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
 		req.reply.send(Void());
 	} catch (Error& e) {
@@ -2213,7 +2213,11 @@ ACTOR Future<Void> submitBulkLoadTask(ClusterControllerData* self, TriggerBulkLo
 			throw e;
 		}
 		TraceEvent(SevInfo, "CCSubmitBulkLoadTaskFailed", self->id).errorUnsuppressed(e);
-		req.reply.sendError(bulkload_task_failed());
+		if (e.code() == error_code_bulkload_task_outdated) {
+			req.reply.sendError(bulkload_task_outdated());
+		} else {
+			req.reply.sendError(bulkload_task_failed());
+		}
 	}
 
 	return Void();
@@ -2224,7 +2228,7 @@ ACTOR Future<Void> handleBulkLoadRequest(ClusterControllerData* self, ClusterCon
 		TriggerBulkLoadRequest req = waitNext(interf.clientInterface.triggerBulkLoad.getFuture());
 		TraceEvent(SevVerbose, "CCBulkLoadTaskRequestReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
-		    .detail("Task", req.bulkLoadTask.toString());
+		    .detail("BulkLoadRequest", req.toString());
 		self->addActor.send(submitBulkLoadTask(self, req));
 	}
 }

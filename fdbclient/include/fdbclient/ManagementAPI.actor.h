@@ -172,6 +172,7 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 
 ACTOR Future<Void> submitBulkLoadTask(Reference<IClusterConnectionRecord> clusterFile,
                                       BulkLoadState bulkLoadTask,
+                                      TriggerBulkLoadRequestType type,
                                       double timeoutSeconds);
 
 ACTOR Future<Void> printHealthyZone(Database cx);

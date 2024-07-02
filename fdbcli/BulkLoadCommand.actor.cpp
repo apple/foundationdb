@@ -53,6 +53,23 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 
+	} else if (tokencmp(tokens[1], "acknowledge")) {
+		if (tokens.size() != 5) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		state UID taskId = UID::fromString(tokens[2].toString());
+		Key rangeBegin = tokens[3];
+		Key rangeEnd = tokens[4];
+		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		wait(submitBulkLoadTask(
+		    clusterFile, BulkLoadState(taskId, range), TriggerBulkLoadRequestType::Acknowledge, /*timeoutSeconds=*/60));
+		return taskId;
+
 	} else if (tokencmp(tokens[1], "local")) {
 		// Generate spec of bulk loading local files
 		if (tokens.size() < 7) {
@@ -70,7 +87,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		std::string byteSampleFile = tokens[6].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
-		wait(submitBulkLoadTask(clusterFile, bulkLoadTask, /*timeoutSeconds=*/60));
+		wait(submitBulkLoadTask(clusterFile, bulkLoadTask, TriggerBulkLoadRequestType::New, /*timeoutSeconds=*/60));
 		return bulkLoadTask.getTaskId();
 
 	} else {
@@ -81,7 +98,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp("bulkload <mode|local> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
+    CommandHelp("bulkload <mode|acknowledge|local> [BeginKey EndKey] <Folder> <DataFile> <ByteSampleFile>",
                 "Start a bulk load task",
                 "Start a bulk load task"));
 } // namespace fdb_cli
