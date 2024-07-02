@@ -171,8 +171,40 @@ struct ClientMetricWorkload : TestWorkload {
 			TraceEvent(SevError, "ClientMetricErrorWhenWriteKeys").error(e);
 			throw;
 		}
-		std::cerr << "writeRandomKeys finish, written=" << cnt << std::endl;
+		std::cout << "writeRandomKeys finish, written=" << cnt << std::endl;
 		return Void();
+	}
+
+	ACTOR Future<uint64_t> writeKeysAndGetLatencyVersion(Database cx, ClientMetricWorkload* self, int numKeys, int previousVS) {
+		state int retry = 0;
+		state int max_retry = 10;
+		state int keysLimit = 1;
+		loop {
+			if (retry > max_retry) {
+				// this should not happen, it should succeed after a few retry
+				ASSERT(false);
+			}
+			// write random keys to generate some latency metrics
+			wait(self->writeRandomKeys(cx, numKeys));
+			// get the latest latency metric and parse its version stamp
+			RangeResult r = wait(self->latencyRangeQuery(cx, keysLimit, true));
+			if (r.size() == 0) {
+				// latency metrics might not be present due to transaction batching, retry a few times
+				++retry;
+				continue;
+			}
+			ASSERT(r.size() > 0);
+			// [0] is the latest version, as we have reverse = true
+			KeyRef latest = r[0].key;
+			uint64_t vs = getVersionStamp(latest);
+			ASSERT(vs >= previousVS);
+			if (vs == previousVS) {
+				// it means there is no new latency metrics, retry until we see one
+				++retry;
+				continue;
+			}
+			return vs;
+		}
 	}
 
 	// goal:
@@ -183,62 +215,16 @@ struct ClientMetricWorkload : TestWorkload {
 		try {
 			state int initialWrites = deterministicRandom()->randomInt(1, 5);
 			state int secondWrites = deterministicRandom()->randomInt(1, 5);
-			state int keysLimit = 1;
 
-			state int retry1 = 0;
-			state int max_retry1 = 10;
-			loop {
-				if (retry1 > max_retry1) {
-					// this should not happen, it should succeed after a few retry
-					ASSERT(false);
-				}
-				// first write random keys to generate some latency metrics
-				wait(self->writeRandomKeys(cx, initialWrites));
-				// get the latest latency metric and parse its version stamp
-				RangeResult r1 = wait(self->latencyRangeQuery(cx, keysLimit, true));
-				if (r1.size() == 0) {
-					// latency metrics might not be present due to transaction batching, retry a few times
-					++retry1;
-					continue;
-				}
-				ASSERT(r1.size() > 0);
-				// [0] is the latest version, as we have reverse = true
-				KeyRef latest = r1[0].key;
-				state uint64_t vs1 = getVersionStamp(latest);
-				std::cout << "vs1=" << vs1 << std::endl;
-				ASSERT(vs1 > 0);
-				break;
-			}
+			state uint64_t zeroVS = 0;
+			state uint64_t vs1 = wait(self->writeKeysAndGetLatencyVersion(cx, self, initialWrites, zeroVS));
+			std::cout << "vs1=" << vs1 << std::endl;
+			ASSERT(vs1 > zeroVS);
 
-			state int retry2 = 0;
-			state int max_retry2 = 10;
-			loop {
-				if (retry2 > max_retry2) {
-					// this should not happen, it should succeed after a few retry
-					ASSERT(false);
-				}
-				// write another set of random keys to generate more latency metrics
-				wait(self->writeRandomKeys(cx, secondWrites));
-				// check the latest latency metric again and parse its version stamp
-				state RangeResult r2 = wait(self->latencyRangeQuery(cx, keysLimit, true));
-				if (r2.size() == 0) {
-					// latency metrics might not be present due to transaction batching, retry a few times
-					++retry2;
-					continue;
-				}
-				ASSERT(r2.size() > 0);
-				KeyRef latest2 = r2[0].key;
-				uint64_t vs2 = getVersionStamp(latest2);
-				std::cout << "vs2=" << vs2 << std::endl;
-				ASSERT(vs2 >= vs1);
-				if (vs2 == vs1) {
-					// it means there is no new latency metrics, retry until we see one
-					++retry2;
-					continue;
-				}
-				ASSERT(vs2 > vs1);
-				break;
-			}
+			state uint64_t vs2 = wait(self->writeKeysAndGetLatencyVersion(cx, self, secondWrites, vs1));
+			std::cout << "vs2=" << vs2 << std::endl;
+			ASSERT(vs2 > vs1);
+
 		} catch (Error& e) {
 			TraceEvent("ClientMetricError").error(e);
 		}
