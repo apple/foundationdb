@@ -67,7 +67,6 @@ struct BulkLoadState {
 	  : taskId(taskId), range(range), loadType(loadType), transportMethod(transportMethod), injectMethod(injectMethod),
 	    folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Invalid) {
 		ASSERT(isValid());
-		// TODO(Zhe): do some validation between methods and files
 	}
 
 	std::string toString() const {
@@ -141,6 +140,7 @@ struct BulkLoadState {
 				return false;
 			}
 		}
+		// TODO(Zhe): do some validation between methods and files
 
 		return true;
 	}

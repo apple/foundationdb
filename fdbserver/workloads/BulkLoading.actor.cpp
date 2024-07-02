@@ -479,7 +479,8 @@ struct BulkLoading : TestWorkload {
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.data.push_back(Standalone(KeyValueRef(firstKey, firstKey)));
 		std::set<std::string> middleKeys;
-		for (int i = 0; i < 20; i++) {
+		int keyCount = deterministicRandom()->randomInt(1, 20);
+		for (int i = 0; i < keyCount; i++) {
 			middleKeys.insert(deterministicRandom()->randomUniqueID().toString());
 		}
 		for (const auto& middleKey : middleKeys) {

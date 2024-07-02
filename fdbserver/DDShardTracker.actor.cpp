@@ -222,7 +222,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
-	TraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
+	DisabledTraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
 	    .detail("Keys", keys)
 	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
 	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
@@ -256,7 +256,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
-					TraceEvent("ShardSizeUpdate", self()->distributorId)
+					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.first.get().bytes)
 					    .detail("WriteBandwidth", metrics.first.get().bytesWrittenPerKSecond)
@@ -272,7 +272,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					            shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 					if (shardMetrics->get().present()) {
-						TraceEvent("TrackerChangeSizes")
+						DisabledTraceEvent("TrackerChangeSizes")
 						    .detail("Context", "trackShardMetrics")
 						    .detail("Keys", keys)
 						    .detail("TotalSizeEstimate", self()->dbSizeEstimate->get())
@@ -401,7 +401,7 @@ ACTOR Future<Void> changeSizes(DataDistributionTracker* self,
 	}
 
 	int64_t totalSizeEstimate = self->dbSizeEstimate->get();
-	TraceEvent("TrackerChangeSizes")
+	DisabledTraceEvent("TrackerChangeSizes")
 	    .detail("Context", "changeSizes when " + context)
 	    .detail("Keys", keys)
 	    .detail("TotalSizeEstimate", totalSizeEstimate)
