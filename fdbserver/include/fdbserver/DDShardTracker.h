@@ -31,6 +31,7 @@ public:
 	FutureStream<GetMetricsListRequest> getShardMetricsList;
 	FutureStream<Promise<int64_t>> averageShardBytes;
 	FutureStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+	FutureStream<BulkLoadShardRequest> triggerShardBulkLoading;
 
 	virtual double getAverageShardBytes() = 0;
 	virtual ~IDDShardTracker() = default;
@@ -43,6 +44,7 @@ struct DataDistributionTrackerInitParams {
 	PromiseStream<RelocateShard> const& output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
@@ -72,6 +74,9 @@ public:
 
 	// PhysicalShard Tracker
 	Reference<PhysicalShardCollection> physicalShardCollection;
+
+	// BulkLoadTask Tracker
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
@@ -123,7 +128,8 @@ public:
 	                        FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
 	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
 	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes,
-	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance);
+	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance,
+	                        FutureStream<BulkLoadShardRequest> const& triggerShardBulkLoading);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };

@@ -24,6 +24,7 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
@@ -220,6 +221,13 @@ struct GetMetricsListRequest {
 
 	GetMetricsListRequest() {}
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+};
+
+struct BulkLoadShardRequest {
+	BulkLoadState bulkLoadState;
+
+	BulkLoadShardRequest() {}
+	BulkLoadShardRequest(BulkLoadState const& bulkLoadState) : bulkLoadState(bulkLoadState) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution
@@ -485,6 +493,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
 	int mode;
+	int bulkLoadMode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
@@ -603,6 +612,151 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 			return true;
 		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
 	}
+};
+
+struct DDBulkLoadTask {
+	BulkLoadState coreState;
+	Version commitVersion;
+	Promise<Void> completeAck;
+	Optional<UID> dataMoveId;
+
+	DDBulkLoadTask() = default;
+
+	DDBulkLoadTask(BulkLoadState coreState, Version commitVersion, Promise<Void> completeAck)
+	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
+
+	std::string toString() const {
+		return coreState.toString() + ", [CommitVersion]: " + std::to_string(commitVersion);
+	}
+};
+
+class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
+public:
+	BulkLoadTaskCollection() { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadTask>()); }
+
+	// Return true if there exists a bulk load task since the given commit version
+	bool overlappingTask(KeyRange range) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
+			if (!it->value().present()) {
+				continue;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	bool overlappingTaskSince(KeyRange range, Version sinceCommitVersion) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
+			if (!it->value().present()) {
+				continue;
+			}
+			if (it->value().get().commitVersion > sinceCommitVersion) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// called by DD bulk load core
+	bool publishTask(BulkLoadState bulkLoadState, Version commitVersion, Promise<Void> completeAck) {
+		if (overlappingTaskSince(bulkLoadState.getRange(), commitVersion)) {
+			return true;
+		}
+		DDBulkLoadTask task(bulkLoadState, commitVersion, completeAck);
+		TraceEvent(SevDebug, "DDBulkLoadCollectionPublishTask")
+		    .detail("Range", bulkLoadState.getRange())
+		    .detail("Task", task.toString());
+		bulkLoadTaskMap.insert(bulkLoadState.getRange(), task);
+		return false;
+	}
+
+	// called when relocator starts
+	bool startTask(BulkLoadState bulkLoadState, UID dataMoveId) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+				return true;
+			}
+			it->value().get().dataMoveId = dataMoveId;
+			TraceEvent(SevDebug, "DDBulkLoadCollectionStartTask")
+			    .detail("Range", bulkLoadState.getRange())
+			    .detail("TaskRange", it->range())
+			    .detail("Task", it->value().get().toString());
+		}
+		return false;
+	}
+
+	// called when relocator succeeds
+	bool terminateTask(BulkLoadState bulkLoadState) {
+		/* for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+		    if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+		        return true;
+		    }
+		    if (!it->value().get().completeAck.canBeSet()) {
+		        TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
+		            .detail("Range", bulkLoadState.getRange())
+		            .detail("TaskRange", it->range())
+		            .detail("Task", it->value().get().toString());
+		        ASSERT(false);
+		    }
+		    it->value().get().completeAck.send(Void());
+		    TraceEvent(SevDebug, "DDBulkLoadCollectionTerminateTask")
+		        .detail("Range", bulkLoadState.getRange())
+		        .detail("TaskRange", it->range())
+		        .detail("Task", it->value().get().toString());
+		}
+		bulkLoadTaskMap.insert(bulkLoadState.getRange(), Optional<DDBulkLoadTask>());
+		return false; */
+		// remove bulk load task from the task map when DD mode is set to off
+		return true;
+	}
+
+	// called when relocator failed
+	bool failTask(BulkLoadState bulkLoadState, const Error& error) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+				return true;
+			}
+			if (!it->value().get().completeAck.canBeSet()) {
+				TraceEvent(SevError, "DDBulkLoadCollectionFailTaskError")
+				    .errorUnsuppressed(error)
+				    .detail("Range", bulkLoadState.getRange())
+				    .detail("TaskRange", it->range())
+				    .detail("Task", it->value().get().toString());
+			}
+			TraceEvent(SevDebug, "DDBulkLoadCollectionFailTask")
+			    .errorUnsuppressed(error)
+			    .detail("Range", bulkLoadState.getRange())
+			    .detail("TaskRange", it->range())
+			    .detail("Task", it->value().get().toString());
+		}
+		return false;
+	}
+
+	std::vector<DDBulkLoadTask> getPublishedTasks(KeyRange range) {
+		std::vector<DDBulkLoadTask> res;
+		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
+			if (!it->value().present()) {
+				continue;
+			}
+			DDBulkLoadTask bulkLoadTask = it->value().get();
+			TraceEvent(SevDebug, "DDBulkLoadCollectionGetPublishedTaskEach")
+			    .detail("Range", range)
+			    .detail("TaskRange", it->range())
+			    .detail("Task", bulkLoadTask.toString());
+			if (bulkLoadTask.coreState.getRange() == range &&
+			    (bulkLoadTask.coreState.phase == BulkLoadPhase::Triggered ||
+			     bulkLoadTask.coreState.phase == BulkLoadPhase::Running)) {
+				res.push_back(bulkLoadTask);
+			}
+		}
+		TraceEvent(SevDebug, "DDBulkLoadCollectionGetPublishedTask")
+		    .detail("Range", range)
+		    .detail("Tasks", describe(res));
+		return res;
+	}
+
+private:
+	KeyRangeMap<Optional<DDBulkLoadTask>> bulkLoadTaskMap;
 };
 
 #ifndef __INTEL_COMPILER

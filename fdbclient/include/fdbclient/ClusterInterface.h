@@ -41,6 +41,7 @@ struct ClusterInterface {
 	RequestStream<struct RepairSystemDataRequest> repairSystemData;
 	RequestStream<struct SplitShardRequest> splitShard;
 	RequestStream<struct TriggerAuditRequest> triggerAudit;
+	RequestStream<struct TriggerBulkLoadRequest> triggerBulkLoad;
 
 	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
@@ -52,7 +53,8 @@ struct ClusterInterface {
 		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
 		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady() ||
 		       moveShard.getFuture().isReady() || repairSystemData.getFuture().isReady() ||
-		       splitShard.getFuture().isReady() || triggerAudit.getFuture().isReady();
+		       splitShard.getFuture().isReady() || triggerAudit.getFuture().isReady() ||
+		       triggerBulkLoad.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -66,6 +68,7 @@ struct ClusterInterface {
 		repairSystemData.getEndpoint(TaskPriority::ClusterController);
 		splitShard.getEndpoint(TaskPriority::ClusterController);
 		triggerAudit.getEndpoint(TaskPriority::ClusterController);
+		triggerBulkLoad.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -80,7 +83,8 @@ struct ClusterInterface {
 		           moveShard,
 		           repairSystemData,
 		           splitShard,
-		           triggerAudit);
+		           triggerAudit,
+		           triggerBulkLoad);
 	}
 };
 

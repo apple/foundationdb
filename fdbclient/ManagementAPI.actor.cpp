@@ -2325,6 +2325,39 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 	}
 }
 
+ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
+	state Transaction tr(cx);
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			if (oldMode != mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				BinaryWriter wrLastWrite(Unversioned());
+				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
+				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+				tr.set(bulkLoadModeKey, wr.toValue());
+				wait(tr.commit());
+				TraceEvent("DDBulkLoadModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                                    std::set<AddressExclusion>* exclusions,
                                                    std::set<NetworkAddress>* inProgressExclusion) {
@@ -2791,6 +2824,38 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 	}
 
 	return auditId;
+}
+
+ACTOR Future<Void> submitBulkLoadTask(Reference<IClusterConnectionRecord> clusterFile,
+                                      BulkLoadState bulkLoadTask,
+                                      TriggerBulkLoadRequestType type,
+                                      double timeoutSeconds) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTask")
+	    .detail("BulkLoadTask", bulkLoadTask.toString())
+	    .detail("TaskType", type);
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTaskBegin")
+		    .detail("BulkLoadTask", bulkLoadTask.toString())
+		    .detail("TaskType", type);
+		TriggerBulkLoadRequest req(bulkLoadTask, type);
+		wait(timeoutError(clusterInterface->get().get().triggerBulkLoad.getReply(req), timeoutSeconds));
+		TraceEvent(SevVerbose, "ManagementAPISubmitBulkLoadTaskEnd")
+		    .detail("BulkLoadTask", bulkLoadTask.toString())
+		    .detail("TaskType", type);
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ManagementAPISubmitBulkLoadTaskError")
+		    .errorUnsuppressed(e)
+		    .detail("BulkLoadTask", bulkLoadTask.toString())
+		    .detail("TaskType", type);
+		throw e;
+	}
+
+	return Void();
 }
 
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {

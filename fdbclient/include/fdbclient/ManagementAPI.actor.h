@@ -154,6 +154,8 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode(Database cx, int mode);
 
+ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
+
 ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
 // Start an audit on range of the specific type.
@@ -167,6 +169,11 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
                                      AuditType type,
                                      UID auditId,
                                      double timeoutSeconds);
+
+ACTOR Future<Void> submitBulkLoadTask(Reference<IClusterConnectionRecord> clusterFile,
+                                      BulkLoadState bulkLoadTask,
+                                      TriggerBulkLoadRequestType type,
+                                      double timeoutSeconds);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

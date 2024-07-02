@@ -71,6 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
+#include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -212,6 +213,7 @@ static const KeyRangeRef persistPendingCheckpointKeys =
 static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
+static const std::string bulkLoadFolder = "bulkLoadFiles";
 
 // Accumulative checksum related prefix
 static const KeyRangeRef persistAccumulativeChecksumKeys =
@@ -9117,6 +9119,100 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 	return Void();
 }
 
+ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
+                                                   MoveInShard* moveInShard,
+                                                   std::string dir,
+                                                   BulkLoadState bulkLoadState) {
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Folder", abspath(dir));
+
+	state double fetchStartTime = now();
+
+	// Step 1: Fetch data to dir
+	state SSBulkLoadFileSet fileSetToLoad;
+	ASSERT(bulkLoadState.getTransportMethod() != BulkLoadTransportMethod::Invalid);
+	if (bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP) {
+		wait(store(
+		    fileSetToLoad,
+		    bulkLoadTransportCP_impl(dir, bulkLoadState, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, data->thisServerID)));
+	} else {
+		throw not_implemented();
+	}
+	// At this point, all necessary data for bulk loading locate at fileSetToLoad
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Dir", dir)
+	    .detail("FileSetToLoad", fileSetToLoad.toString());
+
+	// Step 2: Validation
+	// TODO(Zhe): Validate all files specified in fileSetToLoad exist
+	// TODO(Zhe): Check file checksum
+	// TODO(Zhe): Check file data all in the moveInShard range
+	// TODO(Zhe): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	if (!fileSetToLoad.bytesSampleFile.present()) {
+		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
+		    .detail("BulkLoadState", bulkLoadState.toString())
+		    .detail("FileSetToLoad", fileSetToLoad.toString());
+		Optional<std::string> bytesSampleFile_ =
+		    wait(getBytesSamplingFromSSTFiles(fileSetToLoad.folder, fileSetToLoad.dataFileList, data->thisServerID));
+		fileSetToLoad.bytesSampleFile = bytesSampleFile_;
+	}
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileValidated", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Folder", abspath(dir))
+	    .detail("FileSetToLoad", fileSetToLoad.toString());
+
+	// Step 3: Build LocalRecord (used by ShardedRocksDB KVStore)
+	state CheckpointMetaData localRecord;
+	localRecord.checkpointID = UID();
+	localRecord.dir = abspath(fileSetToLoad.folder);
+	for (const auto& range : moveInShard->ranges()) {
+		ASSERT(bulkLoadState.getRange().contains(range));
+	}
+	localRecord.ranges = moveInShard->ranges();
+	RocksDBCheckpointKeyValues rcp({ bulkLoadState.getRange() });
+	for (const auto& filePath : fileSetToLoad.dataFileList) {
+		CheckpointFile cpFile;
+		cpFile.path = abspath(filePath);
+		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
+		if (coalesceRanges.size() != 1) {
+			TraceEvent(SevError, "SSBulkLoadTaskFetchSSTFileError", data->thisServerID)
+			    .detail("Reason", "MoveInShard ranges unexpected")
+			    .detail("BulkLoadState", bulkLoadState.toString())
+			    .detail("MoveInShard", moveInShard->toString())
+			    .detail("FileSetToLoad", fileSetToLoad.toString());
+		}
+		// TODO(Zhe): set loading file size --- logging purpose
+		cpFile.range = coalesceRanges[0];
+		rcp.fetchedFiles.push_back(cpFile);
+	}
+	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+	localRecord.version = 0;
+	localRecord.bytesSampleFile = fileSetToLoad.bytesSampleFile;
+	localRecord.setFormat(CheckpointFormat::RocksDBKeyValues);
+	localRecord.setState(CheckpointMetaData::Complete);
+	moveInShard->meta->checkpoints.push_back(localRecord);
+
+	const double duration = now() - fetchStartTime;
+	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->meta->checkpoints);
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileBuildMetadata", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Folder", abspath(dir))
+	    .detail("FileSetToLoad", fileSetToLoad.toString())
+	    .detail("Duration", duration)
+	    .detail("TotalBytes", totalBytes)
+	    .detail("Rate", (double)totalBytes / duration);
+
+	// Step 4: Update the moveInShard phase
+	moveInShard->setPhase(MoveInPhase::Ingesting);
+	return Void();
+}
+
 ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard, std::string dir) {
 	TraceEvent(SevInfo, "FetchShardCheckpointMetaDataBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString());
@@ -9210,9 +9306,12 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	return Void();
 }
 
-ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
+ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
+                                              MoveInShard* moveInShard,
+                                              Optional<BulkLoadState> bulkLoadState) {
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
 	state double startTime = now();
 
@@ -9224,7 +9323,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", moveInShard->toString())
-		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+		    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+		    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
 			updateMoveInShardMetaData(data, moveInShard);
@@ -9235,7 +9335,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 
 	TraceEvent(SevInfo, "FetchShardIngestedCheckpoint", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString())
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 
 	if (moveInShard->failed()) {
 		return Void();
@@ -9253,22 +9354,28 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		while (reader->hasNext()) {
 			KeyValue kv = reader->next();
 			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
+			Key key = kv.key;
+			if (key.startsWith(persistByteSampleKeys.begin)) {
+				key = key.removePrefix(persistByteSampleKeys.begin);
+			}
 			if (!checkpoint.containsKey(key)) {
 				TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySampleNotInRange", data->thisServerID)
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("SampleKey", key)
-				    .detail("Size", size);
+				    .detail("Size", size)
+				    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 				continue;
 			}
 			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySample", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)
-			    .detail("Size", size);
+			    .detail("Size", size)
+			    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 			data->metrics.byteSample.sample.insert(key, size);
 			data->metrics.notifyBytes(key, size);
-			data->addMutationToMutationLogOrStorage(invalidVersion,
-			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
+			data->addMutationToMutationLogOrStorage(
+			    invalidVersion,
+			    MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
 		}
 	}
 
@@ -9283,7 +9390,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
 	    .detail("Bytes", totalBytes)
 	    .detail("Duration", duration)
-	    .detail("Rate", static_cast<double>(totalBytes) / duration);
+	    .detail("Rate", static_cast<double>(totalBytes) / duration)
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 
 	return Void();
 }
@@ -9417,6 +9525,9 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			ASSERT(newShard.range == range);
 			newShard.setShardState(StorageServerShard::ReadWrite);
+			TraceEvent(SevInfo, "MoveInShardReadWrite", data->thisServerID)
+			    .detail("Version", data->version.get())
+			    .detail("MoveInShard", moveInShard->toString());
 			data->addShard(ShardInfo::newShard(data, newShard));
 			data->newestAvailableVersion.insert(range, latestVersion);
 			coalescePhysicalShards(data, range);
@@ -9491,6 +9602,15 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
+	state Optional<BulkLoadState> bulkLoadState; // TODO(Zhe): avoid check this all time
+	wait(store(bulkLoadState, getBulkLoadStateFromDataMove(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
+	if (bulkLoadState.present()) {
+		ASSERT(bulkLoadState.get().dataMoveId == moveInShard->dataMoveId());
+		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("BulkLoadTask", bulkLoadState.get().toString());
+	}
+
 	loop {
 		phase = moveInShard->getPhase();
 		TraceEvent(moveInShard->logSev, "FetchShardLoop", data->thisServerID)
@@ -9498,9 +9618,13 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				wait(fetchShardCheckpoint(data, moveInShard, dir));
+				if (bulkLoadState.present()) {
+					wait(fetchShardFetchBulkLoadSSTFiles(data, moveInShard, dir, bulkLoadState.get()));
+				} else {
+					wait(fetchShardCheckpoint(data, moveInShard, dir));
+				}
 			} else if (phase == MoveInPhase::Ingesting) {
-				wait(fetchShardIngestCheckpoint(data, moveInShard));
+				wait(fetchShardIngestCheckpoint(data, moveInShard, bulkLoadState));
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
