@@ -347,8 +347,8 @@ struct BulkLoading : TestWorkload {
 		state Key endKey = allKeys.end;
 		state KeyRange rangeToRead;
 		while (beginKey < endKey) {
+			state Transaction tr(cx);
 			try {
-				state Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 				RangeResult res = wait(krmGetRanges(&tr,
