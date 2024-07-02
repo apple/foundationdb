@@ -175,7 +175,10 @@ struct ClientMetricWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<uint64_t> writeKeysAndGetLatencyVersion(Database cx, ClientMetricWorkload* self, int numKeys, int previousVS) {
+	ACTOR Future<uint64_t> writeKeysAndGetLatencyVersion(Database cx,
+	                                                     ClientMetricWorkload* self,
+	                                                     int numKeys,
+	                                                     int previousVS) {
 		state int retry = 0;
 		state int max_retry = 10;
 		state int keysLimit = 1;
