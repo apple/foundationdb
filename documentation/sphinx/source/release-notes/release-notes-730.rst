@@ -145,7 +145,7 @@ Release Notes
 7.3.20
 ======
 * Wiggling data moves are now throttled. `(PR #10953) <https://github.com/apple/foundationdb/pull/10953>`_ and `(PR #10957) <https://github.com/apple/foundationdb/pull/10957>`_
-* AduitStorage will check all DC replicas. `(PR #10955) <https://github.com/apple/foundationdb/pull/10955>`_ and `(PR #10966) <<https://github.com/apple/foundationdb/pull/10966>`_
+* AduitStorage will check all DC replicas. `(PR #10955) <https://github.com/apple/foundationdb/pull/10955>`_ and `(PR #10966) <https://github.com/apple/foundationdb/pull/10966>`_
 * Large shards are now allowed. `(PR #10961) <https://github.com/apple/foundationdb/pull/10961>`_ and `(PR #10965) <https://github.com/apple/foundationdb/pull/10965>`_
 * Fixed bugs for locality-based exclusion. `(PR #10623) <https://github.com/apple/foundationdb/pull/10623>`_
 * Fixed various memory-related bugs. `(PR #10952) <https://github.com/apple/foundationdb/pull/10952>`_ and `(PR #10969) <https://github.com/apple/foundationdb/pull/10969>`_
