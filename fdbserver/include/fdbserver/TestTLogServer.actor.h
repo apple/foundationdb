@@ -121,7 +121,6 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	Reference<ILogSystem> ls;
 	ServerDBInfo dbInfo;
 	Reference<AsyncVar<ServerDBInfo>> dbInfoRef;
-	TLogSet tLogSet;
 	Standalone<StringRef> dcID;
 	Optional<Standalone<StringRef>> zoneID;
 	int8_t tagLocality;

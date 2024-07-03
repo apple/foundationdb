@@ -1,5 +1,5 @@
 /*
- * MockTLog.actor.cpp
+ * TestTLogServer.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,7 +34,8 @@
 
 #include "flow/actorcompiler.h" // must be last include
 
-Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions) {
+Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
+                                               Optional<Reference<TLogTestContext>> oldTLogTestContext) {
 	Reference<TLogTestContext> context(new TLogTestContext(tLogOptions));
 	context->logID = deterministicRandom()->randomUniqueID();
 	context->workerID = deterministicRandom()->randomUniqueID();
@@ -46,11 +47,25 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions) {
 	context->dcID = "test"_sr;
 	context->tagLocality = context->primaryLocality;
 	context->dbInfo = ServerDBInfo();
-	context->dbInfoRef = makeReference<AsyncVar<ServerDBInfo>>(context->dbInfo);
+	if (oldTLogTestContext.present()) {
+		OldTLogConf oldTLogConf;
+		oldTLogConf.tLogs = oldTLogTestContext.get()->dbInfo.logSystemConfig.tLogs;
+		oldTLogConf.tLogs[0].locality = oldTLogTestContext.get()->primaryLocality;
+		oldTLogConf.tLogs[0].isLocal = true;
+		oldTLogConf.epochBegin = oldTLogTestContext.get()->initVersion;
+		oldTLogConf.epochEnd = oldTLogTestContext.get()->numCommits;
+		oldTLogConf.logRouterTags = 0;
+		oldTLogConf.recoverAt = oldTLogTestContext.get()->initVersion;
+		oldTLogConf.epoch = oldTLogTestContext.get()->epoch;
+		context->tagLocality = oldTLogTestContext.get()->primaryLocality;
+		context->epoch = oldTLogTestContext.get()->epoch + 1;
+		context->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
+	}
 	context->dbInfo.logSystemConfig.logSystemType = LogSystemType::tagPartitioned;
 	context->dbInfo.logSystemConfig.recruitmentID = deterministicRandom()->randomUniqueID();
 	context->initVersion = tLogOptions.initVersion;
 	context->recover = tLogOptions.recover;
+	context->dbInfoRef = makeReference<AsyncVar<ServerDBInfo>>(context->dbInfo);
 
 	return context;
 }
@@ -94,7 +109,6 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	LocalityData localities(
 	    Optional<Standalone<StringRef>>(), pTLogTestContext->zoneID, machineID, pTLogTestContext->dcID);
 	localities.set(StringRef("datacenter"_sr), pTLogTestContext->dcID);
-	pTLogTestContext->dbInfoRef = makeReference<AsyncVar<ServerDBInfo>>(pTLogTestContext->dbInfo);
 
 	Reference<AsyncVar<bool>> isDegraded = FlowTransport::transport().getDegraded();
 	Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>(pTLogContext->tLogID));
@@ -285,25 +299,22 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 	return Void();
 }
 
-// wait for tLog to be created. Then start actor to do push, then
-// start actors to do peeks, then signal transactions can start.
-
 ACTOR Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 	state TLogSet tLogSet;
 	state uint16_t processID = 0;
 
+	tLogSet.tLogLocalities.push_back(LocalityData());
+	tLogSet.tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+	tLogSet.locality = pTLogTestContext->primaryLocality;
+	tLogSet.isLocal = true;
+	tLogSet.tLogVersion = TLogVersion::V6;
+	tLogSet.tLogReplicationFactor = 1;
 	for (; processID < pTLogTestContext->numLogServers; processID++) {
 		state Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
 		bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
 		ASSERT_EQ(isCreated, true);
 
 		tLogSet.tLogs.push_back(OptionalInterface<TLogInterface>(pTLogContext->TestTLogInterface));
-		tLogSet.tLogLocalities.push_back(LocalityData());
-		tLogSet.tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
-		tLogSet.locality = pTLogTestContext->primaryLocality;
-		tLogSet.isLocal = true;
-		tLogSet.tLogVersion = TLogVersion::V6;
-		tLogSet.tLogReplicationFactor = 1;
 	}
 	pTLogTestContext->dbInfo.logSystemConfig.tLogs.push_back(tLogSet);
 	for (processID = 0; processID < pTLogTestContext->numLogServers; processID++) {
@@ -321,7 +332,9 @@ ACTOR Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 
 ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 	state std::vector<Future<Void>> tLogActors;
-	state Reference<TLogTestContext> pTLogTestContextEpochOne = initTLogTestContext(params);
+	state Reference<TLogTestContext> pTLogTestContextEpochOne =
+	    initTLogTestContext(params, Optional<Reference<TLogTestContext>>());
+
 	state uint16_t tLogIdx = 0;
 
 	TraceEvent("TestTLogServerEnterRecoveryTest");
@@ -349,9 +362,8 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		    pTLogTestContextEpochOne->pTLogContextList[tLogIdx]->TestTLogInterface.lock.getReply<TLogLockResult>());
 		TraceEvent("TestTLogServerLockResult").detail("KCV", data.knownCommittedVersion);
 
-		state Reference<TLogTestContext> pTLogTestContextEpochTwo = initTLogTestContext(TestTLogOptions(params));
-		pTLogTestContextEpochTwo->epoch = pTLogTestContextEpochOne->epoch + 1;
-
+		state Reference<TLogTestContext> pTLogTestContextEpochTwo =
+		    initTLogTestContext(TestTLogOptions(params), pTLogTestContextEpochOne);
 		Reference<TLogContext> pNewTLogContext(new TLogContext(tLogIdx));
 		pTLogTestContextEpochTwo->pTLogContextList.push_back(pNewTLogContext);
 
@@ -369,18 +381,6 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		req.recoverTags = { Tag(pTLogTestContextEpochTwo->primaryLocality, 0) };
 		req.recoverFrom = pTLogTestContextEpochOne->dbInfo.logSystemConfig;
 		req.recoverFrom.logRouterTags = 0;
-
-		OldTLogConf oldTLogConf;
-		oldTLogConf.tLogs = pTLogTestContextEpochOne->dbInfo.logSystemConfig.tLogs;
-		oldTLogConf.tLogs[tLogIdx].locality = pTLogTestContextEpochOne->primaryLocality;
-		oldTLogConf.tLogs[tLogIdx].isLocal = true;
-		oldTLogConf.epochBegin = pTLogTestContextEpochOne->initVersion;
-		oldTLogConf.epochEnd = pTLogTestContextEpochOne->numCommits;
-		oldTLogConf.logRouterTags = 0;
-		oldTLogConf.recoverAt = pTLogTestContextEpochOne->initVersion;
-		oldTLogConf.epoch = pTLogTestContextEpochOne->epoch;
-		pTLogTestContextEpochTwo->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
-		pTLogTestContextEpochTwo->tagLocality = pTLogTestContextEpochOne->primaryLocality;
 
 		const TestTLogOptions& tLogOptions = pTLogTestContextEpochTwo->tLogOptions;
 
