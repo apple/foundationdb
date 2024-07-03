@@ -849,7 +849,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					                       whitelistBinPaths,
 					                       "",
 					                       {},
-					                       configDBType));
+					                       configDBType,
+					                       false));
 				}
 				if (processRunBackupAgent(processMode)) {
 					futures.push_back(runBackup(connRecord));

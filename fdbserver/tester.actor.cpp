@@ -935,7 +935,8 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<IClusterConnectionRecord> ccr,
                                     Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                    LocalityData locality) {
+                                    LocalityData locality,
+                                    Optional<std::string> expectedWorkLoad) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
@@ -943,7 +944,8 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	// At any time, we only allow at most 1 consistency checker workload on a server
 	state std::pair<int64_t, Future<Void>> consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>());
 
-	TraceEvent("StartingTesterServerCore", interf.id()).log();
+	TraceEvent("StartingTesterServerCore", interf.id())
+	    .detail("ExpectedWorkload", expectedWorkLoad.present() ? expectedWorkLoad.get() : "[Unset]");
 	loop choose {
 		when(wait(workerFatalError)) {}
 		when(wait(consistencyCheckerUrgentTester.second.isValid() ? consistencyCheckerUrgentTester.second : Never())) {
@@ -953,7 +955,14 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 			consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>()); // reset
 		}
 		when(WorkloadRequest work = waitNext(interf.recruitments.getFuture())) {
-			if (work.title == "ConsistencyCheckUrgent") {
+			if (expectedWorkLoad.present() && expectedWorkLoad.get() != work.title) {
+				TraceEvent(SevError, "StartingTesterServerCoreUnexpectedWorkload", interf.id())
+				    .detail("ClientId", work.clientId)
+				    .detail("ClientCount", work.clientCount)
+				    .detail("ExpectedWorkLoad", expectedWorkLoad.get())
+				    .detail("WorkLoad", work.title);
+				// Drop the workload
+			} else if (work.title == "ConsistencyCheckUrgent") {
 				// The workload is a consistency checker urgent workload
 				if (work.sharedRandomNumber == consistencyCheckerUrgentTester.first) {
 					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterDuplicatedRequest", interf.id())
