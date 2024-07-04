@@ -239,11 +239,6 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 	if podClient.podMetadata == nil {
 		return fmt.Errorf("pod client has no metadata present")
 	}
-	
-	annotations := podClient.podMetadata.Annotations
-	if len(annotations) == 0 {
-		annotations = map[string]string{}
-	}
 
 	if !podClient.podMetadata.DeletionTimestamp.IsZero() {
 		return fmt.Errorf("pod is marked for deletion, cannot update annotations")
@@ -264,13 +259,24 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 
 		return true
 	}, func() error {
-		annotations := podClient.podMetadata.Annotations
-		if len(annotations) == 0 {
-			annotations = map[string]string{}
+		currentAnnotations := podClient.podMetadata.Annotations
+		if len(currentAnnotations) == 0 {
+			currentAnnotations = map[string]string{}
 		}
 
+		var hasChanges bool
 		for key, val := range annotationChanges {
-			annotations[key] = val
+			currentValue, present := currentAnnotations[key]
+			if !present || currentValue != val {
+				podClient.Logger.Info("update annotation with new value", "annotation", key, "currentValue", currentValue, "newValue", val, "present", present)
+				currentAnnotations[key] = val
+				hasChanges = true
+			}
+		}
+
+		// If no changes are present, we can skip the patch.
+		if !hasChanges {
+			return nil
 		}
 
 		return podClient.Patch(context.Background(), &corev1.Pod{
@@ -281,7 +287,7 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:   podClient.podMetadata.Namespace,
 				Name:        podClient.podMetadata.Name,
-				Annotations: annotations,
+				Annotations: currentAnnotations,
 			},
 		}, client.Apply, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
 	})
