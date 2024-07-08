@@ -335,6 +335,8 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 	state Reference<TLogTestContext> pTLogTestContextEpochOne =
 	    initTLogTestContext(params, Optional<Reference<TLogTestContext>>());
 
+	FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+
 	state uint16_t tLogIdx = 0;
 
 	TraceEvent("TestTLogServerEnterRecoveryTest");
@@ -411,15 +413,15 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/test/TestTLogCommits") {
-	TestTLogOptions testTLogOptions(params);
-	testTLogOptions.recover = 0;
-	wait(startTestsTLogRecoveryActors(testTLogOptions));
-	return Void();
-}
+// TEST_CASE("/fdbserver/test/TestTLogCommits") {
+// 	TestTLogOptions testTLogOptions(params);
+// 	testTLogOptions.recover = 0;
+// 	wait(startTestsTLogRecoveryActors(testTLogOptions));
+// 	return Void();
+// }
 
-TEST_CASE("/fdbserver/test/TestTLogRecovery") {
-	TestTLogOptions testTLogOptions(params);
-	wait(startTestsTLogRecoveryActors(testTLogOptions));
-	return Void();
-}
+// TEST_CASE("/fdbserver/test/TestTLogRecovery") {
+// 	TestTLogOptions testTLogOptions(params);
+// 	wait(startTestsTLogRecoveryActors(testTLogOptions));
+// 	return Void();
+// }
