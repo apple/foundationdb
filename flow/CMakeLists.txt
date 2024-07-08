@@ -60,6 +60,7 @@ foreach(ft flow flow_sampling flowlinktest)
 
     target_link_libraries(${ft} PRIVATE stacktrace)
     target_link_libraries(${ft} PUBLIC fmt::fmt SimpleOpt crc32)
+    target_link_libraries(${ft} PRIVATE jemalloc)
     if(UNIX AND NOT APPLE)
         target_link_libraries(${ft} PRIVATE folly_memcpy)
         target_compile_definitions(${ft} PRIVATE WITH_FOLLY_MEMCPY)
