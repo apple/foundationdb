@@ -176,13 +176,13 @@ The only client change from the configuration database is as part of the change
 coordinators command. The change coordinators command is not considered
 successful until the configuration database is readable on the new
 coordinators. If the configuration database has been disabled server-side via
-the ``-no-config-db`` command line option, the coordinators will continue to
+the ``--no-config-db`` command line option, the coordinators will continue to
 serve the configuration interface, but will reply to each request with an empty
 response. Client-side changes are no longer necessary when disabling the
 configuration database.
 
 Optionally, the client liveness check of the configuration database can be
-prevented by specifying the ``-no-config-db`` flag when changing the
+prevented by specifying the ``--no-config-db`` flag when changing the
 coordinators. For example:
 
 ```
