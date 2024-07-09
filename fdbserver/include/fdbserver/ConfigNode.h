@@ -37,6 +37,9 @@ public:
 	Future<Void> serve(ConfigBroadcastInterface const&,
 	                   ConfigTransactionInterface const&,
 	                   ConfigFollowerInterface const&);
+	// Serves some interfaces even when the configuration database is disabled,
+	// to prevent client requests from hanging.
+	Future<Void> serveDisabled(ConfigTransactionInterface const&, ConfigFollowerInterface const&);
 
 public: // Testing
 	Future<Void> serve(ConfigBroadcastInterface const&);
