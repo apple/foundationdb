@@ -278,12 +278,7 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 	template <class T>
 	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(std::string&& key,
 	                                                                                                 const T& value) {
-		if (enabled && init()) {
-			auto s = Traceable<T>::toString(value);
-			addMetric(key.c_str(), value, s);
-			return detailImpl(std::move(key), std::move(s), false);
-		}
-		return *this;
+		return detail(key.c_str(), value);
 	}
 
 	template <class T>
