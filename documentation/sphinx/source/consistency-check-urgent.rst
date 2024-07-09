@@ -37,7 +37,7 @@ How to use?
 To run the ConsistencyCheckerUrgent, you need 1 checker and N testers. The process is as follows:
 
 * If you want to specify ranges to do consistency checker, set ranges via knobs: CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_* and CONSISTENCY_CHECK_URGENT_RANGE_END_*. The custom range's start and end points must be represented in hexadecimal ASCII format, strictly adhering to the "\\\\x" prefix (including two escape chars, followed by 'x'). By default, the knob is set to check the entire key space (i.e., " " ~ "\\xff\\xff").
-* Start N testers (i.e. fdbserver --class test).
+* Start N testers (i.e. fdbserver --class test --consistency-check-urgent-mode). When setting consistency-check-urgent-mode, the tester server will check whether the received workload is a "ConsistencyCheckUrgent" workload. If yes, accept the workload. Otherwise, drop the workload with a SevError trace event: StartingTesterServerCoreUnexpectedWorkload.
 * Start the checker (i.e. fdbserver -r consistencycheckurgent --num-testers={num-testers}), which initiates the consistency checking automatically.
 * Once the checking is complete, the checker exits automatically, leaving the testers alive but idle.
 * If you need to rerun the checking, simply restart the checker process.
