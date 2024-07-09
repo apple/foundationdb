@@ -10,4 +10,4 @@ pytest==6.2.4
 syrupy==1.2.3
 toml==0.10.2
 typing-extensions==3.10.0.0
-zipp==3.4.1
+zipp==3.19.1
