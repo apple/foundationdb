@@ -18,9 +18,16 @@
 #
 FROM centos:7.9.2009 as base
 
+RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo && \
+    sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo && \
+    sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
+
 RUN yum install -y \
     epel-release-7-11 \
     centos-release-scl-2-3.el7.centos && \
+    sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo && \
+    sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo && \
+    sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo && \
     yum install -y \
     bind-utils-9.11.4-26.P2.el7_9.7 \
     binutils-2.27-44.base.el7_9.1 \
