@@ -2800,7 +2800,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* pCommitData,
 		wait(maxLivenessTimeout);
 	} catch (Error& err) {
 		TraceEvent(SevInfo, "CommitBatchFailed").detail("Stage", context.stage).detail("ErrorCode", err.code());
-		throw;
+		throw failed_to_progress();
 	}
 
 	return Void();

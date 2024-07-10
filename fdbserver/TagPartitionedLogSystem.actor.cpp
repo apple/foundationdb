@@ -37,7 +37,7 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 		return minVersion;
 	} catch (Error& err) {
 		if (err.code() == error_code_operation_cancelled) {
-			TraceEvent(SevInfo, "TLogPushCancelled");
+			TraceEvent(g_network()->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled");
 			int index = 0;
 			for (const auto& [tlogID, reply] : replies) {
 				if (reply.isReady()) {
@@ -50,7 +50,7 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 				} else {
 					message = format("TLogNoResponse%04d", index++);
 				}
-				TraceEvent(SevInfo, message.c_str()).detail("TLogInterfaceID", tlogID);
+				TraceEvent(SevInfo, message.c_str()).detail("TLogID", tlogID);
 			}
 		}
 		throw;
@@ -653,7 +653,7 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 			                                   interface.address(),
 			                                   interface.commit.getReply(request, TaskPriority::ProxyTLogCommitReply));
 
-			allReplies.push_back(std::make_pair(interface.id(), tLogReply));
+			allReplies.emplace_back(interface.id(), tLogReply);
 			Future<Void> commitSuccess = success(tLogReply);
 			addActor.get().send(commitSuccess);
 			tLogCommitResults.push_back(commitSuccess);
