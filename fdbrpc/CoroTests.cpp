@@ -257,6 +257,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
 #endif
 	ProtocolVersion protocolVersion() const override { return baseNetwork->protocolVersion(); }
+	void _swiftEnqueue(void* task) override { baseNetwork->_swiftEnqueue(task); }
 };
 
 Future<Void> testCancelled(bool* exits, Future<Void> f) {

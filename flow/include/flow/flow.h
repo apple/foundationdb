@@ -58,6 +58,19 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 
+#ifdef WITH_SWIFT
+#include <swift/bridging>
+
+// Flow_CheckedContinuation.h depends on this header, so we first parse it
+// without relying on any imported Swift types.
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#include "SwiftModules/Flow_CheckedContinuation.h"
+#endif /* SWIFT_HIDE_CHECKED_CONTINUATION */
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#endif /* WITH_SWIFT */
+
 #include "pthread.h"
 
 #include <boost/version.hpp>
@@ -66,6 +79,7 @@
 	do {                                                                                                               \
 		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
 	} while (false)
+
 
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
@@ -913,10 +927,75 @@ public:
 template <class T>
 class Promise;
 
+#ifdef WITH_SWIFT
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+using flow_swift::FlowCheckedContinuation;
+
+template<class T>
+class
+#ifdef WITH_SWIFT
+SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
+#endif
+FlowCallbackForSwiftContinuation : Callback<T> {
+public:
+	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
+	using AssociatedFuture = Future<T>;
+
+private:
+	SwiftCC continuationInstance;
+
+public:
+	FlowCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {}
+
+	void set(const void* _Nonnull pointerToContinuationInstance, Future<T> f, const void* _Nonnull thisPointer) {
+		// Verify Swift did not make a copy of the `self` value for this method
+		// call.
+		assert(this == thisPointer);
+
+		// FIXME: Propagate `SwiftCC` to Swift using forward
+		// interop, without relying on passing it via a `void *`
+		// here. That will let us avoid this hack.
+		const void* _Nonnull opaqueStorage = pointerToContinuationInstance;
+		static_assert(sizeof(SwiftCC) == sizeof(const void*));
+		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC*>(&opaqueStorage));
+		// Set the continuation instance.
+		continuationInstance.set(ccCopy);
+		// Add this callback to the future.
+		f.addCallbackAndClear(this);
+	}
+
+	void fire(const T& value) override {
+		Callback<T>::remove();
+		Callback<T>::next = nullptr;
+		continuationInstance.resume(value);
+	}
+	void error(Error error) override {
+		Callback<T>::remove();
+		Callback<T>::next = nullptr;
+		continuationInstance.resumeThrowing(error);
+	}
+	void unwait() override {
+		// TODO(swift): implement
+	}
+};
+#endif /* SWIFT_HIDE_CHECKED_CONTINUATION */
+#endif /* WITH_SWIFT*/
+
 template <class T>
-class Future {
+class SWIFT_SENDABLE
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+#ifdef WITH_SWIFT
+SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowFutureOps)
+#endif
+#endif
+    Future {
 public:
 	using Element = T;
+#ifdef WITH_SWIFT
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
+	using FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuation<T>;
+#endif
+#endif /* WITH_SWIFT */
 
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
@@ -974,12 +1053,12 @@ public:
 			sav->cancel();
 	}
 
-	void addCallbackAndClear(Callback<T>* cb) {
+	void addCallbackAndClear(Callback<T>* _Nonnull cb) {
 		sav->addCallbackAndDelFutureRef(cb);
 		sav = nullptr;
 	}
 
-	void addYieldedCallbackAndClear(Callback<T>* cb) {
+	void addYieldedCallbackAndClear(Callback<T>* _Nonnull cb) {
 		sav->addYieldedCallbackAndDelFutureRef(cb);
 		sav = nullptr;
 	}
@@ -1009,7 +1088,7 @@ private:
 // Future<T> result = wait(x); // This is legal if wait() generates Futures, but it's probably wrong. It's a compilation
 // error if wait() generates StrictFutures.
 template <class T>
-class StrictFuture : public Future<T> {
+class SWIFT_SENDABLE StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
@@ -1020,19 +1099,23 @@ private:
 };
 
 template <class T>
-class Promise final {
+class SWIFT_SENDABLE Promise final {
 public:
 	template <class U>
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
 
+	// Swift can't call method that takes in a universal references (U&&),
+	// so provide a callable `send` method that copies the value.
+	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
+
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
-	Future<T> getFuture() const {
+	SWIFT_CXX_IMPORT_UNSAFE Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
@@ -1085,7 +1168,11 @@ private:
 };
 
 template <class T>
-struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+struct NotifiedQueue : private SingleCallback<T>
+#ifndef WITH_SWIFT
+   , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+#endif /* WITH_SWIFT */
+{
 	int promises; // one for each promise (and one for an active actor if this is an actor)
 	int futures; // one for each future and one more if there are any callbacks
 
@@ -1210,7 +1297,7 @@ protected:
 };
 
 template <class T>
-class FutureStream {
+class SWIFT_SENDABLE FutureStream {
 public:
 	bool isValid() const { return queue != nullptr; }
 	bool isReady() const { return queue->isReady(); }
@@ -1247,7 +1334,8 @@ public:
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
-	T pop() { return queue->pop(); }
+	// FIXME: remove annotation after https://github.com/apple/swift/issues/64316 is fixed.
+	T pop() __attribute__((swift_attr("import_unsafe"))) { return queue->pop(); }
 	Error getError() const {
 		ASSERT(queue->isError());
 		return queue->error;
@@ -1290,12 +1378,13 @@ struct ReplyType<ReplyPromise<T>> {
 #endif
 
 template <class T>
-class PromiseStream {
+class SWIFT_SENDABLE PromiseStream {
 public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
 	void send(const T& value) { queue->send(value); }
+	void sendCopy(T value) { queue->send(value); }
 	void send(T&& value) { queue->send(std::move(value)); }
 	void sendError(const Error& error) { queue->sendError(error); }
 
@@ -1329,7 +1418,7 @@ public:
 
 	// Not const, because this function gives mutable
 	// access to queue
-	FutureStream<T> getFuture() {
+	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
@@ -1481,6 +1570,9 @@ inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::De
 inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->orderedDelay(seconds, taskID);
 }
+inline void _swiftEnqueue(void* task) {
+	return g_network->_swiftEnqueue(task);
+}
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);
 }
@@ -1497,6 +1589,10 @@ inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 }
 
 void bindDeterministicRandomToOpenssl();
+
+#ifdef WITH_SWIFT
+#pragma clang diagnostic pop
+#endif
 
 #include "flow/Coroutines.h"
 #include "flow/genericactors.actor.h"

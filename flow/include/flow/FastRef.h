@@ -26,6 +26,8 @@
 #include <cstdint>
 #include "flow/Traceable.h"
 
+#include "swift_support.h"
+
 // The thread safety this class provides is that it's safe to call addref and
 // delref on the same object concurrently in different threads. Subclass does
 // not get deleted until after all calls to delref complete.

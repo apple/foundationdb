@@ -30,6 +30,10 @@
 #include "fdbrpc/networksender.actor.h"
 #include "fdbrpc/simulator.h"
 
+#ifdef WITH_SWIFT
+#include <swift/bridging>
+#endif /* WITH_SWIFT */
+
 // Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
 	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
@@ -131,12 +135,19 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
+    // Swift can't call method that takes in a universal references (U&&),
+    // so provide a callable `send` method that copies the value.
+    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
+        sav->send(valueCopy);
+    }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
+  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
 		sav->addFutureRef();
@@ -886,7 +897,7 @@ public:
 
 	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
 
-	FutureStream<T> getFuture() const {
+	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() const {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}

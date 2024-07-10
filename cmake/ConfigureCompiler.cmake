@@ -28,7 +28,9 @@ env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
 env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
 
+set(is_swift_compile "$<COMPILE_LANGUAGE:Swift>")
 set(is_cxx_compile "$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>")
+set(is_swift_link "$<LINK_LANGUAGE:Swift>")
 set(is_cxx_link "$<OR:$<LINK_LANGUAGE:CXX>,$<LINK_LANGUAGE:C>>")
 
 set(USE_SANITIZER OFF)
@@ -177,7 +179,7 @@ else()
 
   if(CLANG)
     # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able
+    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
     # to use a version that has a fix.
     add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
   endif()
@@ -194,13 +196,13 @@ else()
 
   if(CLANG)
     # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able
+    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
     # to use a version that has a fix.
     add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
   endif()
 
   if(NOT FDB_RELEASE)
-    # Enable compression of the debug sections. This reduces the size of the binaries several times.
+    # Enable compression of the debug sections. This reduces the size of the binaries several times. 
     # We do not enable it release builds, because CPack fails to generate debuginfo packages when
     # compression is enabled
     add_compile_options("$<${is_cxx_compile}:-gz>")
@@ -380,6 +382,7 @@ else()
             $<${is_cxx_link}:-lc++abi>
             $<${is_cxx_link}:-Wl,-Bdynamic>
           )
+          add_link_options($<${is_swift_link}:-static-stdlib>)
         endif()
         add_link_options(
           $<${is_cxx_link}:-stdlib=libc++>
@@ -552,5 +555,65 @@ else()
       set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")
       set(CMAKE_CXX_ARCHIVE_FINISH   true)
     endif()
+  endif()
+endif()
+
+#####################################
+## Setup the Swift compiler options.
+#####################################
+
+if (WITH_SWIFT)
+  set(SwiftOptions "")
+
+  # Let Swift know where to find the external GCC toolchain if such toolchain is used.
+  if (CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN)
+    # FIXME: adopt driver flag once it lands:
+    # https://github.com/apple/swift-driver/pull/1307.
+    set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN}")
+    set(SwiftOptions "${SwiftOptions} -Xclang-linker --gcc-toolchain=${CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN}")
+  endif()
+
+  # Set the module cache path.
+  set(SWIFT_MODULE_CACHE_PATH ${CMAKE_BINARY_DIR}/module-cache)
+  set(SwiftOptions "${SwiftOptions} -module-cache-path ${SWIFT_MODULE_CACHE_PATH}")
+
+  # Enable Swift <-> C++ interoperability.
+  set(SwiftOptions "${SwiftOptions} -cxx-interoperability-mode=swift-5.9")
+
+  set(SwiftOptions "${SwiftOptions} -Xcc -DWITH_SWIFT")
+
+  # Suppress noisy C++ warnings from Swift.
+  set(SwiftOptions "${SwiftOptions} -Xcc -Wno-deprecated -Xcc -Wno-undefined-var-template")
+  # Suppress rapidjson noisy GCC pragma diagnostics.
+  set(SwiftOptions "${SwiftOptions} -Xcc -Wno-unknown-warning-option")
+
+  if (FOUNDATIONDB_CROSS_COMPILING)
+    # Cross-compilation options.
+    # For some reason we need to specify -sdk explicitly to pass config-time
+    # cmake checks, even though Swift does tend to pass it by itself for the
+    # actual compilation.
+    string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} TripleArch)
+    set(SwiftOptions "${SwiftOptions} -target ${TripleArch}-unknown-linux-gnu -sdk ${CMAKE_SYSROOT} -resource-dir ${CMAKE_SYSROOT}/usr/lib/swift")
+    if (CMAKE_LINKER)
+      set(SwiftOptions "${SwiftOptions} -use-ld=${CMAKE_LINKER}")
+    endif()
+    # C++ files need path to swift resources to find C++ interoperability
+    # Swift builtin headers.
+    add_compile_options($<${is_cxx_compile}:-I${CMAKE_SYSROOT}/usr/lib/swift>)
+  endif()
+
+  set(CMAKE_Swift_FLAGS "${SwiftOptions}" CACHE STRING "" FORCE)
+
+  if (FOUNDATIONDB_CROSS_COMPILING)
+    # For cross-compilation: make sure the Stdlib .swiftmodule files are available.
+    include(SwiftCrossCompileForceModuleRebuild)
+    swift_force_import_rebuild_of_stdlib()
+  endif()
+
+  # Verify that Swift can import C++ standard library.
+  include(CompilerChecks)
+  check_swift_source_compiles("import CxxStdlib" CanImportCxxStdlibIntoSwift)
+  if (NOT CanImportCxxStdlibIntoSwift)
+    message(FATAL_ERROR "Swift compiler: can not import C++ standard library into Swift; did you forget to set 'CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN'?")
   endif()
 endif()

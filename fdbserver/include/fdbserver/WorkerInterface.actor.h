@@ -158,7 +158,7 @@ struct WorkerDetails {
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this
 // structure
-struct ClusterControllerFullInterface {
+struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	constexpr static FileIdentifier file_identifier = ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
 	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;

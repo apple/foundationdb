@@ -86,6 +86,9 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
+
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
@@ -105,7 +108,20 @@
 #include <Windows.h>
 #endif
 
+#if __has_include("SwiftModules/FDBServer")
+class MasterData;
+#include "SwiftModules/FDBServer"
+#define SWIFT_REVERSE_INTEROP_SUPPORTED
+#endif
+
+#if __has_include("SwiftModules/Flow")
+#include "SwiftModules/Flow"
+#endif
+
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// FIXME(swift): remove those
+extern "C" void swiftCallMeFuture(void* _Nonnull opaqueResultPromisePtr) noexcept;
 
 using namespace std::literals;
 
@@ -372,6 +388,16 @@ void failAfter(Future<Void> trigger, Endpoint e) {
 	if (g_network == g_simulator)
 		failAfter(trigger, g_simulator->getProcess(e));
 }
+
+#ifdef WITH_SWIFT
+ACTOR void swiftTestRunner() {
+	auto p = PromiseVoid();
+	fdbserver_swift::swiftyTestRunner(p);
+	wait(p.getFuture());
+
+	flushAndExit(0);
+}
+#endif
 
 ACTOR Future<Void> histogramReport() {
 	loop {
@@ -2038,11 +2064,38 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
+
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+				// TODO (Swift): Make it TraceEvent
+				// printf("[%s:%d](%s) Installed Swift concurrency hooks: sim2 (g_network)\n",
+				//        __FILE_NAME__,
+				//        __LINE__,
+				//        __FUNCTION__);
+				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+			}
+
 			openTraceFile({}, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
+
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+				// TODO (Swift): Make it TraceEvent
+				// printf("[%s:%d](%s) Installed Swift concurrency hooks: net2 (g_network)\n",
+				//        __FILE_NAME__,
+				//        __LINE__,
+				//        __FUNCTION__);
+			}
+
+#if WITH_SWIFT
+			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
+				swiftTestRunner(); // spawns actor that will call Swift functions
+			}
+#endif
+
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);

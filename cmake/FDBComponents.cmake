@@ -32,6 +32,19 @@ find_package(OpenSSL REQUIRED)
 add_compile_options(-DHAVE_OPENSSL)
 
 ################################################################################
+# Swift Support
+################################################################################
+
+if (WITH_SWIFT)
+  message(DEBUG "Building with Swift")
+  add_definitions(-DWITH_SWIFT)
+  set(WITH_SWIFT ON)
+else()
+  message(DEBUG "Not building with Swift")
+  set(WITH_SWIFT OFF)
+endif()
+
+################################################################################
 # Python Bindings
 ################################################################################
 
@@ -170,7 +183,7 @@ if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
   target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
-  include(ExternalProject)
+  include(ExternalProject)  
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
@@ -227,6 +240,7 @@ function(print_components)
   message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
   message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
   message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
+  message(STATUS "Build Swift (depends on Swift):       ${WITH_SWIFT}")
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")

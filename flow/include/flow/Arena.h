@@ -29,6 +29,7 @@
 #include "flow/IRandom.h"
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
+#include "flow/swift_support.h"
 #include "flow/Optional.h"
 #include "flow/Traceable.h"
 #include <algorithm>

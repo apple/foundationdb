@@ -52,6 +52,9 @@
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/flow.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
+#include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
@@ -1063,6 +1066,20 @@ public:
 	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess, true);
+	}
+
+	void _swiftEnqueue(void* _job) override {
+#ifdef WITH_SWIFT
+		ASSERT(getCurrentProcess());
+		swift::Job* job = (swift::Job*)_job;
+		TaskPriority priority = swift_priority_to_net2(job->getPriority());
+		ASSERT(priority >= TaskPriority::Min && priority <= TaskPriority::Max);
+
+		ISimulator::ProcessInfo* machine = currentProcess;
+
+		auto t = new PromiseTask(machine, job);
+		taskQueue.addReady(priority, t);
+#endif /* WITH_SWIFT */
 	}
 
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
@@ -2599,9 +2616,12 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
+		swift::Job* _Nullable swiftJob = nullptr;
 
-		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
+		explicit PromiseTask(ProcessInfo* machine) : machine(machine), swiftJob(nullptr) {}
+		explicit PromiseTask(ProcessInfo* machine, swift::Job* swiftJob) : machine(machine), swiftJob(swiftJob) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise)
+		  : machine(machine), promise(std::move(promise)), swiftJob(nullptr) {}
 	};
 
 	void execTask(struct PromiseTask& t) {
@@ -2610,7 +2630,15 @@ public:
 		} else {
 			this->currentProcess = t.machine;
 			try {
+#ifdef WITH_SWIFT
+				if (t.swiftJob) {
+					swift_job_run(t.swiftJob, ExecutorRef::generic());
+				} else {
+					t.promise.send(Void());
+				}
+#else
 				t.promise.send(Void());
+#endif
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);

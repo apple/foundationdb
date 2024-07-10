@@ -27,6 +27,7 @@
 #include "flow/serialize.h"
 #include <string>
 #include <type_traits>
+#include "flow/swift_support.h"
 #pragma once
 
 // Yet another performance statistics interface

@@ -214,4 +214,9 @@ Reference<IRandom> nondeterministicRandom();
 // WARNING: This is not thread safe and must not be called from any other thread than the network thread!
 Reference<IRandom> debugRandom();
 
+// Workaround for https://github.com/apple/swift/issues/62354
+inline int64_t swift_get_randomInt64(Reference<IRandom> random, int64_t min, int64_t maxPlusOne) {
+	return random->randomInt64(min, maxPlusOne);
+}
+
 #endif
