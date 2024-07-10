@@ -1197,7 +1197,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        ConfigDBType configDBType);
+                        ConfigDBType configDBType,
+                        bool consistencyCheckUrgentMode);
 
 ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
