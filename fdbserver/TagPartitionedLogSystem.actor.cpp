@@ -37,7 +37,7 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 		return minVersion;
 	} catch (Error& err) {
 		if (err.code() == error_code_operation_cancelled) {
-			TraceEvent(g_network()->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled");
+			TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled");
 			int index = 0;
 			for (const auto& [tlogID, reply] : replies) {
 				if (reply.isReady()) {
