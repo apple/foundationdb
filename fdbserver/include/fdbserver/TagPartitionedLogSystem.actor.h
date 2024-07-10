@@ -149,6 +149,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	UID getDebugID() const final;
 
+	LogSystemType getLogSystemType() const final;
+
 	void addPseudoLocality(int8_t locality);
 
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const final;
@@ -199,10 +201,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> push(Version prevVersion,
-	                     Version version,
-	                     Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion,
+	Future<Version> push(const ILogSystem::PushVersionSet& versionSet,
 	                     LogPushData& data,
 	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,

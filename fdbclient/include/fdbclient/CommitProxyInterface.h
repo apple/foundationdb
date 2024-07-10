@@ -36,7 +36,6 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
-
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
