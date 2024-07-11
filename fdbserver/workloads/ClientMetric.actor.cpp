@@ -167,7 +167,7 @@ struct ClientMetricWorkload : TestWorkload {
 			TraceEvent(SevError, "ClientMetricErrorWhenWriteKeys").error(e);
 			throw;
 		}
-		std::cerr << "writeRandomKeys finish, written=" << cnt << std::endl;
+		std::cout << "writeRandomKeys finish, written=" << cnt << std::endl;
 		return Void();
 	}
 
