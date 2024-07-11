@@ -707,7 +707,8 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<IClusterConnectionRecord> ccr,
                                     Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                    LocalityData locality) {
+                                    LocalityData locality,
+                                    bool consistencyCheckUrgentWorkLoadOnly) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
@@ -715,7 +716,8 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	// At any time, we only allow at most 1 consistency checker workload on a server
 	state std::pair<int64_t, Future<Void>> consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>());
 
-	TraceEvent(SevInfo, "StartingTesterServerCore", interf.id());
+	TraceEvent(SevInfo, "StartingTesterServerCore", interf.id())
+	    .detail("ConsistencyCheckUrgentMode", consistencyCheckUrgentWorkLoadOnly);
 	loop choose {
 		when(wait(workerFatalError)) {}
 		when(wait(consistencyCheckerUrgentTester.second.isValid() ? consistencyCheckerUrgentTester.second : Never())) {
@@ -748,6 +750,13 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 				    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
 				    .detail("ClientId", work.clientId)
 				    .detail("ClientCount", work.clientCount);
+			} else if (consistencyCheckUrgentWorkLoadOnly) {
+				TraceEvent(SevError, "StartingTesterServerCoreUnexpectedWorkload", interf.id())
+				    .detail("SharedRandomNumber", work.sharedRandomNumber)
+				    .detail("ClientId", work.clientId)
+				    .detail("ClientCount", work.clientCount)
+				    .detail("WorkLoad", work.title);
+				// Drop the workload
 			} else {
 				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality, /*isConsistencyCheckUrgent=*/false));
 			}

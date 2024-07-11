@@ -1790,7 +1790,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                 ConfigBroadcastInterface configBroadcastInterface,
                                 Reference<ConfigNode> configNode,
-                                Reference<LocalConfiguration> localConfig) {
+                                Reference<LocalConfiguration> localConfig,
+                                bool consistencyCheckUrgentMode) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -1866,7 +1867,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	errorForwarders.add(loadedPonger(interf.debugPing.getFuture()));
 	errorForwarders.add(waitFailureServer(interf.waitFailure.getFuture()));
 	errorForwarders.add(monitorTraceLogIssues(issues));
-	errorForwarders.add(testerServerCore(interf.testerInterface, connRecord, dbInfo, locality));
+	// If consistencyCheckUrgentMode is set, the tester server drops any workLoad other than consistencyCheckUrgent
+	errorForwarders.add(
+	    testerServerCore(interf.testerInterface, connRecord, dbInfo, locality, consistencyCheckUrgentMode));
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
 	filesClosed.add(stopping.getFuture());
@@ -3126,7 +3129,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        ConfigDBType configDBType) {
+                        ConfigDBType configDBType,
+                        bool consistencyCheckUrgentMode) {
 	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
@@ -3224,7 +3228,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 dbInfo,
 		                                                 configBroadcastInterface,
 		                                                 configNode,
-		                                                 localConfig),
+		                                                 localConfig,
+		                                                 consistencyCheckUrgentMode),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));
