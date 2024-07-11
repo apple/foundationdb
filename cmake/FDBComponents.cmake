@@ -5,7 +5,11 @@ set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are
 ################################################################################
 
 if(USE_JEMALLOC)
-  find_package(jemalloc 5.3.0 REQUIRED)
+  if(NOT USE_CUSTOM_JEMALLOC)
+    find_package(jemalloc 5.3.0 REQUIRED)
+  else()
+    include(Jemalloc)
+  endif()
 endif()
 
 ################################################################################
