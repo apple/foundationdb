@@ -143,7 +143,7 @@ Release Notes
 ======
 * Added data move throttling for perpetual wiggle. `(PR #10957) <https://github.com/apple/foundationdb/pull/10957>`_
 * Fixed AuditStorage to check all DC replicas. `(PR #10966) <https://github.com/apple/foundationdb/pull/10966>`_
-* Large shards are now allowed. `(PR #10961) <https://github.com/apple/foundationdb/pull/10961>`_ and `(PR #10965) <https://github.com/apple/foundationdb/pull/10965>`_
+* Added large shards support. `(PR #10965) <https://github.com/apple/foundationdb/pull/10965>`_
 * Fixed bugs for locality-based exclusion. `(PR #10623) <https://github.com/apple/foundationdb/pull/10623>`_
 * Fixed various memory-related bugs. `(PR #10952) <https://github.com/apple/foundationdb/pull/10952>`_ and `(PR #10969) <https://github.com/apple/foundationdb/pull/10969>`_
 * Fixed perpetual wiggling locality match regex. `(PR #10967) <https://github.com/apple/foundationdb/pull/10967>`_
