@@ -15,7 +15,7 @@ ExternalProject_add(Jemalloc_project
   BUILD_BYPRODUCTS "${JEMALLOC_DIR}/include/jemalloc/jemalloc.h"
   "${JEMALLOC_DIR}/lib/libjemalloc.a"
   "${JEMALLOC_DIR}/lib/libjemalloc_pic.a"
-  CONFIGURE_COMMAND CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./configure --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx --enable-prof
+  CONFIGURE_COMMAND CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./configure --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx --enable-prof --enable-stats --with-malloc-conf=prof:true,prof_prefix:/var/tmp/fdbserver
   BUILD_IN_SOURCE ON
   BUILD_COMMAND make
   INSTALL_DIR "${JEMALLOC_DIR}"
@@ -24,5 +24,5 @@ ExternalProject_add(Jemalloc_project
 add_dependencies(jemalloc::jemalloc Jemalloc_project)
 add_dependencies(jemalloc_pic::jemalloc_pic Jemalloc_project)
 
-set_target_properties(jemalloc::jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc_pic.a")
+set_target_properties(jemalloc::jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc.a")
 set_target_properties(jemalloc_pic::jemalloc_pic PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc_pic.a")
