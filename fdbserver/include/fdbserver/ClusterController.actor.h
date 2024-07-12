@@ -141,7 +141,6 @@ public:
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 		int unfinishedRecoveries;
-		int logGenerations;
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;
@@ -163,7 +162,7 @@ public:
 		                               EnableLocalityLoadBalance::True,
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
+		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0),
 		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
 			clientCounter = countClients(this);
 		}
