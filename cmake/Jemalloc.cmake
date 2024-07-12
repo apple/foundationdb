@@ -24,5 +24,5 @@ ExternalProject_add(Jemalloc_project
 add_dependencies(jemalloc::jemalloc Jemalloc_project)
 add_dependencies(jemalloc_pic::jemalloc_pic Jemalloc_project)
 
-set_target_properties(jemalloc::jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc_pic.a")
+set_target_properties(jemalloc::jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc.a")
 set_target_properties(jemalloc_pic::jemalloc_pic PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc_pic.a")
