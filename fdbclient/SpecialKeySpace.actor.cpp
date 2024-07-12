@@ -989,13 +989,15 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	StatusObjectReader statusObjCluster;
 	if (!statusObj.get("cluster", statusObjCluster)) {
-		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+		*msg = ManagementAPIError::toJsonString(
+		    false, markFailed ? "exclude failed" : "exclude", errorString + "Field 'cluster' missing.\n");
 		return false;
 	}
 
 	StatusObjectReader processesMap;
 	if (!statusObjCluster.get("processes", processesMap)) {
-		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+		*msg = ManagementAPIError::toJsonString(
+		    false, markFailed ? "exclude failed" : "exclude", errorString + "Field 'processes' missing.\n");
 		return false;
 	}
 
@@ -1016,7 +1018,10 @@ ACTOR Future<bool> checkExclusion(Database db,
 			StatusObjectReader process(proc.second);
 			std::string addrStr;
 			if (!process.get("address", addrStr)) {
-				*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+				*msg = ManagementAPIError::toJsonString(false,
+				                                        markFailed ? "exclude failed" : "exclude",
+				                                        errorString + "Field 'address' missing for process " +
+				                                            proc.first + ".\n");
 				return false;
 			}
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
@@ -1046,21 +1051,27 @@ ACTOR Future<bool> checkExclusion(Database db,
 					int64_t used_bytes;
 					if (!role.get("kvstore_used_bytes", used_bytes)) {
 						*msg = ManagementAPIError::toJsonString(
-						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						    false,
+						    markFailed ? "exclude failed" : "exclude",
+						    errorString + "Field 'kvstore_used_bytes' missing for storage role.\n");
 						return false;
 					}
 
 					int64_t free_bytes;
 					if (!role.get("kvstore_free_bytes", free_bytes)) {
 						*msg = ManagementAPIError::toJsonString(
-						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						    false,
+						    markFailed ? "exclude failed" : "exclude",
+						    errorString + "Field 'kvstore_free_bytes' missing for storage role.\n");
 						return false;
 					}
 
 					int64_t available_bytes;
 					if (!role.get("kvstore_available_bytes", available_bytes)) {
 						*msg = ManagementAPIError::toJsonString(
-						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						    false,
+						    markFailed ? "exclude failed" : "exclude",
+						    errorString + "Field 'kvstore_available_bytes' missing for storage role.\n");
 						return false;
 					}
 
@@ -1081,9 +1092,13 @@ ACTOR Future<bool> checkExclusion(Database db,
 				}
 			}
 		}
-	} catch (...) // std::exception
-	{
-		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+
+	}
+	// NOTE: ActorCompiler only accepts Error& or ... (for std::exception), it is not possible to capture
+	// std::exception&
+	catch (...) {
+		*msg = ManagementAPIError::toJsonString(
+		    false, markFailed ? "exclude failed" : "exclude", errorString + "General exception raised.\n");
 		return false;
 	}
 
