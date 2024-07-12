@@ -120,7 +120,8 @@ struct TesterInterface {
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<IClusterConnectionRecord> ccr,
                                     Reference<AsyncVar<struct ServerDBInfo> const> serverDBInfo,
-                                    LocalityData locality);
+                                    LocalityData locality,
+                                    bool consistencyCheckUrgentWorkLoadOnly = false);
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t {

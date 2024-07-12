@@ -107,7 +107,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_CONSISTENCY_CHECK_URGENT_MODE
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -199,6 +199,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
+	{ OPT_CONSISTENCY_CHECK_URGENT_MODE, "--consistency-check-urgent-mode", SO_NONE },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -1036,6 +1037,7 @@ struct CLIOptions {
 	LocalityData localities;
 	int minTesterCount = 1;
 	bool testOnServers = false;
+	bool consistencyCheckUrgentMode = false;
 
 	TLSConfig tlsConfig = TLSConfig(TLSEndpointType::SERVER);
 	double fileIoTimeout = 0.0;
@@ -1517,6 +1519,9 @@ private:
 				break;
 			case OPT_TEST_ON_SERVERS:
 				testOnServers = true;
+				break;
+			case OPT_CONSISTENCY_CHECK_URGENT_MODE:
+				consistencyCheckUrgentMode = true;
 				break;
 			case OPT_METRICSCONNFILE:
 				metricsConnFile = args.OptionArg();
@@ -2154,7 +2159,8 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths,
 				                      opts.configPath,
 				                      opts.manualKnobOverrides,
-				                      opts.configDBType));
+				                      opts.configDBType,
+				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
