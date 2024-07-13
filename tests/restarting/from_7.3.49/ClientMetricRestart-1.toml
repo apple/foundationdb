@@ -1,3 +1,6 @@
+[configuration]
+tenantModes = ['disabled']
+
 [[test]]
 testTitle='ClientMetricRestartTest'
 clearAfterTest=false
