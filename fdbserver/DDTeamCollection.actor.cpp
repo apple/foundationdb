@@ -271,7 +271,6 @@ public:
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
-				// TODO(Zhe): build more team
 				TraceEvent(SevWarnAlways, "DDBulkLoadTaskGetTeamFailedToFindValidTeam", self->distributorId)
 				    .detail("TCReady", self->readyToStart.isReady())
 				    .detail("SrcIds", describe(req.src))

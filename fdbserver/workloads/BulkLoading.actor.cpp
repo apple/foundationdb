@@ -609,11 +609,14 @@ struct BulkLoading : TestWorkload {
 	}
 
 	void produceDataSet(BulkLoading* self, KeyRange range, std::string folderName) {
-		std::string dataFileName = generateRandomBulkLoadDataFileName();
-		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
+		std::string dataFileName =
+		    range.begin.toString() + "_" + range.end.toString() + "_" + generateRandomBulkLoadDataFileName();
+		std::string bytesSampleFileName =
+		    range.begin.toString() + "_" + range.end.toString() + "_" + generateRandomBulkLoadBytesSampleFileName();
 		std::string folder = joinPath(simulationBulkLoadFolderForLargeDataProduce, folderName);
 		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFileName, bytesSampleFileName);
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
+		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
 		self->produceLargeDataToLoad(taskUnit, 5000000);
 		return;
 	}
@@ -625,8 +628,8 @@ struct BulkLoading : TestWorkload {
 		std::string folderName2 = "2";
 		KeyRange range2 = Standalone(KeyRangeRef("2"_sr, "3"_sr));
 		self->produceDataSet(self, range2, folderName2);
-		std::string folderName3 = "4";
-		KeyRange range3 = Standalone(KeyRangeRef("4"_sr, "5"_sr));
+		std::string folderName3 = "3";
+		KeyRange range3 = Standalone(KeyRangeRef("3"_sr, "4"_sr));
 		self->produceDataSet(self, range3, folderName3);
 		return;
 	}

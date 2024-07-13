@@ -42,7 +42,7 @@ ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, 
 			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			if (!val.present()) {
 				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId).detail("DataMoveID", dataMoveId);
-				return Optional<BulkLoadState>(); // TODO(Zhe): is this case not expected?
+				return Optional<BulkLoadState>();
 			}
 			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
 			return dataMoveMetaData.bulkLoadState;

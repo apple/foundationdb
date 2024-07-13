@@ -43,7 +43,9 @@ enum class DataMoveType : uint8_t {
 	LOGICAL = 0,
 	PHYSICAL = 1,
 	PHYSICAL_EXP = 2,
-	NUMBER_OF_TYPES = 3,
+	LOGICAL_BULKLOAD = 3,
+	PHYSICAL_BULKLOAD = 4,
+	NUMBER_OF_TYPES = 5,
 };
 
 // One-to-one relationship to the priority knobs

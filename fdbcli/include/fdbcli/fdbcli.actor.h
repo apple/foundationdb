@@ -206,12 +206,10 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // Retrieve shard information command
 ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
-// Trigger a bulk load task command
+// Bulk loading command
 ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                       Database localDb,
+                                       Database cx,
                                        std::vector<StringRef> tokens);
-// Retrieve bulk load status command
-ACTOR Future<bool> getBulkLoadStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command

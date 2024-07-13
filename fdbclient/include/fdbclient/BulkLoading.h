@@ -89,17 +89,17 @@ struct BulkLoadState {
 		return res;
 	}
 
-	KeyRange getRange() { return range; }
+	KeyRange getRange() const { return range; }
 
-	UID getTaskId() { return taskId; }
+	UID getTaskId() const { return taskId; }
 
-	std::string getFolder() { return folder; }
+	std::string getFolder() const { return folder; }
 
-	BulkLoadTransportMethod getTransportMethod() { return transportMethod; }
+	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
 
-	std::unordered_set<std::string> getDataFiles() { return dataFiles; }
+	std::unordered_set<std::string> getDataFiles() const { return dataFiles; }
 
-	Optional<std::string> getBytesSampleFile() { return bytesSampleFile; }
+	Optional<std::string> getBytesSampleFile() const { return bytesSampleFile; }
 
 	void setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
@@ -110,7 +110,7 @@ struct BulkLoadState {
 		dataMoveId = id;
 	}
 
-	bool isValid() {
+	bool isValid() const {
 		if (!taskId.isValid()) {
 			return false;
 		}
@@ -181,10 +181,13 @@ private:
 	BulkLoadType loadType;
 	BulkLoadTransportMethod transportMethod;
 	BulkLoadInjectMethod injectMethod;
-	// Files to inject
+	// Folder includes all files to be injected
 	std::string folder;
+	// Files to inject
 	std::unordered_set<std::string> dataFiles;
 	Optional<std::string> bytesSampleFile;
+	// bytesSampleFile is Optional. If bytesSampleFile is not provided, storage server will go through all keys and
+	// conduct byte sampling, which will slow down the bulk loading rate.
 	// TODO(Zhe): add file checksum
 };
 

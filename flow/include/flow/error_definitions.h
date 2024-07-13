@@ -153,8 +153,8 @@ ERROR( audit_storage_task_outdated, 1234, "Audit task is scheduled by an outdate
 ERROR( transaction_throttled_hot_shard, 1235, "Transaction throttled due to hot shard" )
 ERROR( storage_replica_comparison_error, 1236, "Storage replicas not consistent" )
 ERROR( unreachable_storage_replica, 1237, "Storage replica cannot be reached" )
-ERROR( bulkload_task_failed, 1238, "Bulk load task is failed")
-ERROR( bulkload_task_outdated, 1239, "Bulk load task is outdated" )
+ERROR( bulkload_task_failed, 1238, "Bulk loading task failed")
+ERROR( bulkload_task_outdated, 1239, "Bulk loading task outdated" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
