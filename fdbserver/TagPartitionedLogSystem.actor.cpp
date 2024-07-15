@@ -46,11 +46,12 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 				std::string message;
 				if (reply.isError()) {
 					// FIXME Use C++20 format when it is available
-					message = format("TLogRespondError%04d", index++);
+					message = format("TLogPushRespondError%04d", index++);
 				} else {
-					message = format("TLogNoResponse%04d", index++);
+					message = format("TLogPushNoResponse%04d", index++);
 				}
-				TraceEvent(SevInfo, message.c_str()).detail("TLogID", tlogID);
+				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, message.c_str())
+				    .detail("TLogID", tlogID);
 			}
 		}
 		throw;

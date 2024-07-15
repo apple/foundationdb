@@ -2733,8 +2733,6 @@ ACTOR Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
 
-	using namespace std::literals::string_view_literals;
-
 	pContext->stage = INITIALIZE;
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
 
