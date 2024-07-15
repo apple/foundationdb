@@ -111,21 +111,21 @@ fdb.api_version(730)
 
 @fdb.transactional
 def set_knob(tr, knob_name, knob_value, config_class, description):
-        tr['\xff\xff/description'] = description
+        tr[b'\xff\xff/description'] = description
         tr[fdb.tuple.pack((config_class, knob_name,))] = knob_value
 
 # This function performs two knob changes transactionally.
 @fdb.transactional
 def set_multiple_knobs(tr):
-        tr['\xff\xff/description'] = 'description'
-        tr[fdb.tuple.pack((None, 'min_trace_severity',))] = '10'
-        tr[fdb.tuple.pack(('az-1', 'min_trace_severity',))] = '20'
+        tr[b'\xff\xff/description'] = b'description'
+        tr[fdb.tuple.pack((None, b'min_trace_severity',))] = b'10'
+        tr[fdb.tuple.pack((b'az-1', b'min_trace_severity',))] = b'20'
 
 db = fdb.open()
 db.options.set_use_config_database()
 
-set_knob(db, 'min_trace_severity', '10', None, 'description')
-set_knob(db, 'min_trace_severity', '20', 'az-1', 'description')
+set_knob(db, b'min_trace_severity', b'10', None, b'description')
+set_knob(db, b'min_trace_severity', b'20', 'az-1', b'description')
 ```
 
 ### CLI Usage
