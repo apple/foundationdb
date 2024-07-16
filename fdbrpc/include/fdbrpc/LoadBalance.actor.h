@@ -287,7 +287,6 @@ Future<Void> replicaComparison(Req req,
                                Reference<MultiInterface<Multi>> ssTeam,
                                RequestStream<Req, P> Interface::*channel,
                                int requiredReplicas) {
-	state int srcErrorCode = error_code_success;
 	state ErrorOr<Resp> src;
 
 	if (ssTeam->size() <= 1 || requiredReplicas == 0) {
@@ -297,7 +296,6 @@ Future<Void> replicaComparison(Req req,
 	wait(store(src, fSource));
 
 	if (src.isError()) {
-		srcErrorCode = src.getError().code();
 		ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
 		if (requiredReplicas == ALL_REPLICAS) {
 			throw src.getError();
@@ -306,7 +304,6 @@ Future<Void> replicaComparison(Req req,
 		state Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
 
 		if (srcLB.present() && srcLB.get().error.present()) {
-			srcErrorCode = srcLB.get().error.get().code();
 			ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
 			if (requiredReplicas == ALL_REPLICAS) {
 				throw srcLB.get().error.get();
