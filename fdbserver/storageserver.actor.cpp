@@ -334,7 +334,7 @@ struct MoveInShard {
 	std::shared_ptr<MoveInUpdates> updates;
 	bool isRestored;
 	Version transferredVersion;
-	bool conductBulkLoad;
+	bool conductBulkLoad = false;
 
 	Future<Void> fetchClient; // holds FetchShard() actor
 	Promise<Void> fetchComplete;
@@ -6112,7 +6112,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
 
-	for (; offset < sz && *remainingLimitBytes > 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
