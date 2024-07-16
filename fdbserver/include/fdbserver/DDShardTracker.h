@@ -77,6 +77,7 @@ public:
 
 	// BulkLoadTask Tracker
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	bool bulkLoadEnabled = false;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;

@@ -630,6 +630,10 @@ struct DDBulkLoadTask {
 	}
 };
 
+inline bool bulkLoadIsEnabled(int bulkLoadModeValue) {
+	return SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && bulkLoadModeValue == 1;
+}
+
 class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
 	BulkLoadTaskCollection() { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadTask>()); }

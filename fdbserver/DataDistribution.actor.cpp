@@ -1511,7 +1511,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
-			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && self->initData->bulkLoadMode == 1) {
+			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
 				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;

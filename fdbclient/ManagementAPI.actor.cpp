@@ -2325,39 +2325,6 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
-	state Transaction tr(cx);
-	state BinaryWriter wr(Unversioned());
-	wr << mode;
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state int oldMode = 0;
-			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
-			if (oldModeValue.present()) {
-				BinaryReader rd(oldModeValue.get(), Unversioned());
-				rd >> oldMode;
-			}
-			if (oldMode != mode) {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << dataDistributionModeLock;
-				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-				BinaryWriter wrLastWrite(Unversioned());
-				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
-				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
-				tr.set(bulkLoadModeKey, wr.toValue());
-				wait(tr.commit());
-				TraceEvent("DDBulkLoadModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
-			}
-			return oldMode;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
                                                    std::set<AddressExclusion>* exclusions,
                                                    std::set<NetworkAddress>* inProgressExclusion) {
@@ -2824,6 +2791,94 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 	}
 
 	return auditId;
+}
+
+ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
+	state Transaction tr(cx);
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			if (oldMode != mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				BinaryWriter wrLastWrite(Unversioned());
+				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
+				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+				tr.set(bulkLoadModeKey, wr.toValue());
+				wait(tr.commit());
+				TraceEvent("DDBulkLoadModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<std::vector<BulkLoadState>> getBulkLoadStateWithinRange(
+    Database cx,
+    KeyRange rangeToRead,
+    size_t limit = 10,
+    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>()) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state std::vector<BulkLoadState> res;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkLoadPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadState bulkLoadState = decodeBulkLoadState(rangeResult[i].value);
+			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
+			if (range != bulkLoadState.getRange()) {
+				ASSERT(bulkLoadState.getRange().contains(range));
+				continue;
+			}
+			if (!phase.present() || phase.get() == bulkLoadState.phase) {
+				res.push_back(bulkLoadState);
+			}
+			if (res.size() >= limit) {
+				return res;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	return res;
 }
 
 ACTOR Future<Void> submitBulkLoadTask(Reference<IClusterConnectionRecord> clusterFile,

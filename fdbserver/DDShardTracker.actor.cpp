@@ -929,8 +929,7 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
-	// TODO(Zhe): do not check if dd bulk load mode is off
-	if (self->bulkLoadTaskCollection->overlappingTask(nextRange)) {
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(nextRange)) {
 		TraceEvent(SevWarn, "ShardCanForwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("ShardMerging", keys)
@@ -950,7 +949,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
-	if (self->bulkLoadTaskCollection->overlappingTask(prevRange)) {
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(prevRange)) {
 		TraceEvent(SevWarn, "ShardCanBackwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("ShardMerging", keys)
@@ -1206,7 +1205,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
-	bool onBulkLoading = self->bulkLoadTaskCollection->overlappingTask(keys);
+	bool onBulkLoading = self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(keys);
 	if (onBulkLoading && shouldSplit) {
 		TraceEvent(SevWarn, "ShardWantToSplitButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
@@ -1695,6 +1694,7 @@ Future<Void> DataDistributionTracker::run(
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
 	self->triggerShardBulkLoading = triggerShardBulkLoading;
 	self->userRangeConfig = initData->userRangeConfig;
+	self->bulkLoadEnabled = bulkLoadIsEnabled(initData->bulkLoadMode);
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

@@ -154,8 +154,6 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode(Database cx, int mode);
 
-ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
-
 ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
 // Start an audit on range of the specific type.
@@ -170,6 +168,16 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
                                      UID auditId,
                                      double timeoutSeconds);
 
+// Set bulk load mode
+ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
+
+// Get bulk load task state by range
+ACTOR Future<std::vector<BulkLoadState>> getBulkLoadStateWithinRange(Database cx,
+                                                                     KeyRange rangeToRead,
+                                                                     size_t limit,
+                                                                     Optional<BulkLoadPhase> phase);
+
+// Submit bulk load task
 ACTOR Future<Void> submitBulkLoadTask(Reference<IClusterConnectionRecord> clusterFile,
                                       BulkLoadState bulkLoadTask,
                                       TriggerBulkLoadRequestType type,

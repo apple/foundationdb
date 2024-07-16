@@ -32,45 +32,15 @@
 
 namespace fdb_cli {
 
-ACTOR Future<Void> getBulkLoadStateByRange(Database cx, KeyRange rangeToRead) {
-	state Transaction tr(cx);
-	state Key readBegin = rangeToRead.begin;
-	state Key readEnd = rangeToRead.end;
-	state int64_t finishCount = 0;
-	state int64_t unfinishedCount = 0;
-	state RangeResult res;
-	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				RangeResult res_ = wait(krmGetRanges(&tr,
-				                                     bulkLoadPrefix,
-				                                     KeyRangeRef(readBegin, readEnd),
-				                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
-				res = res_;
-				break;
-			} catch (Error& e) {
-				if (retryCount > 30) {
-					printf("Incomplete check\n");
-					return Void();
-				}
-				wait(tr.onError(e));
-				retryCount++;
-			}
-		}
-		for (int i = 0; i < res.size() - 1; ++i) {
-			if (res[i].value.empty()) {
-				continue;
-			}
-			BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
-			KeyRange range = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
-			if (range != bulkLoadState.getRange()) {
-				ASSERT(bulkLoadState.getRange().contains(range));
-				continue;
-			}
+ACTOR Future<Void> getBulkLoadStateByRange(Database cx,
+                                           KeyRange rangeToRead,
+                                           size_t countLimit,
+                                           Optional<BulkLoadPhase> phase) {
+	try {
+		std::vector<BulkLoadState> res = wait(getBulkLoadStateWithinRange(cx, rangeToRead, countLimit, phase));
+		int64_t finishCount = 0;
+		int64_t unfinishedCount = 0;
+		for (const auto& bulkLoadState : res) {
 			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
 				printf("[Complete]: %s\n", bulkLoadState.toString().c_str());
 				++finishCount;
@@ -87,10 +57,12 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx, KeyRange rangeToRead) {
 				UNREACHABLE();
 			}
 		}
-		readBegin = res.back().key;
+		printf("Finished task count %ld of total %ld tasks\n", finishCount, finishCount + unfinishedCount);
+	} catch (Error& e) {
+		if (e.code() == error_code_timed_out) {
+			printf("timed out\n");
+		}
 	}
-
-	printf("Finished task count %ld of total %ld tasks\n", finishCount, finishCount + unfinishedCount);
 	return Void();
 }
 
@@ -158,7 +130,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 	} else if (tokencmp(tokens[1], "status")) {
 		// Get progress of existing bulk loading tasks intersecting the input range
 		// TODO(Zhe): check status by ID
-		if (tokens.size() < 4) {
+		if (tokens.size() < 6) {
 			printUsage(tokens[0]);
 			return UID();
 		}
@@ -170,7 +142,24 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		wait(getBulkLoadStateByRange(cx, range));
+		std::string inputPhase = tokens[4].toString();
+		Optional<BulkLoadPhase> phase;
+		if (inputPhase == "all") {
+			phase = Optional<BulkLoadPhase>();
+		} else if (inputPhase == "submitted") {
+			phase = BulkLoadPhase::Invalid;
+		} else if (inputPhase == "triggered") {
+			phase = BulkLoadPhase::Triggered;
+		} else if (inputPhase == "running") {
+			phase = BulkLoadPhase::Running;
+		} else if (inputPhase == "complete") {
+			phase = BulkLoadPhase::Complete;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		int countLimit = std::stoi(tokens[5].toString());
+		wait(getBulkLoadStateByRange(cx, range, countLimit, phase));
 		return UID();
 
 	} else {
@@ -188,5 +177,6 @@ CommandFactory bulkLoadFactory(
                 "<DataFile> <ByteSampleFile>'\n"
                 "To trigger a task injecting a SST file from local file system: `bulkload local <BeginKey> <EndKey> "
                 "<Folder> <DataFile> <ByteSampleFile>'\n"
-                "To get progress of tasks within a range: `bulkload status <BeginKey> <EndKey>'\n"));
+                "To get progress of tasks within a range: `bulkload status <BeginKey> <EndKey> "
+                "[all|submitted|triggered|running|complete] <limit>'\n"));
 } // namespace fdb_cli
