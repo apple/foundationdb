@@ -342,6 +342,9 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0_until_7.2.0/VersionVectorEnableRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/VersionVectorEnableRestart-2.toml IGNORE)
   add_fdb_test(
+    TEST_FILES restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-1.toml
+    restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
     restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
@@ -398,6 +401,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.toml
     restarting/from_7.3.0/SnapTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.49/ClientMetricRestart-1.toml
+    restarting/from_7.3.49/ClientMetricRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_7.3.0/ClientTransactionProfilingCorrectness-2.toml)
