@@ -250,7 +250,6 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreControllerData> con
 // 4) After process all restore requests, finish restore by cleaning up the restore related system key
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, Database cx) {
-	state UID randomUID = deterministicRandom()->randomUniqueID();
 	state std::vector<RestoreRequest> restoreRequests = wait(collectRestoreRequests(cx));
 	state int restoreIndex = 0;
 
