@@ -266,7 +266,6 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 	ACTOR template <class Trans>
 	Future<Void> randomReadWriteClient(Database cx, SkewedReadWriteWorkload* self, double delay, int clientIndex) {
-		state double startTime = now();
 		state double lastTime = now();
 		state double GRVStartTime;
 		state UID debugID;

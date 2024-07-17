@@ -157,7 +157,6 @@ bool exitFailure() {
 namespace fdb_cli {
 
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	state bool result = true;
 	if (tokens.size() < 3 || tokens.size() > 5) {
 		return exitFailure();
 	} else {

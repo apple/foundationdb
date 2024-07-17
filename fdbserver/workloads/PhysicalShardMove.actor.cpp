@@ -76,7 +76,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(PhysicalShardMoveWorkLoad* self, Database cx) {
-		int ignore = wait(setDDMode(cx, 0));
+		wait(success(setDDMode(cx, 0)));
 		state std::vector<UID> teamA;
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                                 { "TestKeyAB"_sr, "TestValueAB"_sr },
@@ -88,7 +88,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
 
-		Version _ = wait(self->populateData(self, cx, &kvs));
+		wait(success(self->populateData(self, cx, &kvs)));
 
 		TraceEvent("TestValueWritten").log();
 

@@ -1046,7 +1046,6 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 			return Optional<ClusterConnectionString>();
 		}
 
-		Version readVersion = wait(tr->getReadVersion());
 		state Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
 		if (g_network->isSimulated() && currentKey.present()) {
 			// If the change coordinators request succeeded, the coordinators
