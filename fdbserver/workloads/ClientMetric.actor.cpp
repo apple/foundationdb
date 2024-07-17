@@ -183,6 +183,7 @@ struct ClientMetricWorkload : TestWorkload {
 
 			state int retry1 = 0;
 			state int max_retry1 = 10;
+			state uint64_t vs1 = 0;
 			loop {
 				if (retry1 > max_retry1) {
 					// this should not happen, it should succeed after a few retry
@@ -200,7 +201,7 @@ struct ClientMetricWorkload : TestWorkload {
 				ASSERT(r1.size() > 0);
 				// [0] is the latest version, as we have reverse = true
 				KeyRef latest = r1[0].key;
-				state uint64_t vs1 = getVersionStamp(latest);
+				vs1 = getVersionStamp(latest);
 				std::cout << "vs1=" << vs1 << std::endl;
 				ASSERT(vs1 > 0);
 				break;
