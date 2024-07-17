@@ -360,8 +360,8 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		wait(pTLogTestContextEpochOne->peekCommitMessages(0, 0));
 	} else {
 		// Done with old generation. Lock the old generation of tLogs.
-		TLogLockResult data = wait(
-		    pTLogTestContextEpochOne->pTLogContextList[tLogIdx]->TestTLogInterface.lock.getReply<TLogLockResult>());
+		TLogLockResult data = wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
+		                               ->TestTLogInterface.lock.template getReply<TLogLockResult>());
 		TraceEvent("TestTLogServerLockResult").detail("KCV", data.knownCommittedVersion);
 
 		state Reference<TLogTestContext> pTLogTestContextEpochTwo =
