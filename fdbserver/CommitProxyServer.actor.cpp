@@ -2582,12 +2582,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		                                     self->prevVersion,
 		                                     writtenTags),
 		    TaskPriority::ProxyMasterVersionReply));
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			ASSERT(self->loggingComplete.isReady());
-			ASSERT_WE_THINK(self->loggingComplete.get() >= self->commitVersion); // @todo remove later
-			pProxyCommitData->minKnownCommittedVersion =
-			    std::max(pProxyCommitData->minKnownCommittedVersion, self->loggingComplete.get());
-		}
 	}
 
 	if (debugID.present()) {
@@ -2599,6 +2593,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		pProxyCommitData->locked = self->lockedAfter;
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			ASSERT(self->loggingComplete.isReady());
+			pProxyCommitData->minKnownCommittedVersion =
+			    std::max(pProxyCommitData->minKnownCommittedVersion, self->loggingComplete.get());
+		}
 	}
 
 	if (self->forceRecovery) {
