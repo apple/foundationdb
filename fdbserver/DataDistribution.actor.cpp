@@ -1145,10 +1145,6 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		}
 		wait(delay(1.0));
 	}
-
-	// Start a new one
-	wait(delay(5.0));
-	self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
 	return Void();
 }
 
@@ -1198,14 +1194,12 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	wait(readyToStart);
 	self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
-	TraceEvent(SevInfo, "DDBulkLoadCoreInitialized", self->ddId);
+	TraceEvent(SevInfo, "DDBulkLoadCoreResumed", self->ddId);
 
 	loop {
 		try {
 			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
 			wait(self->bulkLoadActors.getResult());
-			UNREACHABLE();
-
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
@@ -1215,7 +1209,8 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				throw e;
 			}
 		}
-		wait(delay(5.0)); // avoid crash busy loop
+		self->bulkLoadActors.clear(true);
+		wait(delay(5.0));
 	}
 }
 
