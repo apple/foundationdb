@@ -454,7 +454,7 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 		try {
 			// If corruption detected, enter security mode which
 			// stops using data moves and only allow auditStorage
-			int _ = wait(setDDMode(occ, 2));
+			wait(success(setDDMode(occ, 2)));
 			TraceEvent(SevInfo, "ValidateRangeAssignmentCorruptionDetectedAndDDStopped")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Range", range)

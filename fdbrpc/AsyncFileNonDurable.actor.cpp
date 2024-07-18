@@ -169,7 +169,6 @@ ACTOR Future<int> AsyncFileNonDurable::read(AsyncFileNonDurable* self, void* dat
 
 ACTOR Future<Void> AsyncFileNonDurable::closeFile(AsyncFileNonDurable* self) {
 	state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-	state TaskPriority currentTaskID = g_network->getCurrentTask();
 	state std::string filename = self->filename;
 
 	g_simulator->getMachineByNetworkAddress(self->openedAddress)->deletingOrClosingFiles.insert(self->getFilename());

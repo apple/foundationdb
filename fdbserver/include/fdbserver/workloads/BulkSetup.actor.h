@@ -88,8 +88,6 @@ Future<uint64_t> setupRange(Database cx,
                             uint64_t end,
                             std::vector<Reference<Tenant>> tenants) {
 	state uint64_t bytesInserted = 0;
-	state double startT = now();
-	state double prevStart;
 	loop {
 		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {
@@ -98,7 +96,6 @@ Future<uint64_t> setupRange(Database cx,
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
 		try {
-			prevStart = now();
 			if (deterministicRandom()->random01() < 0.001)
 				tr.debugTransaction(deterministicRandom()->randomUniqueID());
 

@@ -814,7 +814,7 @@ ACTOR [[flow_allow_discard]] Future<bool> actorTest8() {
 					printf("\nactorTest8 failed\n");
 					return false;
 				}
-				bool b = wait(set);
+				wait(success(set));
 				inloop = true;
 				if (1)
 					throw operation_failed();

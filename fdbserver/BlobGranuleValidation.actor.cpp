@@ -254,7 +254,6 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 	state KeyRangeMap<Optional<BlobGranuleSummaryRef>> lastSummary;
 	state Version lastSummaryVersion = invalidVersion;
 	state Transaction tr(cx, tenant);
-	state int successCount = 0;
 	try {
 		loop {
 			// get grv and get latest summaries
@@ -323,8 +322,6 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 					return Void();
 				}
 			}
-
-			successCount++;
 
 			lastSummaryArena = nextSummary.arena();
 			lastSummaryVersion = nextSummaryVersion;

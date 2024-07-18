@@ -3654,10 +3654,10 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
+	wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                 ProtocolVersion::withTSS()))));
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
@@ -3680,10 +3680,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	}
 
 	{
-		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withTSS())));
+		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                 ProtocolVersion::withTSS()))));
 	}
 
 	{
@@ -3702,10 +3702,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	}
 
 	{
-		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                           ProtocolVersion::withTSS(),
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withTSS())));
+		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                 ProtocolVersion::withTSS(),
+		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                 ProtocolVersion::withTSS()))));
 	}
 
 	{
@@ -3770,10 +3770,10 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 	}
 
 	{
-		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                           ProtocolVersion::withTSS(),
-		                                                           ProtocolVersion::withTSS(),
-		                                                           ProtocolVersion::withCacheRole())));
+		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                 ProtocolVersion::withTSS(),
+		                                                 ProtocolVersion::withTSS(),
+		                                                 ProtocolVersion::withCacheRole()))));
 	}
 
 	{
@@ -3788,10 +3788,10 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 	}
 
 	{
-		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withTSS())));
+		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                 ProtocolVersion::withTSS()))));
 	}
 
 	{

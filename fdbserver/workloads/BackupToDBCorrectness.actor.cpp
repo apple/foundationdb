@@ -581,7 +581,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreTool(self->extraDB);
 		state Future<Void> extraBackup;
-		state bool extraTasks = false;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
@@ -753,7 +752,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 			if (extraBackup.isValid()) {
 				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
-				extraTasks = true;
 				try {
 					wait(extraBackup);
 				} catch (Error& e) {
