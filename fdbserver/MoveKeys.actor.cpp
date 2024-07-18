@@ -2332,7 +2332,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 								}
 								throw e;
 							}
-							ASSERT(newBulkLoadState.dataMoveId.present() && newBulkLoadState.dataMoveId == dataMoveId);
+							ASSERT(newBulkLoadState.getDataMoveId().present() &&
+							       newBulkLoadState.getDataMoveId().get() == dataMoveId);
 							newBulkLoadState.completeTime = now();
 							wait(krmSetRange(&tr,
 							                 bulkLoadPrefix,

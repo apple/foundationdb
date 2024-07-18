@@ -892,15 +892,6 @@ public:
 					    .detail("Debug", "Check information below");
 					// Debug: set true for traceAllInfo() to print out more information
 					self->traceAllInfo();
-				} else if (addedTeams <= 0) {
-					TraceEvent(SevWarn, "NoTeamAddedAfterBuildTeam", self->distributorId)
-					    .detail("Primary", self->primary)
-					    .detail("ServerTeamNum", self->teams.size());
-				} else if (addedTeams > 0) {
-					TraceEvent(SevInfo, "NewTeamAddedAfterBuildTeam", self->distributorId)
-					    .detail("Primary", self->primary)
-					    .detail("ServerTeamNum", self->teams.size())
-					    .detail("AddedTeams", addedTeams);
 				}
 			} else {
 				int totalHealthyMachineCount = self->calculateHealthyMachineCount();

@@ -39,7 +39,8 @@ enum class BulkLoadType : uint8_t {
 
 enum class BulkLoadTransportMethod : uint8_t {
 	Invalid = 0,
-	CP = 1,
+	CP = 1, // Local file copy. Used when the data file is in the local file system for any storage server. Used for
+	        // simulation test and local cluster test.
 };
 
 enum class BulkLoadInjectMethod : uint8_t {
@@ -67,6 +68,10 @@ struct BulkLoadState {
 	  : taskId(taskId), range(range), loadType(loadType), transportMethod(transportMethod), injectMethod(injectMethod),
 	    folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Invalid) {
 		ASSERT(isValid());
+	}
+
+	bool operator==(const BulkLoadState& rhs) const {
+		return taskId == rhs.taskId && range == rhs.range && dataFiles == rhs.dataFiles;
 	}
 
 	std::string toString() const {
@@ -101,6 +106,15 @@ struct BulkLoadState {
 
 	Optional<std::string> getBytesSampleFile() const { return bytesSampleFile; }
 
+	bool onAnyPhase(const std::vector<BulkLoadPhase>& inputPhases) const {
+		for (const auto& inputPhase : inputPhases) {
+			if (inputPhase == phase) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
 			TraceEvent(SevWarn, "DDBulkLoadTaskUpdateDataMoveId")
@@ -109,6 +123,10 @@ struct BulkLoadState {
 		}
 		dataMoveId = id;
 	}
+
+	inline Optional<UID> getDataMoveId() const { return dataMoveId; }
+
+	inline void clearDataMoveId() { dataMoveId.reset(); }
 
 	bool isValid() const {
 		if (!taskId.isValid()) {
@@ -167,7 +185,6 @@ struct BulkLoadState {
 
 	// Updated by DD
 	BulkLoadPhase phase;
-	Optional<UID> dataMoveId;
 	double submitTime = 0;
 	double triggerTime = 0;
 	double startTime = 0;
@@ -175,6 +192,7 @@ struct BulkLoadState {
 	int restartCount = -1;
 
 private:
+	// Set by user
 	UID taskId; // Unique ID of the task
 	KeyRange range; // Load the key-value within this range "[begin, end)" from data file
 	// File inject config
@@ -189,6 +207,9 @@ private:
 	// bytesSampleFile is Optional. If bytesSampleFile is not provided, storage server will go through all keys and
 	// conduct byte sampling, which will slow down the bulk loading rate.
 	// TODO(Zhe): add file checksum
+
+	// Set by DD
+	Optional<UID> dataMoveId;
 };
 
 BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,

@@ -975,8 +975,8 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 			KeyRange leftRange = Standalone(KeyRangeRef(it->range().begin, keys.begin));
 			restartShardTrackers(self, leftRange);
 			e.detail("FirstSplitShard", it->range());
-			break;
 		}
+		break;
 	}
 
 	// Step 2: split right without data move nor updating dbEstimate size (will be rebuilt after DD restarts)

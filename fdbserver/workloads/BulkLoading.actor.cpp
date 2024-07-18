@@ -277,10 +277,6 @@ struct BulkLoading : TestWorkload {
 			if (complete) {
 				break;
 			}
-			bool ddEnabled = wait(self->checkDDEnabled(cx));
-			if (!ddEnabled) {
-				throw timed_out();
-			}
 			wait(delay(10.0));
 		}
 		return Void();
@@ -400,18 +396,11 @@ struct BulkLoading : TestWorkload {
 		}
 		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
-		int oldDDMode = wait(setDDMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
 		int old1 = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
-		try {
-			wait(self->waitUntilAllComplete(self, cx));
-			TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
-		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				return Void();
-			}
-		}
+		wait(self->waitUntilAllComplete(self, cx));
+		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
+
 		// Second round of issuing tasks
 		bulkLoadStates.clear();
 		bulkLoadDataList.clear();
@@ -428,14 +417,9 @@ struct BulkLoading : TestWorkload {
 		}
 		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
-		try {
-			wait(self->waitUntilAllComplete(self, cx));
-			TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
-		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				return Void();
-			}
-		}
+		wait(self->waitUntilAllComplete(self, cx));
+		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
+
 		int old2 = wait(setBulkLoadMode(cx, 0));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
 		state int j = 0;
@@ -496,49 +480,41 @@ struct BulkLoading : TestWorkload {
 	}
 
 	ACTOR Future<Void> complexTest(BulkLoading* self, Database cx) {
-		int oldDDMode = wait(setDDMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadComplexTestSetDDMode").detail("OldMode", oldDDMode).detail("NewMode", 1);
 		int old1 = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
 
+		// Issue tasks
 		state KeyRangeMap<Optional<BulkLoadTaskTestUnit>> taskMap;
 		taskMap.insert(allKeys, Optional<BulkLoadTaskTestUnit>());
 		state int i = 0;
 		state int n = deterministicRandom()->randomInt(5, 10);
 		state int frequencyFactorForWaitAll = std::max(2, (int)(n * deterministicRandom()->random01()));
 		state int frequencyFactorForSwitchMode = std::max(2, (int)(n * deterministicRandom()->random01()));
-		try {
-			for (; i < n; i++) {
-				state BulkLoadTaskTestUnit taskUnit =
-				    self->produceRandomBulkLoadTaskUnit(self, simulationBulkLoadFolderForComplexTest, i);
-				taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
-				if (deterministicRandom()->coinflip()) {
-					wait(delay(deterministicRandom()->random01() * 10));
-				}
-				wait(self->issueBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
-				if (i % frequencyFactorForWaitAll == 0 && deterministicRandom()->coinflip()) {
-					wait(self->waitUntilAllComplete(self, cx));
-				}
-				if (i % frequencyFactorForSwitchMode == 0 && deterministicRandom()->coinflip()) {
-					int old2 = wait(setBulkLoadMode(cx, 0));
-					TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
-					wait(delay(deterministicRandom()->random01() * 5));
-					int old3 = wait(setBulkLoadMode(cx, 1));
-					TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old3).detail("NewMode", 1);
-				}
+		for (; i < n; i++) {
+			state BulkLoadTaskTestUnit taskUnit =
+			    self->produceRandomBulkLoadTaskUnit(self, simulationBulkLoadFolderForComplexTest, i);
+			taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
+			if (deterministicRandom()->coinflip()) {
+				wait(delay(deterministicRandom()->random01() * 10));
 			}
-			wait(self->waitUntilAllComplete(self, cx));
-			int old4 = wait(setBulkLoadMode(cx, 0)); // trigger DD restart
-			TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old4).detail("NewMode", 0);
-
-		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				// Throw this error only when DD mode is set off
-				TraceEvent("BulkLoadingWorkLoadComplexTestEarlyComplete");
-				return Void();
+			wait(self->issueBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
+			if (i % frequencyFactorForWaitAll == 0 && deterministicRandom()->coinflip()) {
+				wait(self->waitUntilAllComplete(self, cx));
+			}
+			if (i % frequencyFactorForSwitchMode == 0 && deterministicRandom()->coinflip()) {
+				int old2 = wait(setBulkLoadMode(cx, 0));
+				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
+				wait(delay(deterministicRandom()->random01() * 5));
+				int old3 = wait(setBulkLoadMode(cx, 1));
+				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old3).detail("NewMode", 1);
 			}
 		}
+		// Wait until all tasks have completed
+		wait(self->waitUntilAllComplete(self, cx));
+		int old4 = wait(setBulkLoadMode(cx, 0)); // trigger DD restart
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old4).detail("NewMode", 0);
 
+		// Check correctness
 		state std::vector<KeyValue> kvs;
 		state std::vector<BulkLoadState> bulkLoadStates;
 		for (auto& range : taskMap.ranges()) {
@@ -553,6 +529,8 @@ struct BulkLoading : TestWorkload {
 			bulkLoadStates.push_back(range.value().get().bulkLoadTask);
 		}
 		wait(self->checkData(cx, kvs));
+
+		// Clear metadata
 		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));
 		wait(self->checkBulkLoadMetadataCleared(self, cx));
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");

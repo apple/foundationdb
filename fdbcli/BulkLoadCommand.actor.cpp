@@ -121,7 +121,8 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string folder = tokens[4].toString();
 		std::string dataFile = tokens[5].toString();
-		std::string byteSampleFile = tokens[6].toString();
+		std::string byteSampleFile = tokens[6].toString(); // TODO(Zhe): reject if the input bytes sampling file is not
+		                                                   // same as the configuration as FDB cluster
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
 		wait(submitBulkLoadTask(clusterFile, bulkLoadTask, TriggerBulkLoadRequestType::New, /*timeoutSeconds=*/60));
@@ -173,8 +174,7 @@ CommandFactory bulkLoadFactory(
     CommandHelp("bulkload [mode|acknowledge|local|status] [ARGs]",
                 "bulkload commands",
                 "To set bulkLoad mode: `bulkload mode [on|off]'\n"
-                "To acknowledge completed tasks within a range: `bulkload acknowledge <BeginKey> <EndKey> <Folder> "
-                "<DataFile> <ByteSampleFile>'\n"
+                "To acknowledge completed tasks within a range: `bulkload acknowledge <TaskID> <BeginKey> <EndKey>'\n"
                 "To trigger a task injecting a SST file from local file system: `bulkload local <BeginKey> <EndKey> "
                 "<Folder> <DataFile> <ByteSampleFile>'\n"
                 "To get progress of tasks within a range: `bulkload status <BeginKey> <EndKey> "

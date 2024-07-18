@@ -362,7 +362,7 @@ ACTOR Future<Void> skipAuditOnRange(Reference<DataDistributor> self,
                                     std::shared_ptr<DDAudit> audit,
                                     KeyRange rangeToSkip);
 
-void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, UID taskId);
+void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, UID taskId, std::string context);
 ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self);
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
@@ -1030,7 +1030,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 		try {
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
 			wait(store(newBulkLoadState, updateBulkLoadTaskPhase(&tr, range, taskId, BulkLoadPhase::Triggered)));
-			newBulkLoadState.dataMoveId.reset();
+			newBulkLoadState.clearDataMoveId();
 			newBulkLoadState.restartCount = newBulkLoadState.restartCount + 1;
 			newBulkLoadState.triggerTime = now();
 			wait(krmSetRange(&tr, bulkLoadPrefix, newBulkLoadState.getRange(), bulkLoadStateValue(newBulkLoadState)));
@@ -1079,7 +1079,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// The completion of the task relies on the fact that a data move on a range is either
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
-		wait(completeAck.getFuture());
+		wait(completeAck.getFuture()); // proceed when a data move completes with this task
 		TraceEvent(SevInfo, "DDBulkLoadTaskNewComplete", self->ddId).detail("Task", triggeredBulkLoadTask.toString());
 
 	} catch (Error& e) {
@@ -1099,8 +1099,11 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 }
 
 // TODO(Zhe): add parallelism limitation here
-void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, UID taskId) {
-	TraceEvent(SevInfo, "DDBulkLoadTaskRunAsync", self->ddId).detail("Range", range).detail("TaskId", taskId);
+void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, UID taskId, std::string context) {
+	TraceEvent(SevInfo, "DDBulkLoadTaskRunAsync", self->ddId)
+	    .detail("Range", range)
+	    .detail("TaskId", taskId)
+	    .detail("Context", context);
 	self->bulkLoadActors.add(doBulkLoadTask(self, range, taskId));
 	return;
 }
@@ -1115,7 +1118,8 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		try {
 			// TODO(Zhe): check parallelism limitation when expanding
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead));
+			RangeResult result =
+			    wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (!result[i].value.empty()) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
@@ -1124,10 +1128,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 						// This task is outdated
 						continue;
 					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid) {
-						TraceEvent(SevInfo, "DDBulkLoadScheduleTask", self->ddId)
-						    .detail("BulkLoadTask", bulkLoadState.toString())
-						    .detail("Range", range);
-						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId());
+						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId(), "ScheduleTask");
 					} else {
 						ASSERT(bulkLoadState.phase == BulkLoadPhase::Triggered ||
 						       bulkLoadState.phase == BulkLoadPhase::Running ||
@@ -1160,7 +1161,8 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 			Database cx = self->txnProcessor->context();
 			Transaction tr(cx);
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			RangeResult result = wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead));
+			RangeResult result =
+			    wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (!result[i].value.empty()) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
@@ -1171,15 +1173,11 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 						    .detail("BulkLoadTask", bulkLoadState.toString())
 						    .detail("RangeInSpace", range);
 					} else if (bulkLoadState.phase == BulkLoadPhase::Triggered) {
-						TraceEvent(SevInfo, "DDBulkLoadRestartTriggeredTask", self->ddId)
-						    .detail("BulkLoadTask", bulkLoadState.toString())
-						    .detail("RangeInSpace", range);
-						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId());
+						runBulkLoadTaskAsync(
+						    self, bulkLoadState.getRange(), bulkLoadState.getTaskId(), "RestartTriggeredTask");
 					} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
-						TraceEvent(SevInfo, "DDBulkLoadRestartRunningTask", self->ddId)
-						    .detail("OldBulkLoadTask", bulkLoadState.toString())
-						    .detail("RangeInSpace", range);
-						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId());
+						runBulkLoadTaskAsync(
+						    self, bulkLoadState.getRange(), bulkLoadState.getTaskId(), "RestartRunningTask");
 					} else {
 						TraceEvent(SevDebug, "DDBulkLoadRestartRangeNoTask", self->ddId).detail("RangeInSpace", range);
 					}
@@ -1341,7 +1339,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>();
+			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
 			wait(self->resumeRelocations());
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Relocation Resumed");
