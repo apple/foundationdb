@@ -178,7 +178,7 @@ description is not currently required but encouraged.
             paramType="String" paramDescription="Hexadecimal ID"
             description="Specify the machine ID that was passed to fdbserver processes running on the same machine as this client, for better location-aware load balancing." />
     <Option name="datacenter_id" code="22"
-            paramType="String" paramDescription="Hexadecimal ID"
+            paramType="String" paramDescription="A string identifier for the datacenter"
             description="Specify the datacenter ID that was passed to fdbserver processes running in the same datacenter as this client, for better location-aware load balancing." />
     <!-- The snapshot RYW options act like defaults for the equivalent transaction options, but database defaults cannot have cumulative effects from multiple calls.
          Thus, we don't use the defaultFor annotation on these options. -->
