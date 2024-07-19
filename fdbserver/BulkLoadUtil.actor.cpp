@@ -52,67 +52,10 @@ ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, 
 	}
 }
 
-ACTOR Future<BulkLoadState> updateBulkLoadTaskPhase(Transaction* tr, KeyRange range, UID taskId, BulkLoadPhase phase) {
-	state BulkLoadState bulkLoadState;
-	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
-	if (result.size() > 2) {
-		throw bulkload_task_outdated();
-	} else if (result[0].value.empty()) {
-		throw bulkload_task_outdated();
-	}
-	ASSERT(result.size() == 2);
-	bulkLoadState = decodeBulkLoadState(result[0].value);
-	ASSERT(bulkLoadState.getTaskId().isValid());
-	if (taskId != bulkLoadState.getTaskId()) {
-		// This task is overwritten by a newer task
-		throw bulkload_task_outdated();
-	}
-	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
-	if (bulkLoadState.getRange() != currentRange) {
-		// This task is partially overwritten by a newer task
-		ASSERT(bulkLoadState.getRange().contains(currentRange));
-		throw bulkload_task_outdated();
-	}
-	if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-		// We ignore any complete task
-		throw bulkload_task_outdated();
-	}
-	bulkLoadState.phase = phase;
-	return bulkLoadState;
-}
-
-ACTOR Future<Void> eraseBulkLoadTaskIfComplete(Transaction* tr, KeyRange range, UID taskId) {
-	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
-	if (result.size() > 2) {
-		throw bulkload_task_outdated();
-	} else if (result[0].value.empty()) {
-		throw bulkload_task_outdated();
-	}
-	ASSERT(result.size() == 2);
-	BulkLoadState bulkLoadState = decodeBulkLoadState(result[0].value);
-	ASSERT(bulkLoadState.getTaskId().isValid());
-	if (taskId != bulkLoadState.getTaskId()) {
-		// This task is overwritten by a newer task
-		throw bulkload_task_outdated();
-	}
-	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
-	if (bulkLoadState.getRange() != currentRange) {
-		// This task is partially overwritten by a newer task
-		ASSERT(bulkLoadState.getRange().contains(currentRange));
-		throw bulkload_task_outdated();
-	}
-	if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-		wait(krmSetRangeCoalescing(tr, bulkLoadPrefix, range, normalKeys, StringRef()));
-	} else {
-		throw bulkload_task_failed();
-	}
-	return Void();
-}
-
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
 	std::string content = readFileBytes(fromFile, fileBytesMax);
 	writeFile(toFile, content);
-	// Do file checksum for toFile
+	// TODO(BulkLoad): Do file checksum for toFile
 	return;
 }
 
@@ -194,7 +137,7 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 					KeyValue kv = reader->next();
 					ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 					if (sampleInfo.inSample) {
-						sstWriter->write(kv.key, kv.value); // TODO(Zhe): validate if kvs are sorted
+						sstWriter->write(kv.key, kv.value); // TODO(BulkLoad): validate if kvs are sorted
 						anySampled = true;
 					}
 				}

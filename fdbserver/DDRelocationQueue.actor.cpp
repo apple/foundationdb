@@ -1835,7 +1835,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			}
 
 			if (enableShardMove) {
-				// TODO(Zhe): double check if bulk loading can do with physical shard collection feature
+				// TODO(BulkLoad): double check if bulk loading can do with physical shard collection feature
 				if (!rd.isRestore()) {
 					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
 					// thus, update the physicalShardIDCandidate to related data structures

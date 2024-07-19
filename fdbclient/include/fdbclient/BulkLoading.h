@@ -30,6 +30,7 @@ enum class BulkLoadPhase : uint8_t {
 	Triggered = 1, // Update when DD trigger a data move for the task
 	Running = 2, // Update atomically with updating KeyServer dest servers in startMoveKey
 	Complete = 3, // Update atomically with updating KeyServer src servers in finishMoveKey
+	Acknowledged = 4, // Updated by users; DD automatically clear metadata with this phase
 };
 
 enum class BulkLoadType : uint8_t {
@@ -158,7 +159,7 @@ struct BulkLoadState {
 				return false;
 			}
 		}
-		// TODO(Zhe): do some validation between methods and files
+		// TODO(BulkLoad): do some validation between methods and files
 
 		return true;
 	}
@@ -206,7 +207,7 @@ private:
 	Optional<std::string> bytesSampleFile;
 	// bytesSampleFile is Optional. If bytesSampleFile is not provided, storage server will go through all keys and
 	// conduct byte sampling, which will slow down the bulk loading rate.
-	// TODO(Zhe): add file checksum
+	// TODO(BulkLoad): add file checksum
 
 	// Set by DD
 	Optional<UID> dataMoveId;
@@ -216,34 +217,5 @@ BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
                                       std::string folder,
                                       std::string dataFile,
                                       std::string bytesSampleFile);
-
-enum class TriggerBulkLoadRequestType : uint8_t {
-	Invalid = 0,
-	New = 1,
-	Acknowledge = 2,
-};
-
-struct TriggerBulkLoadRequest {
-	constexpr static FileIdentifier file_identifier = 1384500;
-
-	TriggerBulkLoadRequest() = default;
-	TriggerBulkLoadRequest(BulkLoadState bulkLoadTask, TriggerBulkLoadRequestType type)
-	  : bulkLoadTask(bulkLoadTask), type(type) {}
-
-	std::string toString() const {
-		return "TriggerBulkLoadRequest: [BulkLoadState]: " + bulkLoadTask.toString() +
-		       ", [Type]: " + std::to_string(static_cast<uint8_t>(type));
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, bulkLoadTask, type, reply);
-	}
-
-	BulkLoadState bulkLoadTask;
-	TriggerBulkLoadRequestType type;
-
-	ReplyPromise<Void> reply;
-};
 
 #endif

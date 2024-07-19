@@ -6112,7 +6112,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
 
-	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+	for (; offset < sz && *remainingLimitBytes > 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
@@ -9166,10 +9166,10 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	    .detail("FileSetToLoad", fileSetToLoad.toString());
 
 	// Step 2: Validation
-	// TODO(Zhe): Validate all files specified in fileSetToLoad exist
-	// TODO(Zhe): Check file checksum
-	// TODO(Zhe): Check file data all in the moveInShard range
-	// TODO(Zhe): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	// TODO(BulkLoad): Validate all files specified in fileSetToLoad exist
+	// TODO(BulkLoad): Check file checksum
+	// TODO(BulkLoad): Check file data all in the moveInShard range
+	// TODO(BulkLoad): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
 	if (!fileSetToLoad.bytesSampleFile.present()) {
 		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
 		    .detail("BulkLoadState", bulkLoadState.toString())
@@ -9204,7 +9204,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 			    .detail("MoveInShard", moveInShard->toString())
 			    .detail("FileSetToLoad", fileSetToLoad.toString());
 		}
-		// TODO(Zhe): set loading file size --- logging purpose
+		// TODO(BulkLoad): set loading file size --- logging purpose
 		cpFile.range = coalesceRanges[0];
 		rcp.fetchedFiles.push_back(cpFile);
 	}
@@ -10826,7 +10826,7 @@ private:
 			                                    dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
 			conductBulkLoad =
 			    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
-			// TODO(Zhe): remove after logical move based bulk loading has been implmented
+			// TODO(BulkLoad): remove after logical move based bulk loading has been implmented
 			ASSERT(enablePSM || !conductBulkLoad);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {

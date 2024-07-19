@@ -64,71 +64,50 @@ struct BulkLoading : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> issueBulkLoadTasksFdbcli(BulkLoading* self,
-	                                            Database cx,
-	                                            std::vector<BulkLoadState> tasks,
-	                                            TriggerBulkLoadRequestType type) {
+	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
 			loop {
 				try {
-					wait(submitBulkLoadTask(cx->getConnectionRecord(), tasks[i], type, /*timeoutSecond=*/300));
-					TraceEvent("BulkLoadingIssueBulkLoadTask")
+					wait(submitBulkLoadTask(cx, tasks[i]));
+					TraceEvent("BulkLoadingSubmitBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
-					    .detail("BulkLoadStates", describe(tasks[i]))
-					    .detail("RequestType", type);
+					    .detail("BulkLoadStates", describe(tasks));
 					break;
 				} catch (Error& e) {
-					TraceEvent("BulkLoadingIssueBulkLoadTaskError")
+					TraceEvent("BulkLoadingSubmitBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
-					    .detail("BulkLoadStates", describe(tasks))
-					    .detail("RequestType", type);
-					if (type == TriggerBulkLoadRequestType::Acknowledge) {
-						if (e.code() == error_code_bulkload_task_outdated) {
-							break;
-						}
-					}
-					wait(delay(5.0));
+					    .detail("BulkLoadStates", describe(tasks));
+					wait(delay(0.1));
 				}
 			}
 		}
 		return Void();
 	}
 
-	ACTOR Future<Void> issueBulkLoadTasksTr(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				for (auto task : tasks) {
-					wait(krmSetRange(&tr, bulkLoadPrefix, task.getRange(), bulkLoadStateValue(task)));
+	ACTOR Future<Void> acknowledgeBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+		state int i = 0;
+		for (; i < tasks.size(); i++) {
+			loop {
+				try {
+					wait(acknowledgeBulkLoadTask(cx, tasks[i].getRange(), tasks[i].getTaskId()));
+					TraceEvent("BulkLoadingAcknowledgeBulkLoadTask")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("BulkLoadStates", describe(tasks[i]));
+					break;
+				} catch (Error& e) {
+					TraceEvent("BulkLoadingAcknowledgeBulkLoadTaskError")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .errorUnsuppressed(e)
+					    .detail("BulkLoadStates", describe(tasks));
+					wait(delay(0.1));
 				}
-				wait(tr.commit());
-				TraceEvent("BulkLoadingIssueBulkLoadTask")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("BulkLoadStates", describe(tasks));
-				break;
-			} catch (Error& e) {
-				TraceEvent("BulkLoadingIssueBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .errorUnsuppressed(e)
-				    .detail("BulkLoadStates", describe(tasks));
-				wait(tr.onError(e));
 			}
-		}
-		return Void();
-	}
-
-	ACTOR Future<Void> issueBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
-		if (deterministicRandom()->coinflip()) {
-			wait(self->issueBulkLoadTasksTr(self, cx, tasks));
-		} else {
-			wait(self->issueBulkLoadTasksFdbcli(self, cx, tasks, TriggerBulkLoadRequestType::New));
 		}
 		return Void();
 	}
@@ -362,7 +341,7 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	ACTOR Future<Void> checkBulkLoadMetadataCleared(BulkLoading* self, Database cx) {
+	ACTOR Future<bool> checkBulkLoadMetadataCleared(BulkLoading* self, Database cx) {
 		state Key beginKey = allKeys.begin;
 		state Key endKey = allKeys.end;
 		state KeyRange rangeToRead;
@@ -383,8 +362,15 @@ struct BulkLoading : TestWorkload {
 					if (!res[i].value.empty()) {
 						BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
 						KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
-						ASSERT(bulkLoadState.getRange() != currentRange);
-						ASSERT(bulkLoadState.getRange().contains(currentRange));
+						if (bulkLoadState.getRange() == currentRange) {
+							TraceEvent("BulkLoadingWorkLoadMetadataNotCleared")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
+							    .detail("BulkLoadTask", bulkLoadState.toString());
+							return false;
+						} else {
+							ASSERT(bulkLoadState.getRange().contains(currentRange));
+						}
 						nonEmptyCount++;
 					} else {
 						emptyCount++;
@@ -396,7 +382,7 @@ struct BulkLoading : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		return Void();
+		return true;
 	}
 
 	// Issue three non-overlapping tasks and check data consistency and correctness
@@ -418,7 +404,7 @@ struct BulkLoading : TestWorkload {
 			bulkLoadStates.push_back(taskUnit.bulkLoadTask);
 			bulkLoadDataList.push_back(taskUnit.data);
 		}
-		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
+		wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
 		int old1 = wait(setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
@@ -439,7 +425,7 @@ struct BulkLoading : TestWorkload {
 			bulkLoadStates.push_back(taskUnit.bulkLoadTask);
 			bulkLoadDataList.push_back(taskUnit.data);
 		}
-		wait(self->issueBulkLoadTasks(self, cx, bulkLoadStates));
+		wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
 		wait(self->waitUntilAllComplete(self, cx));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
@@ -453,8 +439,18 @@ struct BulkLoading : TestWorkload {
 			kvs.insert(kvs.end(), bulkLoadDataList[j].begin(), bulkLoadDataList[j].end());
 		}
 		ASSERT(self->checkData(kvs, dbkvs));
-		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));
-		wait(self->checkBulkLoadMetadataCleared(self, cx));
+
+		// Check bulk load metadata
+		int old3 = wait(setBulkLoadMode(cx, 1));
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old3).detail("NewMode", 1);
+		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadStates));
+		loop {
+			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
+			if (cleared) {
+				break;
+			}
+			wait(delay(1.0));
+		}
 		TraceEvent("BulkLoadingWorkLoadSimpleTestComplete");
 		return Void();
 	}
@@ -524,7 +520,7 @@ struct BulkLoading : TestWorkload {
 			if (deterministicRandom()->coinflip()) {
 				wait(delay(deterministicRandom()->random01() * 10));
 			}
-			wait(self->issueBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
+			wait(self->submitBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
 			if (i % frequencyFactorForWaitAll == 0 && deterministicRandom()->coinflip()) {
 				wait(self->waitUntilAllComplete(self, cx));
 			}
@@ -562,8 +558,16 @@ struct BulkLoading : TestWorkload {
 		ASSERT(self->checkData(kvs, dbkvs));
 
 		// Clear metadata
-		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));
-		wait(self->checkBulkLoadMetadataCleared(self, cx));
+		int old5 = wait(setBulkLoadMode(cx, 1));
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old5).detail("NewMode", 1);
+		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadStates));
+		loop {
+			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
+			if (cleared) {
+				break;
+			}
+			wait(delay(1.0));
+		}
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
 		return Void();
 	}

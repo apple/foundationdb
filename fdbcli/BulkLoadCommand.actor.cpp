@@ -37,7 +37,7 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx,
                                            size_t countLimit,
                                            Optional<BulkLoadPhase> phase) {
 	try {
-		std::vector<BulkLoadState> res = wait(getBulkLoadStateWithinRange(cx, rangeToRead, countLimit, phase));
+		std::vector<BulkLoadState> res = wait(getValidBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
 		int64_t finishCount = 0;
 		int64_t unfinishedCount = 0;
 		for (const auto& bulkLoadState : res) {
@@ -102,8 +102,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		wait(submitBulkLoadTask(
-		    clusterFile, BulkLoadState(taskId, range), TriggerBulkLoadRequestType::Acknowledge, /*timeoutSeconds=*/60));
+		wait(acknowledgeBulkLoadTask(cx, range, taskId));
 		return taskId;
 
 	} else if (tokencmp(tokens[1], "local")) {
@@ -121,16 +120,16 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string folder = tokens[4].toString();
 		std::string dataFile = tokens[5].toString();
-		std::string byteSampleFile = tokens[6].toString(); // TODO(Zhe): reject if the input bytes sampling file is not
-		                                                   // same as the configuration as FDB cluster
+		std::string byteSampleFile = tokens[6].toString(); // TODO(BulkLoad): reject if the input bytes sampling file is
+		                                                   // not same as the configuration as FDB cluster
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
-		wait(submitBulkLoadTask(clusterFile, bulkLoadTask, TriggerBulkLoadRequestType::New, /*timeoutSeconds=*/60));
+		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 
 	} else if (tokencmp(tokens[1], "status")) {
 		// Get progress of existing bulk loading tasks intersecting the input range
-		// TODO(Zhe): check status by ID
+		// TODO(BulkLoad): check status by ID
 		if (tokens.size() < 6) {
 			printUsage(tokens[0]);
 			return UID();

@@ -43,7 +43,6 @@ struct DataDistributorInterface {
 	RequestStream<struct TriggerAuditRequest> triggerAudit;
 	RequestStream<struct TenantsOverStorageQuotaRequest> tenantsOverStorageQuota;
 	RequestStream<struct PrepareBlobRestoreRequest> prepareBlobRestoreReq;
-	RequestStream<struct TriggerBulkLoadRequest> triggerBulkLoad;
 
 	DataDistributorInterface() = default;
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -68,8 +67,7 @@ struct DataDistributorInterface {
 		           storageWigglerState,
 		           triggerAudit,
 		           tenantsOverStorageQuota,
-		           prepareBlobRestoreReq,
-		           triggerBulkLoad);
+		           prepareBlobRestoreReq);
 	}
 };
 

@@ -1867,11 +1867,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					if (bulkLoadState.present()) {
 						state BulkLoadState newBulkLoadState;
 						try {
-							wait(store(newBulkLoadState,
-							           updateBulkLoadTaskPhase(&tr,
-							                                   bulkLoadState.get().getRange(),
-							                                   bulkLoadState.get().getTaskId(),
-							                                   BulkLoadPhase::Running)));
+							wait(store(
+							    newBulkLoadState,
+							    getBulkLoadTask(&tr, bulkLoadState.get().getRange(), bulkLoadState.get().getTaskId())));
 						} catch (Error& e) {
 							if (e.code() == error_code_bulkload_task_outdated) {
 								cancelDataMove = true;
@@ -1879,6 +1877,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							}
 							throw e;
 						}
+						if (newBulkLoadState.phase == BulkLoadPhase::Complete) {
+							cancelDataMove = true;
+							throw retry();
+						}
+						newBulkLoadState.phase = BulkLoadPhase::Running;
 						newBulkLoadState.setDataMoveId(dataMoveId);
 						newBulkLoadState.startTime = now();
 						wait(krmSetRange(
@@ -2321,10 +2324,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							state BulkLoadState newBulkLoadState;
 							try {
 								wait(store(newBulkLoadState,
-								           updateBulkLoadTaskPhase(&tr,
-								                                   bulkLoadState.get().getRange(),
-								                                   bulkLoadState.get().getTaskId(),
-								                                   BulkLoadPhase::Complete)));
+								           getBulkLoadTask(
+								               &tr, bulkLoadState.get().getRange(), bulkLoadState.get().getTaskId())));
 							} catch (Error& e) {
 								if (e.code() == error_code_bulkload_task_outdated) {
 									cancelDataMove = true;
@@ -2332,6 +2333,11 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 								}
 								throw e;
 							}
+							if (newBulkLoadState.phase == BulkLoadPhase::Complete) {
+								cancelDataMove = true;
+								throw retry();
+							}
+							newBulkLoadState.phase = BulkLoadPhase::Complete;
 							ASSERT(newBulkLoadState.getDataMoveId().present() &&
 							       newBulkLoadState.getDataMoveId().get() == dataMoveId);
 							newBulkLoadState.completeTime = now();
