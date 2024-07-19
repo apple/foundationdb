@@ -1071,7 +1071,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 	state Promise<Void> completeAck;
 	state BulkLoadState triggeredBulkLoadTask;
 	state Version commitVersion = invalidVersion;
-	TraceEvent(SevInfo, "DDBulkLoadTaskNewBegin", self->ddId).detail("Range", range);
+	TraceEvent(SevInfo, "DDBulkLoadTaskNewBegin", self->ddId).detail("Range", range).detail("TaskID", taskId);
 	wait(tryStartBulkLoadTaskUntilSucceed(self)); // increase the task counter when succeed
 	try {
 		// Step 1: persist bulk load task phase as triggered
@@ -1085,6 +1085,8 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// can get notified when the task is completed by a data move
 		self->bulkLoadTaskCollection->publishTask(triggeredBulkLoadTask, commitVersion, completeAck);
 		TraceEvent(SevInfo, "DDBulkLoadTaskNewTriggered", self->ddId)
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
 		    .detail("Task", triggeredBulkLoadTask.toString())
 		    .detail("CommitVersion", commitVersion);
 		ASSERT(triggeredBulkLoadTask.getRange() == range);
@@ -1094,7 +1096,10 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		wait(completeAck.getFuture()); // proceed when a data move completes with this task
-		TraceEvent(SevInfo, "DDBulkLoadTaskNewComplete", self->ddId).detail("Task", triggeredBulkLoadTask.toString());
+		TraceEvent(SevInfo, "DDBulkLoadTaskNewComplete", self->ddId)
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Task", triggeredBulkLoadTask.toString());
 		self->bulkLoadTaskCollection->decrementTaskCounter();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1102,12 +1107,16 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		}
 		self->bulkLoadTaskCollection->decrementTaskCounter();
 		if (e.code() == error_code_bulkload_task_outdated) {
-			TraceEvent(SevWarn, "DDBulkLoadTaskNewFailed", self->ddId).errorUnsuppressed(e).detail("Range", range);
+			TraceEvent(SevWarn, "DDBulkLoadTaskNewFailed", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("Range", range)
+			    .detail("TaskID", taskId);
 			// sliently exits
 		} else {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoBulkLoadTaskFailed", self->ddId)
 			    .errorUnsuppressed(e)
-			    .detail("Range", range);
+			    .detail("Range", range)
+			    .detail("TaskID", taskId);
 			throw e;
 		}
 	}
@@ -1174,9 +1183,9 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 	state Key endKey = normalKeys.end;
 	state KeyRange rangeToRead;
 	while (beginKey < endKey) {
+		Database cx = self->txnProcessor->context();
+		state Transaction tr(cx);
 		try {
-			Database cx = self->txnProcessor->context();
-			Transaction tr(cx);
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			RangeResult result =
 			    wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
@@ -1202,10 +1211,7 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 			}
 			beginKey = result.back().key;
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			wait(delay(1.0));
+			wait(tr.onError(e));
 		}
 	}
 	TraceEvent(SevInfo, "DDBulkLoadRestartTriggeredTasksComplete", self->ddId);
@@ -1214,7 +1220,7 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 
 ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	wait(readyToStart);
-	self->bulkLoadActors.add(restartTriggeredBulkLoad(self));
+	wait(restartTriggeredBulkLoad(self));
 	TraceEvent(SevInfo, "DDBulkLoadCoreResumed", self->ddId);
 
 	loop {

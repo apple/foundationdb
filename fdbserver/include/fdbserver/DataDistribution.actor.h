@@ -588,14 +588,42 @@ public:
 	// Add a task and this task becomes visible to DDTracker and DDQueue
 	// DDTracker stops any shard boundary change overlapping the task range
 	// DDQueue attaches the task to following data moves until the task has been completed
+	// If there are overlapped old tasks, make it outdated by sending a signal to completeAck
 	void publishTask(const BulkLoadState& bulkLoadState, Version commitVersion, Promise<Void> completeAck) {
 		if (overlappingTaskSince(bulkLoadState.getRange(), commitVersion)) {
 			throw bulkload_task_outdated();
 		}
 		DDBulkLoadTask task(bulkLoadState, commitVersion, completeAck);
 		TraceEvent(SevDebug, "DDBulkLoadCollectionPublishTask", ddId)
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
 		    .detail("Range", bulkLoadState.getRange())
 		    .detail("Task", task.toString());
+		// For any overlapping task, make it outdated
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+			if (!it->value().present()) {
+				continue;
+			}
+			if (it->value().get().coreState.getTaskId() == bulkLoadState.getTaskId()) {
+				TraceEvent(
+				    g_network->isSimulated() ? SevError : SevWarnAlways, "DDBulkLoadCollectionPublishTaskError", ddId)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("NewTask", bulkLoadState.toString())
+				    .detail("OldTask", it->value().get().coreState.toString());
+				throw movekeys_conflict();
+			}
+			if (it->value().get().completeAck.canBeSet()) {
+				it->value().get().completeAck.sendError(bulkload_task_outdated());
+				TraceEvent(SevInfo, "DDBulkLoadCollectionPublishTaskOverwriteTask", ddId)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("NewRange", bulkLoadState.getRange())
+				    .detail("NewTask", task.toString())
+				    .detail("OldTaskRange", it->range())
+				    .detail("OldTask", it->value().get().toString());
+			}
+		}
 		bulkLoadTaskMap.insert(bulkLoadState.getRange(), task);
 		return;
 	}

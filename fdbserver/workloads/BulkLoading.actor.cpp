@@ -64,29 +64,6 @@ struct BulkLoading : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	bool allComplete(RangeResult input) {
-		TraceEvent e("BulkLoadingCheckStatusAllComplete");
-		bool res = true;
-		for (int i = 0; i < input.size() - 1; i++) {
-			TraceEvent e("BulkLoadingCheckStatus");
-			e.detail("Range", Standalone(KeyRangeRef(input[i].key, input[i + 1].key)));
-			if (!input[i].value.empty()) {
-				BulkLoadState bulkLoadState = decodeBulkLoadState(input[i].value);
-				ASSERT(bulkLoadState.isValid());
-				e.detail("BulkLoadState", bulkLoadState.toString());
-				if (bulkLoadState.phase != BulkLoadPhase::Complete) {
-					res = false;
-					e.detail("Status", "Running");
-				} else {
-					e.detail("Status", "Complete");
-				}
-			} else {
-				e.detail("Status", "N/A");
-			}
-		}
-		return res;
-	}
-
 	ACTOR Future<Void> issueBulkLoadTasksFdbcli(BulkLoading* self,
 	                                            Database cx,
 	                                            std::vector<BulkLoadState> tasks,
@@ -97,11 +74,15 @@ struct BulkLoading : TestWorkload {
 				try {
 					wait(submitBulkLoadTask(cx->getConnectionRecord(), tasks[i], type, /*timeoutSecond=*/300));
 					TraceEvent("BulkLoadingIssueBulkLoadTask")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
 					    .detail("BulkLoadStates", describe(tasks[i]))
 					    .detail("RequestType", type);
 					break;
 				} catch (Error& e) {
 					TraceEvent("BulkLoadingIssueBulkLoadTaskError")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
 					    .detail("BulkLoadStates", describe(tasks))
 					    .detail("RequestType", type);
@@ -126,10 +107,15 @@ struct BulkLoading : TestWorkload {
 					wait(krmSetRange(&tr, bulkLoadPrefix, task.getRange(), bulkLoadStateValue(task)));
 				}
 				wait(tr.commit());
-				TraceEvent("BulkLoadingIssueBulkLoadTask").detail("BulkLoadStates", describe(tasks));
+				TraceEvent("BulkLoadingIssueBulkLoadTask")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("BulkLoadStates", describe(tasks));
 				break;
 			} catch (Error& e) {
 				TraceEvent("BulkLoadingIssueBulkLoadTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
 				    .errorUnsuppressed(e)
 				    .detail("BulkLoadStates", describe(tasks));
 				wait(tr.onError(e));
@@ -259,6 +245,10 @@ struct BulkLoading : TestWorkload {
 							continue; // Ignore outdated task
 						}
 						if (bulkLoadState.phase != BulkLoadPhase::Complete) {
+							TraceEvent("BulkLoadingWorkLoadIncompleteTasks")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
+							    .detail("Task", bulkLoadState.toString());
 							return false;
 						}
 					}
