@@ -2319,7 +2319,10 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	try {
 		choose {
 			when(Version ver = wait(self->loggingComplete)) {
-				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+					pProxyCommitData->minKnownCommittedVersion =
+					    std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+				}
 			}
 			when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1))) {}
 		}
@@ -2407,6 +2410,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		pProxyCommitData->locked = self->lockedAfter;
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			ASSERT(self->loggingComplete.isReady());
+			pProxyCommitData->minKnownCommittedVersion =
+			    std::max(pProxyCommitData->minKnownCommittedVersion, self->loggingComplete.get());
+		}
 	}
 
 	if (self->forceRecovery) {
