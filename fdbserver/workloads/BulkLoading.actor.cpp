@@ -272,31 +272,65 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> checkData(Database cx, std::vector<KeyValue> kvs) {
-		state Key keyRead;
+	bool checkData(std::vector<KeyValue> kvs, std::vector<KeyValue> kvsdb) {
+		if (kvs.size() != kvsdb.size()) {
+			TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
+			    .detail("Reason", "KeyValue count wrong")
+			    .detail("KVS", kvs.size())
+			    .detail("DB", kvsdb.size());
+			return false;
+		}
+		std::sort(kvs.begin(), kvs.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
+		std::sort(kvsdb.begin(), kvsdb.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
+		for (int i = 0; i < kvs.size(); i++) {
+			if (kvs[i].key != kvsdb[i].key) {
+				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
+				    .detail("Reason", "Key mismatch")
+				    .detail("KVS", kvs[i])
+				    .detail("DB", kvsdb[i]);
+				return false;
+			} else if (kvs[i].value != kvsdb[i].value) {
+				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
+				    .detail("Reason", "Value mismatch")
+				    .detail("KVS", kvs[i])
+				    .detail("DB", kvsdb[i]);
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool keyIsIgnored(Key key, const std::vector<KeyRange>& ignoreRanges) {
+		for (const auto& range : ignoreRanges) {
+			if (range.contains(key)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	ACTOR Future<std::vector<KeyValue>> getKvsFromDB(BulkLoading* self,
+	                                                 Database cx,
+	                                                 std::vector<KeyRange> ignoreRanges) {
+		state std::vector<KeyValue> res;
 		state Transaction tr(cx);
-		state int i = 0;
+		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart");
 		loop {
 			try {
-				Optional<Value> value = wait(tr.get(kvs[i].key));
-				if (!value.present() || value.get() != kvs[i].value) {
-					TraceEvent(SevError, "BulkLoadingWorkLoadValueError")
-					    .detail("Version", tr.getReadVersion().get())
-					    .detail("ToCheckCount", kvs.size())
-					    .detail("Key", kvs[i].key.toString())
-					    .detail("ExpectedValue", kvs[i].value.toString())
-					    .detail("Value", value.present() ? value.get().toString() : "None");
+				RangeResult result = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!result.more);
+				for (int i = 0; i < result.size(); i++) {
+					if (!self->keyIsIgnored(result[i].key, ignoreRanges)) {
+						res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
+					}
 				}
-				i = i + 1;
-				if (i >= kvs.size()) {
-					break;
-				}
+				break;
 			} catch (Error& e) {
-				TraceEvent(SevInfo, "BulkLoadingWorkLoadValueError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
-		return Void();
+		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBDone");
+		return res;
 	}
 
 	BulkLoadTaskTestUnit produceBulkLoadTaskUnit(BulkLoading* self,
@@ -410,12 +444,15 @@ struct BulkLoading : TestWorkload {
 		wait(self->waitUntilAllComplete(self, cx));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 
+		// Check data
 		int old2 = wait(setBulkLoadMode(cx, 0));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
-		state int j = 0;
-		for (; j < bulkLoadDataList.size(); j++) {
-			wait(self->checkData(cx, bulkLoadDataList[j]));
+		state std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, std::vector<KeyRange>()));
+		state std::vector<KeyValue> kvs;
+		for (int j = 0; j < bulkLoadDataList.size(); j++) {
+			kvs.insert(kvs.end(), bulkLoadDataList[j].begin(), bulkLoadDataList[j].end());
 		}
+		ASSERT(self->checkData(kvs, dbkvs));
 		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));
 		wait(self->checkBulkLoadMetadataCleared(self, cx));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestComplete");
@@ -507,18 +544,22 @@ struct BulkLoading : TestWorkload {
 		// Check correctness
 		state std::vector<KeyValue> kvs;
 		state std::vector<BulkLoadState> bulkLoadStates;
+		state std::vector<KeyRange> incompleteRanges;
 		for (auto& range : taskMap.ranges()) {
 			if (!range.value().present()) {
 				continue;
 			}
 			if (range.value().get().bulkLoadTask.getRange() != range.range()) {
+				ASSERT(range.value().get().bulkLoadTask.getRange().contains(range.range()));
+				incompleteRanges.push_back(range.range());
 				continue; // outdated
 			}
 			std::vector<KeyValue> kvsToCheck = range.value().get().data;
 			kvs.insert(std::end(kvs), std::begin(kvsToCheck), std::end(kvsToCheck));
 			bulkLoadStates.push_back(range.value().get().bulkLoadTask);
 		}
-		wait(self->checkData(cx, kvs));
+		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges));
+		ASSERT(self->checkData(kvs, dbkvs));
 
 		// Clear metadata
 		wait(self->issueBulkLoadTasksFdbcli(self, cx, bulkLoadStates, TriggerBulkLoadRequestType::Acknowledge));

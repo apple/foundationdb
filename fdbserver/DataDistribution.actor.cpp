@@ -1173,7 +1173,6 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 			}
 			wait(tr.onError(e));
 		}
-		wait(delay(1.0));
 	}
 	return Void();
 }
@@ -1237,7 +1236,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 			}
 		}
 		self->bulkLoadActors.clear(true);
-		wait(delay(5.0));
+		wait(delay(SERVER_KNOBS->DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC));
 	}
 }
 
