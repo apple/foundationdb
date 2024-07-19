@@ -1023,16 +1023,22 @@ bool runPendingBulkLoadTaskWithRelocateData(DDQueue* self, RelocateData& rd) {
 		doBulkLoading = true;
 	}
 	if (doBulkLoading) {
-		bool outdated = self->bulkLoadTaskCollection->startTask(rd.bulkLoadTask.get().coreState);
-		if (outdated) {
-			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-			           "DDBulkLoadTaskOutdatedWhenStartRelocator",
-			           self->distributorId) // unexpected
-			    .detail("NewDataMoveID", rd.dataMoveId)
-			    .detail("NewDataMovePriority", rd.priority)
-			    .detail("NewDataMoveRange", rd.keys)
-			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
-			throw movekeys_conflict();
+		try {
+			self->bulkLoadTaskCollection->startTask(rd.bulkLoadTask.get().coreState);
+		} catch (Error& e) {
+			ASSERT_WE_THINK(e.code() == error_code_bulkload_task_outdated);
+			if (e.code() == error_code_bulkload_task_outdated) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+				           "DDBulkLoadTaskOutdatedWhenStartRelocator",
+				           self->distributorId) // unexpected
+				    .detail("NewDataMoveID", rd.dataMoveId)
+				    .detail("NewDataMovePriority", rd.priority)
+				    .detail("NewDataMoveRange", rd.keys)
+				    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
+				throw movekeys_conflict();
+			} else {
+				throw e;
+			}
 		}
 	}
 	return doBulkLoading;
@@ -2147,11 +2153,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					if (doBulkLoading) {
-						bool outdated = self->bulkLoadTaskCollection->terminateTask(rd.bulkLoadTask.get().coreState);
-						TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorComplete", self->distributorId)
-						    .detail("Dests", describe(destIds))
-						    .detail("Task", rd.bulkLoadTask.get().toString())
-						    .detail("Outdated", outdated);
+						try {
+							self->bulkLoadTaskCollection->terminateTask(rd.bulkLoadTask.get().coreState);
+							TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorComplete", self->distributorId)
+							    .detail("Dests", describe(destIds))
+							    .detail("Task", rd.bulkLoadTask.get().toString());
+						} catch (Error& bulkLoadError) {
+							ASSERT_WE_THINK(bulkLoadError.code() == error_code_bulkload_task_outdated);
+							if (bulkLoadError.code() != error_code_bulkload_task_outdated) {
+								throw bulkLoadError;
+							}
+							TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorCompleteButOutdated", self->distributorId)
+							    .detail("Dests", describe(destIds))
+							    .detail("Task", rd.bulkLoadTask.get().toString());
+						}
 					}
 					return Void();
 				} else {

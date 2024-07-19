@@ -1047,11 +1047,32 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 	}
 }
 
+ACTOR Future<Void> tryStartBulkLoadTaskUntilSucceed(Reference<DataDistributor> self) {
+	loop {
+		if (self->bulkLoadTaskCollection->tryStart()) {
+			break;
+		}
+		wait(self->bulkLoadTaskCollection->waitUntilChanged());
+	}
+	return Void();
+}
+
+ACTOR Future<Void> waitUntilBulkLoadTaskCanStart(Reference<DataDistributor> self) {
+	loop {
+		if (self->bulkLoadTaskCollection->canStart()) {
+			break;
+		}
+		wait(self->bulkLoadTaskCollection->waitUntilChanged());
+	}
+	return Void();
+}
+
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	state Promise<Void> completeAck;
 	state BulkLoadState triggeredBulkLoadTask;
 	state Version commitVersion = invalidVersion;
 	TraceEvent(SevInfo, "DDBulkLoadTaskNewBegin", self->ddId).detail("Range", range);
+	wait(tryStartBulkLoadTaskUntilSucceed(self)); // increase the task counter when succeed
 	try {
 		// Step 1: persist bulk load task phase as triggered
 		std::pair<BulkLoadState, Version> triggeredBulkLoadTask_ = wait(triggerBulkLoadTask(self, range, taskId));
@@ -1062,17 +1083,10 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// (2) when starting a data move on the task range, the task will be attached to the data move;
 		// (3) when the data move completes, the completeAck is satisfied. So, waiting on completeAck
 		// can get notified when the task is completed by a data move
-		bool outdated = self->bulkLoadTaskCollection->publishTask(triggeredBulkLoadTask, commitVersion, completeAck);
-		if (outdated) {
-			TraceEvent(SevInfo, "DDBulkLoadTaskNewTriggerOutdated", self->ddId)
-			    .detail("Range", range)
-			    .detail("TaskId", taskId);
-			throw bulkload_task_outdated();
-		} else {
-			TraceEvent(SevInfo, "DDBulkLoadTaskNewTriggered", self->ddId)
-			    .detail("Task", triggeredBulkLoadTask.toString())
-			    .detail("CommitVersion", commitVersion);
-		}
+		self->bulkLoadTaskCollection->publishTask(triggeredBulkLoadTask, commitVersion, completeAck);
+		TraceEvent(SevInfo, "DDBulkLoadTaskNewTriggered", self->ddId)
+		    .detail("Task", triggeredBulkLoadTask.toString())
+		    .detail("CommitVersion", commitVersion);
 		ASSERT(triggeredBulkLoadTask.getRange() == range);
 
 		// Step 3: create bulk load shard and trigger data move and wait for task completion
@@ -1081,11 +1095,13 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		wait(completeAck.getFuture()); // proceed when a data move completes with this task
 		TraceEvent(SevInfo, "DDBulkLoadTaskNewComplete", self->ddId).detail("Task", triggeredBulkLoadTask.toString());
-
+		self->bulkLoadTaskCollection->decrementTaskCounter();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
-		} else if (e.code() == error_code_bulkload_task_outdated) {
+		}
+		self->bulkLoadTaskCollection->decrementTaskCounter();
+		if (e.code() == error_code_bulkload_task_outdated) {
 			TraceEvent(SevWarn, "DDBulkLoadTaskNewFailed", self->ddId).errorUnsuppressed(e).detail("Range", range);
 			// sliently exits
 		} else {
@@ -1098,7 +1114,6 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 	return Void();
 }
 
-// TODO(Zhe): add parallelism limitation here
 void runBulkLoadTaskAsync(Reference<DataDistributor> self, KeyRange range, UID taskId, std::string context) {
 	TraceEvent(SevInfo, "DDBulkLoadTaskRunAsync", self->ddId)
 	    .detail("Range", range)
@@ -1114,20 +1129,26 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	state KeyRange rangeToRead;
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
+	state int i = 0;
+	state BulkLoadState bulkLoadState;
+	state RangeResult result;
 	while (beginKey < endKey) {
 		try {
-			// TODO(Zhe): check parallelism limitation when expanding
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			RangeResult result =
-			    wait(krmGetRanges(&tr, bulkLoadPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
-			for (int i = 0; i < result.size() - 1; i++) {
+			result.clear();
+			wait(store(
+			    result,
+			    krmGetRanges(&tr, bulkLoadPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE)));
+			i = 0;
+			for (; i < result.size() - 1; i++) {
 				if (!result[i].value.empty()) {
 					KeyRange range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
-					BulkLoadState bulkLoadState = decodeBulkLoadState(result[i].value);
+					bulkLoadState = decodeBulkLoadState(result[i].value);
 					if (range != bulkLoadState.getRange()) {
 						// This task is outdated
 						continue;
 					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid) {
+						wait(waitUntilBulkLoadTaskCanStart(self));
 						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId(), "ScheduleTask");
 					} else {
 						ASSERT(bulkLoadState.phase == BulkLoadPhase::Triggered ||
@@ -1334,7 +1355,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
+			self->bulkLoadTaskCollection =
+			    makeReference<BulkLoadTaskCollection>(self->ddId, SERVER_KNOBS->DD_BULKLOAD_PARALLELISM);
 			wait(self->resumeRelocations());
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Relocation Resumed");

@@ -381,7 +381,8 @@ public:
 	int BULKLOAD_FILE_BYTES_MAX; // the maximum bytes of files to inject by bulk loading
 	double DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC; // seconds to delay shard boundary change when blocked by bulk
 	                                                    // loading
-	int DD_BULKLOAD_TASK_METADATA_READ_SIZE; // the number of bulk load task read from metadata at a time
+	int DD_BULKLOAD_TASK_METADATA_READ_SIZE; // the number of bulk load tasks read from metadata at a time
+	int DD_BULKLOAD_PARALLELISM; // the maximum number of running bulk load tasks
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
