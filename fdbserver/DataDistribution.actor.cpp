@@ -1216,7 +1216,7 @@ ACTOR Future<Void> bulkLoadTaskScheduler(Reference<DataDistributor> self) {
 	}
 }
 
-ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
+ACTOR Future<Void> resumeBulkLoadTasks(Reference<DataDistributor> self) {
 	state Key beginKey = normalKeys.begin;
 	state Key endKey = normalKeys.end;
 	state KeyRange rangeToRead;
@@ -1261,7 +1261,7 @@ ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
 
 ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	wait(readyToStart);
-	wait(restartTriggeredBulkLoad(self));
+	wait(resumeBulkLoadTasks(self));
 	TraceEvent(SevInfo, "DDBulkLoadCoreResumed", self->ddId);
 
 	loop {
