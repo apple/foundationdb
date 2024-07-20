@@ -184,7 +184,10 @@ ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask);
 ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId);
 
 // Get bulk load task for the input range and taskId
-ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr, KeyRange range, UID taskId);
+ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
+                                            KeyRange range,
+                                            UID taskId,
+                                            std::vector<BulkLoadPhase> phases);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

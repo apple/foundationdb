@@ -26,11 +26,12 @@
 #include "fdbrpc/fdbrpc.h"
 
 enum class BulkLoadPhase : uint8_t {
-	Invalid = 0, // Set by users
-	Triggered = 1, // Update when DD trigger a data move for the task
-	Running = 2, // Update atomically with updating KeyServer dest servers in startMoveKey
-	Complete = 3, // Update atomically with updating KeyServer src servers in finishMoveKey
-	Acknowledged = 4, // Updated by users; DD automatically clear metadata with this phase
+	Invalid = 0, // Used to distinguish if a BulkLoadState is a valid task
+	Submitted = 1, // Set by users
+	Triggered = 2, // Update when DD trigger a data move for the task
+	Running = 3, // Update atomically with updating KeyServer dest servers in startMoveKey
+	Complete = 4, // Update atomically with updating KeyServer src servers in finishMoveKey
+	Acknowledged = 5, // Updated by users; DD automatically clear metadata with this phase
 };
 
 enum class BulkLoadType : uint8_t {
@@ -55,7 +56,7 @@ struct BulkLoadState {
 	BulkLoadState() = default;
 
 	// for acknowledging a completed task, where only taskId and range are used
-	BulkLoadState(UID taskId, KeyRange range) : taskId(taskId), range(range) {}
+	BulkLoadState(UID taskId, KeyRange range) : taskId(taskId), range(range), phase(BulkLoadPhase::Invalid) {}
 
 	// for submitting a task
 	BulkLoadState(UID taskId,
@@ -67,7 +68,7 @@ struct BulkLoadState {
 	              std::unordered_set<std::string> dataFiles,
 	              Optional<std::string> bytesSampleFile)
 	  : taskId(taskId), range(range), loadType(loadType), transportMethod(transportMethod), injectMethod(injectMethod),
-	    folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Invalid) {
+	    folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted) {
 		ASSERT(isValid());
 	}
 

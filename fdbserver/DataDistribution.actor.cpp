@@ -423,7 +423,7 @@ public:
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
 	    teamCollection(nullptr), bulkLoadTaskCollection(nullptr), auditStorageHaLaunchingLock(1),
 	    auditStorageReplicaLaunchingLock(1), auditStorageLocationMetadataLaunchingLock(1),
-	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadActors(true),
+	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadActors(false),
 	    bulkLoadEnabled(false) {}
 
 	// bootstrap steps
@@ -1029,7 +1029,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 		state BulkLoadState newBulkLoadState;
 		try {
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
-			wait(store(newBulkLoadState, getBulkLoadTask(&tr, range, taskId)));
+			wait(store(newBulkLoadState, getBulkLoadTask(&tr, range, taskId, {})));
 			newBulkLoadState.phase = BulkLoadPhase::Triggered;
 			newBulkLoadState.clearDataMoveId();
 			newBulkLoadState.restartCount = newBulkLoadState.restartCount + 1;
@@ -1129,17 +1129,7 @@ ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange r
 		state Database cx = self->txnProcessor->context();
 		state Transaction tr(cx);
 		try {
-			BulkLoadState bulkLoadTask = wait(getBulkLoadTask(&tr, range, taskId));
-			if (bulkLoadTask.phase != BulkLoadPhase::Acknowledged) {
-				TraceEvent(
-				    g_network->isSimulated() ? SevError : SevWarnAlways, "EraseBulkLoadTaskUnexpectedError", self->ddId)
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("InputRange", range)
-				    .detail("InputTaskID", taskId)
-				    .detail("BulkLoadMetadata", bulkLoadTask.toString());
-				break;
-			}
+			BulkLoadState bulkLoadTask = wait(getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Acknowledged }));
 			wait(krmSetRangeCoalescing(&tr, bulkLoadPrefix, range, normalKeys, StringRef()));
 			wait(tr.commit());
 			break;
@@ -1196,7 +1186,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					if (range != bulkLoadState.getRange()) {
 						// This task is outdated
 						continue;
-					} else if (bulkLoadState.phase == BulkLoadPhase::Invalid) {
+					} else if (bulkLoadState.phase == BulkLoadPhase::Submitted) {
 						wait(waitUntilBulkLoadTaskCanStart(self));
 						runBulkLoadTaskAsync(self, bulkLoadState.getRange(), bulkLoadState.getTaskId(), "ScheduleTask");
 					} else if (bulkLoadState.phase == BulkLoadPhase::Acknowledged) {
@@ -1218,6 +1208,12 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		}
 	}
 	return Void();
+}
+
+ACTOR Future<Void> bulkLoadTaskScheduler(Reference<DataDistributor> self) {
+	loop {
+		wait(scheduleBulkLoadTasks(self) && delay(SERVER_KNOBS->DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC));
+	}
 }
 
 ACTOR Future<Void> restartTriggeredBulkLoad(Reference<DataDistributor> self) {
@@ -1270,7 +1266,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 
 	loop {
 		try {
-			self->bulkLoadActors.add(scheduleBulkLoadTasks(self));
+			self->bulkLoadActors.add(bulkLoadTaskScheduler(self));
 			wait(self->bulkLoadActors.getResult());
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -1281,7 +1277,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				throw e;
 			}
 		}
-		self->bulkLoadActors.clear(true);
+		self->bulkLoadActors.clear(false);
 		wait(delay(SERVER_KNOBS->DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC));
 	}
 }

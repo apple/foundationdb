@@ -2888,7 +2888,7 @@ ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (bulkLoadTask.phase != BulkLoadPhase::Invalid) {
+			if (bulkLoadTask.phase != BulkLoadPhase::Submitted) {
 				TraceEvent(SevError, "SubmitBulkLoadTaskError")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
@@ -2906,9 +2906,12 @@ ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
 	return Void();
 }
 
-// Get bulk load task metadata with range and taskId
+// Get bulk load task metadata with range and taskId and phase selector
 // Throw error if the task is outdated at the tr read version
-ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr, KeyRange range, UID taskId) {
+ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
+                                            KeyRange range,
+                                            UID taskId,
+                                            std::vector<BulkLoadPhase> phases) {
 	state BulkLoadState bulkLoadState;
 	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
 	if (result.size() > 2) {
@@ -2929,6 +2932,10 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr, KeyRange range, UID
 		ASSERT(bulkLoadState.getRange().contains(currentRange));
 		throw bulkload_task_outdated();
 	}
+	if (phases.size() > 0 && !bulkLoadState.onAnyPhase(phases)) {
+		// It is possible that a task with same ID but the phase has been reset
+		throw bulkload_task_outdated();
+	}
 	return bulkLoadState;
 }
 
@@ -2940,10 +2947,8 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(bulkLoadState, getBulkLoadTask(&tr, range, taskId)));
-			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-				bulkLoadState.phase = BulkLoadPhase::Acknowledged;
-			}
+			wait(store(bulkLoadState, getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete })));
+			bulkLoadState.phase = BulkLoadPhase::Acknowledged;
 			ASSERT(range == bulkLoadState.getRange() && taskId == bulkLoadState.getTaskId());
 			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadState.getRange(), bulkLoadStateValue(bulkLoadState)));
 			wait(tr.commit());
