@@ -605,13 +605,15 @@ public:
 				continue;
 			}
 			if (it->value().get().coreState.getTaskId() == bulkLoadState.getTaskId()) {
-				TraceEvent(
-				    g_network->isSimulated() ? SevError : SevWarnAlways, "DDBulkLoadCollectionPublishTaskError", ddId)
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("NewTask", bulkLoadState.toString())
-				    .detail("OldTask", it->value().get().coreState.toString());
-				throw movekeys_conflict();
+				ASSERT(it->value().get().coreState.getRange() == bulkLoadState.getRange());
+				if (it->value().get().coreState.getRange() != it->range()) {
+					// If task Id matches but the range has been partially overwritten
+					// This task is outdated
+					ASSERT(it->value().get().coreState.getRange().contains(it->range()));
+					throw bulkload_task_outdated();
+				} else {
+					continue; // already triggered
+				}
 			}
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.sendError(bulkload_task_outdated());
@@ -628,7 +630,6 @@ public:
 		return;
 	}
 
-	// Attach the input data move to the input task
 	// This method is called when there is a data move assigned to run the bulk load task
 	void startTask(const BulkLoadState& bulkLoadState) {
 		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
