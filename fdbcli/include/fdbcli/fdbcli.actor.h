@@ -199,10 +199,10 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              std::string filePath,
                                              bool isNewDatabase,
                                              bool force);
-// Trigger audit storage command
+// Trigger audit storage
 ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
                                            std::vector<StringRef> tokens);
-// Retrieve audit storage status command
+// Retrieve audit storage status
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // Retrieve shard information command
 ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
