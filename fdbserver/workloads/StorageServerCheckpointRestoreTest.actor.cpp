@@ -79,7 +79,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 
 		TraceEvent("TestCheckpointRestoreBegin");
-		int ignore = wait(setDDMode(cx, 0));
+		wait(success(setDDMode(cx, 0)));
 		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
 
 		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);

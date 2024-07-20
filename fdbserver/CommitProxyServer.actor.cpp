@@ -1116,6 +1116,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		for (int r = 0; r < self->pProxyCommitData->resolvers.size(); r++) {
 			TraceEvent(SevWarnAlways, "ResetResolverNetwork", self->pProxyCommitData->dbgid)
 			    .detail("PeerAddr", self->pProxyCommitData->resolvers[r].address())
+			    .detail("PeerAddress", self->pProxyCommitData->resolvers[r].address())
 			    .detail("CurrentBatch", self->localBatchNumber)
 			    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 			FlowTransport::transport().resetConnection(self->pProxyCommitData->resolvers[r].address());
@@ -1785,7 +1786,6 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
                                                                  Optional<MutationRef>* encryptedMutationOpt,
                                                                  Arena* arena) {
 	state MutationRef encryptedMutation = encryptedMutationOpt->get();
-	state const BlobCipherEncryptHeader* header;
 	state BlobCipherEncryptHeaderRef headerRef;
 	state MutationRef decryptedMutation;
 
@@ -2502,7 +2502,10 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	try {
 		choose {
 			when(Version ver = wait(self->loggingComplete)) {
-				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+					pProxyCommitData->minKnownCommittedVersion =
+					    std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+				}
 			}
 			when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1))) {}
 		}
@@ -2590,6 +2593,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		pProxyCommitData->locked = self->lockedAfter;
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			ASSERT(self->loggingComplete.isReady());
+			pProxyCommitData->minKnownCommittedVersion =
+			    std::max(pProxyCommitData->minKnownCommittedVersion, self->loggingComplete.get());
+		}
 	}
 
 	if (self->forceRecovery) {

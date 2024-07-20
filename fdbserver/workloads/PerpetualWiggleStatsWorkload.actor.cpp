@@ -156,8 +156,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	ACTOR static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
-		int oldMode = wait(setDDMode(cx, 0));
-		MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID())); // force current DD to quit
+		wait(success(setDDMode(cx, 0)));
+		wait(success(takeMoveKeysLock(cx, UID()))); // force current DD to quit
 		bool success = wait(IssueConfigurationChange(cx, "storage_migration_type=disabled", true));
 		ASSERT(success);
 		wait(delay(30.0)); // make sure the DD has already quit before the test start

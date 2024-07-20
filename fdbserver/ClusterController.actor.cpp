@@ -1023,11 +1023,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
 		self->db.unfinishedRecoveries = 0;
-		self->db.logGenerations = 0;
 		ASSERT(!req.logSystemConfig.oldTLogs.size());
-	} else {
-		// TODO(zhewu): Remove logGenerations. It is not used anywhere.
-		self->db.logGenerations = req.logSystemConfig.oldTLogs.size();
 	}
 
 	db->masterRegistrationCount = req.registrationCount;

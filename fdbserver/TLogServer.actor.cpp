@@ -2197,7 +2197,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
 			    .detail("Tag", req.tag)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
@@ -2950,7 +2951,6 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
-		state bool pullingRecoveryData = endVersion.present() && endVersion.get() == logData->recoveredAt;
 		loop {
 			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {

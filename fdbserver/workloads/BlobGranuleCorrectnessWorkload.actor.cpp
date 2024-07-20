@@ -339,18 +339,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		state bool gotEOS = false;
 		state int64_t totalRows = 0;
 		state uint32_t lastKey = -1;
-		state uint32_t lastId = -1;
 		state std::map<uint32_t, KeyData>::iterator lastKeyData = threadData->keyData.end();
 
 		fmt::print("Loading previous directory data for {0}\n", threadData->directoryID);
 
 		loop {
-			state Version readVersion = invalidVersion;
-			state int64_t bufferedBytes = 0;
 			try {
 				state Version ver = wait(tr.getReadVersion());
 				fmt::print("Dir {0}: RV={1}\n", threadData->directoryID, ver);
-				readVersion = ver;
 
 				state PromiseStream<Standalone<RangeResultRef>> results;
 				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
@@ -381,8 +377,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 						// insert new WriteData for key
 						lastKeyData->second.writes.emplace_back(ver, MAX_VERSION, val, it.value.size());
-
-						lastId = id;
 					}
 
 					if (!res.empty()) {

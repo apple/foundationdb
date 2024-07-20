@@ -123,9 +123,30 @@ Release Notes
 7.3.24
 ======
 * Released with AVX disabled.
-* Added support for large shard. `(PR#10965) <https://github.com/apple/foundationdb/pull/10965>`_
-* Fixed perpetual wiggle locality match regex. `(PR#10973) <https://github.com/apple/foundationdb/pull/10973>`_
-* Added a knob to throttle perpetual wiggle data move. `(PR#10957) <https://github.com/apple/foundationdb/pull/10957>`_
+* Added support for large shard. `(PR #10965) <https://github.com/apple/foundationdb/pull/10965>`_
+* Fixed perpetual wiggle locality match regex. `(PR #10973) <https://github.com/apple/foundationdb/pull/10973>`_
+* Added a knob to throttle perpetual wiggle data move. `(PR #10957) <https://github.com/apple/foundationdb/pull/10957>`_
+
+7.3.23
+======
+* Same as 7.3.22 release with AVX enabled.
+
+7.3.22
+======
+* No code change, only version bumped.
+
+7.3.21
+======
+* Same as 7.3.20 release with AVX enabled.
+
+7.3.20
+======
+* Added data move throttling for perpetual wiggle. `(PR #10957) <https://github.com/apple/foundationdb/pull/10957>`_
+* Fixed AuditStorage to check all DC replicas. `(PR #10966) <https://github.com/apple/foundationdb/pull/10966>`_
+* Added large shards support. `(PR #10965) <https://github.com/apple/foundationdb/pull/10965>`_
+* Fixed bugs for locality-based exclusion. `(PR #10946) <https://github.com/apple/foundationdb/pull/10946>`_
+* Fixed various memory-related bugs. `(PR #10952) <https://github.com/apple/foundationdb/pull/10952>`_ and `(PR #10969) <https://github.com/apple/foundationdb/pull/10969>`_
+* Fixed perpetual wiggling locality match regex. `(PR #10972) <https://github.com/apple/foundationdb/pull/10972>`_
 
 7.3.19
 ======

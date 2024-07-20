@@ -67,7 +67,6 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ReadHotDetectionWorkload* self) {
-		state int g = 0;
 		state Standalone<StringRef> largeValue;
 		state Standalone<StringRef> smallValue;
 		largeValue = self->randomString(largeValue.arena(), 100000);

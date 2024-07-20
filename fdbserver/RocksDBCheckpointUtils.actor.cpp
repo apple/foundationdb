@@ -255,8 +255,7 @@ ACTOR Future<Void> fetchCheckpointBytesSampleFile(Database cx,
 	ASSERT(!metaData->src.empty());
 	state UID ssId = metaData->src.front();
 
-	int64_t fileSize =
-	    wait(doFetchCheckpointFile(cx, metaData->bytesSampleFile.get(), localFile, ssId, metaData->checkpointID));
+	wait(success(doFetchCheckpointFile(cx, metaData->bytesSampleFile.get(), localFile, ssId, metaData->checkpointID)));
 	metaData->bytesSampleFile = localFile;
 	if (cFun) {
 		wait(cFun(*metaData));
@@ -965,7 +964,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	ASSERT_EQ(metaData->src.size(), 1);
 	const UID ssId = metaData->src.front();
 
-	int64_t fileSize = wait(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID));
+	wait(success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID)));
 	rocksCF.sstFiles[idx].db_path = dir;
 	rocksCF.sstFiles[idx].fetched = true;
 	metaData->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());

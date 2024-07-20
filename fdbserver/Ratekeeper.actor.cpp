@@ -384,8 +384,6 @@ public:
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
-		state double lastStartTime = 0;
-		state double startTime = 0;
 		state bool blobWorkerDead = false;
 		state double lastLoggedTime = 0;
 
@@ -408,9 +406,6 @@ public:
 			} else {
 				grv = self->maxVersion;
 			}
-
-			lastStartTime = startTime;
-			startTime = now();
 
 			if (blobWorkers.size() > 0) {
 				state Future<Optional<BlobManagerBlockedReply>> blockedAssignments;

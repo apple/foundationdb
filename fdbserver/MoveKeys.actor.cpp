@@ -19,6 +19,7 @@
  */
 
 #include <vector>
+#include <limits.h>
 
 #include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -454,7 +455,7 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 		try {
 			// If corruption detected, enter security mode which
 			// stops using data moves and only allow auditStorage
-			int _ = wait(setDDMode(occ, 2));
+			wait(success(setDDMode(occ, 2)));
 			TraceEvent(SevInfo, "ValidateRangeAssignmentCorruptionDetectedAndDDStopped")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Range", range)
@@ -2049,10 +2050,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 	wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
-	state std::unordered_set<UID> tssToIgnore;
-	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
-	state int waitForTSSCounter = 2;
 	state bool runPreCheck = true;
+	state bool skipTss = false;
+	state double ssReadyTime = std::numeric_limits<double>::max();
 
 	ASSERT(!destinationTeam.empty());
 
@@ -2214,16 +2214,16 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				// Wait for new destination servers to fetch the data range.
 				serverReady.reserve(storageServerInterfaces.size());
-				tssReady.reserve(storageServerInterfaces.size());
-				tssReadyInterfs.reserve(storageServerInterfaces.size());
 				for (int s = 0; s < storageServerInterfaces.size(); s++) {
 					serverReady.push_back(waitForShardReady(
 					    storageServerInterfaces[s], range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
 
+					if (skipTss)
+						continue;
+
 					auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
-					if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
-					    !tssToIgnore.count(tssPair->second.id())) {
+					if (tssPair != tssMapping.end()) {
 						tssReadyInterfs.push_back(tssPair->second);
 						tssReady.push_back(waitForShardReady(
 						    tssPair->second, range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
@@ -2242,40 +2242,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				             Void(),
 				             TaskPriority::MoveKeys));
 
-				// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
-				// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
-				// the data move.
-				if (tssReady.size()) {
-					bool allSSDone = true;
-					for (auto& f : serverReady) {
-						allSSDone &= f.isReady() && !f.isError();
-						if (!allSSDone) {
-							break;
-						}
-					}
-
-					if (allSSDone) {
-						bool anyTssNotDone = false;
-
-						for (auto& f : tssReady) {
-							if (!f.isReady() || f.isError()) {
-								anyTssNotDone = true;
-								waitForTSSCounter--;
-								break;
-							}
-						}
-
-						if (anyTssNotDone && waitForTSSCounter == 0) {
-							for (int i = 0; i < tssReady.size(); i++) {
-								if (!tssReady[i].isReady() || tssReady[i].isError()) {
-									tssToIgnore.insert(tssReadyInterfs[i].id());
-								}
-							}
-						}
-					}
-				}
-
-				std::vector<UID> readyServers;
+				state std::vector<UID> readyServers;
 				for (int s = 0; s < serverReady.size(); ++s) {
 					if (serverReady[s].isReady() && !serverReady[s].isError()) {
 						readyServers.push_back(storageServerInterfaces[s].uniqueID);
@@ -2283,7 +2250,24 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				}
 				int tssCount = 0;
 				for (int s = 0; s < tssReady.size(); s++) {
-					tssCount += tssReady[s].isReady() && !tssReady[s].isError();
+					if (tssReady[s].isReady() && !tssReady[s].isError()) {
+						tssCount += 1;
+					}
+				}
+
+				if (readyServers.size() == serverReady.size() && !skipTss) {
+					ssReadyTime = std::min(now(), ssReadyTime);
+					if (tssCount < tssReady.size() &&
+					    now() - ssReadyTime >= SERVER_KNOBS->DD_WAIT_TSS_DATA_MOVE_DELAY) {
+						skipTss = true;
+						TraceEvent(SevWarnAlways, "FinishMoveShardsSkipTSS")
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("ReadyServers", describe(readyServers))
+						    .detail("NewDestinations", describe(newDestinations))
+						    .detail("ReadyTSS", tssCount)
+						    .detail("TSSInfo", describe(tssReadyInterfs))
+						    .detail("SSReadyTime", ssReadyTime);
+					}
 				}
 
 				TraceEvent(sevDm, "FinishMoveShardsWaitedServers", relocationIntervalId)
@@ -2394,7 +2378,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					retries++;
 					if (retries % 10 == 0) {
 						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
-						           "RelocateShard_FinishMoveKeysRetrying",
+						           "RelocateShard_FinishMoveShardsRetrying",
 						           relocationIntervalId)
 						    .error(err)
 						    .detail("DataMoveID", dataMoveId);

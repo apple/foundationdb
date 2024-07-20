@@ -2968,8 +2968,6 @@ public:
 			state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
 			state Reference<ReadYourWritesTransaction> srcTr(
 			    new ReadYourWritesTransaction(backupAgent->taskBucket->src));
-			state Version beginVersion;
-			state Version endVersion;
 
 			loop {
 				try {
@@ -3006,9 +3004,7 @@ public:
 						return Void();
 					}
 
-					if (bVersionF.get().present()) {
-						beginVersion = BinaryReader::fromStringRef<Version>(bVersionF.get().get(), Unversioned());
-					} else {
+					if (!bVersionF.get().present()) {
 						break;
 					}
 
@@ -3026,8 +3022,6 @@ public:
 					if (partialTimeout.isReady()) {
 						return Void();
 					}
-
-					endVersion = srcTr->getCommittedVersion() + 1;
 
 					break;
 				} catch (Error& e) {

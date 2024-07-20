@@ -821,6 +821,33 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> serveDisabled(ConfigNodeImpl* self,
+	                                        ConfigTransactionInterface const* cti,
+	                                        ConfigFollowerInterface const* cfi) {
+		loop {
+			choose {
+				when(ConfigTransactionGetGenerationRequest req = waitNext(cti->getGeneration.getFuture())) {
+					req.reply.send(ConfigTransactionGetGenerationReply{ ConfigGeneration() });
+				}
+				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
+					req.reply.send(ConfigTransactionGetReply());
+				}
+				when(ConfigTransactionCommitRequest req = waitNext(cti->commit.getFuture())) {
+					req.reply.send(Void());
+				}
+				when(ConfigTransactionGetConfigClassesRequest req = waitNext(cti->getClasses.getFuture())) {
+					req.reply.send(ConfigTransactionGetConfigClassesReply());
+				}
+				when(ConfigTransactionGetKnobsRequest req = waitNext(cti->getKnobs.getFuture())) {
+					req.reply.send(ConfigTransactionGetKnobsReply());
+				}
+				when(state ConfigFollowerLockRequest req = waitNext(cfi->lock.getFuture())) {
+					req.reply.send(Void());
+				}
+			}
+		}
+	}
+
 	ACTOR static Future<bool> registered(ConfigNodeImpl* self) {
 		Optional<Value> value = wait(self->kvStore->readValue(registeredKey));
 		return value.present();
@@ -846,6 +873,10 @@ public:
 		return serve(this, &cbi, &cti, &cfi);
 	}
 
+	Future<Void> serveDisabled(ConfigTransactionInterface const& cti, ConfigFollowerInterface const& cfi) {
+		return serveDisabled(this, &cti, &cfi);
+	}
+
 	Future<Void> serve(ConfigBroadcastInterface const& cbi) { return serve(this, &cbi, true); }
 
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
@@ -867,6 +898,10 @@ Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi,
                                ConfigTransactionInterface const& cti,
                                ConfigFollowerInterface const& cfi) {
 	return impl->serve(cbi, cti, cfi);
+}
+
+Future<Void> ConfigNode::serveDisabled(ConfigTransactionInterface const& cti, ConfigFollowerInterface const& cfi) {
+	return impl->serveDisabled(cti, cfi);
 }
 
 Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi) {

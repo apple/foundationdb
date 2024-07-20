@@ -163,7 +163,6 @@ ACTOR Future<Void> printPhysicalShardCount(Database cx) {
 
 ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 	state Key begin = allKeys.begin;
-	state int numShards = 0;
 
 	while (begin < allKeys.end) {
 		// RYW to optimize re-reading the same key ranges
@@ -193,7 +192,6 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 				}
 
 				begin = serverShards.back().key;
-				numShards += serverShards.size() - 1;
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));

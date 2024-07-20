@@ -3255,7 +3255,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (data->version.get() < req.begin) {
@@ -3302,7 +3303,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FetchVersion", feedInfo->fetchVersion)
 		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
 		    .detail("DurableValidationVersion", durableValidationVersion)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -3729,7 +3731,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("PopVersion", reply.popVersion)
 		    .detail("Count", reply.mutations.size())
 		    .detail("GotAll", gotAll)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
@@ -3811,7 +3814,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
@@ -3853,7 +3857,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
 			    .detail("Version", req.begin - 1)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		loop {
@@ -3870,7 +3875,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
 					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 				removeUID = true;
 			}
@@ -3892,7 +3898,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
 					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 			}
 			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
@@ -10538,15 +10545,14 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				} else {
 					ASSERT(shard->adding != nullptr || shard->moveInShard != nullptr);
 					if (shard->desiredShardId != desiredId) {
-						TraceEvent(SevError, "CSKConflictingMoveInShards", data->thisServerID)
+						TraceEvent(SevWarnAlways, "CSKConflictingMoveInShards", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
 						    .detailf("TargetShard", "%016llx", desiredId)
 						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
 						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
-						// TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
-						ASSERT(false);
+						throw data_move_conflict();
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)

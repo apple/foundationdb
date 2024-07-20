@@ -283,6 +283,12 @@ func (monitor *monitor) loadConfiguration() {
 	}
 
 	monitor.acceptConfiguration(configuration, configurationBytes)
+	// Always update the annotations if needed to handle cases where the fdb-kubernetes-monitor
+	// has loaded the new configuration but was not able to update the annotations.
+	err := monitor.podClient.updateAnnotations(monitor)
+	if err != nil {
+		monitor.logger.Error(err, "Error updating pod annotations")
+	}
 }
 
 // checkOwnerExecutable validates that a path is a file that exists and is
@@ -331,11 +337,6 @@ func (monitor *monitor) acceptConfiguration(configuration *api.ProcessConfigurat
 	// If the monitor has running processes but the processes shouldn't be running, kill them with SIGTERM.
 	if hasRunningProcesses && !monitor.activeConfiguration.ShouldRunServers() {
 		monitor.sendSignalToProcesses(syscall.SIGTERM)
-	}
-
-	err := monitor.podClient.updateAnnotations(monitor)
-	if err != nil {
-		monitor.logger.Error(err, "Error updating pod annotations")
 	}
 }
 
