@@ -2954,7 +2954,6 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			while (!self->goodRecruitmentTime.isReady()) {
 				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 			}
-
 			self->degradationInfo = self->getDegradationInfo();
 
 			// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
@@ -2988,7 +2987,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
 				// the transaction system.
-				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
+				if (SERVER_KNOBS->CC_PAUSE_HEALTH_MONITOR) {
+					TraceEvent(SevWarnAlways, "HealthMonitorPaused");
+				} else if (self->shouldTriggerRecoveryDueToDegradedServers()) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->recentHealthTriggeredRecoveryTime.push(now());
@@ -3176,7 +3177,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	                                                               self.id.toString() + "/ClusterControllerMetrics"));
 	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
 	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
-
 	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 		self.addActor.send(workerHealthMonitor(&self));
 		self.addActor.send(updateRemoteDCHealth(&self));
