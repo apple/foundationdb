@@ -606,14 +606,10 @@ public:
 			}
 			if (it->value().get().coreState.getTaskId() == bulkLoadState.getTaskId()) {
 				ASSERT(it->value().get().coreState.getRange() == bulkLoadState.getRange());
-				if (it->value().get().coreState.getRange() != it->range()) {
-					// If task Id matches but the range has been partially overwritten
-					// This task is outdated
-					ASSERT(it->value().get().coreState.getRange().contains(it->range()));
-					throw bulkload_task_outdated();
-				} else {
-					continue; // already triggered
-				}
+				// In case that the task has been already triggered
+				// Avoid repeatedly being triggered by throwing the error
+				// then the current doBulkLoadTask will sliently exit
+				throw bulkload_task_outdated();
 			}
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.sendError(bulkload_task_outdated());

@@ -1873,6 +1873,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							                           bulkLoadState.get().getRange(),
 							                           bulkLoadState.get().getTaskId(),
 							                           { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
+							// It is possible that the previous data move is cancelled but has updated the
+							// task phase as running. In this case, we update the phase from Running to Running
 							newBulkLoadState.phase = BulkLoadPhase::Running;
 						} catch (Error& e) {
 							if (e.code() == error_code_bulkload_task_outdated) {

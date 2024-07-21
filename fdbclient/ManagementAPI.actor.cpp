@@ -2906,7 +2906,7 @@ ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
 }
 
 // Get bulk load task metadata with range and taskId and phase selector
-// Throw error if the task is outdated at the tr read version
+// Throw error if the task is outdated or the task is not in any input phase at the tr read version
 ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             KeyRange range,
                                             UID taskId,
