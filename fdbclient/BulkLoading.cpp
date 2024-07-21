@@ -24,11 +24,9 @@ BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
                                       std::string folder,
                                       std::string dataFile,
                                       std::string bytesSampleFile) {
-	UID taskId = deterministicRandom()->randomUniqueID();
 	std::unordered_set<std::string> dataFiles;
 	dataFiles.insert(dataFile);
-	return BulkLoadState(taskId,
-	                     range,
+	return BulkLoadState(range,
 	                     BulkLoadType::SST,
 	                     BulkLoadTransportMethod::CP,
 	                     BulkLoadInjectMethod::File,

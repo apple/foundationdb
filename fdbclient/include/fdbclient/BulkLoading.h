@@ -59,16 +59,16 @@ struct BulkLoadState {
 	BulkLoadState(UID taskId, KeyRange range) : taskId(taskId), range(range), phase(BulkLoadPhase::Invalid) {}
 
 	// for submitting a task
-	BulkLoadState(UID taskId,
-	              KeyRange range,
+	BulkLoadState(KeyRange range,
 	              BulkLoadType loadType,
 	              BulkLoadTransportMethod transportMethod,
 	              BulkLoadInjectMethod injectMethod,
 	              std::string folder,
 	              std::unordered_set<std::string> dataFiles,
 	              Optional<std::string> bytesSampleFile)
-	  : taskId(taskId), range(range), loadType(loadType), transportMethod(transportMethod), injectMethod(injectMethod),
-	    folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted) {
+	  : taskId(deterministicRandom()->randomUniqueID()), range(range), loadType(loadType),
+	    transportMethod(transportMethod), injectMethod(injectMethod), folder(folder), dataFiles(dataFiles),
+	    bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted) {
 		ASSERT(isValid());
 	}
 
