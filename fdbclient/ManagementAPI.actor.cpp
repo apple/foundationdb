@@ -2888,7 +2888,7 @@ ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (bulkLoadTask.phase != BulkLoadPhase::Submitted) {
-				TraceEvent(SevError, "SubmitBulkLoadTaskError")
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Task", bulkLoadTask.toString());
@@ -2932,7 +2932,6 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
 		throw bulkload_task_outdated();
 	}
 	if (phases.size() > 0 && !bulkLoadState.onAnyPhase(phases)) {
-		// It is possible that a task with same ID but the phase has been reset
 		throw bulkload_task_outdated();
 	}
 	return bulkLoadState;
@@ -2946,7 +2945,8 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(bulkLoadState, getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete })));
+			wait(store(bulkLoadState,
+			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
 			bulkLoadState.phase = BulkLoadPhase::Acknowledged;
 			ASSERT(range == bulkLoadState.getRange() && taskId == bulkLoadState.getTaskId());
 			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadState.getRange(), bulkLoadStateValue(bulkLoadState)));

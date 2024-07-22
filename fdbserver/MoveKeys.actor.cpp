@@ -2311,7 +2311,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 								           getBulkLoadTask(&tr,
 								                           bulkLoadState.get().getRange(),
 								                           bulkLoadState.get().getTaskId(),
-								                           { BulkLoadPhase::Running })));
+								                           { BulkLoadPhase::Running, BulkLoadPhase::Complete })));
 								newBulkLoadState.phase = BulkLoadPhase::Complete;
 							} catch (Error& e) {
 								if (e.code() == error_code_bulkload_task_outdated) {

@@ -658,6 +658,26 @@ public:
 		return;
 	}
 
+	// Erase any metadata on the map for the input bulkload task
+	void eraseTask(const BulkLoadState& bulkLoadState) {
+		std::vector<KeyRange> rangesToClear;
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+				continue;
+			}
+			TraceEvent(SevDebug, "DDBulkLoadCollectionEraseTaskdata", ddId)
+			    .detail("Range", bulkLoadState.getRange())
+			    .detail("TaskRange", it->range())
+			    .detail("Task", it->value().get().toString());
+			rangesToClear.push_back(it->range());
+		}
+		for (const auto& rangeToClear : rangesToClear) {
+			bulkLoadTaskMap.insert(rangeToClear, Optional<DDBulkLoadTask>());
+		}
+		bulkLoadTaskMap.coalesce(normalKeys);
+		return;
+	}
+
 	// Get the task which has exactly the same range as the input range
 	Optional<DDBulkLoadTask> getTaskByRange(KeyRange range) const {
 		Optional<DDBulkLoadTask> res;

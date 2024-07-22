@@ -1029,10 +1029,14 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 		state Transaction tr(cx);
 		state BulkLoadState newBulkLoadState;
 		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
 			std::vector<BulkLoadPhase> phase;
 			if (!restart) {
-				wait(store(newBulkLoadState, getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Submitted })));
+				wait(
+				    store(newBulkLoadState,
+				          getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Submitted, BulkLoadPhase::Triggered })));
 			} else {
 				wait(store(newBulkLoadState,
 				           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
@@ -1042,10 +1046,11 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 			newBulkLoadState.restartCount = newBulkLoadState.restartCount + 1;
 			newBulkLoadState.triggerTime = now();
 			wait(krmSetRange(&tr, bulkLoadPrefix, newBulkLoadState.getRange(), bulkLoadStateValue(newBulkLoadState)));
-			TraceEvent(SevInfo, "DDBulkLoadTaskTriggeredPersist", self->ddId)
-			    .detail("BulkLoadState", newBulkLoadState.toString());
 			wait(tr.commit());
 			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(SevInfo, "DDBulkLoadTaskTriggeredPersist", self->ddId)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("BulkLoadState", newBulkLoadState.toString());
 			ASSERT(commitVersion != invalidVersion);
 			return std::make_pair(newBulkLoadState, commitVersion);
 
@@ -1090,12 +1095,6 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    wait(triggerBulkLoadTask(self, range, taskId, restart));
 		triggeredBulkLoadTask = triggeredBulkLoadTask_.first;
 		commitVersion = triggeredBulkLoadTask_.second;
-
-		// Step 2: submit the task to in-memory task map, which (1) turns off shard boundary change;
-		// (2) when starting a data move on the task range, the task will be attached to the data move;
-		// (3) when the data move completes, the completeAck is satisfied. So, waiting on completeAck
-		// can get notified when the task is completed by a data move
-		self->bulkLoadTaskCollection->publishTask(triggeredBulkLoadTask, commitVersion, completeAck);
 		TraceEvent(SevInfo, "DDBulkLoadTaskNewTriggered", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
@@ -1103,6 +1102,12 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    .detail("CommitVersion", commitVersion)
 		    .detail("Restart", restart);
 		ASSERT(triggeredBulkLoadTask.getRange() == range);
+
+		// Step 2: submit the task to in-memory task map, which (1) turns off shard boundary change;
+		// (2) when starting a data move on the task range, the task will be attached to the data move;
+		// (3) when the data move completes, the completeAck is satisfied. So, waiting on completeAck
+		// can get notified when the task is completed by a data move
+		self->bulkLoadTaskCollection->publishTask(triggeredBulkLoadTask, commitVersion, completeAck);
 
 		// Step 3: create bulk load shard and trigger data move and wait for task completion
 		// The completion of the task relies on the fact that a data move on a range is either
@@ -1143,10 +1148,14 @@ ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange r
 	loop {
 		state Database cx = self->txnProcessor->context();
 		state Transaction tr(cx);
+		state BulkLoadState bulkLoadTask;
 		try {
-			BulkLoadState bulkLoadTask = wait(getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Acknowledged }));
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(store(bulkLoadTask, getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Acknowledged })));
 			wait(krmSetRangeCoalescing(&tr, bulkLoadPrefix, range, normalKeys, StringRef()));
 			wait(tr.commit());
+			self->bulkLoadTaskCollection->eraseTask(bulkLoadTask);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_bulkload_task_outdated) {

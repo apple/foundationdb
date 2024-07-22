@@ -53,6 +53,9 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx,
 			} else if (bulkLoadState.phase == BulkLoadPhase::Submitted) {
 				printf("[Submitted] %s\n", bulkLoadState.toString().c_str());
 				++unfinishedCount;
+			} else if (bulkLoadState.phase == BulkLoadPhase::Acknowledged) {
+				printf("[Acknowledge] %s\n", bulkLoadState.toString().c_str());
+				++finishCount;
 			} else {
 				UNREACHABLE();
 			}
@@ -154,6 +157,8 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			phase = BulkLoadPhase::Running;
 		} else if (inputPhase == "complete") {
 			phase = BulkLoadPhase::Complete;
+		} else if (inputPhase == "acknowledged") {
+			phase = BulkLoadPhase::Acknowledged;
 		} else {
 			printUsage(tokens[0]);
 			return UID();
