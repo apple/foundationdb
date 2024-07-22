@@ -1,0 +1,18 @@
+[configuration]
+tenantModes = ['disabled']
+
+[[test]]
+testTitle='ClientMetricRestartTest'
+clearAfterTest=false
+waitForQuiescenceEnd=false
+
+    [[test.workload]]
+    testName='ClientMetric'
+    toSet=true
+    samplingProbability=0.01
+    testDuration=500.0
+
+    [[test.workload]]
+    testName='SaveAndKill'
+    restartInfoLocation='simfdb/restartInfo.ini'
+    testDuration=500.0

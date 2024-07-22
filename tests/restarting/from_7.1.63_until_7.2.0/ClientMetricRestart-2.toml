@@ -1,0 +1,10 @@
+[[test]]
+testTitle='ClientMetricRestartTest'
+clearAfterTest=false
+waitForQuiescenceEnd=false
+runConsistencyCheck=false
+
+    [[test.workload]]
+    testName='ClientMetric'
+    toSet=false
+    testDuration=500.0
