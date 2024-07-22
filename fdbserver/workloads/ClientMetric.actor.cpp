@@ -212,8 +212,8 @@ struct ClientMetricWorkload : TestWorkload {
 	//      vs2 should be strictly larger than vs1, to verify new latency metrics are added
 	ACTOR Future<Void> runner(Database cx, ClientMetricWorkload* self) {
 		try {
-			state int initialWrites = deterministicRandom()->randomInt(1, 5);
-			state int secondWrites = deterministicRandom()->randomInt(1, 5);
+			state int initialWrites = deterministicRandom()->randomInt(100, 200);
+			state int secondWrites = deterministicRandom()->randomInt(100, 200);
 
 			state uint64_t zeroVS = 0;
 			state uint64_t vs1 = wait(self->writeKeysAndGetLatencyVersion(cx, self, initialWrites, zeroVS));
