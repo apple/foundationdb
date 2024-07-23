@@ -336,6 +336,7 @@ public:
 	int64_t REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN;
 	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
 	                                                               // light-traffic shards out of the overloading server
+	double DD_WAIT_TSS_DATA_MOVE_DELAY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
