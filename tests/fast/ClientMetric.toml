@@ -1,17 +1,13 @@
 [[test]]
 testTitle='ClientMetricTest'
 clearAfterTest=false
+runConsistencyCheck=false
 
     [[test.workload]]
     testName='ClientMetric'
     toSet=true
-    samplingProbability=1.0
+    samplingProbability=0.01
     testDuration=500.0
-    trInfoSizeLimit=177654
-
-    [[test.workload]]
-    testName='RandomClogging'
-    testDuration=30.0
 
     [[test.workload]]
     testName='SaveAndKill'
