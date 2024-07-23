@@ -1714,6 +1714,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "bulkload")) {
+					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(ccf, localDb, tokens)));
+					if (taskId.isValid()) {
+						printf("Received bulkload task: %s\n", taskId.toString().c_str());
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
 					bool _result = wait(makeInterruptable(forceRecoveryWithDataLossCommandActor(db, tokens)));
 					if (!_result)

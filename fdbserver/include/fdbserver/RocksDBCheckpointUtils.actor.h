@@ -51,6 +51,17 @@ public:
 	virtual ~IRocksDBSstFileWriter() {}
 };
 
+class IRocksDBSstFileReader {
+public:
+	virtual void open(const std::string localFile) = 0;
+
+	virtual KeyValue next() = 0;
+
+	virtual bool hasNext() const = 0;
+
+	virtual ~IRocksDBSstFileReader() {}
+};
+
 struct CheckpointFile {
 	constexpr static FileIdentifier file_identifier = 13804348;
 	std::string path;
@@ -345,6 +356,8 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
 std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
 
 std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
+
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader();
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 

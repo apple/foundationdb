@@ -33,6 +33,7 @@ public:
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 
 	KeyRangeMap<ShardTrackedData> shards;
 
@@ -95,6 +96,8 @@ public:
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
+		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection =
+		    makeReference<BulkLoadTaskCollection>(ddcx.id(), SERVER_KNOBS->DD_BULKLOAD_PARALLELISM);
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(
@@ -104,6 +107,7 @@ public:
 		                                       .output = output,
 		                                       .shardsAffectedByTeamFailure = ddcx.shardsAffectedByTeamFailure,
 		                                       .physicalShardCollection = physicalShardCollection,
+		                                       .bulkLoadTaskCollection = bulkLoadTaskCollection,
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
@@ -114,7 +118,8 @@ public:
 		                                        getTopKMetrics.getFuture(),
 		                                        getShardMetricsList.getFuture(),
 		                                        getAverageShardBytes.getFuture(),
-		                                        triggerStorageQueueRebalance.getFuture()));
+		                                        triggerStorageQueueRebalance.getFuture(),
+		                                        triggerShardBulkLoading.getFuture()));
 
 		actors.add(relocateShardReporter(this, output.getFuture()));
 

@@ -71,6 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
+#include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -212,6 +213,7 @@ static const KeyRangeRef persistPendingCheckpointKeys =
 static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
+static const std::string bulkLoadFolder = "bulkLoadFiles";
 
 // Accumulative checksum related prefix
 static const KeyRangeRef persistAccumulativeChecksumKeys =
@@ -332,6 +334,7 @@ struct MoveInShard {
 	std::shared_ptr<MoveInUpdates> updates;
 	bool isRestored;
 	Version transferredVersion;
+	bool conductBulkLoad = false;
 
 	Future<Void> fetchClient; // holds FetchShard() actor
 	Promise<Void> fetchComplete;
@@ -340,8 +343,17 @@ struct MoveInShard {
 	Severity logSev = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
 	MoveInShard() = default;
-	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version, MoveInPhase phase);
-	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version);
+	MoveInShard(StorageServer* server,
+	            const UID& id,
+	            const UID& dataMoveId,
+	            const Version version,
+	            const bool conductBulkLoad,
+	            MoveInPhase phase);
+	MoveInShard(StorageServer* server,
+	            const UID& id,
+	            const UID& dataMoveId,
+	            const Version version,
+	            const bool conductBulkLoad);
 	MoveInShard(StorageServer* server, MoveInShardMetaData meta);
 	~MoveInShard();
 
@@ -1090,7 +1102,9 @@ public:
 	void checkTenantEntry(Version version, TenantInfo tenant, bool lockAware);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
-	std::shared_ptr<MoveInShard> getMoveInShard(const UID& dataMoveId, const Version version);
+	std::shared_ptr<MoveInShard> getMoveInShard(const UID& dataMoveId,
+	                                            const Version version,
+	                                            const bool conductBulkLoad);
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
@@ -2417,7 +2431,9 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 	return res;
 }
 
-std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId, const Version version) {
+std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId,
+                                                           const Version version,
+                                                           const bool conductBulkLoad) {
 	for (auto& [id, moveInShard] : this->moveInShards) {
 		if (moveInShard->dataMoveId() == dataMoveId && moveInShard->meta->createVersion == version) {
 			return moveInShard;
@@ -2425,10 +2441,12 @@ std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId
 	}
 
 	const UID id = deterministicRandom()->randomUniqueID();
-	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, version);
+	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, version, conductBulkLoad);
 	auto [it, inserted] = this->moveInShards.emplace(id, shard);
 	ASSERT(inserted);
-	TraceEvent(SevDebug, "SSNewMoveInShard", this->thisServerID).detail("MoveInShard", shard->toString());
+	TraceEvent(SevDebug, "SSNewMoveInShard", this->thisServerID)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("ConductBulkLoad", conductBulkLoad);
 	return shard;
 }
 
@@ -9085,7 +9103,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         bool nowAssigned,
                                         Version version,
                                         ChangeServerKeysContext context,
-                                        EnablePhysicalShardMove enablePSM);
+                                        EnablePhysicalShardMove enablePSM,
+                                        bool conductBulkLoad);
 
 ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveInShard) {
 	if (moveInShard->getPhase() != MoveInPhase::Fetching && moveInShard->getPhase() != MoveInPhase::Ingesting) {
@@ -9111,7 +9130,8 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 			                                   true,
 			                                   mLV.version - 1,
 			                                   CSK_FALL_BACK,
-			                                   EnablePhysicalShardMove::False);
+			                                   EnablePhysicalShardMove::False,
+			                                   false);
 		} else {
 			TraceEvent(SevWarn, "ShardAlreadyChanged", data->thisServerID)
 			    .detail("ShardRange", currentShard->keys)
@@ -9121,6 +9141,100 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 
 	wait(data->durableVersion.whenAtLeast(mLV.version + 1));
 
+	return Void();
+}
+
+ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
+                                                   MoveInShard* moveInShard,
+                                                   std::string dir,
+                                                   BulkLoadState bulkLoadState) {
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Folder", abspath(dir));
+
+	state double fetchStartTime = now();
+
+	// Step 1: Fetch data to dir
+	state SSBulkLoadFileSet fileSetToLoad;
+	ASSERT(bulkLoadState.getTransportMethod() != BulkLoadTransportMethod::Invalid);
+	if (bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP) {
+		wait(store(
+		    fileSetToLoad,
+		    bulkLoadTransportCP_impl(dir, bulkLoadState, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, data->thisServerID)));
+	} else {
+		throw not_implemented();
+	}
+	// At this point, all necessary data for bulk loading locate at fileSetToLoad
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Dir", dir)
+	    .detail("FileSetToLoad", fileSetToLoad.toString());
+
+	// Step 2: Validation
+	// TODO(BulkLoad): Validate all files specified in fileSetToLoad exist
+	// TODO(BulkLoad): Check file checksum
+	// TODO(BulkLoad): Check file data all in the moveInShard range
+	// TODO(BulkLoad): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	if (!fileSetToLoad.bytesSampleFile.present()) {
+		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
+		    .detail("BulkLoadState", bulkLoadState.toString())
+		    .detail("FileSetToLoad", fileSetToLoad.toString());
+		Optional<std::string> bytesSampleFile_ =
+		    wait(getBytesSamplingFromSSTFiles(fileSetToLoad.folder, fileSetToLoad.dataFileList, data->thisServerID));
+		fileSetToLoad.bytesSampleFile = bytesSampleFile_;
+	}
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileValidated", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Folder", abspath(dir))
+	    .detail("FileSetToLoad", fileSetToLoad.toString());
+
+	// Step 3: Build LocalRecord (used by ShardedRocksDB KVStore)
+	state CheckpointMetaData localRecord;
+	localRecord.checkpointID = UID();
+	localRecord.dir = abspath(fileSetToLoad.folder);
+	for (const auto& range : moveInShard->ranges()) {
+		ASSERT(bulkLoadState.getRange().contains(range));
+	}
+	localRecord.ranges = moveInShard->ranges();
+	RocksDBCheckpointKeyValues rcp({ bulkLoadState.getRange() });
+	for (const auto& filePath : fileSetToLoad.dataFileList) {
+		CheckpointFile cpFile;
+		cpFile.path = abspath(filePath);
+		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
+		if (coalesceRanges.size() != 1) {
+			TraceEvent(SevError, "SSBulkLoadTaskFetchSSTFileError", data->thisServerID)
+			    .detail("Reason", "MoveInShard ranges unexpected")
+			    .detail("BulkLoadState", bulkLoadState.toString())
+			    .detail("MoveInShard", moveInShard->toString())
+			    .detail("FileSetToLoad", fileSetToLoad.toString());
+		}
+		// TODO(BulkLoad): set loading file size --- logging purpose
+		cpFile.range = coalesceRanges[0];
+		rcp.fetchedFiles.push_back(cpFile);
+	}
+	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+	localRecord.version = 0;
+	localRecord.bytesSampleFile = fileSetToLoad.bytesSampleFile;
+	localRecord.setFormat(CheckpointFormat::RocksDBKeyValues);
+	localRecord.setState(CheckpointMetaData::Complete);
+	moveInShard->meta->checkpoints.push_back(localRecord);
+
+	const double duration = now() - fetchStartTime;
+	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->meta->checkpoints);
+	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileBuildMetadata", data->thisServerID)
+	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Folder", abspath(dir))
+	    .detail("FileSetToLoad", fileSetToLoad.toString())
+	    .detail("Duration", duration)
+	    .detail("TotalBytes", totalBytes)
+	    .detail("Rate", (double)totalBytes / duration);
+
+	// Step 4: Update the moveInShard phase
+	moveInShard->setPhase(MoveInPhase::Ingesting);
 	return Void();
 }
 
@@ -9217,9 +9331,12 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	return Void();
 }
 
-ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
+ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
+                                              MoveInShard* moveInShard,
+                                              Optional<BulkLoadState> bulkLoadState) {
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
 	state double startTime = now();
 
@@ -9231,7 +9348,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", moveInShard->toString())
-		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+		    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+		    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
 			updateMoveInShardMetaData(data, moveInShard);
@@ -9242,7 +9360,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 
 	TraceEvent(SevInfo, "FetchShardIngestedCheckpoint", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString())
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 
 	if (moveInShard->failed()) {
 		return Void();
@@ -9260,22 +9379,28 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		while (reader->hasNext()) {
 			KeyValue kv = reader->next();
 			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
+			Key key = kv.key;
+			if (key.startsWith(persistByteSampleKeys.begin)) {
+				key = key.removePrefix(persistByteSampleKeys.begin);
+			}
 			if (!checkpoint.containsKey(key)) {
 				TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySampleNotInRange", data->thisServerID)
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("SampleKey", key)
-				    .detail("Size", size);
+				    .detail("Size", size)
+				    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 				continue;
 			}
 			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySample", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)
-			    .detail("Size", size);
+			    .detail("Size", size)
+			    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 			data->metrics.byteSample.sample.insert(key, size);
 			data->metrics.notifyBytes(key, size);
-			data->addMutationToMutationLogOrStorage(invalidVersion,
-			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
+			data->addMutationToMutationLogOrStorage(
+			    invalidVersion,
+			    MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
 		}
 	}
 
@@ -9290,7 +9415,8 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
 	    .detail("Bytes", totalBytes)
 	    .detail("Duration", duration)
-	    .detail("Rate", static_cast<double>(totalBytes) / duration);
+	    .detail("Rate", static_cast<double>(totalBytes) / duration)
+	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
 
 	return Void();
 }
@@ -9424,6 +9550,9 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			ASSERT(newShard.range == range);
 			newShard.setShardState(StorageServerShard::ReadWrite);
+			TraceEvent(SevInfo, "MoveInShardReadWrite", data->thisServerID)
+			    .detail("Version", data->version.get())
+			    .detail("MoveInShard", moveInShard->toString());
 			data->addShard(ShardInfo::newShard(data, newShard));
 			data->newestAvailableVersion.insert(range, latestVersion);
 			coalescePhysicalShards(data, range);
@@ -9498,6 +9627,18 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
+	state Optional<BulkLoadState> bulkLoadState;
+	if (moveInShard->meta->conductBulkLoad) {
+		wait(store(bulkLoadState,
+		           getBulkLoadStateFromDataMove(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
+	}
+	if (bulkLoadState.present()) {
+		ASSERT(bulkLoadState.get().getDataMoveId() == moveInShard->dataMoveId());
+		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("BulkLoadTask", bulkLoadState.get().toString());
+	}
+
 	loop {
 		phase = moveInShard->getPhase();
 		TraceEvent(moveInShard->logSev, "FetchShardLoop", data->thisServerID)
@@ -9505,9 +9646,13 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				wait(fetchShardCheckpoint(data, moveInShard, dir));
+				if (bulkLoadState.present()) {
+					wait(fetchShardFetchBulkLoadSSTFiles(data, moveInShard, dir, bulkLoadState.get()));
+				} else {
+					wait(fetchShardCheckpoint(data, moveInShard, dir));
+				}
 			} else if (phase == MoveInPhase::Ingesting) {
-				wait(fetchShardIngestCheckpoint(data, moveInShard));
+				wait(fetchShardIngestCheckpoint(data, moveInShard, bulkLoadState));
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
@@ -9641,8 +9786,14 @@ MoveInShard::MoveInShard(StorageServer* server,
                          const UID& id,
                          const UID& dataMoveId,
                          const Version version,
+                         const bool conductBulkLoad,
                          MoveInPhase phase)
-  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, phase)),
+  : meta(std::make_shared<MoveInShardMetaData>(id,
+                                               dataMoveId,
+                                               std::vector<KeyRange>(),
+                                               version,
+                                               phase,
+                                               conductBulkLoad)),
     server(server), updates(std::make_shared<MoveInUpdates>(id,
                                                             version,
                                                             server,
@@ -9656,8 +9807,12 @@ MoveInShard::MoveInShard(StorageServer* server,
 	}
 }
 
-MoveInShard::MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version)
-  : MoveInShard(server, id, dataMoveId, version, MoveInPhase::Fetching) {}
+MoveInShard::MoveInShard(StorageServer* server,
+                         const UID& id,
+                         const UID& dataMoveId,
+                         const Version version,
+                         const bool conductBulkLoad)
+  : MoveInShard(server, id, dataMoveId, version, conductBulkLoad, MoveInPhase::Fetching) {}
 
 MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
   : meta(std::make_shared<MoveInShardMetaData>(meta)), server(server),
@@ -10205,7 +10360,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         bool nowAssigned,
                                         Version version,
                                         ChangeServerKeysContext context,
-                                        EnablePhysicalShardMove enablePSM) {
+                                        EnablePhysicalShardMove enablePSM,
+                                        bool conductBulkLoad) {
 	ASSERT(!keys.empty());
 	const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 	TraceEvent(SevInfo, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
@@ -10214,6 +10370,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
 	    .detail("PhysicalShardMove", static_cast<bool>(enablePSM))
+	    .detail("BulkLoading", static_cast<bool>(conductBulkLoad))
 	    .detail("IsTSS", data->isTss())
 	    .detail("Context", changeServerKeysContextName(context));
 
@@ -10366,7 +10523,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned()) {
 					if (enablePSM) {
-						std::shared_ptr<MoveInShard> moveInShard = data->getMoveInShard(dataMoveId, cVer);
+						std::shared_ptr<MoveInShard> moveInShard =
+						    data->getMoveInShard(dataMoveId, cVer, conductBulkLoad);
 						moveInShard->addRange(range);
 						updatedMoveInShards.emplace(moveInShard->id(), moveInShard);
 						updatedShards.push_back(StorageServerShard(
@@ -10382,6 +10540,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 					    .detail("NowAssigned", nowAssigned)
 					    .detail("Version", cVer)
 					    .detail("TotalAssignedAtVer", ++totalAssignedAtVer)
+					    .detail("ConductBulkLoad", conductBulkLoad)
 					    .detail("NewShard", updatedShards.back().toString());
 				} else {
 					ASSERT(shard->adding != nullptr || shard->moveInShard != nullptr);
@@ -10611,6 +10770,7 @@ private:
 	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
 	UID dataMoveId;
 	bool processedStartKey;
+	bool conductBulkLoad = false;
 
 	KeyRef cacheStartKey;
 	bool processedCacheStartKey;
@@ -10633,9 +10793,11 @@ private:
 					TraceEvent(SevDebug, "SSSetAssignedStatus", data->thisServerID)
 					    .detail("Range", keys)
 					    .detail("NowAssigned", nowAssigned)
-					    .detail("Version", ver);
+					    .detail("Version", ver)
+					    .detail("EnablePSM", enablePSM)
+					    .detail("ConductBulkLoad", conductBulkLoad);
 					changeServerKeysWithPhysicalShards(
-					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context, enablePSM);
+					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context, enablePSM, conductBulkLoad);
 				} else {
 					// add changes in shard assignment to the mutation log
 					setAssignedStatus(data, keys, nowAssigned);
@@ -10666,7 +10828,12 @@ private:
 				dataMoveType = DataMoveType::LOGICAL;
 			}
 			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL ||
-			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
+			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()) ||
+			                                    dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
+			conductBulkLoad =
+			    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
+			// TODO(BulkLoad): remove after logical move based bulk loading has been implmented
+			ASSERT(enablePSM || !conductBulkLoad);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)

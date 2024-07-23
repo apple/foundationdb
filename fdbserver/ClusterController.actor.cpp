@@ -2267,6 +2267,12 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 	}
 
 	loop {
+		bool ddExist = self->db.serverInfo->get().distributor.present();
+		TraceEvent(SevInfo, "CCMonitorDataDistributor", self->id)
+		    .detail("Recruiting", self->recruitDistributor.get())
+		    .detail("Existing", ddExist)
+		    .detail("ExistingDD", ddExist ? self->db.serverInfo->get().distributor.get().id().toString() : "");
+
 		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,

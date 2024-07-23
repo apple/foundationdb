@@ -272,6 +272,12 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					            shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 					if (shardMetrics->get().present()) {
+						DisabledTraceEvent("TrackerChangeSizes")
+						    .detail("Context", "trackShardMetrics")
+						    .detail("Keys", keys)
+						    .detail("TotalSizeEstimate", self()->dbSizeEstimate->get())
+						    .detail("EndSizeOfOldShards", shardMetrics->get().get().metrics.bytes)
+						    .detail("StartingSizeOfNewShards", metrics.first.get().bytes);
 						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
 						                            shardMetrics->get().get().metrics.bytes);
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
@@ -367,7 +373,10 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 	}
 }
 
-ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize) {
+ACTOR Future<Void> changeSizes(DataDistributionTracker* self,
+                               KeyRange keys,
+                               int64_t oldShardsEndingSize,
+                               std::string context) {
 	state std::vector<Future<int64_t>> sizes;
 	state std::vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards->intersectingRanges(keys)) {
@@ -392,10 +401,12 @@ ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int
 	}
 
 	int64_t totalSizeEstimate = self->dbSizeEstimate->get();
-	/*TraceEvent("TrackerChangeSizes")
+	DisabledTraceEvent("TrackerChangeSizes")
+	    .detail("Context", "changeSizes when " + context)
+	    .detail("Keys", keys)
 	    .detail("TotalSizeEstimate", totalSizeEstimate)
 	    .detail("EndSizeOfOldShards", oldShardsEndingSize)
-	    .detail("StartingSizeOfNewShards", newShardsStartingSize);*/
+	    .detail("StartingSizeOfNewShards", newShardsStartingSize);
 	self->dbSizeEstimate->set(totalSizeEstimate + newShardsStartingSize - oldShardsEndingSize);
 	self->systemSizeEstimate += newSystemShardsStartingSize;
 	if (keys.begin >= systemKeys.begin) {
@@ -502,7 +513,7 @@ void executeShardSplit(DataDistributionTracker* self,
 		}
 	}
 
-	self->actors.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+	self->actors.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes, "ShardSplit"));
 }
 
 struct RangeToSplit {
@@ -918,6 +929,14 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(nextRange)) {
+		TraceEvent(SevWarn, "ShardCanForwardMergeButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("ShardMerging", keys)
+		    .detail("NextShard", nextRange);
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, nextRange);
 }
 
@@ -930,7 +949,62 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(prevRange)) {
+		TraceEvent(SevWarn, "ShardCanBackwardMergeButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("ShardMerging", keys)
+		    .detail("PrevShard", prevRange);
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, prevRange);
+}
+
+// Must be atomic
+void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoadState) {
+	KeyRange keys = bulkLoadState.getRange();
+	ASSERT(!keys.empty());
+	TraceEvent e(SevInfo, "DDBulkLoadCreateShardToBulkLoad", self->distributorId);
+	e.detail("TaskId", bulkLoadState.getTaskId());
+	e.detail("BulkLoadRange", keys);
+	// Create shards at the two ends and do not data move for those shards
+	// Create a new shard and trigger data move for bulk loading on the new shard
+	// Step 1: split left without data move nor updating dbEstimate size (will be rebuilt after DD restarts)
+	for (auto it : self->shards->intersectingRanges(keys)) {
+		if (it->range().begin < keys.begin) {
+			KeyRange leftRange = Standalone(KeyRangeRef(it->range().begin, keys.begin));
+			restartShardTrackers(self, leftRange);
+			e.detail("FirstSplitShard", it->range());
+		}
+		break;
+	}
+
+	// Step 2: split right without data move nor updating dbEstimate size (will be rebuilt after DD restarts)
+	for (auto it : self->shards->intersectingRanges(keys)) {
+		if (it->range().end > keys.end) {
+			KeyRange rightRange = Standalone(KeyRangeRef(keys.end, it->range().end));
+			restartShardTrackers(self, rightRange);
+			e.detail("LastSplitShard", it->range());
+			break;
+		}
+	}
+
+	// Step 3: merge with new data move
+	StorageMetrics oldStats;
+	int shardCount = 0;
+	for (auto it : self->shards->intersectingRanges(keys)) {
+		Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+		if (it->value().stats->get().present()) {
+			oldStats = oldStats + it->value().stats->get().get().metrics;
+			shardCount = shardCount + it->value().stats->get().get().shardCount;
+		}
+	}
+	restartShardTrackers(self, keys, ShardMetrics(oldStats, now(), shardCount));
+	self->shardsAffectedByTeamFailure->defineShard(keys);
+	self->output.send(
+	    RelocateShard(keys, DataMovementReason::TEAM_HEALTHY, RelocateReason::OTHER, bulkLoadState.getTaskId()));
+	e.detail("NewShardToLoad", keys);
+	return;
 }
 
 Future<Void> shardMerger(DataDistributionTracker* self,
@@ -1131,6 +1205,15 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
+	bool onBulkLoading = self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(keys);
+	if (onBulkLoading && shouldSplit) {
+		TraceEvent(SevWarn, "ShardWantToSplitButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("KeyRange", keys);
+		shouldSplit = false;
+		// Bulk loading will delay shard boundary change until the loading completes
+		onChange = onChange || delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC);
+	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
 	if (keys.begin > allKeys.begin)
@@ -1143,6 +1226,14 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow &&
 	                   (shardForwardMergeFeasible(self, keys, nextIter.range()) ||
 	                    shardBackwardMergeFeasible(self, keys, prevIter.range()));
+	if (onBulkLoading && shouldMerge) {
+		TraceEvent(SevWarn, "ShardWantToMergeButUnderBulkLoading", self->distributorId)
+		    .suppressFor(5.0)
+		    .detail("KeyRange", keys);
+		shouldMerge = false;
+		// Bulk loading will delay shard boundary change until the loading completes
+		onChange = onChange || delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC);
+	}
 
 	// Every invocation must set this or clear it
 	if (shouldMerge && !self->anyZeroHealthyTeams->get()) {
@@ -1289,7 +1380,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
-	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0);
+	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0, "ShardInit");
 	self->readyToStart.send(Void());
 	wait(initialSize);
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
@@ -1511,9 +1602,9 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
   : IDDShardTracker(), db(params.db), distributorId(params.distributorId), shards(params.shards), actors(false),
     systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
-    physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
-    anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
-    ddTenantCache(params.ddTenantCache) {}
+    physicalShardCollection(params.physicalShardCollection), bulkLoadTaskCollection(params.bulkLoadTaskCollection),
+    readyToStart(params.readyToStart), anyZeroHealthyTeams(params.anyZeroHealthyTeams),
+    trackerCancelled(params.trackerCancelled), ddTenantCache(params.ddTenantCache) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
@@ -1564,6 +1655,9 @@ struct DataDistributionTrackerImpl {
 				when(RebalanceStorageQueueRequest req = waitNext(self->triggerStorageQueueRebalance)) {
 					triggerStorageQueueRebalance(self, req);
 				}
+				when(BulkLoadShardRequest req = waitNext(self->triggerShardBulkLoading)) {
+					createShardToBulkLoad(self, req.bulkLoadState);
+				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
 					self->actors.add(tenantCreationHandling(self, newTenant));
@@ -1573,7 +1667,12 @@ struct DataDistributionTrackerImpl {
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "DataDistributionTrackerError", self->distributorId).error(e);
+			if (e.code() != error_code_broken_promise) {
+				TraceEvent(SevError, "DataDistributionTrackerError", self->distributorId)
+				    .error(e); // FIXME: get rid of broken_promise
+			} else {
+				TraceEvent(SevWarn, "DataDistributionTrackerError", self->distributorId).error(e);
+			}
 			throw e;
 		}
 	}
@@ -1586,13 +1685,16 @@ Future<Void> DataDistributionTracker::run(
     const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
     const FutureStream<GetMetricsListRequest>& getShardMetricsList,
     const FutureStream<Promise<int64_t>>& getAverageShardBytes,
-    const FutureStream<RebalanceStorageQueueRequest>& triggerStorageQueueRebalance) {
+    const FutureStream<RebalanceStorageQueueRequest>& triggerStorageQueueRebalance,
+    const FutureStream<BulkLoadShardRequest>& triggerShardBulkLoading) {
 	self->getShardMetrics = getShardMetrics;
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
 	self->triggerStorageQueueRebalance = triggerStorageQueueRebalance;
+	self->triggerShardBulkLoading = triggerShardBulkLoading;
 	self->userRangeConfig = initData->userRangeConfig;
+	self->bulkLoadEnabled = bulkLoadIsEnabled(initData->bulkLoadMode);
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

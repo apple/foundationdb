@@ -379,6 +379,13 @@ public:
 	                            // requested
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
+	int BULKLOAD_FILE_BYTES_MAX; // the maximum bytes of files to inject by bulk loading
+	double DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC; // seconds to delay shard boundary change when blocked by bulk
+	                                                    // loading
+	int DD_BULKLOAD_TASK_METADATA_READ_SIZE; // the number of bulk load tasks read from metadata at a time
+	int DD_BULKLOAD_PARALLELISM; // the maximum number of running bulk load tasks
+	double DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk load scheduler has to wait
+	                                              // between two rounds
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

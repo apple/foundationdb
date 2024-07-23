@@ -51,23 +51,33 @@ struct MoveInShardMetaData {
 	std::vector<CheckpointMetaData> checkpoints; // All related checkpoints, they should cover `ranges`.
 	Optional<std::string> error;
 	double startTime;
+	bool conductBulkLoad;
 
 	MoveInShardMetaData() = default;
 	MoveInShardMetaData(const UID& id,
 	                    const UID& dataMoveId,
 	                    std::vector<KeyRange> ranges,
 	                    const Version version,
-	                    MoveInPhase phase)
+	                    MoveInPhase phase,
+	                    bool conductBulkLoad)
 	  : id(id), dataMoveId(dataMoveId), ranges(ranges), createVersion(version), highWatermark(version),
-	    phase(static_cast<int8_t>(phase)), startTime(now()) {}
-	MoveInShardMetaData(const UID& id, const UID& dataMoveId, std::vector<KeyRange> ranges, const Version version)
-	  : MoveInShardMetaData(id, dataMoveId, ranges, version, MoveInPhase::Fetching) {}
-	MoveInShardMetaData(const UID& dataMoveId, std::vector<KeyRange> ranges, const Version version)
+	    phase(static_cast<int8_t>(phase)), startTime(now()), conductBulkLoad(conductBulkLoad) {}
+	MoveInShardMetaData(const UID& id,
+	                    const UID& dataMoveId,
+	                    std::vector<KeyRange> ranges,
+	                    const Version version,
+	                    bool conductBulkLoad)
+	  : MoveInShardMetaData(id, dataMoveId, ranges, version, MoveInPhase::Fetching, conductBulkLoad) {}
+	MoveInShardMetaData(const UID& dataMoveId,
+	                    std::vector<KeyRange> ranges,
+	                    const Version version,
+	                    bool conductBulkLoad)
 	  : MoveInShardMetaData(deterministicRandom()->randomUniqueID(),
 	                        dataMoveId,
 	                        ranges,
 	                        version,
-	                        MoveInPhase::Fetching) {}
+	                        MoveInPhase::Fetching,
+	                        conductBulkLoad) {}
 
 	bool operator<(const MoveInShardMetaData& rhs) const {
 		return this->ranges.front().begin < rhs.ranges.front().begin;
@@ -77,6 +87,8 @@ struct MoveInShardMetaData {
 
 	void setPhase(MoveInPhase phase) { this->phase = static_cast<int8_t>(phase); }
 
+	bool doBulkLoading() const { return this->conductBulkLoad; }
+
 	uint64_t destShardId() const { return this->dataMoveId.first(); }
 	std::string destShardIdString() const { return format("%016llx", this->dataMoveId.first()); }
 
@@ -85,12 +97,13 @@ struct MoveInShardMetaData {
 		       " [DataMoveID]: " + this->dataMoveId.toString() +
 		       " [ShardCreateVersion]: " + std::to_string(this->createVersion) + " [ID]: " + this->id.toString() +
 		       " [State]: " + std::to_string(static_cast<int>(this->phase)) +
-		       " [HighWatermark]: " + std::to_string(this->highWatermark);
+		       " [HighWatermark]: " + std::to_string(this->highWatermark) +
+		       " [ConductBulkLoad]: " + std::to_string(this->conductBulkLoad);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, dataMoveId, ranges, createVersion, highWatermark, phase, checkpoints);
+		serializer(ar, id, dataMoveId, ranges, createVersion, highWatermark, phase, checkpoints, conductBulkLoad);
 	}
 };
 

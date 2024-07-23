@@ -299,6 +299,14 @@ class DDTxnProcessorImpl {
 					return result;
 				}
 
+				result->bulkLoadMode = 0;
+				Optional<Value> bulkLoadMode = wait(tr.get(bulkLoadModeKey));
+				if (bulkLoadMode.present()) {
+					BinaryReader rd(bulkLoadMode.get(), Unversioned());
+					rd >> result->bulkLoadMode;
+				}
+				TraceEvent(SevInfo, "DDBulkLoadInitMode").detail("Mode", result->bulkLoadMode);
+
 				state Future<std::vector<ProcessData>> workers = getWorkers(&tr);
 				state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 				wait(success(workers) && success(serverList));
