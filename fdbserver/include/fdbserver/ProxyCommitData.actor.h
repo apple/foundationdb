@@ -80,6 +80,19 @@ struct ProxyStats {
 
 	LatencySample commitBatchingWindowSize;
 
+	// Number of transactions in the batch
+	LatencySample commitBatchTransactions;
+	// Summary length of transactions in the batch
+	LatencySample commitBatchBytes;
+	// what time transactions were waiting in the batch before they
+	// started processing with commitBatch()
+	LatencySample commitBatchingWaiting;
+	LatencySample commitPreresolutionLatency;
+	LatencySample commitResolutionLatency;
+	LatencySample commitPostresolutionLatency;
+	LatencySample commitTLogLoggingLatency;
+	LatencySample commitReplyLatency;
+
 	LatencySample computeLatency;
 
 	Future<Void> logger;
@@ -155,6 +168,38 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitBatchTransactions("CommitBatchTransactions",
+	                            id,
+	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitBatchBytes("CommitBatchBytes",
+	                     id,
+	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitBatchingWaiting("CommitBatchingWaiting",
+	                          id,
+	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitPreresolutionLatency("CommitPreresolutionLatency",
+	                               id,
+	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitResolutionLatency("CommitResolutionLatency",
+	                            id,
+	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitPostresolutionLatency("CommitPostresolutionLatency",
+	                                id,
+	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitTLogLoggingLatency("CommitTLogLoggingLatency",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitReplyLatency("CommitReplyLatency",
+	                       id,
+	                       SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                       SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    computeLatency("ComputeLatency",
 	                   id,
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
