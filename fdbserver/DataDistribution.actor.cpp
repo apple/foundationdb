@@ -1084,7 +1084,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 	state Promise<Void> completeAck;
 	state BulkLoadState triggeredBulkLoadTask;
 	state Version commitVersion = invalidVersion;
-	TraceEvent(SevInfo, "DDBulkLoadTaskNewBegin", self->ddId)
+	TraceEvent(SevInfo, "DDBulkLoadDoBulkLoadBegin", self->ddId)
 	    .detail("Range", range)
 	    .detail("TaskID", taskId)
 	    .detail("Restart", restart);
@@ -1095,7 +1095,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    wait(triggerBulkLoadTask(self, range, taskId, restart));
 		triggeredBulkLoadTask = triggeredBulkLoadTask_.first;
 		commitVersion = triggeredBulkLoadTask_.second;
-		TraceEvent(SevInfo, "DDBulkLoadTaskNewTriggered", self->ddId)
+		TraceEvent(SevInfo, "DDBulkLoadDoBulkLoadTaskTriggered", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Task", triggeredBulkLoadTask.toString())
@@ -1114,7 +1114,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		wait(completeAck.getFuture()); // proceed when a data move completes with this task
-		TraceEvent(SevInfo, "DDBulkLoadTaskNewComplete", self->ddId)
+		TraceEvent(SevInfo, "DDBulkLoadDoBulkLoadTaskComplete", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Task", triggeredBulkLoadTask.toString())
@@ -1124,21 +1124,19 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		self->bulkLoadTaskCollection->decrementTaskCounter();
+		TraceEvent(SevWarn, "DDBulkLoadDoBulkLoadTaskFailed", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("Range", range)
+		    .detail("TaskID", taskId)
+		    .detail("Restart", restart);
 		if (e.code() == error_code_bulkload_task_outdated) {
-			TraceEvent(SevWarn, "DDBulkLoadTaskNewFailed", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("Range", range)
-			    .detail("TaskID", taskId)
-			    .detail("Restart", restart);
+			self->bulkLoadTaskCollection->decrementTaskCounter();
 			// sliently exits
-		} else {
-			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoBulkLoadTaskFailed", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("Range", range)
-			    .detail("TaskID", taskId)
-			    .detail("Restart", restart);
+		} else if (e.code() == error_code_movekeys_conflict) {
 			throw e;
+		} else {
+			// retry by spawning a new one
+			runBulkLoadTaskAsync(self, range, taskId, true);
 		}
 	}
 	return Void();
