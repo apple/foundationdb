@@ -357,7 +357,7 @@ func (o DatabaseOptions) SetMachineId(param string) error {
 
 // Specify the datacenter ID that was passed to fdbserver processes running in the same datacenter as this client, for better location-aware load balancing.
 //
-// Parameter: Hexadecimal ID
+// Parameter: A string identifier for the datacenter
 func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }
