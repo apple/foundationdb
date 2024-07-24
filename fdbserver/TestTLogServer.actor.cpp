@@ -208,7 +208,8 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 			toCommit.addTags(tags);
 			toCommit.writeTypedMessage(m);
 		}
-		Future<Version> loggingComplete = pTLogTestContext->ls->push(prev, next, prev, prev, toCommit, SpanContext());
+		const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
+		Future<Version> loggingComplete = pTLogTestContext->ls->push(versionSet, toCommit, SpanContext());
 		Version ver = wait(loggingComplete);
 		ASSERT_LE(ver, next);
 		prev++;

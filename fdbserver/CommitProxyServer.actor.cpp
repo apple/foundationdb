@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <string_view>
 #include <tuple>
 #include <variant>
 
@@ -625,14 +626,26 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 
 namespace CommitBatch {
 
+constexpr const std::string_view UNSET = std::string_view();
+constexpr const std::string_view INITIALIZE = "initialize"sv;
+constexpr const std::string_view PRE_RESOLUTION = "preResolution"sv;
+constexpr const std::string_view RESOLUTION = "resolution"sv;
+constexpr const std::string_view POST_RESOLUTION = "postResolution"sv;
+constexpr const std::string_view TRANSACTION_LOGGING = "transactionLogging"sv;
+constexpr const std::string_view REPLY = "reply"sv;
+constexpr const std::string_view COMPLETE = "complete"sv;
+
 struct CommitBatchContext {
 	using StoreCommit_t = std::vector<std::pair<Future<LogSystemDiskQueueAdapter::CommitMessage>, Future<Void>>>;
 
 	ProxyCommitData* const pProxyCommitData;
 	std::vector<CommitTransactionRequest> trs;
-	int currentBatchMemBytesCount;
+	const int currentBatchMemBytesCount;
 
 	double startTime;
+
+	// The current stage of batch commit
+	std::string_view stage = UNSET;
 
 	// If encryption is enabled this value represents the total time (in nanoseconds) that was spent on encryption in
 	// the commit proxy for a given Commit Batch
@@ -2437,14 +2450,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		// Issue acs mutation at the end of this commit batch
 		addAccumulativeChecksumMutations(self);
 	}
-	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
-	                                                          self->commitVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
-	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
-	                                                          span.context,
-	                                                          self->debugID,
-	                                                          tpcvMap);
+	const auto versionSet = ILogSystem::PushVersionSet{ self->prevVersion,
+		                                                self->commitVersion,
+		                                                pProxyCommitData->committedVersion.get(),
+		                                                pProxyCommitData->minKnownCommittedVersion };
+	self->loggingComplete =
+	    pProxyCommitData->logSystem->push(versionSet, self->toCommit, span.context, self->debugID, tpcvMap);
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
@@ -2725,46 +2736,78 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	return Void();
 }
 
-} // namespace CommitBatch
-
 // Commit one batch of transactions trs
-ACTOR Future<Void> commitBatch(ProxyCommitData* self,
-                               std::vector<CommitTransactionRequest>* trs,
-                               int currentBatchMemBytesCount) {
+ACTOR Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
-	state CommitBatch::CommitBatchContext context(self, trs, currentBatchMemBytesCount);
+
+	pContext->stage = INITIALIZE;
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches)
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::ProxyCommit));
 
-	context.pProxyCommitData->lastVersionTime = context.startTime;
-	++context.pProxyCommitData->stats.commitBatchIn;
-	context.setupTraceBatch();
+	pContext->pProxyCommitData->lastVersionTime = pContext->startTime;
+	++pContext->pProxyCommitData->stats.commitBatchIn;
+	pContext->setupTraceBatch();
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
 	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
-	wait(CommitBatch::preresolutionProcessing(&context));
-	if (context.rejected) {
-		self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
+	pContext->stage = PRE_RESOLUTION;
+	wait(CommitBatch::preresolutionProcessing(pContext));
+	if (pContext->rejected) {
+		pContext->pProxyCommitData->commitBatchesMemBytesCount -= pContext->currentBatchMemBytesCount;
 		return Void();
 	}
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
-	wait(CommitBatch::getResolution(&context));
+	pContext->stage = RESOLUTION;
+	wait(CommitBatch::getResolution(pContext));
 
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but
 	/// doesn't need to be)
-	wait(CommitBatch::postResolution(&context));
+	pContext->stage = POST_RESOLUTION;
+	wait(CommitBatch::postResolution(pContext));
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
-	wait(CommitBatch::transactionLogging(&context));
+	pContext->stage = TRANSACTION_LOGGING;
+	wait(CommitBatch::transactionLogging(pContext));
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for
 	/// latency)
-	wait(CommitBatch::reply(&context));
+	pContext->stage = REPLY;
+	wait(CommitBatch::reply(pContext));
+
+	pContext->stage = COMPLETE;
+	return Void();
+}
+
+} // namespace CommitBatch
+
+ACTOR Future<Void> commitBatch(ProxyCommitData* pCommitData,
+                               std::vector<CommitTransactionRequest>* trs,
+                               int currentBatchMemBytesCount) {
+
+	state CommitBatch::CommitBatchContext context(pCommitData, trs, currentBatchMemBytesCount);
+
+	Future<Void> commit = CommitBatch::commitBatchImpl(&context);
+
+	// When encryption is enabled, cipher key fetching issue (e.g KMS outage) is detected by the
+	// encryption monitor. In that case, commit timeout is expected and timeout error is suppressed. But
+	// we still want to trigger recovery occasionally (with the COMMIT_PROXY_MAX_LIVENESS_TIMEOUT), in
+	// the hope that the cipher key fetching issue could be resolve by recovery (e.g, if one CP have
+	// networking issue connecting to EKP, and recovery may exclude the CP).
+	Future<Void> livenessTimeout = timeoutErrorIfCleared(
+	    commit, pCommitData->encryptionMonitor->degraded(), SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT);
+
+	Future<Void> maxLivenessTimeout = timeoutError(livenessTimeout, SERVER_KNOBS->COMMIT_PROXY_MAX_LIVENESS_TIMEOUT);
+	try {
+		wait(maxLivenessTimeout);
+	} catch (Error& err) {
+		TraceEvent(SevInfo, "CommitBatchFailed").detail("Stage", context.stage).detail("ErrorCode", err.code());
+		throw failed_to_progress();
+	}
 
 	return Void();
 }
@@ -3965,32 +4008,31 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		when(std::pair<std::vector<CommitTransactionRequest>, int> batchedRequests =
 		         waitNext(batchedCommits.getFuture())) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+			/*
+			TraceEvent("CommitProxyCTR", proxy.id())
+			    .detail("CommitTransactions", trs.size())
+			    .detail("TransactionRate", transactionRate)
+			    .detail("TransactionQueue", transactionQueue.size())
+			    .detail("ReleasedTransactionCount", transactionCount);
+			TraceEvent("CommitProxyCore", commitData.dbgid)
+			    .detail("TxSize", trs.size())
+			    .detail("MasterLifetime", masterLifetime.toString())
+			    .detail("DbMasterLifetime", commitData.db->get().masterLifetime.toString())
+			    .detail("RecoveryState", commitData.db->get().recoveryState)
+			    .detail("CCInf", commitData.db->get().clusterInterface.id().toString());
+			*/
 			const std::vector<CommitTransactionRequest>& trs = batchedRequests.first;
-			int batchBytes = batchedRequests.second;
-			//TraceEvent("CommitProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
-			//TraceEvent("CommitProxyCore", commitData.dbgid).detail("TxSize", trs.size()).detail("MasterLifetime", masterLifetime.toString()).detail("DbMasterLifetime", commitData.db->get().masterLifetime.toString()).detail("RecoveryState", commitData.db->get().recoveryState).detail("CCInf", commitData.db->get().clusterInterface.id().toString());
-			if (trs.size() || (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-			                   masterLifetime.isEqual(commitData.db->get().masterLifetime))) {
+			const int batchBytes = batchedRequests.second;
+			if (trs.size() ||
+			    (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
+			     masterLifetime.isEqual(commitData.db->get().masterLifetime) && lastCommitComplete.isReady())) {
 
-				if (trs.size() || lastCommitComplete.isReady()) {
-					// When encryption is enabled, cipher key fetching issue (e.g KMS outage) is detected by the
-					// encryption monitor. In that case, commit timeout is expected and timeout error is suppressed. But
-					// we still want to trigger recovery occasionally (with the COMMIT_PROXY_MAX_LIVENESS_TIMEOUT), in
-					// the hope that the cipher key fetching issue could be resolve by recovery (e.g, if one CP have
-					// networking issue connecting to EKP, and recovery may exclude the CP).
-					lastCommitComplete = transformError(
-					    timeoutError(
-					        timeoutErrorIfCleared(
-					            commitBatch(&commitData,
-					                        const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
-					                        batchBytes),
-					            commitData.encryptionMonitor->degraded(),
-					            SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT),
-					        SERVER_KNOBS->COMMIT_PROXY_MAX_LIVENESS_TIMEOUT),
-					    timed_out(),
-					    failed_to_progress());
-					addActor.send(lastCommitComplete);
-				}
+				lastCommitComplete =
+				    commitBatch(&commitData,
+				                const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
+				                batchBytes);
+
+				addActor.send(lastCommitComplete);
 			}
 		}
 		when(ProxySnapRequest snapReq = waitNext(proxy.proxySnapReq.getFuture())) {
