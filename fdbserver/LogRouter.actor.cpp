@@ -703,7 +703,8 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid)
 			    .errorUnsuppressed(e)
 			    .detail("Tag", req.tag)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);

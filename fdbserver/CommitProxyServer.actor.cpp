@@ -1031,6 +1031,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		for (int r = 0; r < self->pProxyCommitData->resolvers.size(); r++) {
 			TraceEvent(SevWarnAlways, "ResetResolverNetwork", self->pProxyCommitData->dbgid)
 			    .detail("PeerAddr", self->pProxyCommitData->resolvers[r].address())
+			    .detail("PeerAddress", self->pProxyCommitData->resolvers[r].address())
 			    .detail("CurrentBatch", self->localBatchNumber)
 			    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 			FlowTransport::transport().resetConnection(self->pProxyCommitData->resolvers[r].address());

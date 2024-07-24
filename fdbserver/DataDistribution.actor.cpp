@@ -1182,7 +1182,8 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 		TraceEvent("SnapDataDistributor_ReqError")
 		    .errorUnsuppressed(reply.getError())
 		    .detail("ConvertedErrorType", e.what())
-		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+		    .detail("Peer", stream.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress());
 		throw e;
 	}
 	return Void();
@@ -1197,6 +1198,7 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 			TraceEvent("SnapDataDistributor_ReqError")
 			    .errorUnsuppressed(reply.getError())
 			    .detail("Peer", stream.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress())
 			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
 			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
