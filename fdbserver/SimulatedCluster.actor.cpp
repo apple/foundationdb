@@ -2643,7 +2643,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			if (machine >= machines) {
 				if (extraStorageMachineCount > 0) {
 					processClass = ProcessClass(ProcessClass::ClassType::StorageClass,
-					                            ProcessClass::CommandLineSource); // Unset or Storage
+					                            ProcessClass::CommandLineSource); // Storage
 					extraStorageMachineCount--;
 					possible_ss++;
 				} else if (storageCacheMachines > 0 && dc == 0) {
