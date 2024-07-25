@@ -484,7 +484,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	int extraMachineCountDC = 0;
-	int extraStorageMachineCountDC = 0;
+	int extraStorageMachineCountPerDC = 0;
 
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
@@ -569,7 +569,7 @@ public:
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
-		    .add("extraStorageMachineCountDC", &extraStorageMachineCountDC)
+		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
@@ -2191,7 +2191,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			                             5, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
 		}
 	}
-	machine_count += datacenters * (testConfig.extraMachineCountDC + testConfig.extraStorageMachineCountDC);
+	machine_count += datacenters * (testConfig.extraMachineCountDC + testConfig.extraStorageMachineCountPerDC);
 }
 
 // Sets the coordinator count based on the testConfig. May be overwritten later
@@ -2602,7 +2602,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
 			fmt::print("sim http machines = {0}\n", simHTTPMachines);
 		}
-		int extraStorageMachineCount = testConfig.extraStorageMachineCountDC;
+		int extraStorageMachineCount = testConfig.extraStorageMachineCountPerDC;
 
 		int totalMachines =
 		    machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines + extraStorageMachineCount;
