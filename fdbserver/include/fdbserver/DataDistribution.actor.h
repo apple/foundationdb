@@ -532,7 +532,7 @@ struct TeamCollectionInterface {
 
 struct DDBulkLoadTask {
 	BulkLoadState coreState;
-	Version commitVersion;
+	Version commitVersion = invalidVersion;
 	Promise<Void> completeAck; // satisfied when a data move for this task completes for the first time, where the task
 	                           // metadata phase has been complete
 
