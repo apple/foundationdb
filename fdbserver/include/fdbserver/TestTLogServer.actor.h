@@ -44,6 +44,7 @@ struct TestTLogOptions {
 	std::string kvStoreFilename;
 	std::string dataFolder;
 	std::string kvStoreExtension;
+	std::vector<Version> versions;
 	int64_t kvMemoryLimit;
 	int numTagsPerServer;
 	int numLogServers;

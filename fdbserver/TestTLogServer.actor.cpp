@@ -30,6 +30,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 
 #include "flow/actorcompiler.h" // must be last include
@@ -211,11 +212,14 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 		Future<Version> loggingComplete = pTLogTestContext->ls->push(prev, next, prev, prev, toCommit, SpanContext());
 		Version ver = wait(loggingComplete);
 		ASSERT_LE(ver, next);
-		prev++;
-		next++;
+		prev = next;
+		pTLogTestContext->tLogOptions.versions.push_back(next);
+		next += SERVER_KNOBS->VERSIONS_PER_SECOND;
 	}
 
-	TraceEvent("TestTLogServerExitPush", pTLogTestContext->workerID).detail("LogID", logID);
+	TraceEvent("TestTLogServerExitPush", pTLogTestContext->workerID)
+	    .detail("LogID", logID)
+	    .detail("NumVersions", pTLogTestContext->tLogOptions.versions.size());
 
 	return Void();
 }
@@ -233,13 +237,15 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 
 	TraceEvent("TestTLogServerEnterPeek", pTLogTestContext->workerID).detail("LogID", logID).detail("Tag", tag);
 
-	state Version begin = 1;
+	state Version begin;
 	state int i;
 	for (i = 0; i < pTLogTestContext->numCommits; i++) {
 		// wait for next message commit
+		begin = pTLogTestContext->tLogOptions.versions[i];
 		::TLogPeekRequest request(begin, tag, false, false);
 		::TLogPeekReply reply = wait(pTLogContext->TestTLogInterface.peekMessages.getReply(request));
 		TraceEvent("TestTLogServerTryValidateDataOnPeek", pTLogTestContext->workerID)
+		    .detail("R", begin)
 		    .detail("B", reply.begin.present() ? reply.begin.get() : -1);
 
 		// validate versions
@@ -290,8 +296,6 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 		// go directly to pop as there is no SS.
 		::TLogPopRequest requestPop(begin, begin, tag);
 		wait(pTLogContext->TestTLogInterface.popMessages.getReply(requestPop));
-
-		begin++;
 	}
 
 	TraceEvent("TestTLogServerExitPeek", pTLogTestContext->workerID).detail("LogID", logID).detail("TagID", tag);
@@ -369,9 +373,12 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		Reference<TLogContext> pNewTLogContext(new TLogContext(tLogIdx));
 		pTLogTestContextEpochTwo->pTLogContextList.push_back(pNewTLogContext);
 
+		// for validation: the expected versions in EpochTwo that were written in EpochOne
+		pTLogTestContextEpochTwo->tLogOptions.versions = pTLogTestContextEpochOne->tLogOptions.versions;
+
 		InitializeTLogRequest req;
 		req.recruitmentID = pTLogTestContextEpochTwo->dbInfo.logSystemConfig.recruitmentID;
-		req.recoverAt = pTLogTestContextEpochOne->numCommits;
+		req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back();
 		req.startVersion = pTLogTestContextEpochOne->initVersion + 1;
 		req.recoveryTransactionVersion = pTLogTestContextEpochOne->initVersion;
 		req.knownCommittedVersion = pTLogTestContextEpochOne->initVersion;
