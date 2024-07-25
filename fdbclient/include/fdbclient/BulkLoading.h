@@ -186,7 +186,7 @@ struct BulkLoadState {
 	}
 
 	// Updated by DD
-	BulkLoadPhase phase;
+	BulkLoadPhase phase = BulkLoadPhase::Invalid;
 	double submitTime = 0;
 	double triggerTime = 0;
 	double startTime = 0;
@@ -198,9 +198,9 @@ private:
 	UID taskId; // Unique ID of the task
 	KeyRange range; // Load the key-value within this range "[begin, end)" from data file
 	// File inject config
-	BulkLoadType loadType;
-	BulkLoadTransportMethod transportMethod;
-	BulkLoadInjectMethod injectMethod;
+	BulkLoadType loadType = BulkLoadType::Invalid;
+	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
+	BulkLoadInjectMethod injectMethod = BulkLoadInjectMethod::Invalid;
 	// Folder includes all files to be injected
 	std::string folder;
 	// Files to inject

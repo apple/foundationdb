@@ -66,7 +66,7 @@ struct CheckpointFile {
 	constexpr static FileIdentifier file_identifier = 13804348;
 	std::string path;
 	KeyRange range;
-	int64_t size; // Logical bytes of the checkpoint.
+	int64_t size = 0; // Logical bytes of the checkpoint.
 
 	CheckpointFile() = default;
 	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}

@@ -9201,8 +9201,6 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	localRecord.ranges = moveInShard->ranges();
 	RocksDBCheckpointKeyValues rcp({ bulkLoadState.getRange() });
 	for (const auto& filePath : fileSetToLoad.dataFileList) {
-		CheckpointFile cpFile;
-		cpFile.path = abspath(filePath);
 		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
 		if (coalesceRanges.size() != 1) {
 			TraceEvent(SevError, "SSBulkLoadTaskFetchSSTFileError", data->thisServerID)
@@ -9212,8 +9210,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 			    .detail("FileSetToLoad", fileSetToLoad.toString());
 		}
 		// TODO(BulkLoad): set loading file size --- logging purpose
-		cpFile.range = coalesceRanges[0];
-		rcp.fetchedFiles.push_back(cpFile);
+		rcp.fetchedFiles.emplace_back(abspath(filePath), coalesceRanges[0], 0);
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 	localRecord.version = 0;
