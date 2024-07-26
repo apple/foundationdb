@@ -239,7 +239,9 @@ public:
 					unhealthyTeamCount++;
 					continue;
 				}
-				if (dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) <= 0) {
+				bool allDestServerHaveLowDiskUtil =
+				    dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0;
+				if (!allDestServerHaveLowDiskUtil) {
 					notEligibileTeamCount++;
 					continue;
 				}
