@@ -2,9 +2,8 @@
 config = 'triple'
 storageEngineType = 5
 processesPerMachine = 2
-coordinators = 3
-machineCount = 40
-generateFearless = false # disable remote DC. TODO(BulkLoad): remove this after SimulatedCluster has been fixed
+machineCount = 15
+extraStorageMachineCountPerDC = 8
 tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. Therefore, disable tenant
 
 [[knobs]]
@@ -16,7 +15,6 @@ tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. 
 # so for this BulkLoading test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
 dd_physical_shard_move_probability = 1.0
-desired_teams_per_server = 10
 
 [[test]]
 testTitle = 'BulkLoadingWorkload'

@@ -484,6 +484,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	int extraMachineCountDC = 0;
+	int extraStorageMachineCountPerDC = 0;
 
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
@@ -568,6 +569,7 @@ public:
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
@@ -2189,7 +2191,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			                             5, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
 		}
 	}
-	machine_count += datacenters * testConfig.extraMachineCountDC;
+	machine_count += datacenters * (testConfig.extraMachineCountDC + testConfig.extraStorageMachineCountPerDC);
 }
 
 // Sets the coordinator count based on the testConfig. May be overwritten later
@@ -2600,8 +2602,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
 			fmt::print("sim http machines = {0}\n", simHTTPMachines);
 		}
+		int extraStorageMachineCount = testConfig.extraStorageMachineCountPerDC;
 
-		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
+		int totalMachines =
+		    machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines + extraStorageMachineCount;
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -2637,7 +2641,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			int processCount = processesPerMachine;
 			ProcessMode processMode = requiresExtraDBMachines ? BackupAgentOnly : FDBDAndBackupAgent;
 			if (machine >= machines) {
-				if (storageCacheMachines > 0 && dc == 0) {
+				if (extraStorageMachineCount > 0) {
+					processClass = ProcessClass(ProcessClass::ClassType::StorageClass,
+					                            ProcessClass::CommandLineSource); // Storage
+					extraStorageMachineCount--;
+					possible_ss++;
+				} else if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
 					storageCacheMachines--;
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
