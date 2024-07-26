@@ -1178,6 +1178,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 
 		TraceEvent(SevDebug, "PeerHealthMonitor")
+		    .suppressFor(5.0)
 		    .detail("Peer", address)
 		    .detail("PeerAddress", address)
 		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
