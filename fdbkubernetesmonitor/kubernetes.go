@@ -110,6 +110,10 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 	nodeName := os.Getenv("FDB_NODE_NAME")
 
 	internalClient, internalCache, err := setupCache(namespace, podName, nodeName)
+	if err != nil {
+		return nil, err
+	}
+
 	podClient := &kubernetesClient{
 		podMetadata:   nil,
 		nodeMetadata:  nil,
