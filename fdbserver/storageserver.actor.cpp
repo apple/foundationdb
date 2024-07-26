@@ -12265,7 +12265,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		// Handle MoveInShard::MoveInUpdates.
-		TraceEvent(SevDebug, "MoveInUpdatesPrePersist", data->thisServerID)
+		TraceEvent(g_network->isSimulated() ? SevVerbose : SevInfo, "MoveInUpdatesPrePersist", data->thisServerID)
 		    .detail("NewOldestVersion", newOldestVersion)
 		    .detail("StartOldestVersion", startOldestVersion);
 		for (const auto& [_, moveInShard] : data->moveInShards) {
