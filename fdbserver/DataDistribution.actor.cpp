@@ -822,7 +822,9 @@ public:
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs); // Cancal data move
-				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				TraceEvent("DDInitScheduledCancelDataMoveForWrongType", self->ddId)
+				    .detail("DataMove", meta.toString())
+				    .detail("DataMoveType", dataMoveType);
 			} else if (it.value()->isCancelled() ||
 			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
