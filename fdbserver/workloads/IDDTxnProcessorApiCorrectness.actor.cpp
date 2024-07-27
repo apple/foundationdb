@@ -353,6 +353,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		const UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                     AssignEmptyRange(false),
 		                                     DataMoveType::LOGICAL,
+		                                     DoBulkLoading(false),
 		                                     DataMovementReason::INVALID,
 		                                     UnassignShard(false));
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {

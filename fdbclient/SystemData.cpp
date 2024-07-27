@@ -532,6 +532,7 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
                         const DataMoveType type,
+                        DoBulkLoading doBulkLoading,
                         const DataMovementReason reason,
                         UnassignShard unassignShard) {
 	uint64_t split = 0;
@@ -542,12 +543,14 @@ const UID newDataMoveId(const uint64_t physicalShardId,
 	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
-			// Clear the lower 16 bits
-			split = (~0xFFFF) & split;
+			// Clear the lower 20 bits
+			split = (~0xFFFFF) & split;
 			// Set DataMoveType to the lower [0, 8) bits
 			split = split | static_cast<uint64_t>(type);
 			// Set DataMovementReason to the lower [8, 16) bits
 			split = split | (static_cast<uint64_t>(reason) << 8);
+			// Set DoBulkLoading to the lower [16, 20) bits
+			split = split | (static_cast<uint64_t>(doBulkLoading) << 16);
 		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
 	}
 	return UID(physicalShardId, split);
@@ -590,8 +593,9 @@ bool serverHasKey(ValueRef storedValue) {
 	UID shardId;
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	DoBulkLoading doBulkLoading(false);
 	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-	decodeServerKeysValue(storedValue, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
+	decodeServerKeysValue(storedValue, assigned, emptyRange, dataMoveType, doBulkLoading, shardId, dataMoveReason);
 	return assigned;
 }
 
@@ -609,6 +613,7 @@ void decodeDataMoveId(const UID& id,
                       bool& assigned,
                       bool& emptyRange,
                       DataMoveType& dataMoveType,
+                      DoBulkLoading& doBulkLoading,
                       DataMovementReason& dataMoveReason) {
 	dataMoveType = DataMoveType::LOGICAL;
 	dataMoveReason = DataMovementReason::INVALID;
@@ -650,6 +655,7 @@ void decodeDataMoveId(const UID& id,
 			// from release-7.3, users can temporarily disable the feature until the old data moves
 			// have been consumed.
 		}
+		doBulkLoading = static_cast<DoBulkLoading>(0xF & (id.second() >> 16));
 	}
 }
 
@@ -657,10 +663,12 @@ void decodeServerKeysValue(const ValueRef& value,
                            bool& assigned,
                            bool& emptyRange,
                            DataMoveType& dataMoveType,
+                           DoBulkLoading& doBulkLoading,
                            UID& id,
                            DataMovementReason& dataMoveReason) {
 	dataMoveType = DataMoveType::LOGICAL;
 	dataMoveReason = DataMovementReason::INVALID;
+	doBulkLoading = DoBulkLoading::False;
 	if (value.size() == 0) {
 		assigned = false;
 		emptyRange = false;
@@ -681,7 +689,7 @@ void decodeServerKeysValue(const ValueRef& value,
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
 		rd >> id;
-		decodeDataMoveId(id, assigned, emptyRange, dataMoveType, dataMoveReason);
+		decodeDataMoveId(id, assigned, emptyRange, dataMoveType, doBulkLoading, dataMoveReason);
 	}
 }
 
@@ -2177,14 +2185,17 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 	    static_cast<DataMoveType>(deterministicRandom()->randomInt(0, static_cast<int>(DataMoveType::NUMBER_OF_TYPES)));
 	const DataMovementReason reason = static_cast<DataMovementReason>(
 	    deterministicRandom()->randomInt(1, static_cast<int>(DataMovementReason::NUMBER_OF_REASONS)));
-	const UID dataMoveId = newDataMoveId(physicalShardId, AssignEmptyRange(false), type, reason, UnassignShard(false));
+	const DoBulkLoading doBulkLoading(deterministicRandom()->coinflip());
+	const UID dataMoveId =
+	    newDataMoveId(physicalShardId, AssignEmptyRange(false), type, doBulkLoading, reason, UnassignShard(false));
 
 	bool assigned, emptyRange;
 	DataMoveType decodeType;
+	DoBulkLoading decodeDoBulkLoading = DoBulkLoading::False;
 	DataMovementReason decodeReason = DataMovementReason::INVALID;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, decodeType, decodeReason);
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, decodeType, decodeDoBulkLoading, decodeReason);
 
-	ASSERT(type == decodeType && reason == decodeReason);
+	ASSERT(type == decodeType && reason == decodeReason && doBulkLoading == decodeDoBulkLoading);
 
 	printf("testing data move ID encoding/decoding complete\n");
 

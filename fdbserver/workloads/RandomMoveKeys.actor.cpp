@@ -161,6 +161,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 				                               AssignEmptyRange(false),
 				                               DataMoveType::PHYSICAL,
+				                               DoBulkLoading::False,
 				                               DataMovementReason::TEAM_HEALTHY,
 				                               UnassignShard(false));
 				params = std::make_unique<MoveKeysParams>(dataMoveId,
@@ -180,6 +181,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 				                               AssignEmptyRange(false),
 				                               DataMoveType::LOGICAL,
+				                               DoBulkLoading(false),
 				                               DataMovementReason::TEAM_HEALTHY,
 				                               UnassignShard(false));
 				params = std::make_unique<MoveKeysParams>(dataMoveId,

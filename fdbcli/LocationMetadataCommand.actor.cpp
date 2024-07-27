@@ -182,9 +182,15 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 					UID shardId;
 					bool assigned, emptyRange;
 					DataMoveType dataMoveType = DataMoveType::LOGICAL;
+					DoBulkLoading doBulkLoading(false);
 					DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-					decodeServerKeysValue(
-					    serverShards[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
+					decodeServerKeysValue(serverShards[i].value,
+					                      assigned,
+					                      emptyRange,
+					                      dataMoveType,
+					                      doBulkLoading,
+					                      shardId,
+					                      dataMoveReason);
 					printf("Range: %s, ShardID: %s, Assigned: %s\n",
 					       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
 					       shardId.toString().c_str(),

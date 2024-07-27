@@ -10814,8 +10814,10 @@ private:
 			// keys
 			startKey = m.param1;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
+			DoBulkLoading doBulkLoading(false);
 			dataMoveReason = DataMovementReason::INVALID;
-			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId, dataMoveReason);
+			decodeServerKeysValue(
+			    m.param2, nowAssigned, emptyRange, dataMoveType, doBulkLoading, dataMoveId, dataMoveReason);
 			if (dataMoveType != DataMoveType::LOGICAL &&
 			    data->storage.getKeyValueStoreType() != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 				TraceEvent(SevWarnAlways, "KVStoreNotSupportDataMoveType", data->thisServerID)
@@ -10825,10 +10827,8 @@ private:
 				dataMoveType = DataMoveType::LOGICAL;
 			}
 			enablePSM = EnablePhysicalShardMove(dataMoveType == DataMoveType::PHYSICAL ||
-			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()) ||
-			                                    dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
-			conductBulkLoad =
-			    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
+			                                    (dataMoveType == DataMoveType::PHYSICAL_EXP && data->isTss()));
+			conductBulkLoad = (doBulkLoading == DoBulkLoading::True);
 			// TODO(BulkLoad): remove after logical move based bulk loading has been implmented
 			ASSERT(enablePSM || !conductBulkLoad);
 			processedStartKey = true;

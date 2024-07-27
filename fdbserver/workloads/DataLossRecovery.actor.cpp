@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/Knobs.h"
@@ -237,6 +238,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 					                               AssignEmptyRange(false),
 					                               DataMoveType::PHYSICAL,
+					                               DoBulkLoading(false),
 					                               DataMovementReason::TEAM_HEALTHY,
 					                               UnassignShard(false));
 					params = std::make_unique<MoveKeysParams>(dataMoveId,
@@ -256,6 +258,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 					                               AssignEmptyRange(false),
 					                               DataMoveType::LOGICAL,
+					                               DoBulkLoading(false),
 					                               DataMovementReason::TEAM_HEALTHY,
 					                               UnassignShard(false));
 					params = std::make_unique<MoveKeysParams>(dataMoveId,

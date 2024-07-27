@@ -38,14 +38,13 @@
 FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
+FDB_BOOLEAN_PARAM(DoBulkLoading);
 
 enum class DataMoveType : uint8_t {
 	LOGICAL = 0,
 	PHYSICAL = 1,
 	PHYSICAL_EXP = 2,
-	LOGICAL_BULKLOAD = 3,
-	PHYSICAL_BULKLOAD = 4,
-	NUMBER_OF_TYPES = 5,
+	NUMBER_OF_TYPES = 3,
 };
 
 // One-to-one relationship to the priority knobs
@@ -206,6 +205,7 @@ extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const UID newDataMoveId(const uint64_t physicalShardId,
                         AssignEmptyRange assignEmptyRange,
                         const DataMoveType type,
+                        DoBulkLoading doBulkLoading,
                         const DataMovementReason reason,
                         UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
@@ -218,11 +218,13 @@ void decodeDataMoveId(const UID& id,
                       bool& assigned,
                       bool& emptyRange,
                       DataMoveType& dataMoveType,
+                      DoBulkLoading& doBulkLoading,
                       DataMovementReason& dataMoveReason);
 void decodeServerKeysValue(const ValueRef& value,
                            bool& assigned,
                            bool& emptyRange,
                            DataMoveType& dataMoveType,
+                           DoBulkLoading& doBulkLoading,
                            UID& id,
                            DataMovementReason& dataMoveReason);
 

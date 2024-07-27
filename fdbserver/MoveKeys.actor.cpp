@@ -56,9 +56,11 @@ struct Shard {
 bool shouldCreateCheckpoint(const UID& dataMoveId) {
 	bool assigned, emptyRange;
 	DataMoveType type;
+	DoBulkLoading doBulkLoading(false);
 	DataMovementReason reason;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, type, reason);
-	return type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, type, doBulkLoading, reason);
+	return (type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP) &&
+	       doBulkLoading == DoBulkLoading::False;
 }
 
 // Unassigns keyrange `range` from server `ssId`, except ranges in `shards`.
@@ -419,8 +421,10 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 			UID shardId;
 			bool assigned, emptyRange;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
+			DoBulkLoading doBulkLoading(false);
 			DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
+			decodeServerKeysValue(
+			    readResult[i].value, assigned, emptyRange, dataMoveType, doBulkLoading, shardId, dataMoveReason);
 			if (!assigned) {
 				TraceEvent(SevError, "ValidateRangeAssignmentCorruptionDetected")
 				    .setMaxFieldLength(-1)
@@ -2606,8 +2610,9 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	UID shardId;
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	DoBulkLoading doBulkLoading(false);
 	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, dataMoveType, doBulkLoading, shardId, dataMoveReason);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
@@ -2847,6 +2852,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                                  AssignEmptyRange::True,
 						                                  DataMoveType::LOGICAL,
+						                                  DoBulkLoading::False,
 						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
@@ -3370,6 +3376,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                  AssignEmptyRange(false),
 		                                  DataMoveType::PHYSICAL,
+		                                  DoBulkLoading::False,
 		                                  DataMovementReason::SEED_SHARD_SERVER,
 		                                  UnassignShard(false));
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());
