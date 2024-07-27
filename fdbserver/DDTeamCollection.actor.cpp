@@ -232,10 +232,17 @@ public:
 
 			std::vector<Reference<TCTeamInfo>> candidateTeams;
 			int unhealthyTeamCount = 0;
+			int notEligibileTeamCount = 0;
 			int duplicatedCount = 0;
 			for (const auto& dest : self->teams) {
 				if (!dest->isHealthy()) {
 					unhealthyTeamCount++;
+					continue;
+				}
+				bool allDestServerHaveLowDiskUtil =
+				    dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0;
+				if (!allDestServerHaveLowDiskUtil) {
+					notEligibileTeamCount++;
 					continue;
 				}
 				bool ok = true;
@@ -268,6 +275,7 @@ public:
 				    .detail("CandidateSize", candidateTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
+				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
@@ -278,7 +286,8 @@ public:
 				    .detail("TeamSize", self->teams.size())
 				    .detail("CandidateSize", candidateTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
-				    .detail("DuplicatedCount", duplicatedCount);
+				    .detail("DuplicatedCount", duplicatedCount)
+				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
 			}
 			req.reply.send(std::make_pair(res, false));
 			return Void();
@@ -3672,7 +3681,7 @@ public:
 
 			for (i = 0; i < machineTeams.size(); i++) {
 				const auto& team = machineTeams[i];
-				TraceEvent("MachineTeamInfo", self->getDistributorId())
+				TraceEvent(g_network->isSimulated() ? SevVerbose : SevInfo, "MachineTeamInfo", self->getDistributorId())
 				    .detail("TeamIndex", i)
 				    .detail("MachineIDs", team->getMachineIDsStr())
 				    .detail("ServerTeams", team->getServerTeams().size())
