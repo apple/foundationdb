@@ -57,6 +57,14 @@
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+DataMoveType getDataMoveTypeFromDataMoveId(const UID& dataMoveId) {
+	bool assigned, emptyRange;
+	DataMoveType dataMoveType;
+	DataMovementReason dataMoveReason;
+	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType, dataMoveReason);
+	return dataMoveType;
+}
+
 void RelocateShard::setParentRange(KeyRange const& parent) {
 	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
 	parent_range = parent;
@@ -794,6 +802,7 @@ public:
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
+			DataMoveType dataMoveType = getDataMoveTypeFromDataMoveId(meta.id);
 			if (meta.ranges.empty()) {
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
 				continue;
@@ -806,6 +815,16 @@ public:
 				// Cancel data move for old bulk loading
 				// Do not assign bulk load to rs so that this is a normal data move cancellation signal
 				TraceEvent("DDInitScheduledCancelOldBulkLoadDataMove", self->ddId).detail("DataMove", meta.toString());
+			} else if (dataMoveType == DataMoveType::LOGICAL_BULKLOAD ||
+			           dataMoveType == DataMoveType::PHYSICAL_BULKLOAD) {
+				// The metadata is from the old system
+				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				rs.dataMoveId = meta.id;
+				rs.cancelled = true;
+				self->relocationProducer.send(rs); // Cancal data move
+				TraceEvent("DDInitScheduledCancelDataMoveForWrongType", self->ddId)
+				    .detail("DataMove", meta.toString())
+				    .detail("DataMoveType", dataMoveType);
 			} else if (it.value()->isCancelled() ||
 			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);

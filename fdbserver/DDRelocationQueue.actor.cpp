@@ -116,14 +116,6 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 	return std::make_pair(&reasonPriority, &priorityReason);
 }
 
-DataMoveType getDataMoveType(const UID& dataMoveId) {
-	bool assigned, emptyRange;
-	DataMoveType dataMoveType;
-	DataMovementReason dataMoveReason;
-	decodeDataMoveId(dataMoveId, assigned, emptyRange, dataMoveType, dataMoveReason);
-	return dataMoveType;
-}
-
 // Return negative priority for invalid or dummy reasons
 int dataMovementPriority(DataMovementReason reason) {
 	auto [reasonPriority, _] = buildPriorityMappings();
@@ -2112,7 +2104,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("Reason", rd.reason.toString())
 					    .detail("DataMoveReason", static_cast<int>(rd.dmReason))
 					    .detail("DataMoveID", rd.dataMoveId)
-					    .detail("DataMoveType", getDataMoveType(rd.dataMoveId));
+					    .detail("DataMoveType", getDataMoveTypeFromDataMoveId(rd.dataMoveId));
 					if (now() - startTime > 600) {
 						TraceEvent(SevWarnAlways, "RelocateShardTooLong")
 						    .detail("Duration", now() - startTime)

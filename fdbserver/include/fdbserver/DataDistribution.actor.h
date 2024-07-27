@@ -98,6 +98,8 @@ private:
 extern int dataMovementPriority(DataMovementReason moveReason);
 extern DataMovementReason priorityToDataMovementReason(int priority);
 
+DataMoveType getDataMoveTypeFromDataMoveId(const UID& dataMoveId);
+
 struct DDShardInfo;
 
 // Represents a data move in DD.
