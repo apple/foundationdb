@@ -100,23 +100,27 @@ Future<uint64_t> setupRange(Database cx,
 				tr.debugTransaction(deterministicRandom()->randomUniqueID());
 
 			state Standalone<KeyValueRef> sampleKV = (*workload)(begin);
-			Optional<Value> f = wait(tr.get(sampleKV.key));
-			if (f.present()) {
-				//				if( sampleKV.value.size() == f.get().size() ) {
-				//TraceEvent("BulkSetupRangeAlreadyPresent")
-				//	.detail("Begin", begin)
-				//	.detail("End", end)
-				//	.detail("Version", tr.getReadVersion().get())
-				//	.detail("Key", printable((*workload)(begin).key))
-				//	.detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
-				return bytesInserted; // The transaction already completed!
-				//}
-				//TraceEvent(SevError, "BulkSetupConflict")
-				//	.detail("Begin", begin)
-				//	.detail("End", end)
-				//	.detail("ExpectedLength", sampleKV.value.size())
-				//	.detail("FoundLength", f.get().size());
-				// throw operation_failed();
+			if (!g_network->isSimulated() || !g_simulator->speedUpSimulation) {
+				// Don't issue reads if speedUpSimulation is true. So this transaction
+				// becomes blind writes, to avoid transaction_too_old errors.
+				Optional<Value> f = wait(tr.get(sampleKV.key));
+				if (f.present()) {
+					//				if( sampleKV.value.size() == f.get().size() ) {
+					//TraceEvent("BulkSetupRangeAlreadyPresent")
+					//	.detail("Begin", begin)
+					//	.detail("End", end)
+					//	.detail("Version", tr.getReadVersion().get())
+					//	.detail("Key", printable((*workload)(begin).key))
+					//	.detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
+					return bytesInserted; // The transaction already completed!
+					//}
+					//TraceEvent(SevError, "BulkSetupConflict")
+					//	.detail("Begin", begin)
+					//	.detail("End", end)
+					//	.detail("ExpectedLength", sampleKV.value.size())
+					//	.detail("FoundLength", f.get().size());
+					// throw operation_failed();
+				}
 			}
 			// Predefine a single large write conflict range over the whole key space
 			tr.addWriteConflictRange(KeyRangeRef(workload->keyForIndex(begin), keyAfter(workload->keyForIndex(end))));
