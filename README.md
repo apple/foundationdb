@@ -142,7 +142,7 @@ There are no special requirements for Linux.  A docker image can be pulled from
 `foundationdb/build` that has all of FoundationDB's dependencies
 pre-installed, and is what the CI uses to build and test PRs.
 
-```
+```sh
 cmake -G Ninja <FDB_SOURCE_DIR>
 ninja
 cpack -G DEB
