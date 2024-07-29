@@ -73,14 +73,14 @@ struct BulkLoading : TestWorkload {
 					TraceEvent("BulkLoadingSubmitBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
-					    .detail("BulkLoadStates", describe(tasks));
+					    .detail("BulkLoadState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("BulkLoadingSubmitBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
-					    .detail("BulkLoadStates", describe(tasks));
+					    .detail("BulkLoadState", tasks[i].toString());
 					wait(delay(0.1));
 				}
 			}
@@ -97,14 +97,17 @@ struct BulkLoading : TestWorkload {
 					TraceEvent("BulkLoadingAcknowledgeBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
-					    .detail("BulkLoadStates", describe(tasks[i]));
+					    .detail("BulkLoadState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("BulkLoadingAcknowledgeBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
-					    .detail("BulkLoadStates", describe(tasks));
+					    .detail("BulkLoadState", tasks[i].toString());
+					if (e.code() == error_code_bulkload_task_outdated) {
+						break; // has been erased or overwritten by other tasks
+					}
 					wait(delay(0.1));
 				}
 			}
