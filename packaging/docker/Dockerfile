@@ -112,7 +112,7 @@ RUN curl -Ls $FDB_WEBSITE/$FDB_VERSION/libfdb_c.x86_64.so -o /usr/lib/libfdb_c.s
 RUN rm -rf /tmp/*
 WORKDIR /
 
-FROM foundationdb-base as fdb-kubernetes-monitor
+FROM foundationdb-base AS fdb-kubernetes-monitor
 
 # Install the kubernetes monitor binary
 COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
@@ -127,11 +127,11 @@ FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 
 RUN microdnf -y install \
     python3.12 \
-    python3.12-pip \
+    python3.12-pip && \
     microdnf clean all && \
-    alias python3="python3.12" >> /etc/bash.bashrc && \
-    alias python="python3.12" >> /etc/bash.bashrc && \
-    python3 -m pip install watchdog==0.9.0
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 20 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 20 && \
+    python3 -m pip install watchdog==4.0.1
 
 WORKDIR /
 ADD entrypoint.bash sidecar.py /
