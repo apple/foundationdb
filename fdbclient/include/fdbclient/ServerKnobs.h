@@ -249,6 +249,9 @@ public:
 	// shard metrics will update immediately
 	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
 	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // Experimental. Enable to enforce shard split when write traffic is high
+	double
+	    DD_SHARD_USABLE_REGION_CHECK_PERIOD_SEC; // The period of seconds of checking usable region is randomly selected
+	                                             // between [value/2, value). Set value=0 to disable the checking
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;

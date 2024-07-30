@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ServerKnobs.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
@@ -30,6 +31,7 @@
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "fdbserver/DDShardTracker.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -208,6 +210,26 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 		bounds.permittedError.opsReadPerKSecond = currentReadOps * 0.25;
 	}
 	return { bounds, readHotShard };
+}
+
+ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyRange keys) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	loop {
+		// Do random backoff 1 ~ 2 mins
+		wait(delay((deterministicRandom()->random01() + 1) / 2.0 *
+		           SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_PERIOD_SEC));
+		auto [destTeams, srcTeams] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
+		if (destTeams.size() != self()->usableRegions) {
+			TraceEvent(SevWarn, "ShardUsableRegionMismatch", self()->distributorId)
+			    .suppressFor(5.0)
+			    .detail("DestTeamSize", destTeams.size())
+			    .detail("SrcTeamSize", srcTeams.size())
+			    .detail("UsableRegion", self()->usableRegions)
+			    .detail("Shard", keys);
+			RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
+			self()->output.send(rs);
+		}
+	}
 }
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
@@ -1346,6 +1368,10 @@ void restartShardTrackers(DataDistributionTracker* self,
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		data.trackBytes =
 		    trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, whenDDInit);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_PERIOD_SEC > 0 &&
+		    self->usableRegions != -1) {
+			data.trackUsableRegion = shardUsableRegions(DataDistributionTracker::SafeAccessor(self), ranges[i]);
+		}
 		self->shards->insert(ranges[i], data);
 	}
 }
@@ -1604,7 +1630,8 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), bulkLoadTaskCollection(params.bulkLoadTaskCollection),
     readyToStart(params.readyToStart), anyZeroHealthyTeams(params.anyZeroHealthyTeams),
-    trackerCancelled(params.trackerCancelled), ddTenantCache(params.ddTenantCache) {}
+    trackerCancelled(params.trackerCancelled), ddTenantCache(params.ddTenantCache),
+    usableRegions(params.usableRegions) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {

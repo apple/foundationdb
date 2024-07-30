@@ -49,6 +49,7 @@ struct DataDistributionTrackerInitParams {
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
 	Optional<Reference<TenantCache>> ddTenantCache;
+	int32_t usableRegions = -1;
 };
 
 // track the status of shards
@@ -67,6 +68,7 @@ public:
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
+	int32_t usableRegions = -1;
 
 	// CapacityTracker
 	PromiseStream<RelocateShard> output;
