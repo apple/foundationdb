@@ -16,44 +16,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM centos:7.9.2009 as base
+FROM rockylinux:9.3-minimal AS base
 
-RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo && \
-    sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo && \
-    sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
-
-RUN yum install -y \
-    epel-release-7-11 \
-    centos-release-scl-2-3.el7.centos && \
-    sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo && \
-    sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo && \
-    sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo && \
-    yum install -y \
-    bind-utils-9.11.4-26.P2.el7_9.7 \
-    binutils-2.27-44.base.el7_9.1 \
-    curl-7.29.0-59.el7_9.1 \
-    gdb-7.6.1-120.el7 \
-    hostname-3.13-3.el7_7.1 \
-    jq-1.6-2.el7  \
-    less-458-9.el7 \
-    libubsan-7.3.1-5.16.el7 \
-    lsof-4.87-6.el7 \
-    net-tools-2.0-0.25.20131004git.el7 \
-    nmap-ncat-6.40-19.el7 \
-    perf-3.10.0-1160.45.1.el7 \
-    perl-5.16.3-299.el7_9 \
-    procps-ng-3.3.10-28.el7 \
-    strace-4.24-6.el7 \
-    sysstat-10.1.5-19.el7 \
-    tar-1.26-35.el7 \
-    tcpdump-4.9.2-4.el7_7.1 \
-    telnet-0.17-66.el7 \
-    traceroute-2.0.22-2.el7 \
-    unzip-6.0-22.el7_9 \
-    openssl-1.0.2k-24.el7_9.x86_64 \
-    vim-enhanced-7.4.629-8.el7_9 && \
-    yum clean all && \
-    rm -rf /var/cache/yum
+RUN microdnf install -y \
+    bind-utils \
+    binutils \
+    curl \
+    gdb \
+    hostname \
+    jq \
+    less \
+    libubsan \
+    lsof \
+    net-tools \
+    nmap-ncat \
+    perf \
+    perl \
+    procps-ng \
+    strace \
+    sysstat \
+    tar \
+    tcpdump \
+    telnet \
+    traceroute \
+    unzip \
+    openssl \
+    vim-enhanced && \
+    microdnf clean all
 
 WORKDIR /tmp
 
@@ -66,13 +55,13 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM golang:1.22.2-bullseye AS go-build
+FROM golang:1.22.5-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
 
-FROM base as foundationdb-base
+FROM base AS foundationdb-base
 
 WORKDIR /tmp
 ARG FDB_VERSION=6.3.22
@@ -134,14 +123,15 @@ WORKDIR /var/fdb
 VOLUME /var/fdb/data
 ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 
-FROM foundationdb-base as foundationdb-kubernetes-sidecar
+FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 
-RUN yum -y install \
-    rh-python38-2.0-4.el7 \
-    yum clean all && \
-    rm -rf /var/cache/yum && \
-    source /opt/rh/rh-python38/enable && \
-    pip3 install watchdog==0.9.0
+RUN microdnf -y install \
+    python3.12 \
+    python3.12-pip \
+    microdnf clean all && \
+    alias python3="python3.12" >> /etc/bash.bashrc && \
+    alias python="python3.12" >> /etc/bash.bashrc && \
+    python3 -m pip install watchdog==0.9.0
 
 WORKDIR /
 ADD entrypoint.bash sidecar.py /
@@ -152,7 +142,7 @@ VOLUME /var/output-files
 ENV LISTEN_PORT 8080
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.bash"]
 
-FROM foundationdb-base as foundationdb
+FROM foundationdb-base AS foundationdb
 
 WORKDIR /tmp
 RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
@@ -177,11 +167,11 @@ ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
-FROM foundationdb-base as ycsb
+FROM foundationdb-base AS ycsb
 
-RUN yum -y install \
-    java-11-openjdk-11.0.13.0.8-1.el7_9 && \
-    yum clean all && \
+RUN microdnf -y install \
+    java-11-openjdk java-11-openjdk-devel && \
+    microdnf clean all && \
     rm -rf /var/cache/yum
 
 WORKDIR /tmp

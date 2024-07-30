@@ -24,8 +24,4 @@ if [[ -n "$ADDITIONAL_ENV_FILE" ]]; then
   source $ADDITIONAL_ENV_FILE
 fi
 
-if [[ -f "/opt/rh/rh-python38/enable" ]]; then
-    source /opt/rh/rh-python38/enable
-fi
-
 exec /sidecar.py $*
