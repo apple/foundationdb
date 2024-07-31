@@ -221,8 +221,8 @@ ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self
 		// Do backoff
 		int shardCount = self()->shards->size();
 		double expectedCompletionSeconds = shardCount * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
-		double delayTime = std::max(SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_PERIOD_MIN_SEC,
-		                            deterministicRandom()->random01() * expectedCompletionSeconds);
+		double delayTime = SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_PERIOD_MIN_SEC +
+		                   deterministicRandom()->random01() * expectedCompletionSeconds;
 		wait(delay(delayTime));
 		auto [destTeams, srcTeams] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
 		if (destTeams.size() != self()->usableRegions) {
