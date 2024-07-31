@@ -32,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -127,7 +128,7 @@ Future<uint64_t> setupRange(Database cx,
 			bytesInserted = 0;
 			for (uint64_t n = begin; n < end; n++) {
 				Standalone<KeyValueRef> kv = (*workload)(n);
-				tr.set(kv.key, kv.value);
+				tr.set(kv.key, kv.value, AddConflictRange::False);
 				bytesInserted += kv.key.size() + kv.value.size();
 			}
 			wait(tr.commit());
