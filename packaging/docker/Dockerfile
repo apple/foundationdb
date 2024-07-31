@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM rockylinux:9.3-minimal AS base
+FROM docker.io/rockylinux/rockylinux:9.4-minimal AS base
 
 RUN microdnf install -y \
     bind-utils \
@@ -125,12 +125,17 @@ ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 
 FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 
+# We use python3.9 here as the tests with 3.12 resulted in the following error:
+# error:0A000126:SSL routines::unexpected eof while reading. This could be an issue
+# with the installed openssl version. Since the sidecar support will be deprecated in the
+# future it's fine to use python 3.9 here.
+# EOL for python 3.9 is 2025-10: https://devguide.python.org/versions/
 RUN microdnf -y install \
-    python3.12 \
-    python3.12-pip && \
+    python3.9 \
+    python3.9-pip && \
     microdnf clean all && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 20 && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 20 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.9 20 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 20 && \
     python3 -m pip install watchdog==4.0.1
 
 WORKDIR /
