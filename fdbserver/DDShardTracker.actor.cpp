@@ -217,6 +217,7 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyRange keys) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0);
+	wait(delay(0.1)); // yield to get the total number of shards when DD init
 	loop {
 		// Do backoff
 		int shardCount = self()->shards->size();
