@@ -25,6 +25,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDSharedContext.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -36,7 +37,6 @@
 #include "flow/Trace.h"
 #include "fdbserver/DDShardTracker.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <cstdint>
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatusHigh };
@@ -217,26 +217,24 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyRange keys) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0);
-	wait(delay(0.1)); // yield to get the total number of shards when DD init
-	loop {
-		// Do backoff
-		int shardCount = self()->shards->size();
-		double expectedCompletionSeconds = shardCount * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
-		double delayTime = SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_PERIOD_MIN_SEC +
-		                   deterministicRandom()->random01() * expectedCompletionSeconds;
-		wait(delay(delayTime));
-		auto [destTeams, srcTeams] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
-		if (destTeams.size() != self()->usableRegions) {
-			TraceEvent(SevWarn, "ShardUsableRegionMismatch", self()->distributorId)
-			    .suppressFor(5.0)
-			    .detail("DestTeamSize", destTeams.size())
-			    .detail("SrcTeamSize", srcTeams.size())
-			    .detail("UsableRegion", self()->usableRegions)
-			    .detail("Shard", keys);
-			RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
-			self()->output.send(rs);
-		}
+	wait(yieldedFuture(self()->readyToStart.getFuture()));
+	double expectedCompletionSeconds = self()->shards->size() * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
+	double delayTime = deterministicRandom()->random01() * expectedCompletionSeconds;
+	wait(delayJittered(delayTime));
+	auto [destTeams, srcTeams] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
+	if (destTeams.size() < self()->usableRegions) {
+		TraceEvent(SevWarn, "ShardUsableRegionMismatch", self()->distributorId)
+		    .suppressFor(5.0)
+		    .detail("DestTeamSize", destTeams.size())
+		    .detail("SrcTeamSize", srcTeams.size())
+		    .detail("DestServers", describe(destTeams))
+		    .detail("SrcServers", describe(srcTeams))
+		    .detail("UsableRegion", self()->usableRegions)
+		    .detail("Shard", keys);
+		RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
+		self()->output.send(rs);
 	}
+	return Void();
 }
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,

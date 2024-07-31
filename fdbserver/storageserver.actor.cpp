@@ -10785,14 +10785,15 @@ private:
 			// ignore data movements for tss in quarantine
 			if (!data->isTSSInQuarantine()) {
 				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
+				TraceEvent(SevDebug, "SSSetAssignedStatus", data->thisServerID)
+				    .detail("SSShardAware", data->shardAware)
+				    .detail("Range", keys)
+				    .detail("NowAssigned", nowAssigned)
+				    .detail("Version", ver)
+				    .detail("EnablePSM", enablePSM)
+				    .detail("ConductBulkLoad", conductBulkLoad);
 				if (data->shardAware) {
 					setAssignedStatus(data, keys, nowAssigned);
-					TraceEvent(SevDebug, "SSSetAssignedStatus", data->thisServerID)
-					    .detail("Range", keys)
-					    .detail("NowAssigned", nowAssigned)
-					    .detail("Version", ver)
-					    .detail("EnablePSM", enablePSM)
-					    .detail("ConductBulkLoad", conductBulkLoad);
 					changeServerKeysWithPhysicalShards(
 					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context, enablePSM, conductBulkLoad);
 				} else {
@@ -10816,9 +10817,8 @@ private:
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
 			dataMoveReason = DataMovementReason::INVALID;
 			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveType, dataMoveId, dataMoveReason);
-			if (dataMoveType != DataMoveType::LOGICAL &&
-			    data->storage.getKeyValueStoreType() != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
-				TraceEvent(SevWarnAlways, "KVStoreNotSupportDataMoveType", data->thisServerID)
+			if (dataMoveType != DataMoveType::LOGICAL && !data->shardAware) {
+				TraceEvent(SevWarnAlways, "SSNotSupportDataMoveType", data->thisServerID)
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("KVStoreType", data->storage.getKeyValueStoreType())
 				    .detail("DataMoveId", dataMoveId);
