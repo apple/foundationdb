@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <memory>
 #include <sys/wait.h>
 #include <cinttypes>
 #include <sys/stat.h>
