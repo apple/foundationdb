@@ -1911,6 +1911,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				validateBulkLoadRelocateData(rd, destIds, self->distributorId);
 			}
 			TraceEvent(SevInfo, "DDRelocatorGotDestTeam", self->distributorId)
+			    .detail("KeyBegin", rd.keys.begin)
+			    .detail("KeyEnd", rd.keys.end)
+			    .detail("Priority", rd.priority)
 			    .detail("DataMoveId", rd.dataMoveId)
 			    .detail("SrcIds", describe(rd.src))
 			    .detail("DestId", describe(destIds))
