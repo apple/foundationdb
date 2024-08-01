@@ -60,7 +60,7 @@ struct TestTLogOptions {
 		dataFolder = params.get("dataFolder").orDefault("simfdb");
 		kvMemoryLimit = params.getDouble("kvMemoryLimit").orDefault(0x500e6);
 		numTagsPerServer = params.getInt("numTagsPerServer").orDefault(1);
-		numLogServers = params.getInt("numLogServers").orDefault(1);
+		numLogServers = params.getInt("numLogServers").orDefault(2);
 		numCommits = params.getInt("numCommits").orDefault(3);
 		initVersion = params.getInt("initVersion").orDefault(1);
 		recover = params.getInt("recover").orDefault(1);
