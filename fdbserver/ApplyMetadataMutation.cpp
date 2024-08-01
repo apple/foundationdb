@@ -387,6 +387,10 @@ private:
 				    .detail("ToCommit", toCommit != nullptr)
 				    .detail("InitialCommit", initialCommit);
 				confChange = true;
+				if (m.param1 == configUsableRegionsKey && m.param2 == "2"_sr && toCommit) {
+					TraceEvent("MutationRequiresRestartEnableHA", dbgid);
+					toCommit->setChangedToHA();
+				}
 			}
 		}
 		if (!initialCommit)

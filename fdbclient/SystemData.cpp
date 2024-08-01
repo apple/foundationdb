@@ -976,7 +976,7 @@ ProcessClass decodeProcessClassValue(ValueRef const& value) {
 
 const KeyRangeRef configKeys("\xff/conf/"_sr, "\xff/conf0"_sr);
 const KeyRef configKeysPrefix = configKeys.begin;
-
+const KeyRef configUsableRegionsKey = "\xff/conf/usable_regions"_sr;
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
 // The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
