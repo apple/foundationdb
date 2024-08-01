@@ -19,21 +19,17 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ServerKnobs.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDSharedContext.h"
-#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
-#include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
-#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "fdbserver/DDShardTracker.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
