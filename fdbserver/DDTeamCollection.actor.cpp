@@ -1818,7 +1818,8 @@ public:
 							    .detail("ServerID", interf.id())
 							    .detail("Status", status->toString());
 							status->isFailed = false;
-						} else if (self->clearHealthyZoneFuture.isReady()) {
+						} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
+						           self->clearHealthyZoneFuture.isReady()) {
 							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
 							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 							self->healthyZone.set(Optional<Key>());
