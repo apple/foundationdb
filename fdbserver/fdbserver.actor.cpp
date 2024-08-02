@@ -2054,6 +2054,7 @@ int main(int argc, char* argv[]) {
 
 		// Initialize the thread pool
 		CoroThreadPool::init();
+
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
 		// are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
