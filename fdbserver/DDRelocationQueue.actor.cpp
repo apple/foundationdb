@@ -1909,12 +1909,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			// Sanity check for bulk loading data move
 			if (doBulkLoading) {
 				validateBulkLoadRelocateData(rd, destIds, self->distributorId);
-				TraceEvent(SevInfo, "DDBulkLoadTaskGotDestTeam", self->distributorId)
-				    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
-				    .detail("DataMoveId", rd.dataMoveId)
-				    .detail("SrcIds", describe(rd.src))
-				    .detail("DestId", describe(destIds));
 			}
+			TraceEvent(SevInfo, "DDRelocatorGotDestTeam", self->distributorId)
+			    .detail("KeyBegin", rd.keys.begin)
+			    .detail("KeyEnd", rd.keys.end)
+			    .detail("Priority", rd.priority)
+			    .detail("DataMoveId", rd.dataMoveId)
+			    .detail("SrcIds", describe(rd.src))
+			    .detail("DestId", describe(destIds))
+			    .detail("BulkLoadTask", doBulkLoading ? rd.bulkLoadTask.get().toString() : "");
 
 			// Sanity check
 			state int totalIds = 0;
