@@ -1016,8 +1016,11 @@ ACTOR Future<Void> applyMutations(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")
-		    .error(e);
+		Severity sev =
+		    (e.code() == error_code_restore_missing_data || e.code() == error_code_transaction_throttled_hot_shard)
+		        ? SevWarnAlways
+		        : SevError;
+		TraceEvent(sev, "ApplyMutationsError").error(e);
 		throw;
 	}
 }
