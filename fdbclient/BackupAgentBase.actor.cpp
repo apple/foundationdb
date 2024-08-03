@@ -847,8 +847,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					mutationSize = 0;
 				}
 
-				state int i;
-				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
+				for (int i = 0; i < curReq.transaction.mutations.size(); i++) {
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
 					req.transaction.encryptedMutations.push_back_deep(req.arena,
 					                                                  curReq.transaction.encryptedMutations[i]);
