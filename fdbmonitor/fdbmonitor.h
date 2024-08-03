@@ -92,6 +92,44 @@ struct Command;
 void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds);
 void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, sigset_t* mask);
 
+struct EnvVarUtils {
+	// This utility assumes key and value are separated by one equal sign
+	static std::pair<std::string, std::string> extractKeyAndValue(const std::string& keyValue) {
+		const auto equalIdx = keyValue.find('=');
+		if (equalIdx == std::numeric_limits<size_t>::max()) {
+			log_msg(SevError, "Stopping because equalIdx has reached size_t max value\n");
+			exit(1);
+		}
+		return { /* key */ keyValue.substr(0, equalIdx), /* value */ keyValue.substr(equalIdx + 1) };
+	}
+
+	static bool keyValueValid(const std::string& keyValue, const std::string& envvars) {
+		if (keyValue.empty()) {
+			log_msg(SevError, "Key-value in envvars %s can not be empty\n", envvars.c_str());
+			return false;
+		}
+		const auto numEqualSigns = std::count(keyValue.begin(), keyValue.end(), '=');
+		if (numEqualSigns != 1) {
+			log_msg(SevError,
+			        "Key-value %s in envvars string %s should have exactly one equal "
+			        "sign\n",
+			        keyValue.c_str(),
+			        envvars.c_str());
+			return false;
+		}
+		const auto [key, value] = extractKeyAndValue(keyValue);
+		if (key.empty()) {
+			log_msg(SevError, "Stopping because key in envvars key-value %s is empty\n", keyValue.c_str());
+			return false;
+		}
+		if (value.empty()) {
+			log_msg(SevError, "Stopping because value in envvars key-value %s is empty\n", keyValue.c_str());
+			return false;
+		}
+		return true;
+	}
+};
+
 struct Command {
 private:
 	std::vector<std::string> commands;
@@ -108,6 +146,7 @@ public:
 	double last_start;
 	double fork_retry_time;
 	bool quiet;
+	const char* envvars;
 	const char* delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
@@ -116,10 +155,9 @@ public:
 	// one pair for each of stdout and stderr
 	int pipes[2][2];
 
-	Command() : argv(nullptr) {}
 	Command(const CSimpleIni& ini, std::string _section, ProcessID id, fdb_fd_set fds, int* maxfd)
-	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), delete_envvars(nullptr),
-	    deconfigured(false), kill_on_configuration_change(true), memory_rss(0) {
+	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), envvars(nullptr),
+	    delete_envvars(nullptr), deconfigured(false), kill_on_configuration_change(true), memory_rss(0) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s", id.c_str());
 		ssection = _ssection;
@@ -210,6 +248,9 @@ public:
 		if (q && !strcmp(q, "true"))
 			quiet = true;
 
+		const char* env = get_value_multi(ini, "envvars", ssection.c_str(), section.c_str(), "general", nullptr);
+		envvars = env;
+
 		const char* del_env =
 		    get_value_multi(ini, "delete-envvars", ssection.c_str(), section.c_str(), "general", nullptr);
 		delete_envvars = del_env;
@@ -235,9 +276,12 @@ public:
 		}
 #else
 		if (mem_rss) {
-			// While the memory check is not currently implemented on non-Linux by fdbmonitor, the "memory" option is
-			// still pass to fdbserver, which will crash itself if the limit is exceeded.
-			log_msg(SevWarn, "Memory monitoring by fdbmonitor is not supported by current system\n");
+			// While the memory check is not currently implemented on non-Linux by
+			// fdbmonitor, the "memory" option is still pass to fdbserver, which will
+			// crash itself if the limit is exceeded.
+			log_msg(SevWarn,
+			        "Memory monitoring by fdbmonitor is not supported by "
+			        "current system\n");
 		}
 #endif
 
@@ -251,13 +295,14 @@ public:
 		const std::string pid_s = std::to_string(getpid());
 
 		for (auto i : keys) {
-			// For "memory" option, despite they are handled by fdbmonitor, we still pass it to fdbserver.
+			// For "memory" option, despite they are handled by fdbmonitor, we still
+			// pass it to fdbserver.
 			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
 			    isParameterNameEqual(i.pItem, "initial-restart-delay") ||
 			    isParameterNameEqual(i.pItem, "restart-backoff") ||
 			    isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
 			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
-			    isParameterNameEqual(i.pItem, "delete-envvars") ||
+			    isParameterNameEqual(i.pItem, "envvars") || isParameterNameEqual(i.pItem, "delete-envvars") ||
 			    isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
@@ -294,6 +339,7 @@ public:
 		}
 		argv[i] = nullptr;
 	}
+
 	~Command() {
 		for (int i = 0; i < commands.size(); ++i) {
 			free(argv[i]);
@@ -307,8 +353,10 @@ public:
 			}
 		}
 	}
+
 	void update(const Command& other) {
 		quiet = other.quiet;
+		envvars = other.envvars;
 		delete_envvars = other.delete_envvars;
 		initial_restart_delay = other.initial_restart_delay;
 		max_restart_delay = other.max_restart_delay;
@@ -320,6 +368,7 @@ public:
 		current_restart_delay = std::min<double>(max_restart_delay, current_restart_delay);
 		current_restart_delay = std::max<double>(initial_restart_delay, current_restart_delay);
 	}
+
 	bool operator!=(const Command& rhs) {
 		if (rhs.commands.size() != commands.size())
 			return true;

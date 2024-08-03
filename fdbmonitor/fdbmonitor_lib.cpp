@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <limits>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -471,12 +472,36 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		dup2(cmd->pipes[0][1], fileno(stdout));
 		dup2(cmd->pipes[1][1], fileno(stderr));
 
+		if (cmd->envvars != nullptr && std::strlen(cmd->envvars) > 0) {
+			std::string vars(cmd->envvars);
+			size_t start = 0;
+			do {
+				const auto keyValueEnd = vars.find(' ', start);
+				const auto& keyValue =
+				    keyValueEnd != std::string::npos ? vars.substr(start, keyValueEnd - start) : vars.substr(start);
+				if (!EnvVarUtils::keyValueValid(keyValue, vars)) {
+					exit(1);
+				}
+				const auto [key, value] = EnvVarUtils::extractKeyAndValue(keyValue);
+				if (setenv(key.c_str(), value.c_str(), /* overwrite */ 1)) {
+					fprintf(stderr, "setenv failed for %s in envvars\n", keyValue.c_str());
+					exit(1);
+				}
+				start = keyValueEnd;
+				if (start != std::string::npos) {
+					while (vars[start] == ' ') {
+						start++;
+					}
+				}
+			} while (start != std::string::npos && start < vars.length());
+		}
+
 		if (cmd->delete_envvars != nullptr && std::strlen(cmd->delete_envvars) > 0) {
 			std::string vars(cmd->delete_envvars);
 			size_t start = 0;
 			do {
-				size_t bound = vars.find(" ", start);
-				std::string var = vars.substr(start, bound - start);
+				const size_t bound = vars.find(" ", start);
+				const std::string& var = vars.substr(start, bound - start);
 				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
 				fflush(stdout);
 				if (unsetenv(var.c_str())) {
@@ -534,7 +559,9 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 			fprintf(stdout, "Launching %s (%d) for %s\n", cmd->argv[0], getpid(), cmd->ssection.c_str());
 			fflush(stdout);
 		}
+
 		execv(cmd->argv[0], (char* const*)cmd->argv);
+
 		fprintf(stderr,
 		        "Unable to launch %s for %s (execv error %d: %s)\n",
 		        cmd->argv[0],

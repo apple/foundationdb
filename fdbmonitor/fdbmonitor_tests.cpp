@@ -1,9 +1,17 @@
 #include "fdbmonitor.h"
 
 #include <cassert>
+#include <string>
 
 namespace fdbmonitor {
 namespace tests {
+
+void assert_msg(const bool cond, const std::string& msg) {
+	if (!cond) {
+		printf("%s\n", msg.c_str());
+		std::abort();
+	}
+}
 
 int testPathFunction(const char* name, std::function<std::string(std::string)> fun, std::string a, std::string b) {
 	std::string o = fun(a);
@@ -23,7 +31,7 @@ int testPathFunction2(const char* name,
 	return r ? 0 : 1;
 }
 
-int testPathOps() {
+void testPathOps() {
 	int errors = 0;
 
 	errors += testPathFunction("popPath", popPath, "a", "");
@@ -116,13 +124,31 @@ int testPathOps() {
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, joinPath(cwd, "foo2/"));
 
 	printf("%d errors.\n", errors);
-	return errors;
+	assert(errors == 0);
 }
+
+void testEnvVarUtils() {
+	// Ensure validation passes for good inputs
+	assert(EnvVarUtils::keyValueValid("FOO=BAR", "FOO=BAR"));
+	assert(EnvVarUtils::keyValueValid("x=y", "FOO=BAR x=y"));
+	assert(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
+	                                  "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"));
+	assert(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
+	                                  "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out FOO=BAR"));
+
+	// Ensure validation fails for bad inputs
+	assert_msg(!EnvVarUtils::keyValueValid("", "FOO=BAR ="), "Key-Value can not be empty");
+	assert_msg(!EnvVarUtils::keyValueValid("FOO==BAR", "FOO==BAR"), "Only one equal sign allowed");
+	assert_msg(!EnvVarUtils::keyValueValid("BAZ=", "FOO=BAR BAZ="), "Value must be non-empty");
+	assert_msg(!EnvVarUtils::keyValueValid("=BAZ", "FOO=BAR =BAZ"), "Key must be non-empty");
+}
+
 } // namespace tests
 } // namespace fdbmonitor
 
 int main(int argc, char** argv) {
 	using namespace fdbmonitor::tests;
 
-	assert(testPathOps() /* errors */ == 0);
+	testPathOps();
+	testEnvVarUtils();
 }
