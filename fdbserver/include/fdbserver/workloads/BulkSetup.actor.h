@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -127,7 +128,7 @@ Future<uint64_t> setupRange(Database cx,
 			bytesInserted = 0;
 			for (uint64_t n = begin; n < end; n++) {
 				Standalone<KeyValueRef> kv = (*workload)(n);
-				tr.set(kv.key, kv.value);
+				tr.set(kv.key, kv.value, AddConflictRange::False);
 				bytesInserted += kv.key.size() + kv.value.size();
 			}
 			wait(tr.commit());

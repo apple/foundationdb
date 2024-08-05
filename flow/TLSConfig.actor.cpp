@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -741,9 +741,9 @@ std::string getX509Name(const X509_NAME* name) {
 	}
 	X509_NAME_print_ex(out.get(), name, /* indent= */ 0, /* flags */ XN_FLAG_ONELINE);
 	unsigned char* rawName = nullptr;
-	int length = BIO_get_mem_data(out.get(), &rawName);
-	std::string result = (char*)rawName;
-	ASSERT_EQ(result.size(), size_t(length));
+	long length = BIO_get_mem_data(out.get(), &rawName);
+	ASSERT(length > 0);
+	std::string result((const char*)rawName, length);
 	return result;
 }
 

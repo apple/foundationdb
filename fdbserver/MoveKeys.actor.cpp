@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Error.h"
+#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
@@ -1690,7 +1691,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					}
 					dataMove = DataMoveMetaData();
 					dataMove.id = dataMoveId;
-					TraceEvent(sevDm, "StartMoveKeysNewDataMove", relocationIntervalId)
+					TraceEvent(sevDm, "StartMoveShardssNewDataMove", relocationIntervalId)
 					    .detail("DataMoveRange", keys)
 					    .detail("DataMoveID", dataMoveId);
 				}
@@ -2084,6 +2085,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(sevDm, "FinishMoveShardsFoundDataMove", relocationIntervalId)
+					    .detail("AtVerison", tr.getReadVersion().get())
+					    .detail("DataMoveKey", dataMoveKeyFor(dataMoveId))
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString())
 					    .detail("CancelDataMove", cancelDataMove);
@@ -2106,6 +2109,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					range = dataMove.ranges.front();
 				} else {
 					TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeleted", relocationIntervalId)
+					    .detail("AtVerison", tr.getReadVersion().get())
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
 					wait(checkDataMoveComplete(occ, dataMoveId, keys, relocationIntervalId));

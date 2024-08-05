@@ -190,9 +190,9 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 		ASSERT_EQ(tLogReady, true);
 	}
 
+	state int i = 0;
 	state Version prev = pTLogTestContext->initVersion - 1;
 	state Version next = pTLogTestContext->initVersion;
-	state int i = 0;
 
 	for (; i < pTLogTestContext->numCommits; i++) {
 		Standalone<StringRef> key = StringRef(format("key %d", i));

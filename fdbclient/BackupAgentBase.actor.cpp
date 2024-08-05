@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1016,8 +1016,11 @@ ACTOR Future<Void> applyMutations(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")
-		    .error(e);
+		Severity sev =
+		    (e.code() == error_code_restore_missing_data || e.code() == error_code_transaction_throttled_hot_shard)
+		        ? SevWarnAlways
+		        : SevError;
+		TraceEvent(sev, "ApplyMutationsError").error(e);
 		throw;
 	}
 }

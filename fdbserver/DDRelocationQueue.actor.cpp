@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1909,12 +1909,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			// Sanity check for bulk loading data move
 			if (doBulkLoading) {
 				validateBulkLoadRelocateData(rd, destIds, self->distributorId);
-				TraceEvent(SevInfo, "DDBulkLoadTaskGotDestTeam", self->distributorId)
-				    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
-				    .detail("DataMoveId", rd.dataMoveId)
-				    .detail("SrcIds", describe(rd.src))
-				    .detail("DestId", describe(destIds));
 			}
+			TraceEvent(SevInfo, "DDRelocatorGotDestTeam", self->distributorId)
+			    .detail("KeyBegin", rd.keys.begin)
+			    .detail("KeyEnd", rd.keys.end)
+			    .detail("Priority", rd.priority)
+			    .detail("DataMoveId", rd.dataMoveId)
+			    .detail("SrcIds", describe(rd.src))
+			    .detail("DestId", describe(destIds))
+			    .detail("BulkLoadTask", doBulkLoading ? rd.bulkLoadTask.get().toString() : "");
 
 			// Sanity check
 			state int totalIds = 0;
