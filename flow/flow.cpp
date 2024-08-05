@@ -124,18 +124,15 @@ Reference<IRandom> deterministicRandom() {
 }
 
 Reference<IRandom> nondeterministicRandom() {
-	if (!seededRandom) {
-		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
-	}
-	return seededRandom;
+	return deterministicRandom();
 }
 
 /* Reference<IRandom> nondeterministicRandom() {
-	static thread_local Reference<IRandom> random;
-	if (!random) {
-		random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
-	}
-	return random;
+    static thread_local Reference<IRandom> random;
+    if (!random) {
+        random = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed()));
+    }
+    return random;
 }*/
 
 std::string UID::toString() const {
