@@ -190,9 +190,9 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 		ASSERT_EQ(tLogReady, true);
 	}
 
-	state int i = 0;
 	state Version prev = pTLogTestContext->initVersion - 1;
 	state Version next = pTLogTestContext->initVersion;
+	state int i = 0;
 
 	for (; i < pTLogTestContext->numCommits; i++) {
 		Standalone<StringRef> key = StringRef(format("key %d", i));
@@ -212,7 +212,12 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 			toCommit.writeTypedMessage(m, false, true);
 		}
 		const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
-		Future<Version> loggingComplete = pTLogTestContext->ls->push(versionSet, toCommit, SpanContext());
+		std::unordered_map<uint16_t, Version> tpcvMap;
+		for (uint32_t j = 0; j < pTLogTestContext->numLogServers; j++) {
+			tpcvMap[j] = prev;
+		}
+		Future<Version> loggingComplete =
+		    pTLogTestContext->ls->push(versionSet, toCommit, SpanContext(), UID(), tpcvMap);
 		Version ver = wait(loggingComplete);
 		ASSERT_LE(ver, next);
 		prev = next;
@@ -383,9 +388,12 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 
 			Reference<TLogContext> pNewTLogContext(new TLogContext(tLogIdx));
 			pTLogTestContextEpochTwo->pTLogContextList.push_back(pNewTLogContext);
-			InitializeTLogRequest req;
+			state InitializeTLogRequest req;
 			req.recruitmentID = pTLogTestContextEpochTwo->dbInfo.logSystemConfig.recruitmentID;
-			req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back();
+			req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back() + 10;
+			wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
+			         ->TestTLogInterface.sendClusterRecoveryVersion.getReply(
+			             SendClusterRecoveryVersionRequest(req.recoverAt + 1)));
 			req.startVersion = pTLogTestContextEpochOne->initVersion + 1;
 			req.recoveryTransactionVersion = pTLogTestContextEpochOne->initVersion;
 			req.knownCommittedVersion = pTLogTestContextEpochOne->initVersion;
