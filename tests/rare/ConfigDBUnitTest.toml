@@ -1,5 +1,5 @@
 # This test can't run as part of RandomUnitTests.toml, so run it less frequently
-testPriority = '10'
+testPriority = '50'
 
 [[test]]
 testTitle = "ConfigDBUnitTest"
