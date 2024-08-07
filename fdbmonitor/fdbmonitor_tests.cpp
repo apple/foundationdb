@@ -129,12 +129,12 @@ void testPathOps() {
 
 void testEnvVarUtils() {
 	// Ensure key-value extraction works
-	std::pair<std::string, std::string> keyValuePair1 = std::make_pair("FOO", "BAR");
+	const std::pair<std::string, std::string> keyValuePair1{ "FOO", "BAR" };
 	assert(keyValuePair1 == EnvVarUtils::extractKeyAndValue("FOO=BAR"));
-	std::pair<std::string, std::string> keyValuePair2 = std::make_pair("x", "y");
+	const std::pair<std::string, std::string> keyValuePair2{ "x", "y" };
 	assert(keyValuePair2 == EnvVarUtils::extractKeyAndValue("x=y"));
-	std::pair<std::string, std::string> keyValuePair3 =
-	    std::make_pair("MALLOC_CONF", "prof:true,lg_prof_interval:30,prof_prefix:jeprof.out");
+	const std::pair<std::string, std::string> keyValuePair3{ "MALLOC_CONF",
+		                                                     "prof:true,lg_prof_interval:30,prof_prefix:jeprof.out" };
 	assert(keyValuePair3 ==
 	       EnvVarUtils::extractKeyAndValue("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"));
 
