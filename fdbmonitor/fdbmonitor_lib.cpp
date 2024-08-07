@@ -472,14 +472,19 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		dup2(cmd->pipes[0][1], fileno(stdout));
 		dup2(cmd->pipes[1][1], fileno(stderr));
 
-		if (cmd->envvars != nullptr && std::strlen(cmd->envvars) > 0) {
-			std::string vars(cmd->envvars);
+		if (delay) {
+			while ((delay = sleep(delay)) > 0) {
+			}
+		}
+
+		if (!cmd->envvars.empty()) {
 			size_t start = 0;
 			do {
-				const auto keyValueEnd = vars.find(' ', start);
-				const auto& keyValue =
-				    keyValueEnd != std::string::npos ? vars.substr(start, keyValueEnd - start) : vars.substr(start);
-				if (!EnvVarUtils::keyValueValid(keyValue, vars)) {
+				const auto keyValueEnd = cmd->envvars.find(' ', start);
+				const auto& keyValue = keyValueEnd != std::string::npos
+				                           ? cmd->envvars.substr(start, keyValueEnd - start)
+				                           : cmd->envvars.substr(start);
+				if (!EnvVarUtils::keyValueValid(keyValue, cmd->envvars)) {
 					exit(1);
 				}
 				const auto [key, value] = EnvVarUtils::extractKeyAndValue(keyValue);
@@ -489,19 +494,18 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 				}
 				start = keyValueEnd;
 				if (start != std::string::npos) {
-					while (vars[start] == ' ') {
+					while (cmd->envvars[start] == ' ') {
 						start++;
 					}
 				}
-			} while (start != std::string::npos && start < vars.length());
+			} while (start != std::string::npos && start < cmd->envvars.length());
 		}
 
-		if (cmd->delete_envvars != nullptr && std::strlen(cmd->delete_envvars) > 0) {
-			std::string vars(cmd->delete_envvars);
+		if (!cmd->delete_envvars.empty()) {
 			size_t start = 0;
 			do {
-				const size_t bound = vars.find(" ", start);
-				const std::string& var = vars.substr(start, bound - start);
+				const size_t bound = cmd->delete_envvars.find(' ', start);
+				const std::string& var = cmd->delete_envvars.substr(start, bound - start);
 				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
 				fflush(stdout);
 				if (unsetenv(var.c_str())) {
@@ -513,9 +517,12 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 					exit(1);
 				}
 				start = bound;
-				while (vars[start] == ' ')
-					start++;
-			} while (start <= vars.length());
+				if (start != std::string::npos) {
+					while (cmd->delete_envvars[start] == ' ') {
+						start++;
+					}
+				}
+			} while (start != std::string::npos && start < cmd->delete_envvars.length());
 		}
 
 #ifdef __linux__
@@ -530,10 +537,6 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		if (getppid() == 1) /* parent already died before procctl */
 			exit(0);
 #endif
-
-		if (delay)
-			while ((delay = sleep(delay)) > 0) {
-			}
 
 		if (getegid() != gid)
 			if (setgid(gid) != 0) {

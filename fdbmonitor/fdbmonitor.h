@@ -146,8 +146,8 @@ public:
 	double last_start;
 	double fork_retry_time;
 	bool quiet;
-	const char* envvars;
-	const char* delete_envvars;
+	std::string envvars;
+	std::string delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
 	uint64_t memory_rss;
@@ -156,8 +156,8 @@ public:
 	int pipes[2][2];
 
 	Command(const CSimpleIni& ini, std::string _section, ProcessID id, fdb_fd_set fds, int* maxfd)
-	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), envvars(nullptr),
-	    delete_envvars(nullptr), deconfigured(false), kill_on_configuration_change(true), memory_rss(0) {
+	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), envvars(), delete_envvars(),
+	    deconfigured(false), kill_on_configuration_change(true), memory_rss(0) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s", id.c_str());
 		ssection = _ssection;
@@ -249,11 +249,15 @@ public:
 			quiet = true;
 
 		const char* env = get_value_multi(ini, "envvars", ssection.c_str(), section.c_str(), "general", nullptr);
-		envvars = env;
+		if (env) {
+			envvars = env;
+		}
 
 		const char* del_env =
 		    get_value_multi(ini, "delete-envvars", ssection.c_str(), section.c_str(), "general", nullptr);
-		delete_envvars = del_env;
+		if (del_env) {
+			delete_envvars = del_env;
+		}
 
 		const char* kocc =
 		    get_value_multi(ini, "kill-on-configuration-change", ssection.c_str(), section.c_str(), "general", nullptr);
