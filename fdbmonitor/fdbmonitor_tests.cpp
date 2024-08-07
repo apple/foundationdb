@@ -128,7 +128,17 @@ void testPathOps() {
 }
 
 void testEnvVarUtils() {
-	// Ensure validation passes for good inputs
+	// Ensure key-value extraction works
+	std::pair<std::string, std::string> keyValuePair1 = std::make_pair("FOO", "BAR");
+	assert(keyValuePair1 == EnvVarUtils::extractKeyAndValue("FOO=BAR"));
+	std::pair<std::string, std::string> keyValuePair2 = std::make_pair("x", "y");
+	assert(keyValuePair2 == EnvVarUtils::extractKeyAndValue("x=y"));
+	std::pair<std::string, std::string> keyValuePair3 =
+	    std::make_pair("MALLOC_CONF", "prof:true,lg_prof_interval:30,prof_prefix:jeprof.out");
+	assert(keyValuePair3 ==
+	       EnvVarUtils::extractKeyAndValue("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"));
+
+	// Ensure key-value validation passes for good inputs
 	assert(EnvVarUtils::keyValueValid("FOO=BAR", "FOO=BAR"));
 	assert(EnvVarUtils::keyValueValid("x=y", "FOO=BAR x=y"));
 	assert(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
@@ -136,7 +146,7 @@ void testEnvVarUtils() {
 	assert(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
 	                                  "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out FOO=BAR"));
 
-	// Ensure validation fails for bad inputs
+	// Ensure key-value validation fails for bad inputs
 	assert_msg(!EnvVarUtils::keyValueValid("", "FOO=BAR ="), "Key-Value can not be empty");
 	assert_msg(!EnvVarUtils::keyValueValid("FOO==BAR", "FOO==BAR"), "Only one equal sign allowed");
 	assert_msg(!EnvVarUtils::keyValueValid("BAZ=", "FOO=BAR BAZ="), "Value must be non-empty");
