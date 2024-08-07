@@ -53,7 +53,7 @@ struct TLogInterface {
 	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream<struct TLogSnapRequest> snapRequest;
 	RequestStream<struct TrackTLogRecoveryRequest> trackRecovery;
-	RequestStream<struct SendClusterRecoveryVersionRequest> sendClusterRecoveryVersion;
+	RequestStream<struct setClusterRecoveryVersionRequest> setClusterRecoveryVersion;
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
@@ -88,7 +88,7 @@ struct TLogInterface {
 		streams.push_back(snapRequest.getReceiver());
 		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
 		streams.push_back(trackRecovery.getReceiver());
-		streams.push_back(sendClusterRecoveryVersion.getReceiver());
+		streams.push_back(setClusterRecoveryVersion.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -119,7 +119,7 @@ struct TLogInterface {
 			    RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
 			trackRecovery =
 			    RequestStream<struct TrackTLogRecoveryRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(12));
-			sendClusterRecoveryVersion = RequestStream<struct SendClusterRecoveryVersionRequest>(
+			setClusterRecoveryVersion = RequestStream<struct setClusterRecoveryVersionRequest>(
 			    peekMessages.getEndpoint().getAdjustedEndpoint(13));
 		}
 	}
@@ -449,15 +449,14 @@ struct TrackTLogRecoveryRequest {
 	}
 };
 
-struct SendClusterRecoveryVersionRequest {
+struct setClusterRecoveryVersionRequest {
 	constexpr static FileIdentifier file_identifier = 6876464;
 
-	// Reply when the TLog's oldest generation start version is higher than this version.
 	Version recoveryVersion;
 	ReplyPromise<Void> reply;
 
-	SendClusterRecoveryVersionRequest() = default;
-	SendClusterRecoveryVersionRequest(Version recoveryVersion) : recoveryVersion(recoveryVersion) {}
+	setClusterRecoveryVersionRequest() = default;
+	setClusterRecoveryVersionRequest(Version recoveryVersion) : recoveryVersion(recoveryVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

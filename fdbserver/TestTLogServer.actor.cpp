@@ -214,7 +214,7 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 			for (uint32_t logServer = startLogServer; logServer < pTLogTestContext->numLogServers;
 			     logServer += teamSize) {
 				// test tLogs advancing versions at different rates
-				// if (!tagID && i > 5 && !startLogServer && i > pTLogTestContext->numCommits / 2) {
+				// if (!tagID && i > 5 && i > pTLogTestContext->numCommits / 2) {
 				// 	continue;
 				// }
 				Tag tag(pTLogTestContext->tagLocality, tagID);
@@ -222,14 +222,16 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 				toCommit.addTags(tags);
 				toCommit.writeTypedMessage(m, false, true);
 				tpcvMap[logServer] = prev;
-				TraceEvent("AddTags").detail("C", i).detail("T", tagID).detail("L", logServer);
+				TraceEvent("AddTags").detail("C", i).detail("T", tag).detail("L", logServer);
 			}
 		}
-		const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
-		Future<Version> loggingComplete =
-		    pTLogTestContext->ls->push(versionSet, toCommit, SpanContext(), UID(), tpcvMap);
-		Version ver = wait(loggingComplete);
-		ASSERT_LE(ver, next);
+		if (toCommit.getMutationCount()) {
+			const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
+			Future<Version> loggingComplete =
+			    pTLogTestContext->ls->push(versionSet, toCommit, SpanContext(), UID(), tpcvMap);
+			Version ver = wait(loggingComplete);
+			ASSERT_LE(ver, next);
+		}
 		prev = next;
 		pTLogTestContext->tLogOptions.versions.push_back(next);
 		next += SERVER_KNOBS->VERSIONS_PER_SECOND + deterministicRandom()->randomInt(0, 20);
@@ -378,14 +380,22 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 	wait(buildTLogSet(pTLogTestContextEpochOne));
 
 	PromiseStream<Future<Void>> promises;
+
 	pTLogTestContextEpochOne->ls = ILogSystem::fromServerDBInfo(
 	    pTLogTestContextEpochOne->logID, pTLogTestContextEpochOne->dbInfo, false, promises);
 
 	wait(pTLogTestContextEpochOne->sendPushMessages());
 
+	state uint32_t replicaCount = 2; // SOMEDAY: paramaterize
+	state uint32_t teamSize = pTLogTestContextEpochOne->numLogServers / replicaCount;
+	state uint32_t startLogServer = 0;
 	if (!pTLogTestContextEpochOne->recover) {
-		for (tLogIdx = 0; tLogIdx < pTLogTestContextEpochOne->numLogServers; tLogIdx++) {
-			wait(pTLogTestContextEpochOne->peekCommitMessages(tLogIdx, 0));
+		state uint32_t tagID = 0;
+		for (; tagID < pTLogTestContextEpochOne->numTags; tagID++, startLogServer++) {
+			state uint32_t logID = startLogServer;
+			for (; logID < pTLogTestContextEpochOne->numLogServers; startLogServer += teamSize) {
+				wait(pTLogTestContextEpochOne->peekCommitMessages(logID, tagID));
+			}
 		}
 	} else {
 		// Done with old generation. Lock the old generations of tLogs.
@@ -405,8 +415,8 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 			req.recruitmentID = pTLogTestContextEpochTwo->dbInfo.logSystemConfig.recruitmentID;
 			req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back() + 10;
 			wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
-			         ->TestTLogInterface.sendClusterRecoveryVersion.getReply(
-			             SendClusterRecoveryVersionRequest(req.recoverAt + 1)));
+			         ->TestTLogInterface.setClusterRecoveryVersion.getReply(
+			             setClusterRecoveryVersionRequest(req.recoverAt + 1)));
 			req.startVersion = pTLogTestContextEpochOne->initVersion + 1;
 			req.recoveryTransactionVersion = pTLogTestContextEpochOne->initVersion;
 			req.knownCommittedVersion = pTLogTestContextEpochOne->initVersion;
@@ -432,9 +442,14 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 			ASSERT_EQ(isCreated, true);
 			pTLogContext->TLogStarted.send(true);
 
-			state int i = 0;
-			for (; i < pTLogTestContextEpochTwo->tLogOptions.numTags; i++) {
-				wait(pTLogTestContextEpochTwo->peekCommitMessages(tLogIdx, i));
+			if (!pTLogTestContextEpochOne->recover) {
+				tagID = 0;
+				for (; tagID < pTLogTestContextEpochTwo->numTags; tagID++, startLogServer++) {
+					logID = startLogServer;
+					for (; logID < pTLogTestContextEpochTwo->numLogServers; startLogServer += teamSize) {
+						wait(pTLogTestContextEpochTwo->peekCommitMessages(logID, tagID));
+					}
+				}
 			}
 
 			// signal that tLogs can be destroyed
