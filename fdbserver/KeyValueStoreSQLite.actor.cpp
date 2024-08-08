@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Buggify.h"
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
@@ -1611,7 +1612,10 @@ struct ThreadSafeCounter {
 class KeyValueStoreSQLite final : public IKeyValueStore {
 public:
 	void dispose() override { doClose(this, true); }
-	void close() override { doClose(this, false); }
+	void close() override {
+		g_network->totalSSClose++;
+		doClose(this, false);
+	}
 
 	Future<Void> getError() const override { return delayed(readThreads->getError() || writeThread->getError()); }
 	Future<Void> onClosed() const override { return stopped.getFuture(); }
@@ -1700,6 +1704,7 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& rv) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			// double t = timer();
 			if (rv.debugID.present())
 				g_traceBatch.addEvent("GetValueDebug",
@@ -1715,6 +1720,12 @@ private:
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValueActionSlow",dbgid).detail("Elapsed", t);
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadTime = g_network->totalReadTime + duration_s;
+			}
 		}
 
 		struct ReadValuePrefixAction final : TypedAction<Reader, ReadValuePrefixAction>,
@@ -1728,6 +1739,7 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& rv) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			// double t = timer();
 			if (rv.debugID.present())
 				g_traceBatch.addEvent("GetValuePrefixDebug",
@@ -1743,6 +1755,12 @@ private:
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
+			}
 		}
 
 		struct ReadRangeAction final : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
@@ -1754,8 +1772,15 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& rr) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			rr.result.send(getCursor()->get().getRange(rr.keys, rr.rowLimit, rr.byteLimit));
 			++counter;
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+			}
 		}
 	};
 
@@ -1795,6 +1820,7 @@ private:
 			TraceEvent("KVWriterDestroyed", dbgid).log();
 		}
 		void init() override {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			if (checkAllChecksumsOnOpen) {
 				if (conn.checkAllPageChecksums() != 0) {
 					// It's not strictly necessary to discard the file immediately if a page checksum error is found
@@ -1826,6 +1852,12 @@ private:
 					}
 				}
 			}
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalOpenTime = g_network->totalOpenTime + duration_s;
+			}
 		}
 
 		struct InitAction final : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
@@ -1843,6 +1875,7 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
 		};
 		void action(SetAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double s = now();
 			checkFreePages();
 			cursor->set(a.kv);
@@ -1850,6 +1883,12 @@ private:
 			++writesComplete;
 			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SetActionFinished", dbgid).detail("Elapsed", now() - s);
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalSetTime = g_network->totalSetTime + duration_s;
+			}
 		}
 
 		struct ClearAction final : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
@@ -1858,12 +1897,19 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
 		};
 		void action(ClearAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double s = now();
 			cursor->fastClear(a.range, freeTableEmpty);
 			cursor->clear(a.range); // TODO: at most one
 			++writesComplete;
 			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("ClearActionFinished", dbgid).detail("Elapsed", now() - s);
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalClearTime = g_network->totalClearTime + duration_s;
+			}
 		}
 
 		struct CommitAction final : TypedAction<Writer, CommitAction>, FastAllocated<CommitAction> {
@@ -1873,6 +1919,7 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double t1 = now();
 			cursor->commit();
 			delete cursor;
@@ -1904,6 +1951,13 @@ private:
 
 			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("CommitActionFinished", dbgid).detail("Elapsed", now() - t1);
+
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalCommitTime = g_network->totalCommitTime + duration_s;
+			}
 		}
 
 		// Checkpoints the database and resets the wal file back to the beginning
@@ -2237,14 +2291,17 @@ void KeyValueStoreSQLite::startReadThreads() {
 }
 
 void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
+	g_network->totalSSSet++;
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
 void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
+	g_network->totalSSClear++;
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }
 Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
+	g_network->totalSSCommit++;
 	++writesRequested;
 	auto p = new Writer::CommitAction;
 	auto f = p->result.getFuture();
@@ -2252,6 +2309,7 @@ Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
 	return f;
 }
 Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<ReadOptions> options) {
+	g_network->totalSSRead++;
 	++readsRequested;
 	Optional<UID> debugID;
 	if (options.present()) {
@@ -2263,6 +2321,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<Read
 	return f;
 }
 Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) {
+	g_network->totalSSReadPrefix++;
 	++readsRequested;
 	Optional<UID> debugID;
 	if (options.present()) {
@@ -2277,6 +2336,7 @@ Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
                                                    int rowLimit,
                                                    int byteLimit,
                                                    Optional<ReadOptions> options) {
+	g_network->totalSSReadRange++;
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();

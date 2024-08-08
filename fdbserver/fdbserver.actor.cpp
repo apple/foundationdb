@@ -20,6 +20,7 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
+#include "flow/Buggify.h"
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -2541,6 +2542,9 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation) {
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now() - startNow, timer() - start);
+			g_network->printSSOps();
+			g_network->printSSOpsError();
+			g_network->printSSOpsTime();
 		}
 
 		// IFailureMonitor::failureMonitor().address_info.clear();

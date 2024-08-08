@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Buggify.h"
 #ifdef WITH_ROCKSDB
 
 #include <rocksdb/c.h>
@@ -1170,6 +1171,9 @@ Error statusToError(const rocksdb::Status& s) {
 	if (s.IsIOError()) {
 		return io_error();
 	} else if (s.IsTimedOut()) {
+		if (g_network->isSimulated()) {
+			g_network->totalSSTrTooOldError++;
+		}
 		return transaction_too_old();
 	} else {
 		return unknown_error();
@@ -1245,6 +1249,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			ASSERT(cf == nullptr);
 
 			std::vector<std::string> columnFamilies;
@@ -1272,6 +1277,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (!status.ok()) {
 				logRocksDBError(id, status, "Open");
 				a.done.sendError(statusToError(status));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalOpenTime = g_network->totalOpenTime + duration_s;
+					g_network->totalSSOpenError++;
+				}
 				return;
 			}
 
@@ -1288,6 +1300,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				if (!status.ok()) {
 					logRocksDBError(id, status, "Open");
 					a.done.sendError(statusToError(status));
+					g_network->totalSSOpenError++;
 				}
 			}
 
@@ -1319,6 +1332,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
 					return Future<bool>(true);
 				}).blockUntilReady();
+			}
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalOpenTime = g_network->totalOpenTime + duration_s;
 			}
 			a.done.send(Void());
 		}
@@ -1369,6 +1388,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 		};
 		void action(CommitAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			bool doPerfContextMetrics =
 			    SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
 			    (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE);
@@ -1387,6 +1407,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				if (!s.ok()) {
 					logRocksDBError(id, s, "CommitDeleteVisitor");
 					a.done.sendError(statusToError(s));
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e6;
+						g_network->totalCommitTime = g_network->totalCommitTime + duration_s;
+						g_network->totalSSCommitError++;
+					}
 					return;
 				}
 				// If there are any range deletes, we should have added them to be deleted.
@@ -1407,6 +1435,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (!s.ok()) {
 				logRocksDBError(id, s, "Commit");
+				if (g_network->isSimulated())
+					g_network->totalSSCommitError++;
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
@@ -1435,6 +1465,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
 			}
+
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalCommitTime = g_network->totalCommitTime + duration_s;
+			}
 		}
 
 		struct CloseAction : TypedAction<Writer, CloseAction> {
@@ -1445,9 +1482,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			readIterPool.reset();
 			if (db == nullptr) {
 				a.done.send(Void());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalCloseTime = g_network->totalCloseTime + duration_s;
+				}
 				return;
 			}
 			for (rocksdb::ColumnFamilyHandle* handle : cfHandles) {
@@ -1476,6 +1520,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			TraceEvent("RocksDB", id).detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalCloseTime = g_network->totalCloseTime + duration_s;
+			}
 		}
 
 		void action(CheckpointAction& a);
@@ -1549,6 +1599,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			ASSERT(cf != nullptr);
 			bool doPerfContextMetrics =
 			    SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
@@ -1573,6 +1624,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Method", "ReadValueAction")
 				    .detail("TimeoutValue", readValueTimeout);
 				a.result.sendError(transaction_too_old());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadTime = g_network->totalReadTime + duration_s;
+					g_network->totalSSReadError++;
+					g_network->totalSSTrTooOldError++;
+				}
 				return;
 			}
 
@@ -1590,6 +1649,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (!s.ok() && !s.IsNotFound()) {
 				logRocksDBError(id, s, "ReadValue");
 				a.result.sendError(statusToError(s));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadTime = g_network->totalReadTime + duration_s;
+					g_network->totalSSReadError++;
+				}
 				return;
 			}
 
@@ -1609,6 +1675,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else {
 				logRocksDBError(id, s, "ReadValue");
 				a.result.sendError(statusToError(s));
+				if (g_network->isSimulated())
+					g_network->totalSSReadError++;
 			}
 
 			const double endTime = timer_monotonic();
@@ -1620,6 +1688,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
+			}
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadTime = g_network->totalReadTime + duration_s;
 			}
 		}
 
@@ -1637,6 +1711,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			bool doPerfContextMetrics =
 			    SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
 			    (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE);
@@ -1662,6 +1737,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("TimeoutValue", readValuePrefixTimeout);
 				a.result.sendError(transaction_too_old());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
+					g_network->totalSSReadPrefixError++;
+					g_network->totalSSTrTooOldError++;
+				}
 				return;
 			}
 
@@ -1695,6 +1778,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else {
 				logRocksDBError(id, s, "ReadValuePrefix");
 				a.result.sendError(statusToError(s));
+				if (g_network->isSimulated())
+					g_network->totalSSReadPrefixError++;
 			}
 			const double endTime = timer_monotonic();
 			if (a.getHistograms) {
@@ -1705,6 +1790,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
+			}
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
 			}
 		}
 
@@ -1723,6 +1814,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			++a.counters.rocksdbReadRangeQueries;
 			bool doPerfContextMetrics =
 			    SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
@@ -1742,6 +1834,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Method", "ReadRangeAction")
 				    .detail("TimeoutValue", readRangeTimeout);
 				a.result.sendError(transaction_too_old());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+					g_network->totalSSReadRangeError++;
+					g_network->totalSSTrTooOldError++;
+				}
 				return;
 			}
 
@@ -1775,6 +1875,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						    .detail("Method", "ReadRangeAction")
 						    .detail("TimeoutValue", readRangeTimeout);
 						a.result.sendError(transaction_too_old());
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e6;
+							g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+							g_network->totalSSReadRangeError++;
+							g_network->totalSSTrTooOldError++;
+						}
 						return;
 					}
 					cursor->Next();
@@ -1808,6 +1918,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						    .detail("Method", "ReadRangeAction")
 						    .detail("TimeoutValue", readRangeTimeout);
 						a.result.sendError(transaction_too_old());
+						g_network->totalSSReadRangeError++;
+						g_network->totalSSTrTooOldError++;
 						return;
 					}
 					cursor->Prev();
@@ -1819,6 +1931,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (!s.ok()) {
 				logRocksDBError(id, s, "ReadRange");
 				a.result.sendError(statusToError(s));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+					g_network->totalSSReadRangeError++;
+				}
 				return;
 			}
 			result.more =
@@ -1839,6 +1958,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
+			}
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
 			}
 		}
 	};
@@ -2036,7 +2161,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void dispose() override { doClose(this, true); }
 
-	void close() override { doClose(this, false); }
+	void close() override {
+		g_network->totalSSClose++;
+		doClose(this, false);
+	}
 
 	KeyValueStoreType getType() const override {
 		if (SERVER_KNOBS->ENABLE_SHARDED_ROCKSDB)
@@ -2051,6 +2179,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
+		if (g_network->isSimulated())
+			g_network->totalSSOpen++;
 		auto a = std::make_unique<Writer::OpenAction>(
 		    path, metrics, &readSemaphore, &fetchSemaphore, errorListener, counters);
 		openFuture = a->done.getFuture();
@@ -2068,6 +2198,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			keysSet.clear();
 			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		}
+		if (g_network->isSimulated())
+			g_network->totalSSSet++;
 		ASSERT(defaultFdbCF != nullptr);
 		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
 		if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE) {
@@ -2085,7 +2217,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			keysSet.clear();
 			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		}
-
+		if (g_network->isSimulated())
+			g_network->totalSSClear++;
 		ASSERT(defaultFdbCF != nullptr);
 		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
 		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
@@ -2177,7 +2310,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
-	Future<Void> commit(bool) override { return commitInRocksDB(this); }
+	Future<Void> commit(bool) override {
+		if (g_network->isSimulated())
+			g_network->totalSSCommit++;
+		return commitInRocksDB(this);
+	}
 
 	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
 		if (semaphore.waiters() > maxWaiters) {
@@ -2211,6 +2348,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
+		if (g_network->isSimulated())
+			g_network->totalSSRead++;
 		ReadType type = ReadType::NORMAL;
 		Optional<UID> debugID;
 
@@ -2235,6 +2374,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
+		if (g_network->isSimulated())
+			g_network->totalSSReadPrefix++;
 		ReadType type = ReadType::NORMAL;
 		Optional<UID> debugID;
 
@@ -2282,6 +2423,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              Optional<ReadOptions> options) override {
+		if (g_network->isSimulated())
+			g_network->totalSSReadRange++;
+
 		ReadType type = ReadType::NORMAL;
 
 		if (options.present()) {
