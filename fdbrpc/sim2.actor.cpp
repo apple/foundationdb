@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "flow/MkCert.h"
+#include "flow/Trace.h"
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
@@ -140,6 +141,43 @@ bool simulator_should_inject_blob_fault(const char* context, const char* file, i
 	}
 
 	return false;
+}
+
+void flip_bit(StringRef data, const char* file, int line) {
+	if (data.size() == 0)
+		return;
+	ASSERT(g_network->isSimulated() && g_simulator->isBitFlipInjectionEnabled());
+	if (g_simulator->isBitFlipInjected(file, line))
+		return;
+
+	int index = deterministicRandom()->randomInt(0, data.size());
+	int bit = deterministicRandom()->randomInt(0, 8);
+	uint8_t* p = const_cast<uint8_t*>(data.begin()) + index;
+	uint8_t original = *p;
+	*p ^= 1 << bit;
+	TraceEvent(SevWarn, "BitFlipped")
+	    .detail("File", file)
+	    .detail("Line", line)
+	    .detail("BufferOffset", index)
+	    .detail("FlippedBit", bit)
+	    .detail("OriginalByte", original)
+	    .detail("NewByte", *p);
+	g_simulator->addBitFlipInjectionStats(file, line);
+	// ASSERT(false);
+}
+
+Severity getBitFlipSeverityType() {
+	return g_simulator && g_simulator->isBitFlipInjected() ? SevWarn : SevError;
+}
+
+void ISimulator::addBitFlipInjectionStats(const char* file, int line) {
+	std::string fileLine = format("%s:%d", file, line);
+	bitFlipInjections[fileLine]++;
+}
+
+bool ISimulator::isBitFlipInjected(const char* file, int line) {
+	std::string fileLine = format("%s:%d", file, line);
+	return g_simulator->bitFlipInjections.count(fileLine) > 0;
 }
 
 void ISimulator::disableFor(const std::string& desc, double time) {
