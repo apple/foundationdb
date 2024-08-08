@@ -49,9 +49,6 @@
     <Content Include="..\..\bindings\python\fdb\impl.py">
       <Link>Inputs\impl.py</Link>
     </Content>
-    <Content Include="..\..\bindings\python\fdb\six.py">
-      <Link>Inputs\six.py</Link>
-    </Content>
     <Content Include="..\..\bindings\python\fdb\tuple.py">
       <Link>Inputs\tuple.py</Link>
     </Content>

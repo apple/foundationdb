@@ -4,7 +4,6 @@ set(SRCS
   fdb/directory_impl.py
   fdb/impl.py
   fdb/locality.py
-  fdb/six.py
   fdb/subspace_impl.py
   fdb/tenant_management.py
   fdb/tuple.py
