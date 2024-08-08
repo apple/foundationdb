@@ -1031,6 +1031,13 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			if (r && r->code == 401)
 				throw http_auth_failed();
 
+			// ref: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
+			// this error code indicates that an error from client side, such as expiredToken, empty header/body
+			// we have to throw a dedicated exception rather than a general http_failed because this is not retryable.
+			if (r && r->code == 400) {
+				throw http_bad_request();
+			}
+
 			// Recognize and throw specific errors
 			if (err.present()) {
 				int code = err.get().code();

@@ -6004,8 +6004,10 @@ ACTOR Future<Void> transformRestoredDatabase(Database cx,
 void simulateBlobFailure() {
 	if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
 		double i = deterministicRandom()->random01();
-		if (i < 0.5) {
+		if (i < 0.4) {
 			throw http_request_failed();
+		} else if (i < 0.5) {
+			throw http_bad_request();
 		} else if (i < 0.7) {
 			throw connection_failed();
 		} else if (i < 0.8) {
