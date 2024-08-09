@@ -421,7 +421,7 @@ public:
 	Future<Void> onConfigChange;
 
 	ActorCollection bulkLoadActors;
-	bool bulkLoadEnabled;
+	bool bulkLoadEnabled = false;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
@@ -701,7 +701,10 @@ public:
 		}
 
 		state std::vector<Key> customBoundaries;
-		if (self->initData->bulkLoadMode == 0) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+			// Bulk load does not allow boundary change
+			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
+		} else {
 			for (auto it : self->initData->userRangeConfig->ranges()) {
 				auto range = it->range();
 				customBoundaries.push_back(range.begin);
@@ -709,9 +712,6 @@ public:
 				    .detail("Range", KeyRangeRef(range.begin, range.end))
 				    .detail("Config", it->value());
 			}
-		} else {
-			// Bulk load does not allow boundary change
-			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		}
 
 		state int shard = 0;
