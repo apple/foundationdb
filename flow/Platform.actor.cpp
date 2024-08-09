@@ -2280,30 +2280,25 @@ int getRandomSeed() {
 } // namespace platform
 
 std::string joinPath(std::string const& directory, std::string const& filename) {
-	auto d = directory;
-	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
-		f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
-		d.resize(d.size() - 1);
-	return d + CANONICAL_PATH_SEPARATOR + f;
+	std::filesystem::path p = std::filesystem::path(directory) / std::filesystem::path(filename);
+	return p.string();
 }
 
 void renamedFile() {
 	INJECT_FAULT(io_error, "renameFile"); // renaming file failed
 }
 
-void renameFile(std::string const& fromPath, std::string const& toPath) {
+void renameFile(std::filesystem::path const& fromPath, std::filesystem::path const& toPath) {
 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
 #ifdef _WIN32
-	if (MoveFileExA(fromPath.c_str(),
-	                toPath.c_str(),
+	if (MoveFileExA(fromPath, // I think that this should be .string() ??
+	                toPath,
 	                MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 		// renamedFile();
 		return;
 	}
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	if (!rename(fromPath.c_str(), toPath.c_str())) {
+	if (!rename(fromPath, toPath)) {
 		// FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable
 		// open for the same file renamedFile();
 		return;
@@ -2323,13 +2318,13 @@ void renameFile(std::string const& fromPath, std::string const& toPath) {
 #define FOPEN_CLOEXEC_MODE ""
 #endif
 
-void atomicReplace(std::string const& path, std::string const& content, bool textmode) {
+void atomicReplace(std::filesystem::path const& path, std::string const& content, bool textmode) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT(io_error, "atomicReplace"); // atomic rename failed
 
 		std::string tempfilename =
-		    joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
+		    std::filesystem::canonical(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
 		f = textmode ? fopen(tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE) : fopen(tempfilename.c_str(), "wb");
 		if (!f)
 			throw io_error();
@@ -2428,24 +2423,8 @@ static bool deletedFile() {
 	return true;
 }
 
-bool deleteFile(std::string const& filename) {
-	INJECT_FAULT(platform_error, "deleteFile"); // file deletion failed
-#ifdef _WIN32
-	if (DeleteFile(filename.c_str()))
-		return deletedFile();
-	if (GetLastError() == ERROR_FILE_NOT_FOUND)
-		return false;
-#elif defined(__unixish__)
-	if (!unlink(filename.c_str()))
-		return deletedFile();
-	if (errno == ENOENT)
-		return false;
-#else
-#error Port me!
-#endif
-	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "DeleteFile").error(e).detail("Filename", filename).GetLastError();
-	throw e;
+bool deleteFile(std::filesystem::path path) {
+	return std::filesystem::remove(path);
 }
 
 static void createdDirectory() {
@@ -2454,64 +2433,8 @@ static void createdDirectory() {
 
 namespace platform {
 
-bool createDirectory(std::string const& directory) {
-	INJECT_FAULT(platform_error, "createDirectory"); // create dir failed
-
-#ifdef _WIN32
-	if (CreateDirectory(directory.c_str(), nullptr)) {
-		createdDirectory();
-		return true;
-	}
-	if (GetLastError() == ERROR_ALREADY_EXISTS)
-		return false;
-	if (GetLastError() == ERROR_PATH_NOT_FOUND) {
-		size_t delim = directory.find_last_of("/\\");
-		if (delim != std::string::npos) {
-			createDirectory(directory.substr(0, delim));
-			return createDirectory(directory);
-		}
-	}
-	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "CreateDirectory").error(e).detail("Directory", directory).GetLastError();
-	throw e;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	size_t sep = 0;
-	do {
-		sep = directory.find_first_of('/', sep + 1);
-		if (mkdir(directory.substr(0, sep).c_str(), 0755) != 0) {
-			if (errno == EEXIST)
-				continue;
-			auto mkdirErrno = errno;
-
-			// check if directory already exists
-			// necessary due to old kernel bugs
-			struct stat s;
-			const char* dirname = directory.c_str();
-			if (stat(dirname, &s) != -1 && S_ISDIR(s.st_mode)) {
-				TraceEvent("DirectoryAlreadyExists").detail("Directory", dirname).detail("IgnoredError", mkdirErrno);
-				continue;
-			}
-
-			Error e;
-			if (mkdirErrno == EACCES) {
-				e = file_not_writable();
-			} else {
-				e = systemErrorCodeToError();
-			}
-
-			TraceEvent(SevError, "CreateDirectory")
-			    .error(e)
-			    .detail("Directory", directory)
-			    .detailf("UnixErrorCode", "%x", errno)
-			    .detail("UnixError", strerror(mkdirErrno));
-			throw e;
-		}
-		createdDirectory();
-	} while (sep != std::string::npos && sep != directory.length() - 1);
-	return true;
-#else
-#error Port me!
-#endif
+bool createDirectory(std::filesystem::path const& directory) {
+	return std::filesystem::create_directory(directory);
 }
 
 } // namespace platform
@@ -2520,70 +2443,19 @@ const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
 StringRef dotdot = ".."_sr;
 
-std::string cleanPath(std::string const& path) {
-	std::vector<StringRef> finalParts;
-	bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
-
-	StringRef p(path);
-
-	while (p.size() != 0) {
-		StringRef part = p.eat(separator);
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
-			continue;
-		if (part == dotdot) {
-			if (!finalParts.empty() && finalParts.back() != dotdot) {
-				finalParts.pop_back();
-				continue;
-			}
-			if (absolute) {
-				continue;
-			}
-		}
-		finalParts.push_back(part);
-	}
-
-	std::string result;
-	result.reserve(PATH_MAX);
-	if (absolute) {
-		result.append(1, CANONICAL_PATH_SEPARATOR);
-	}
-
-	for (int i = 0; i < finalParts.size(); ++i) {
-		if (i != 0) {
-			result.append(1, CANONICAL_PATH_SEPARATOR);
-		}
-		result.append((const char*)finalParts[i].begin(), finalParts[i].size());
-	}
-
-	return result.empty() ? "." : result;
+std::filesystem::path cleanPath(std::filesystem::path const& path) {
+	std::filesystem::path p(path);
+	p = std::filesystem::absolute(p);
+	p = std::filesystem::canonical(p);
+	return p;
 }
 
 std::string popPath(const std::string& path) {
-	int i = path.size() - 1;
-	// Skip over any trailing separators
-	while (i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
-		--i;
-	}
-	// Skip over non separators
-	while (i >= 0 && path[i] != CANONICAL_PATH_SEPARATOR) {
-		--i;
-	}
-	// Skip over trailing separators again
-	bool foundSeparator = false;
-	while (i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
-		--i;
-		foundSeparator = true;
-	}
-
-	if (foundSeparator) {
-		++i;
-	} else {
-		// If absolute then we popped off the only path component so return "/"
-		if (!path.empty() && path.front() == CANONICAL_PATH_SEPARATOR) {
-			return "/";
-		}
-	}
-	return path.substr(0, i + 1);
+	std::filesystem::path p(path);
+    std::filesystem::path parent = p.parent_path();
+    std::filesystem::path filename = parent.filename();
+    std::string result = filename.string();
+    return result + "/";
 }
 
 std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist) {
@@ -2975,63 +2847,22 @@ void setThreadPriority(int pri) {
 }
 
 bool fileExists(std::string const& filename) {
-	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
-	if (!f)
-		return false;
-	fclose(f);
-	return true;
+	return std::filesystem::exists(filename); 
 }
 
-bool directoryExists(std::string const& path) {
-#ifdef _WIN32
-	DWORD bits = ::GetFileAttributes(path.c_str());
-	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
-#else
-	DIR* d = opendir(path.c_str());
-	if (d == nullptr)
-		return false;
-	closedir(d);
-	return true;
-#endif
+bool directoryExists(std::filesystem::path p) {
+	return std::filesystem::exists(p) && std::filesystem::is_directory(p);
 }
 
-int64_t fileSize(std::string const& filename) {
-#ifdef _WIN32
-	struct _stati64 file_status;
-	if (_stati64(filename.c_str(), &file_status) != 0)
-		return 0;
-	else
-		return file_status.st_size;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	struct stat file_status;
-	if (stat(filename.c_str(), &file_status) != 0)
-		return 0;
-	else
-		return file_status.st_size;
-#else
-#error Port me!
-#endif
+int64_t fileSize(std::filesystem::path const& filename) {
+	return std::filesystem::file_size(filename);
 }
 
-time_t fileModifiedTime(const std::string& filename) {
-#ifdef _WIN32
-	struct _stati64 file_status;
-	if (_stati64(filename.c_str(), &file_status) != 0)
-		return 0;
-	else
-		return file_status.st_mtime;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	struct stat file_status;
-	if (stat(filename.c_str(), &file_status) != 0)
-		return 0;
-	else
-		return file_status.st_mtime;
-#else
-#error Port me!
-#endif
+time_t fileModifiedTime(const std::string const& filename) { // Leaving this here for extra protection
+	return std::filesystem::last_write_time(filename);
 }
 
-size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
+size_t readFileBytes(std::filesystem::path const& filename, uint8_t* buff, size_t len) {
 	std::fstream ifs(filename, std::fstream::in | std::fstream::binary);
 	if (!ifs.good()) {
 		TraceEvent("ileBytes_FileOpenError").detail("Filename", filename).GetLastError();
@@ -3052,7 +2883,7 @@ size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
 	return bytesRead;
 }
 
-std::string readFileBytes(std::string const& filename, size_t maxSize) {
+std::string readFileBytes(std::filesystem::path const& filename, size_t maxSize) {
 	if (!fileExists(filename)) {
 		TraceEvent("ReadFileBytes_FileNotFound").detail("Filename", filename);
 		throw file_not_found();
@@ -3074,7 +2905,7 @@ std::string readFileBytes(std::string const& filename, size_t maxSize) {
 	return ret;
 }
 
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
+void writeFileBytes(std::filesystem::path const& filename, const uint8_t* data, size_t count) {
 	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
 	if (!ofs.good()) {
 		TraceEvent("WriteFileBytes_FileOpenError").detail("Filename", filename).GetLastError();
@@ -3084,7 +2915,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 	ofs.write((const char*)data, count);
 }
 
-void writeFile(std::string const& filename, std::string const& content) {
+void writeFile(std::filesystem::path const& filename, std::string const& content) {
 	writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
 }
 
@@ -3138,7 +2969,7 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite) {
 #if defined(_WIN32)
 #define getcwd(buf, maxlen) _getcwd(buf, maxlen)
 #endif
-std::string getWorkingDirectory() {
+std::filesystem::path getWorkingDirectory() {
 	char* buf;
 	if ((buf = getcwd(nullptr, 0)) == nullptr) {
 		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
@@ -3146,7 +2977,7 @@ std::string getWorkingDirectory() {
 	}
 	std::string result(buf);
 	free(buf);
-	return result;
+	return std::filesystem::path(result);
 }
 
 } // namespace platform
