@@ -356,7 +356,7 @@ void writeFileBytes(std::filesystem::path const& filename, const uint8_t* data, 
 // Write text into file
 void writeFile(std::filesystem::path const& filename, std::string const& content);
 
-std::filesystem::path joinPath(std::filesystem::path const& directory, std::filesystem::path const& filename); // May not even exist tbh, because there's a function that prints out the filename canonical path 
+std::filesystem::path joinPath(std::filesystem::path const& directory, std::filesystem::path const& filename); 
 
 // cleanPath() does a 'logical' resolution of the given path string to a canonical form *without*
 // following symbolic links or verifying the existence of any path components.  It removes redundant

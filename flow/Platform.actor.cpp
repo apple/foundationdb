@@ -2288,7 +2288,7 @@ void renamedFile() {
 	INJECT_FAULT(io_error, "renameFile"); // renaming file failed
 }
 
-void renameFile(std::filesystem::path fromPath, std::filesystem::path toPath) {
+void renameFile(std::filesystem::path const& fromPath, std::filesystem::path const& toPath) {
 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
 #ifdef _WIN32
 	if (MoveFileExA(fromPath, // I think that this should be .string() ??
@@ -2318,7 +2318,7 @@ void renameFile(std::filesystem::path fromPath, std::filesystem::path toPath) {
 #define FOPEN_CLOEXEC_MODE ""
 #endif
 
-void atomicReplace(std::filesystem::path path, std::string const& content, bool textmode) {
+void atomicReplace(std::filesystem::path const& path, std::string const& content, bool textmode) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT(io_error, "atomicReplace"); // atomic rename failed
@@ -2424,23 +2424,7 @@ static bool deletedFile() {
 }
 
 bool deleteFile(std::filesystem::path path) {
-	INJECT_FAULT(platform_error, "deleteFile"); // file deletion failed
-#ifdef _WIN32
-	if (DeleteFile(path))
-		return deletedFile();
-	if (GetLastError() == ERROR_FILE_NOT_FOUND)
-		return false;
-#elif defined(__unixish__)
-	if (!unlink(path))
-		return deletedFile();
-	if (errno == ENOENT)
-		return false;
-#else
-#error Port me!
-#endif
-	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "DeleteFile").error(e).detail("Filename", path).GetLastError();
-	throw e;
+	return std::filesystem::remove(path);
 }
 
 static void createdDirectory() {
@@ -2459,15 +2443,19 @@ const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
 StringRef dotdot = ".."_sr;
 
-std::string cleanPath(std::string const& path) {
-	std::filesystem::path p = std::filesystem::path(path);
+std::filesystem::path cleanPath(std::filesystem::path const& path) {
+	std::filesystem::path p(path);
 	p = std::filesystem::absolute(p);
 	p = std::filesystem::canonical(p);
-	return p.string();
+	return p;
 }
 
 std::string popPath(const std::string& path) {
-	return (std::filesystem::path(path).parent_path().filename()).string() + "/";
+	std::filesystem::path p(path);
+    std::filesystem::path parent = p.parent_path();
+    std::filesystem::path filename = parent.filename();
+    std::string result = filename.string();
+    return result + "/";
 }
 
 std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist) {
@@ -2981,7 +2969,7 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite) {
 #if defined(_WIN32)
 #define getcwd(buf, maxlen) _getcwd(buf, maxlen)
 #endif
-std::string getWorkingDirectory() {
+std::filesystem::path getWorkingDirectory() {
 	char* buf;
 	if ((buf = getcwd(nullptr, 0)) == nullptr) {
 		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
@@ -2989,7 +2977,7 @@ std::string getWorkingDirectory() {
 	}
 	std::string result(buf);
 	free(buf);
-	return result;
+	return std::filesystem::path(result);
 }
 
 } // namespace platform
