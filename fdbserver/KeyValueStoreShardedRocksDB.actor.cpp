@@ -90,6 +90,7 @@ struct PhysicalShard;
 struct DataShard;
 struct ReadIterator;
 struct ShardedRocksDBKeyValueStore;
+struct ColumnFamilyInfo;
 
 using rocksdb::BackgroundErrorReason;
 using rocksdb::CompactionReason;
@@ -285,6 +286,11 @@ private:
 // Encapsulation of shared states.
 struct ShardedRocksDBState {
 	bool closing = false;
+};
+
+struct ColumnFamilyInfo {
+	std::mutex mu;
+	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> columnFamilyMap;
 };
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
@@ -921,6 +927,11 @@ struct PhysicalShard {
 		       numRangeDeletions > SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT;
 	}
 
+	bool shouldCompact() {
+		return SERVER_KNOBS->SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE ||
+		       numRangeDeletions > SERVER_KNOBS->SHARDED_ROCKSDB_CLEAR_RANGE_COMPACTION_LIMIT;
+	}
+
 	std::string toString() {
 		std::string ret = "[ID]: " + this->id + ", [CF]: ";
 		if (initialized()) {
@@ -936,22 +947,24 @@ struct PhysicalShard {
 		isInitialized.store(false);
 		readIterPool.reset();
 
+		/*
 		// Deleting default column family is not allowed.
 		if (deletePending && id != DEFAULT_CF_NAME) {
-			auto s = db->DropColumnFamily(cf);
-			if (!s.ok()) {
-				logRocksDBError(s, "DestroyShard");
-				logShardEvent(id, ShardOp::DESTROY, SevError, s.ToString());
-				return;
-			}
+		    auto s = db->DropColumnFamily(cf);
+		    if (!s.ok()) {
+		        logRocksDBError(s, "DestroyShard");
+		        logShardEvent(id, ShardOp::DESTROY, SevError, s.ToString());
+		        return;
+		    }
 		}
 		auto s = db->DestroyColumnFamilyHandle(cf);
+
 		if (!s.ok()) {
-			logRocksDBError(s, "DestroyCFHandle");
-			logShardEvent(id, ShardOp::DESTROY, SevError, s.ToString());
-			return;
+		    logRocksDBError(s, "DestroyCFHandle");
+		    logShardEvent(id, ShardOp::DESTROY, SevError, s.ToString());
+		    return;
 		}
-		logShardEvent(id, ShardOp::DESTROY);
+		logShardEvent(id, ShardOp::DESTROY); */
 	}
 
 	rocksdb::DB* db;
@@ -1116,7 +1129,7 @@ public:
 		return Void();
 	}
 
-	rocksdb::Status init() {
+	rocksdb::Status init(ColumnFamilyInfo* sharedCfInfo) {
 		const double start = now();
 		// Open instance.
 		TraceEvent(SevInfo, "ShardedRocksDBInitBegin", this->logId).detail("DataPath", path);
@@ -1177,15 +1190,17 @@ public:
 			    .detail("PhysicalShardCount", handles.size());
 
 			std::shared_ptr<PhysicalShard> metadataShard = nullptr;
+			std::unique_lock<std::mutex> lock(sharedCfInfo->mu);
 			for (auto handle : handles) {
 				auto shard = std::make_shared<PhysicalShard>(db, handle->GetName(), handle);
 				if (shard->id == METADATA_SHARD_ID) {
 					metadataShard = shard;
 				}
 				physicalShards[shard->id] = shard;
-				columnFamilyMap[handle->GetID()] = handle;
+				sharedCfInfo->columnFamilyMap[handle->GetID()] = handle;
 				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId).detail("ShardId", shard->id);
 			}
+			lock.unlock();
 
 			std::set<std::string> unusedShards(columnFamilies.begin(), columnFamilies.end());
 			unusedShards.erase(METADATA_SHARD_ID);
@@ -1245,18 +1260,18 @@ public:
 				}
 			}
 
-			for (const auto& name : unusedShards) {
-				auto it = physicalShards.find(name);
-				ASSERT(it != physicalShards.end());
-				auto shard = it->second;
-				if (shard->dataShards.size() == 0) {
-					shard->deleteTimeSec = now();
-					pendingDeletionShards.push_back(name);
-					TraceEvent(SevInfo, "UnusedPhysicalShard", logId).detail("ShardId", name);
-				}
-			}
 			if (unusedShards.size() > 0) {
 				TraceEvent("ShardedRocksDB", logId).detail("CleanUpUnusedShards", unusedShards.size());
+				for (const auto& name : unusedShards) {
+					auto it = physicalShards.find(name);
+					ASSERT(it != physicalShards.end());
+					auto shard = it->second;
+					if (shard->dataShards.size() == 0) {
+						shard->deleteTimeSec = now();
+						pendingDeletionShards.push_back(name);
+						TraceEvent(SevInfo, "UnusedPhysicalShard", logId).detail("ShardId", name);
+					}
+				}
 			}
 		} else {
 			// DB is opened with default shard.
@@ -1268,7 +1283,7 @@ public:
 			// Add SpecialKeys range. This range should not be modified.
 			std::shared_ptr<PhysicalShard> defaultShard =
 			    std::make_shared<PhysicalShard>(db, DEFAULT_CF_NAME, handles[0]);
-			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
+			sharedCfInfo->columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
 			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, defaultShard.get());
 			dataShardMap.insert(specialKeys, dataShard.get());
 			defaultShard->dataShards[specialKeys.begin.toString()] = std::move(dataShard);
@@ -1277,7 +1292,7 @@ public:
 			// Create metadata shard.
 			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, cfOptions);
 			metadataShard->init();
-			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
+			sharedCfInfo->columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
 
 			// Write special key range metadata.
@@ -1371,6 +1386,56 @@ public:
 			result.push_back(it.value());
 		}
 		return result;
+	}
+
+	PhysicalShard* addRangeInternal(KeyRange range, std::string id, bool active) {
+		auto ranges = dataShardMap.intersectingRanges(range);
+
+		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+			if (it.value()) {
+				if (it.value()->physicalShard->id == id) {
+					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					    .detail("ErrorType", "RangeAlreadyExist")
+					    .detail("IntersectingRange", it->range())
+					    .detail("DataShardRange", it->value()->range)
+					    .detail("ExpectedShardId", id)
+					    .detail("PhysicalShardID", it->value()->physicalShard->toString());
+				} else {
+					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					    .detail("ErrorType", "ConflictingRange")
+					    .detail("IntersectingRange", it->range())
+					    .detail("DataShardRange", it->value()->range)
+					    .detail("ExpectedShardId", id)
+					    .detail("PhysicalShardID", it->value()->physicalShard->toString());
+				}
+				return nullptr;
+			}
+		}
+
+		auto cfOptions = active ? getCFOptions() : getCFOptionsForInactiveShard();
+		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
+		std::shared_ptr<PhysicalShard>& shard = it->second;
+
+		activePhysicalShardIds.emplace(id);
+
+		auto dataShard = std::make_unique<DataShard>(range, shard.get());
+		dataShardMap.insert(range, dataShard.get());
+		shard->dataShards[range.begin.toString()] = std::move(dataShard);
+		return shard.get();
+	}
+
+	std::unordered_map<std::string, PhysicalShard*> addRanges(std::vector<std::pair<KeyRange, std::string>> ranges,
+	                                                          bool active) {
+		TraceEvent(SevVerbose, "ShardedRocksDBAddRanges").detail("Size", ranges.size());
+		std::unordered_map<std::string, PhysicalShard*> shards;
+		for (auto& [range, id] : ranges) {
+			auto shard = addRangeInternal(range, id, active);
+			if (shard != nullptr) {
+				shards[id] = shard;
+			}
+		}
+		validate();
+		return shards;
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id, bool active) {
@@ -1736,7 +1801,7 @@ public:
 	}
 
 	void closeAllShards() {
-		columnFamilyMap.clear();
+		// columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
 		auto s = db->Close();
@@ -1754,7 +1819,7 @@ public:
 		db->DeleteRange(options, physicalShards["default"]->cf, toSlice(allKeys.begin), toSlice(specialKeys.end));
 		db->DeleteRange(options, metadataShard->cf, toSlice(metadataRange.begin), toSlice(metadataRange.end));
 
-		columnFamilyMap.clear();
+		// columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
 		auto s = db->Close();
@@ -1772,16 +1837,6 @@ public:
 	rocksdb::DB* getDb() const { return db; }
 
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* getAllShards() { return &physicalShards; }
-
-	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* getColumnFamilyMap() { return &columnFamilyMap; }
-
-	std::vector<rocksdb::ColumnFamilyHandle*> getColumnFamilies() {
-		std::vector<rocksdb::ColumnFamilyHandle*> res;
-		for (auto& [id, cf] : columnFamilyMap) {
-			res.push_back(cf);
-		}
-		return res;
-	}
 
 	size_t numPhysicalShards() const { return physicalShards.size(); };
 
@@ -1854,8 +1909,6 @@ private:
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	std::unordered_set<std::string> activePhysicalShardIds;
-	// Stores mapping between cf id and cf handle, used during compaction.
-	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> columnFamilyMap;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::unique_ptr<std::set<PhysicalShard*>> dirtyShards;
 	KeyRangeMap<DataShard*> dataShardMap;
@@ -2524,14 +2577,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
-	struct CompactionWorker : IThreadPoolReceiver {
+	struct LowPriorityWorker : IThreadPoolReceiver {
 		const UID logId;
-		explicit CompactionWorker(UID logId) : logId(logId) {}
+		ColumnFamilyInfo* sharedCfInfo;
+
+		explicit LowPriorityWorker(UID logId, ColumnFamilyInfo* sharedCfInfo)
+		  : logId(logId), sharedCfInfo(sharedCfInfo) {}
 
 		void init() override {}
-		~CompactionWorker() override {}
+		~LowPriorityWorker() override {}
 
-		struct CompactShardsAction : TypedAction<CompactionWorker, CompactShardsAction> {
+		struct CompactShardsAction : TypedAction<LowPriorityWorker, CompactShardsAction> {
 			std::vector<std::shared_ptr<PhysicalShard>> shards;
 			std::shared_ptr<PhysicalShard> metadataShard;
 			ThreadReturnPromise<Void> done;
@@ -2594,15 +2650,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		const UID logId;
 		int threadIndex;
-		std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
+		ColumnFamilyInfo* sharedCfInfo;
 		std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 		double sampleStartTime;
 
 		explicit Writer(UID logId,
 		                int threadIndex,
-		                std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap,
+		                ColumnFamilyInfo* sharedCfInfo,
 		                std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
-		  : logId(logId), threadIndex(threadIndex), columnFamilyMap(columnFamilyMap), rocksDBMetrics(rocksDBMetrics),
+		  : logId(logId), threadIndex(threadIndex), sharedCfInfo(sharedCfInfo), rocksDBMetrics(rocksDBMetrics),
 		    sampleStartTime(now()) {}
 
 		~Writer() override {}
@@ -2635,7 +2691,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(OpenAction& a) {
-			auto status = a.shardManager->init();
+			auto status = a.shardManager->init(sharedCfInfo);
 
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
@@ -2648,22 +2704,38 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct AddShardAction : TypedAction<Writer, AddShardAction> {
-			PhysicalShard* shard;
+			std::unordered_map<std::string, PhysicalShard*> shards;
+			bool active;
 			ThreadReturnPromise<Void> done;
 
-			AddShardAction(PhysicalShard* shard) : shard(shard) { ASSERT(shard); }
+			AddShardAction(std::unordered_map<std::string, PhysicalShard*>& shards, bool active)
+			  : shards(shards), active(active) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
 		void action(AddShardAction& a) {
-			auto s = a.shard->init();
-			if (!s.ok()) {
-				TraceEvent(SevError, "AddShardError").detail("Status", s.ToString()).detail("ShardId", a.shard->id);
-				a.done.sendError(statusToError(s));
+			std::vector<rocksdb::ColumnFamilyHandle*> handles;
+			// Bulk creates column families to avoid extra overhead.
+			auto cfOptions = a.active ? getCFOptions() : getCFOptionsForInactiveShard();
+			std::vector<std::string> ids;
+			for (auto& [id, _] : a.shards) {
+				ids.push_back(id);
+			}
+			a.shards[0]->db->CreateColumnFamilies(cfOptions, ids, &handles);
+			if (handles.size() != ids.size()) {
+				// Reboot SS.
+				a.done.sendError(internal_error());
 				return;
 			}
-			ASSERT(a.shard->cf);
-			(*columnFamilyMap)[a.shard->cf->GetID()] = a.shard->cf;
+
+			{
+				std::unique_lock<std::mutex> lock(sharedCfInfo->mu);
+				for (auto* handle : handles) {
+					ASSERT(a.shards.contains(handle->GetName()));
+					a.shards[handle->GetName()]->cf = handle;
+					sharedCfInfo->columnFamilyMap[handle->GetID()] = handle;
+				}
+			}
 			a.done.send(Void());
 		}
 
@@ -2679,13 +2751,34 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		void action(RemoveShardAction& a) {
 			auto start = now();
-			for (auto& shard : a.shards) {
-				shard->deletePending = true;
-				columnFamilyMap->erase(shard->cf->GetID());
-				a.metadataShard->db->Delete(
-				    rocksdb::WriteOptions(), a.metadataShard->cf, compactionTimestampPrefix.toString() + shard->id);
+			std::vector<rocksdb::ColumnFamilyHandle*> cfHandles;
+			{
+				std::unique_lock<std::mutex> lock(sharedCfInfo->mu);
+				for (auto& shard : a.shards) {
+					cfHandles.push_back(shard->cf);
+					// shard->deletePending = true;
+					sharedCfInfo->columnFamilyMap.erase(shard->cf->GetID());
+					a.metadataShard->db->Delete(
+					    rocksdb::WriteOptions(), a.metadataShard->cf, compactionTimestampPrefix.toString() + shard->id);
+				}
+			}
+
+			auto s = a.metadataShard->db->DropColumnFamilies(cfHandles);
+			if (!s.ok()) {
+				a.done.sendError(internal_error());
+				return;
 			}
 			TraceEvent("RemoveShardTime").detail("Duration", now() - start).detail("Size", a.shards.size());
+
+			for (auto& shard : a.shards) {
+				auto s = shard->db->DestroyColumnFamilyHandle(shard->cf);
+				if (!s.ok()) {
+					logRocksDBError(s, "DestroyCFHandle");
+					logShardEvent(shard->id, ShardOp::DESTROY, SevError, s.ToString());
+					return;
+				}
+			}
+
 			a.shards.clear();
 			a.done.send(Void());
 		}
@@ -2694,7 +2787,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::DB* db;
 			std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 			std::unique_ptr<std::set<PhysicalShard*>> dirtyShards;
-			const std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
 			ThreadReturnPromise<Void> done;
 			double startTime;
 			bool getHistograms;
@@ -2702,10 +2794,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 			CommitAction(rocksdb::DB* db,
 			             std::unique_ptr<rocksdb::WriteBatch> writeBatch,
-			             std::unique_ptr<std::set<PhysicalShard*>> dirtyShards,
-			             std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap)
-			  : db(db), writeBatch(std::move(writeBatch)), dirtyShards(std::move(dirtyShards)),
-			    columnFamilyMap(columnFamilyMap) {
+			             std::unique_ptr<std::set<PhysicalShard*>> dirtyShards)
+			  : db(db), writeBatch(std::move(writeBatch)), dirtyShards(std::move(dirtyShards)) {
 				if (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
 					getHistograms = true;
 					startTime = timer_monotonic();
@@ -2802,9 +2892,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (SERVER_KNOBS->SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				std::unique_lock<std::mutex> lock(sharedCfInfo->mu);
 				for (const auto& [id, range] : deletes) {
-					auto cf = columnFamilyMap->find(id);
-					ASSERT(cf != columnFamilyMap->end());
+					auto cf = sharedCfInfo->columnFamilyMap.find(id);
+					ASSERT(cf != sharedCfInfo->columnFamilyMap.end());
 					auto begin = toSlice(range.begin);
 					auto end = toSlice(range.end);
 
@@ -3118,7 +3209,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					return;
 				} else {
 					ASSERT(ps->initialized());
-					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
+					sharedCfInfo->columnFamilyMap[ps->cf->GetID()] = ps->cf;
 					TraceEvent(SevInfo, "RocksDBRestoreCFSuccess", logId)
 					    .detail("Path", a.path)
 					    .detail("ColumnFaminly", ps->cf->GetName())
@@ -3196,7 +3287,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						a.done.sendError(statusToError(status));
 						return;
 					}
-					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
+					sharedCfInfo->columnFamilyMap[ps->cf->GetID()] = ps->cf;
 				}
 				if (!status.ok()) {
 					logRocksDBError(status, "RestoreInitPhysicalShard");
@@ -3593,15 +3684,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		if (g_network->isSimulated()) {
 			TraceEvent(SevDebug, "ShardedRocksDB").detail("Info", "Use Coro threads in simulation.");
 			writeThread = CoroThreadPool::createThreadPool();
-			compactionThread = CoroThreadPool::createThreadPool();
+			lowPriorityThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
-			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY);
+			lowPriorityThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
-		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
-		compactionThread->addThread(new CompactionWorker(id), "fdb-rocksdb-cw");
+		writeThread->addThread(new Writer(id, 0, &sharedCfInfo, rocksDBMetrics), "fdb-rocksdb-wr");
+		lowPriorityThread->addThread(new LowPriorityWorker(id, &sharedCfInfo), "fdb-rocksdb-cw");
 		TraceEvent("ShardedRocksDBReadThreads", id)
 		    .detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
@@ -3638,7 +3729,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		try {
 			wait(self->writeThread->stop());
-			wait(self->compactionThread->stop());
+			wait(self->lowPriorityThread->stop());
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
 		}
@@ -3676,7 +3767,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->metrics =
 			    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);
-			this->compactionJob = compactShards(this->rState, openFuture, &shardManager, compactionThread);
+			this->lowPriorityJob = compactShards(this->rState, openFuture, &shardManager, lowPriorityThread);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			this->refreshRocksDBBackgroundWorkHolder =
 			    refreshRocksDBBackgroundEventCounter(this->id, this->eventListener);
@@ -3688,11 +3779,22 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> addRange(KeyRangeRef range, std::string id, bool active) override {
+		/*
 		auto shard = shardManager.addRange(range, id, active);
 		if (shard->initialized()) {
-			return Void();
+		    return Void();
 		}
 		auto a = new Writer::AddShardAction(shard);
+		Future<Void> res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+		*/
+		return Void();
+	}
+
+	Future<Void> addRanges(std::vector<std::pair<KeyRange, std::string>> ranges, bool active) override {
+		auto shards = shardManager.addRanges(ranges, active);
+		auto a = new Writer::AddShardAction(shards, active);
 		Future<Void> res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
@@ -3734,10 +3836,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> canCommit() override { return checkRocksdbState(shardManager.getDb()); }
 
 	Future<Void> commit(bool) override {
-		auto a = new Writer::CommitAction(shardManager.getDb(),
-		                                  shardManager.getWriteBatch(),
-		                                  shardManager.getDirtyShards(),
-		                                  shardManager.getColumnFamilyMap());
+		auto a =
+		    new Writer::CommitAction(shardManager.getDb(), shardManager.getWriteBatch(), shardManager.getDirtyShards());
 		keysSet.clear();
 		auto res = a->done.getFuture();
 		writeThread->post(a);
@@ -3940,7 +4040,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 
 				if (shards.size() > 0) {
-					auto a = new CompactionWorker::CompactShardsAction(shards, shardManager->getMetaDataShard());
+					auto a = new LowPriorityWorker::CompactShardsAction(shards, shardManager->getMetaDataShard());
 					auto res = a->done.getFuture();
 					thread->post(a);
 					wait(res);
@@ -4037,8 +4137,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	std::string path;
 	UID id;
 	std::set<Key> keysSet;
+	ColumnFamilyInfo sharedCfInfo;
 	Reference<IThreadPool> writeThread;
-	Reference<IThreadPool> compactionThread;
+	Reference<IThreadPool> lowPriorityThread;
 	Reference<IThreadPool> readThreads;
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
@@ -4049,7 +4150,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	FlowLock fetchSemaphore;
 	int numFetchWaiters;
 	Counters counters;
-	Future<Void> compactionJob;
+	Future<Void> lowPriorityJob;
 	Future<Void> refreshHolder;
 	Future<Void> refreshRocksDBBackgroundWorkHolder;
 	Future<Void> cleanUpJob;
