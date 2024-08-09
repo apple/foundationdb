@@ -18,12 +18,8 @@
  * limitations under the License.
  */
 
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/filesystem/directory.hpp>
-#include <boost/filesystem/path.hpp>
-#include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <istream>
@@ -2558,7 +2554,7 @@ void encryptionAtRestPlaintextMarkerCheck() {
 		return;
 	}
 
-	namespace fs = boost::filesystem;
+	namespace fs = std::filesystem;
 
 	printf("EncryptionAtRestPlaintextMarkerCheckStart\n");
 	TraceEvent("EncryptionAtRestPlaintextMarkerCheckStart");
@@ -2568,8 +2564,8 @@ void encryptionAtRestPlaintextMarkerCheck() {
 	bool success = true;
 	// Enumerate all files in the "simfdb/" folder and look for "marker" string
 	for (fs::recursive_directory_iterator itr(p); itr != end; ++itr) {
-		if (boost::filesystem::is_regular_file(itr->path())) {
-			std::ifstream f(itr->path().string().c_str());
+		if (fs::is_regular_file(itr->path())) {
+			std::ifstream f(itr->path());
 			if (f) {
 				std::string buf;
 				int count = 0;
@@ -3048,9 +3044,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 			return Void();
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester
-		if (boost::algorithm::ends_with(fileName, ".txt")) {
+		if (fileName.ends_with(".txt")) {
 			testSet.testSpecs = readTests(ifs);
-		} else if (boost::algorithm::ends_with(fileName, ".toml")) {
+		} else if (fileName.ends_with(".toml")) {
 			// TOML is weird about opening the file as binary on windows, so we
 			// just let TOML re-open the file instead of using ifs.
 			testSet = readTOMLTests(fileName);
