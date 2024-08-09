@@ -18,11 +18,16 @@
  * limitations under the License.
  */
 
+#include <csignal>
 #include <memory>
 #include <sys/wait.h>
 #include <cinttypes>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/event.h>
+#endif
 
 #include "fdbmonitor.h"
 #include "SimpleOpt/SimpleOpt.h"
