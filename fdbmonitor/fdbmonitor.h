@@ -92,6 +92,11 @@ struct Command;
 void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds);
 void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, sigset_t* mask);
 
+#if defined(__APPLE__) || defined(__FreeBSD__)
+void watch_conf_dir(int kq, int* confd_fd, std::string confdir);
+void watch_conf_file(int kq, int* conff_fd, const char* confpath);
+#endif
+
 struct EnvVarUtils {
 	// This utility assumes key and value are separated by one equal sign
 	static std::pair<std::string, std::string> extractKeyAndValue(const std::string& keyValue) {

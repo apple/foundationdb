@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include <csignal>
 #include <limits>
+#include <sys/time.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
