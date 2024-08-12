@@ -2139,32 +2139,29 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 		Version minTLogs = minEnd;
 		Version prevVersion = minEnd;
 		for (auto const& [version, tLogs] : versionAllTLogs) {
-			if (prevVersion == minEnd || prevVersion == prevVersionMap[version]) {
-				// This version is not recoverable if there is a log server (LS) such that:
-				// - the commit proxy sent this version to LS (i.e., LS is present in "versionAllTLogs[version]")
-				// - LS is available (i.e., LS is present in "availableTLogs")
-				// - LS didn't receive this version (i.e., LS is not present in "versionAvailableTLogs[version]")
-				if (((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).none()) {
-					// If the commit proxy sent this version to "N" log servers then at least
-					// (N - replicationFactor + 1) log servers must be available.
-					if (versionAvailableTLogs[version].size() >= tLogs.size() - replicationFactor + 1) {
-						minTLogs = version;
-						prevVersion = version;
-						// Update RVs.
-						for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size();
-						     id++) {
-							if (versionAvailableTLogs[version][id]) {
-								RVs[id] = version;
-							}
-						}
-					} else {
-						break;
-					}
-				} else {
-					break;
-				}
-			} else {
+			if (!(prevVersion == minEnd || prevVersion == prevVersionMap[version])) {
 				break;
+			}
+			// This version is not recoverable if there is a log server (LS) such that:
+			// - the commit proxy sent this version to LS (i.e., LS is present in "versionAllTLogs[version]")
+			// - LS is available (i.e., LS is present in "availableTLogs")
+			// - LS didn't receive this version (i.e., LS is not present in "versionAvailableTLogs[version]")
+			if (!(((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).none())) {
+				break;
+			}
+			// If the commit proxy sent this version to "N" log servers then at least
+			// (N - replicationFactor + 1) log servers must be available.
+			if (!(versionAvailableTLogs[version].size() >= tLogs.size() - replicationFactor + 1)) {
+				break;
+			}
+			// Update RV.
+			minTLogs = version;
+			prevVersion = version;
+			// Update recovery version vector.
+			for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
+				if (versionAvailableTLogs[version][id]) {
+					RVs[id] = version;
+				}
 			}
 		}
 		minLogGroup = std::min(minLogGroup, minTLogs);
