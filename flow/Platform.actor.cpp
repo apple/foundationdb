@@ -2279,11 +2279,6 @@ int getRandomSeed() {
 }
 } // namespace platform
 
-std::string joinPath(std::string const& directory, std::string const& filename) {
-	std::filesystem::path p = std::filesystem::path(directory) / std::filesystem::path(filename);
-	return p.string();
-}
-
 void renamedFile() {
 	INJECT_FAULT(io_error, "renameFile"); // renaming file failed
 }
@@ -2298,11 +2293,10 @@ void renameFile(std::filesystem::path const& fromPath, std::filesystem::path con
 		return;
 	}
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	if (!rename(fromPath, toPath)) {
+	rename(fromPath, toPath);
 		// FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable
 		// open for the same file renamedFile();
-		return;
-	}
+	return;
 #else
 #error Port me!
 #endif
@@ -2324,7 +2318,7 @@ void atomicReplace(std::filesystem::path const& path, std::string const& content
 		INJECT_FAULT(io_error, "atomicReplace"); // atomic rename failed
 
 		std::string tempfilename =
-		    std::filesystem::canonical(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
+		    (std::filesystem::canonical(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
 		f = textmode ? fopen(tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE) : fopen(tempfilename.c_str(), "wb");
 		if (!f)
 			throw io_error();
@@ -2423,7 +2417,7 @@ static bool deletedFile() {
 	return true;
 }
 
-bool deleteFile(std::filesystem::path path) {
+bool deleteFile(std::filesystem::path const& path) {
 	return std::filesystem::remove(path);
 }
 
@@ -2450,15 +2444,14 @@ std::filesystem::path cleanPath(std::filesystem::path const& path) {
 	return p;
 }
 
-std::string popPath(const std::string& path) {
-	std::filesystem::path p(path);
-    std::filesystem::path parent = p.parent_path();
+std::filesystem::path popPath(std::filesystem::path const& path) {
+    std::filesystem::path parent = path.parent_path();
     std::filesystem::path filename = parent.filename();
-    std::string result = filename.string();
-    return result + "/";
+    filename /= "";
+	return filename;
 }
 
-std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist) {
+std::filesystem::path abspath(std::filesystem::path const& path, bool resolveLinks = true, bool mustExist = false) {
 	if (path_.empty()) {
 		Error e = platform_error();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
@@ -2476,7 +2469,7 @@ std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist)
 		// Treat paths starting with ~ or separator as absolute, meaning they shouldn't be appended to the current
 		// working dir
 		bool absolute = !path.empty() && (path[0] == CANONICAL_PATH_SEPARATOR || path[0] == '~');
-		std::string clean = cleanPath(absolute ? path : joinPath(platform::getWorkingDirectory(), path));
+		std::string clean = cleanPath(absolute ? path : platform::getWorkingDirectory() / path);
 		if (mustExist && !fileExists(clean)) {
 			Error e = systemErrorCodeToError();
 			Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
@@ -2508,12 +2501,12 @@ std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist)
 		// try to resolve symlinks in progressively shorter prefixes of the path
 		if (errno == ENOENT && !mustExist) {
 			std::string prefix = popPath(path);
-			std::string suffix = path.substr(prefix.size());
+			std::string suffix = path.extension();
 			if (prefix.empty() && (suffix.empty() || suffix[0] != '~')) {
 				prefix = ".";
 			}
 			if (!prefix.empty()) {
-				return cleanPath(joinPath(abspath(prefix, true, false), suffix));
+				return cleanPath(abspath(prefix, true, false) / suffix);
 			}
 		}
 		Error e = systemErrorCodeToError();
@@ -2629,12 +2622,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return S_ISDIR(fileAttributes);
 }
 
-ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
+ACTOR Future<std::vector<std::filesystem::path>> findFiles(std::filesystem::path directory,
                                                  std::string extension,
                                                  bool directoryOnly,
                                                  bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed
-	state std::vector<std::string> result;
+	state std::vector<std::filesystem::path> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state DIR* dip = nullptr;
@@ -2648,7 +2641,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 			}
 			std::string name(dit->d_name);
 			struct stat buf;
-			if (stat(joinPath(directory, name).c_str(), &buf)) {
+			if (stat(directory / name, &buf)) {
 				bool isError = errno != ENOENT;
 				TraceEvent(isError ? SevError : SevWarn, "StatFailed")
 				    .detail("Directory", directory)
@@ -2683,7 +2676,7 @@ ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
 
 namespace platform {
 
-std::vector<std::string> listFiles(std::string const& directory, std::string const& extension) {
+std::vector<std::filesystem::path> listFiles(std::string const& directory, std::string const& extension) {
 	return findFiles(directory, extension, false /* directoryOnly */, false).get();
 }
 
@@ -2703,13 +2696,13 @@ void findFilesRecursively(std::string const& path, std::vector<std::string>& out
 	// Add files to output, prefixing path
 	std::vector<std::string> files = platform::listFiles(path);
 	for (auto const& f : files)
-		out.push_back(joinPath(path, f));
+		out.push_back(path / f);
 
 	// Recurse for directories
 	std::vector<std::string> directories = platform::listDirectories(path);
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
-			findFilesRecursively(joinPath(path, dir), out);
+			findFilesRecursively(path / dir, out);
 	}
 }
 
@@ -2717,13 +2710,13 @@ ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::
 	// Add files to output, prefixing path
 	state std::vector<std::string> files = wait(listFilesAsync(path, ""));
 	for (auto const& f : files)
-		out->push_back(joinPath(path, f));
+		out->push_back(path / f);
 
 	// Recurse for directories
 	state std::vector<std::string> directories = wait(listDirectoriesAsync(path));
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
-			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
+			wait(findFilesRecursivelyAsync(path / dir, out));
 	}
 	return Void();
 }
@@ -2850,7 +2843,7 @@ bool fileExists(std::string const& filename) {
 	return std::filesystem::exists(filename); 
 }
 
-bool directoryExists(std::filesystem::path p) {
+bool directoryExists(std::filesystem::path const& p) {
 	return std::filesystem::exists(p) && std::filesystem::is_directory(p);
 }
 
@@ -2858,7 +2851,7 @@ int64_t fileSize(std::filesystem::path const& filename) {
 	return std::filesystem::file_size(filename);
 }
 
-time_t fileModifiedTime(const std::string const& filename) { // Leaving this here for extra protection
+time_t fileModifiedTime(std::string const& filename) { // Leaving this here for extra protection
 	return std::filesystem::last_write_time(filename);
 }
 
@@ -3003,8 +2996,8 @@ std::string getDefaultConfigPath() {
 #endif
 }
 
-std::string getDefaultClusterFilePath() {
-	return joinPath(getDefaultConfigPath(), "fdb.cluster");
+std::filesystem::path getDefaultClusterFilePath() {
+	return getDefaultConfigPath() / "fdb.cluster";
 }
 } // namespace platform
 
@@ -4104,39 +4097,39 @@ void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
 
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	    "abspath", abspath, "simfdb/backups/four/../two", true, true, cwd / "simfdb/backups/one/two");
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	    "abspath", abspath, "simfdb/backups/five/../two", true, true, cwd / "simfdb/backups/one/two");
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/two"));
+	    "abspath", abspath, "simfdb/backups/five/../two", true, false, cwd / "simfdb/backups/one/two");
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, true, platform_error());
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/three"));
+	    "abspath", abspath, "simfdb/backups/five/../three", true, false, cwd / "simfdb/backups/one/three");
 	errors += testPathFunction2("abspath",
 	                            abspath,
 	                            "simfdb/backups/five/../three/../four",
 	                            true,
 	                            false,
-	                            joinPath(cwd, "simfdb/backups/one/four"));
+	                            cwd /"simfdb/backups/one/four");
 
 	errors += testPathFunction2("parentDirectory",
 	                            parentDirectory,
 	                            "simfdb/backups/four/../two",
 	                            true,
 	                            true,
-	                            joinPath(cwd, "simfdb/backups/one/"));
+	                            cwd / "simfdb/backups/one/");
 	errors += testPathFunction2("parentDirectory",
 	                            parentDirectory,
 	                            "simfdb/backups/five/../two",
 	                            true,
 	                            true,
-	                            joinPath(cwd, "simfdb/backups/one/"));
+	                            cwd / "simfdb/backups/one/");
 	errors += testPathFunction2("parentDirectory",
 	                            parentDirectory,
 	                            "simfdb/backups/five/../two",
 	                            true,
 	                            false,
-	                            joinPath(cwd, "simfdb/backups/one/"));
+	                            cwd, "simfdb/backups/one/");
 	errors += testPathFunction2(
 	    "parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true, platform_error());
 	errors += testPathFunction2("parentDirectory",
@@ -4144,13 +4137,13 @@ void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 	                            "simfdb/backups/five/../three",
 	                            true,
 	                            false,
-	                            joinPath(cwd, "simfdb/backups/one/"));
+	                            cwd / "simfdb/backups/one/");
 	errors += testPathFunction2("parentDirectory",
 	                            parentDirectory,
 	                            "simfdb/backups/five/../three/../four",
 	                            true,
 	                            false,
-	                            joinPath(cwd, "simfdb/backups/one/"));
+	                            cwd / "simfdb/backups/one/");
 }
 #else
 void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {}
@@ -4197,47 +4190,47 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	errors += testPathFunction2("abspath", abspath, "/a", true, false, "/a");
 	errors += testPathFunction2("abspath", abspath, "one/two/three/four", false, true, platform_error());
 	errors +=
-	    testPathFunction2("abspath", abspath, "one/two/three/four", false, false, joinPath(cwd, "one/two/three/four"));
+	    testPathFunction2("abspath", abspath, "one/two/three/four", false, false, cwd / "one/two/three/four");
 	errors += testPathFunction2(
-	    "abspath", abspath, "one/two/three/./four", false, false, joinPath(cwd, "one/two/three/four"));
+	    "abspath", abspath, "one/two/three/./four", false, false, cwd / "one/two/three/four");
 	errors += testPathFunction2(
-	    "abspath", abspath, "one/two/three/./four", false, false, joinPath(cwd, "one/two/three/four"));
+	    "abspath", abspath, "one/two/three/./four", false, false, cwd / "one/two/three/four");
 	errors +=
-	    testPathFunction2("abspath", abspath, "one/two/three/./four/..", false, false, joinPath(cwd, "one/two/three"));
+	    testPathFunction2("abspath", abspath, "one/two/three/./four/..", false, false, cwd / "one/two/three");
 	errors += testPathFunction2(
-	    "abspath", abspath, "one/./two/../three/./four", false, false, joinPath(cwd, "one/three/four"));
+	    "abspath", abspath, "one/./two/../three/./four", false, false, cwd / "one/three/four");
 	errors += testPathFunction2("abspath", abspath, "one/./two/../three/./four", false, true, platform_error());
 	errors += testPathFunction2("abspath", abspath, "one/two/three/./four", false, true, platform_error());
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/one/two/three", false, true, joinPath(cwd, "simfdb/backups/one/two/three"));
+	    "abspath", abspath, "simfdb/backups/one/two/three", false, true, cwd / "simfdb/backups/one/two/three");
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/one/two/threefoo", false, true, platform_error());
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/four/../two", false, false, joinPath(cwd, "simfdb/backups/two"));
+	    "abspath", abspath, "simfdb/backups/four/../two", false, false, cwd / "simfdb/backups/two");
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", false, true, platform_error());
 	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", false, true, platform_error());
 	errors += testPathFunction2(
-	    "abspath", abspath, "simfdb/backups/five/../two", false, false, joinPath(cwd, "simfdb/backups/two"));
-	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", false, false, joinPath(cwd, "foo2/bar"));
+	    "abspath", abspath, "simfdb/backups/five/../two", false, false, cwd / "simfdb/backups/two");
+	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", false, false, cwd / "foo2/bar");
 	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", false, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", true, false, joinPath(cwd, "foo2/bar"));
+	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", true, false, cwd / "foo2/bar");
 	errors += testPathFunction2("abspath", abspath, "foo/./../foo2/./bar//", true, true, platform_error());
 
 	errors += testPathFunction2("parentDirectory", parentDirectory, "", true, false, platform_error());
 	errors += testPathFunction2("parentDirectory", parentDirectory, "/", true, false, "/");
 	errors += testPathFunction2("parentDirectory", parentDirectory, "/a", true, false, "/");
 	errors +=
-	    testPathFunction2("parentDirectory", parentDirectory, ".", false, false, cleanPath(joinPath(cwd, "..")) + "/");
+	    testPathFunction2("parentDirectory", parentDirectory, ".", false, false, cleanPath(cwd / "..") + "/");
 	errors += testPathFunction2("parentDirectory", parentDirectory, "./foo", false, false, cleanPath(cwd) + "/");
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "one/two/three/four", false, true, platform_error());
 	errors += testPathFunction2(
-	    "parentDirectory", parentDirectory, "one/two/three/four", false, false, joinPath(cwd, "one/two/three/"));
+	    "parentDirectory", parentDirectory, "one/two/three/four", false, false, cwd / "one/two/three/");
 	errors += testPathFunction2(
-	    "parentDirectory", parentDirectory, "one/two/three/./four", false, false, joinPath(cwd, "one/two/three/"));
+	    "parentDirectory", parentDirectory, "one/two/three/./four", false, false, cwd / "one/two/three/");
 	errors += testPathFunction2(
-	    "parentDirectory", parentDirectory, "one/two/three/./four/..", false, false, joinPath(cwd, "one/two/"));
+	    "parentDirectory", parentDirectory, "one/two/three/./four/..", false, false, cwd / "one/two/");
 	errors += testPathFunction2(
-	    "parentDirectory", parentDirectory, "one/./two/../three/./four", false, false, joinPath(cwd, "one/three/"));
+	    "parentDirectory", parentDirectory, "one/./two/../three/./four", false, false, cwd / "one/three/");
 	errors += testPathFunction2(
 	    "parentDirectory", parentDirectory, "one/./two/../three/./four", false, true, platform_error());
 	errors +=
@@ -4247,7 +4240,7 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	                            "simfdb/backups/one/two/three",
 	                            false,
 	                            true,
-	                            joinPath(cwd, "simfdb/backups/one/two/"));
+	                            cwd / "simfdb/backups/one/two/");
 	errors += testPathFunction2(
 	    "parentDirectory", parentDirectory, "simfdb/backups/one/two/threefoo", false, true, platform_error());
 	errors += testPathFunction2("parentDirectory",
@@ -4255,7 +4248,7 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	                            "simfdb/backups/four/../two",
 	                            false,
 	                            false,
-	                            joinPath(cwd, "simfdb/backups/"));
+	                            cwd / "simfdb/backups/");
 	errors += testPathFunction2(
 	    "parentDirectory", parentDirectory, "simfdb/backups/four/../two", false, true, platform_error());
 	errors += testPathFunction2(
@@ -4265,13 +4258,13 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	                            "simfdb/backups/five/../two",
 	                            false,
 	                            false,
-	                            joinPath(cwd, "simfdb/backups/"));
+	                            cwd / "simfdb/backups/");
 	errors += testPathFunction2(
-	    "parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, false, joinPath(cwd, "foo2/"));
+	    "parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, false, cwd / "foo2/");
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", false, true, platform_error());
 	errors += testPathFunction2(
-	    "parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, false, joinPath(cwd, "foo2/"));
+	    "parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, false, cwd / "foo2/");
 	errors +=
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, true, platform_error());
 

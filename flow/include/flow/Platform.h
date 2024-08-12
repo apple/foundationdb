@@ -330,7 +330,7 @@ bool directoryExists(std::filesystem::path const& path);
 int64_t fileSize(std::filesystem::path const& filename);
 
 // Returns last modified time of the file.
-time_t fileModifiedTime(const std::filesystem::path const& filename); // Maybe this should be const for extra protection?
+time_t fileModifiedTime(std::filesystem::path const& filename); // Maybe this should be const for extra protection?
 
 // Returns true if file is deleted, false if it was not found, throws platform_error() otherwise
 // Consider using IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need durability!
@@ -356,8 +356,6 @@ void writeFileBytes(std::filesystem::path const& filename, const uint8_t* data, 
 // Write text into file
 void writeFile(std::filesystem::path const& filename, std::string const& content);
 
-std::filesystem::path joinPath(std::filesystem::path const& directory, std::filesystem::path const& filename); 
-
 // cleanPath() does a 'logical' resolution of the given path string to a canonical form *without*
 // following symbolic links or verifying the existence of any path components.  It removes redundant
 // "." references and duplicate separators, and resolves any ".." references that can be resolved
@@ -377,7 +375,7 @@ std::filesystem::path cleanPath(std::filesystem::path const& path);
 //   /a/.
 //   /a/./
 //   /a//..//
-std::filesystem::path popPath(const std::filesystem::path& path);
+std::filesystem::path popPath(std::filesystem::path const& path);
 
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
