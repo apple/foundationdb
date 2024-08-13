@@ -169,6 +169,19 @@ ACTOR Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> 
 	}
 }
 
+ACTOR Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
+	ThreadFuture<RangeResult> resultFuture =
+	    tr->getRange(fdb_cli::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+	RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
+	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+	std::set<NetworkAddress> inProgressExclusion;
+	for (const auto& addr : result) {
+		inProgressExclusion.insert(
+		    NetworkAddress::parse(addr.key.removePrefix(fdb_cli::exclusionInProgressSpecialKeyRange.begin).toString()));
+	}
+	return inProgressExclusion;
+}
+
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> db,
                                                                 std::set<AddressExclusion> exclusions,
                                                                 bool waitForAllExcluded) {
@@ -177,15 +190,10 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
 	loop {
 		inProgressExclusion.clear();
 		try {
-			state ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult exclusionInProgress = wait(safeThreadFutureToFuture(resultFuture));
-			ASSERT(!exclusionInProgress.more && exclusionInProgress.size() < CLIENT_KNOBS->TOO_MANY);
-			if (exclusionInProgress.empty())
+			std::set<NetworkAddress> result = wait(getInProgressExclusion(tr));
+			if (result.empty())
 				return inProgressExclusion;
-			for (const auto& addr : exclusionInProgress)
-				inProgressExclusion.insert(NetworkAddress::parse(
-				    addr.key.removePrefix(fdb_cli::exclusionInProgressSpecialKeyRange.begin).toString()));
+			inProgressExclusion = result;
 
 			// Check if all of the specified exclusions are done.
 			bool allExcluded = true;
@@ -306,6 +314,15 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 
 		if (failedAddresses.size() || failedLocalities.size()) {
 			printf("To return one of these servers to the cluster, type `include failed <addresses>'.\n");
+		}
+
+		printf("\n");
+
+		Reference<ITransaction> tr = db->createTransaction();
+		std::set<NetworkAddress> inProgressExclusion = wait(getInProgressExclusion(tr));
+		printf("There are currently %zu processes for which exclusion is in progress:\n", inProgressExclusion.size());
+		for (const auto& addr : inProgressExclusion) {
+			printf("%s\n", addr.toString().c_str());
 		}
 
 		return true;
@@ -457,7 +474,8 @@ CommandFactory excludeFactory(
         "        [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>]\n"
         "        [locality_processid:<excludeprocessid>] [locality_<KEY>:<localtyvalue>]",
         "exclude servers from the database by IP address or locality",
-        "If no addresses or localities are specified, lists the set of excluded addresses and localities.\n"
+        "If no addresses or localities are specified, lists the set of excluded addresses and localities in addition "
+        "to addresses for which exclusion is in progress.\n"
         "\n"
         "For each IP address or IP:port pair in <ADDRESS...> and/or each locality attribute (like dcid, "
         "zoneid, machineid, processid), adds the address/locality to the set of exclusions and waits until all "
