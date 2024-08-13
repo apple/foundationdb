@@ -2092,12 +2092,19 @@ void populateBitset(boost::dynamic_bitset<>& bs, std::vector<int>& ids) {
 // TODO: unit tests to stress UNICAST
 Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
-                                 Version minEnd) {
+                                 Version minMaxDVEnd,
+                                 Version minKCVEnd) {
 	std::vector<std::vector<int>> tLogLocIds;
 	int maxTLogLocId = std::numeric_limits<int>::min();
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
 	int bsSize = maxTLogLocId + 1; // bitset size, used below
 
+	// NOTE: We think the unicast recovery version is always greater than or equal to
+	// "min(DV)" (= "minMaxDVEnd"). To be conservative we use "min(KCV)" (= "minKCVEnd")
+	// as the default (starting) recovery version and later verify that the computed
+	// recovery version is greater than or equal to "minMaxDVEnd".
+	// @todo modify code to use "minMaxDVEnd" as the default (starting) recovery version
+	Version minEnd = minKCVEnd;
 	std::vector<Version> RVs(maxTLogLocId + 1, minEnd); // recovery versions of various tLogs
 
 	int tLogGroupIdx = 0;
@@ -2156,17 +2163,19 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 			}
 			// Update RV.
 			minTLogs = version;
-			prevVersion = version;
 			// Update recovery version vector.
 			for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
 				if (versionAvailableTLogs[version][id]) {
 					RVs[id] = version;
 				}
 			}
+			// Update prevVersion.
+			prevVersion = version;
 		}
 		minLogGroup = std::min(minLogGroup, minTLogs);
 		tLogGroupIdx++;
 	}
+	ASSERT_WE_THINK(minLogGroup >= minMaxDVEnd);
 	return minLogGroup;
 }
 
@@ -2427,6 +2436,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	state Version knownCommittedVersion = 0;
 	loop {
 		Version minEnd = std::numeric_limits<Version>::max();
+		Version minKCVEnd = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
 		std::vector<Future<Void>> changes;
 		std::vector<std::tuple<int, std::vector<TLogLockResult>>> logGroupResults;
@@ -2441,6 +2451,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor, std::get<2>(versions.get()));
 				maxEnd = std::max(maxEnd, std::get<1>(versions.get()));
 				minEnd = std::min(minEnd, std::get<1>(versions.get()));
+				minKCVEnd = std::min(minKCVEnd, std::get<0>(versions.get()));
 			}
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 		}
@@ -2451,7 +2462,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 			logSystem->recoverAt = minEnd;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				logSystem->recoverAt = getRecoverVersionUnicast(logServers, logGroupResults, minEnd);
+				logSystem->recoverAt = getRecoverVersionUnicast(logServers, logGroupResults, minEnd, minKCVEnd);
 				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
 			}
 
