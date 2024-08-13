@@ -23,6 +23,7 @@
 #include <string>
 #include <utility>
 
+#include "flow/Buggify.h"
 #include "flow/MkCert.h"
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
@@ -787,6 +788,8 @@ private:
 		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		state UID opId = deterministicRandom()->randomUniqueID();
+		state std::chrono::time_point<std::chrono::high_resolution_clock> realStartTime1 =
+		    std::chrono::high_resolution_clock::now();
 		if (randLog)
 			fmt::print(randLog,
 			           "SFR1 {0} {1} {2} {3} {4}\n",
@@ -796,8 +799,10 @@ private:
 			           length,
 			           offset);
 
-		wait(waitUntilDiskReady(self->diskParameters, length));
+		// wait(waitUntilDiskReady(self->diskParameters, length));
 
+		std::chrono::time_point<std::chrono::high_resolution_clock> realStartTime2 =
+		    std::chrono::high_resolution_clock::now();
 		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
 			throw io_error();
@@ -808,6 +813,14 @@ private:
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
 			throw io_error();
 		}
+		auto realEndTime = std::chrono::high_resolution_clock::now();
+		double duration_s1 =
+		    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime1).count() / 1e9;
+		double duration_s2 =
+		    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime2).count() / 1e9;
+		g_network->totalWFReadTime = g_network->totalWFReadTime + duration_s1;
+		g_network->totalFReadTime = g_network->totalWFReadTime + duration_s2;
+		g_network->totalFRead++;
 
 		if (randLog) {
 			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
@@ -842,8 +855,8 @@ private:
 			           offset);
 		}
 
-		if (self->delayOnWrite)
-			wait(waitUntilDiskReady(self->diskParameters, data.size()));
+		// if (self->delayOnWrite)
+		//	wait(waitUntilDiskReady(self->diskParameters, data.size()));
 
 		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
@@ -888,8 +901,8 @@ private:
 			throw io_error();
 		}
 
-		if (self->delayOnWrite)
-			wait(waitUntilDiskReady(self->diskParameters, 0));
+		// if (self->delayOnWrite)
+		//	wait(waitUntilDiskReady(self->diskParameters, 0));
 
 		if (_chsize(self->h, (long)size) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError")
@@ -924,8 +937,8 @@ private:
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
-		if (self->delayOnWrite)
-			wait(waitUntilDiskReady(self->diskParameters, 0, true));
+		// if (self->delayOnWrite)
+		//	wait(waitUntilDiskReady(self->diskParameters, 0, true));
 
 		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -982,7 +995,7 @@ private:
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
-		wait(waitUntilDiskReady(self->diskParameters, 0));
+		// wait(waitUntilDiskReady(self->diskParameters, 0));
 
 		int64_t pos = _lseeki64(self->h, 0L, SEEK_END);
 		if (pos == -1) {

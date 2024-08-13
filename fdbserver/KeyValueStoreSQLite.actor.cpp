@@ -20,6 +20,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/Buggify.h"
+#include <iostream>
+#include <string>
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
@@ -1204,7 +1206,12 @@ struct RawCursor {
 
 		if (db.fragment_values) {
 			if (rowLimit > 0) {
-				int r = moveTo(keys.begin);
+				// Zhe:
+				// std::cout << "ReadRangeBegin: " << std::to_string(rowLimit) << " " << keys.toString() << std::endl
+				//          << std::flush;
+				int r = moveTo(keys.begin, false, true);
+				// std::cout << "ReadRangeEnd: " << std::to_string(rowLimit) << " " << keys.toString() << std::endl
+				//           << std::flush;
 				if (r < 0)
 					moveNext();
 
@@ -1267,7 +1274,7 @@ struct RawCursor {
 		return result;
 	}
 
-	int moveTo(KeyRef key, bool ignore_fragment_mode = false) {
+	int moveTo(KeyRef key, bool ignore_fragment_mode = false, bool from_read_range = false) {
 		UnpackedRecord r;
 		r.pKeyInfo = &keyInfo;
 		r.flags =
@@ -1294,8 +1301,18 @@ struct RawCursor {
 			r.nField = 2;
 		}
 
+		/*if (from_read_range)
+		    std::cout << "MoveToBegin: " << std::to_string(ignore_fragment_mode) << " "
+		              << std::to_string(g_network->now()) << " " << key.toString() << std::endl
+		              << std::flush;*/
 		int result;
 		db.checkError("BtreeMovetoUnpacked", sqlite3BtreeMovetoUnpacked(cursor, &r, 0, 0, &result));
+
+		/*if (from_read_range)
+		    std::cout << "MoveToEnd: " << std::to_string(ignore_fragment_mode) << " "
+		              << std::to_string(g_network->now()) << " " << key.toString() << std::endl
+		              << std::flush;*/
+
 		valid = result >= 0 || !sqlite3BtreeEof(cursor);
 		return result;
 	}
@@ -1772,14 +1789,25 @@ private:
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& rr) {
+			// std::cout << "ReadRangeActionBegin: " << conn.filename << " " << rr.keys.toString() << std::endl
+			//           << std::flush;
 			auto realStartTime = std::chrono::high_resolution_clock::now();
 			rr.result.send(getCursor()->get().getRange(rr.keys, rr.rowLimit, rr.byteLimit));
 			++counter;
+			// std::cout << "ReadRangeActionEnd: " << conn.filename << " " << rr.keys.toString() << std::endl
+			//           << std::flush;
 			if (g_network->isSimulated()) {
 				auto realEndTime = std::chrono::high_resolution_clock::now();
 				double duration_s =
 				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				// g_network->readRangeTimeList.push_back(duration_s);
 				g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+				if (duration_s > g_network->maxReadRangeTime) {
+					g_network->maxReadRangeTime = duration_s;
+				}
+				if (duration_s < g_network->minReadRangeTime) {
+					g_network->minReadRangeTime = duration_s;
+				}
 			}
 		}
 	};

@@ -1841,6 +1841,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
 					g_network->totalSSReadRangeError++;
 					g_network->totalSSTrTooOldError++;
+					if (duration_s > g_network->maxReadRangeTime) {
+						g_network->maxReadRangeTime = duration_s;
+					}
+					if (duration_s < g_network->minReadRangeTime) {
+						g_network->minReadRangeTime = duration_s;
+					}
 				}
 				return;
 			}
@@ -1937,6 +1943,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
 					g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
 					g_network->totalSSReadRangeError++;
+					if (duration_s > g_network->maxReadRangeTime) {
+						g_network->maxReadRangeTime = duration_s;
+					}
+					if (duration_s < g_network->minReadRangeTime) {
+						g_network->minReadRangeTime = duration_s;
+					}
 				}
 				return;
 			}
@@ -1964,6 +1976,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				double duration_s =
 				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
 				g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+				// g_network->readRangeTimeList.push_back(duration_s);
+				if (duration_s > g_network->maxReadRangeTime) {
+					g_network->maxReadRangeTime = duration_s;
+				}
+				if (duration_s < g_network->minReadRangeTime) {
+					g_network->minReadRangeTime = duration_s;
+				}
 			}
 		}
 	};
@@ -1988,8 +2007,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// substantially more confidence in the correctness.
 		// TODO: Adapt the simulation framework to not advance time quickly when background reads/writes are occurring.
 		if (g_network->isSimulated()) {
-			writeThread = CoroThreadPool::createThreadPool(true);
-			readThreads = CoroThreadPool::createThreadPool(true);
+			writeThread = CoroThreadPool::createThreadPool(false);
+			readThreads = CoroThreadPool::createThreadPool(false);
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);

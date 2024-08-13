@@ -2545,6 +2545,9 @@ int main(int argc, char* argv[]) {
 			g_network->printSSOps();
 			g_network->printSSOpsError();
 			g_network->printSSOpsTime();
+			g_network->printFOpsTime();
+			g_network->printReadRangeTimes();
+			// g_network->printReadRangeDistribution();
 		}
 
 		// IFailureMonitor::failureMonitor().address_info.clear();

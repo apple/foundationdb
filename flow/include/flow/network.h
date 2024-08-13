@@ -160,6 +160,8 @@ public:
 	uint64_t totalSSReadRangeError = 0;
 	uint64_t totalSSTrTooOldError = 0;
 
+	uint64_t totalFRead = 0;
+
 	double totalReadTime = 0;
 	double totalOpenTime = 0;
 	double totalCloseTime = 0;
@@ -168,6 +170,13 @@ public:
 	double totalClearTime = 0;
 	double totalReadPrefixTime = 0;
 	double totalReadRangeTime = 0;
+	double totalFReadTime = 0;
+	double totalWFReadTime = 0;
+
+	double maxReadRangeTime = -1;
+	double minReadRangeTime = 9999999;
+
+	std::vector<double> readRangeTimeList;
 
 	void printSSOps() {
 		printf("Total SS Open %lu\n", totalSSOpen);
@@ -201,6 +210,30 @@ public:
 		printf("Total SS Set Time %f\n", totalSetTime);
 		printf("Total SS Clear Time %f\n", totalClearTime);
 		printf("Total SS Commit Time %f\n", totalCommitTime);
+	}
+
+	void printFOpsTime() {
+		printf("Total File Read %lu\n", totalFRead);
+		printf("Total File Read Time %f\n", totalFReadTime);
+		printf("Total File Wait Read Time %f\n", totalWFReadTime);
+	}
+
+	void printReadRangeTimes() {
+		printf("Total Max SS Read Range Time %f\n", maxReadRangeTime);
+		printf("Total Min SS Read Range Time %f\n", minReadRangeTime);
+	}
+
+	void printReadRangeDistribution() {
+		int n = 1000;
+		if (readRangeTimeList.size() < n) {
+			return;
+		}
+		std::sort(readRangeTimeList.begin(), readRangeTimeList.end());
+		int section_n = readRangeTimeList.size() / n;
+		for (int i = 0; i < n; i++) {
+			int index = section_n * i;
+			printf("SS Read Range Time Distribution %d %f\n", i, readRangeTimeList[index]);
+		}
 	}
 
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
