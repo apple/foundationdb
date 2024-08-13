@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,11 +51,22 @@ public:
 	virtual ~IRocksDBSstFileWriter() {}
 };
 
+class IRocksDBSstFileReader {
+public:
+	virtual void open(const std::string localFile) = 0;
+
+	virtual KeyValue next() = 0;
+
+	virtual bool hasNext() const = 0;
+
+	virtual ~IRocksDBSstFileReader() {}
+};
+
 struct CheckpointFile {
 	constexpr static FileIdentifier file_identifier = 13804348;
 	std::string path;
 	KeyRange range;
-	int64_t size; // Logical bytes of the checkpoint.
+	int64_t size = 0; // Logical bytes of the checkpoint.
 
 	CheckpointFile() = default;
 	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}
@@ -345,6 +356,8 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
 std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
 
 std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
+
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader();
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,6 +59,8 @@ public:
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
 
+	Optional<DDBulkLoadTask> bulkLoadTask;
+
 	RelocateData();
 	explicit RelocateData(RelocateShard const& rs);
 
@@ -109,6 +111,7 @@ struct DDQueueInitParams {
 	std::vector<TeamCollectionInterface> const& teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes;
 	int const& teamSize;
 	int const& singleRegionTeamSize;
@@ -242,6 +245,7 @@ public:
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;

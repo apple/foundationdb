@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ public:
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 
 	KeyRangeMap<ShardTrackedData> shards;
 
@@ -95,6 +96,8 @@ public:
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
+		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection =
+		    makeReference<BulkLoadTaskCollection>(ddcx.id(), SERVER_KNOBS->DD_BULKLOAD_PARALLELISM);
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(
@@ -104,17 +107,20 @@ public:
 		                                       .output = output,
 		                                       .shardsAffectedByTeamFailure = ddcx.shardsAffectedByTeamFailure,
 		                                       .physicalShardCollection = physicalShardCollection,
+		                                       .bulkLoadTaskCollection = bulkLoadTaskCollection,
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
-		                                       .ddTenantCache = {} });
+		                                       .ddTenantCache = {},
+		                                       .usableRegions = -1 });
 		actors.add(DataDistributionTracker::run(shardTracker,
 		                                        initData,
 		                                        getShardMetrics.getFuture(),
 		                                        getTopKMetrics.getFuture(),
 		                                        getShardMetricsList.getFuture(),
 		                                        getAverageShardBytes.getFuture(),
-		                                        triggerStorageQueueRebalance.getFuture()));
+		                                        triggerStorageQueueRebalance.getFuture(),
+		                                        triggerShardBulkLoading.getFuture()));
 
 		actors.add(relocateShardReporter(this, output.getFuture()));
 

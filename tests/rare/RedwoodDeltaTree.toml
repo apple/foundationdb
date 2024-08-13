@@ -1,3 +1,7 @@
+# High priority number decreases the chance to run this test.
+# Priority 1.0 is the default in TestHarness2
+testPriority = '50'
+
 [[test]]
 testTitle = 'RedwoodDeltaTree'
 useDB = false

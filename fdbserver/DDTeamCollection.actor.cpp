@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -193,6 +193,109 @@ public:
 			}
 		}
 		req.reply.send(std::make_pair(res, false));
+	}
+
+	// Random selection for load balance
+	ACTOR static Future<Void> getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
+		try {
+			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReqReceived", self->distributorId)
+			    .detail("TCReady", self->readyToStart.isReady())
+			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
+			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
+			    .detail("SrcIds", describe(req.src))
+			    .detail("Primary", self->isPrimary())
+			    .detail("TeamSize", self->teams.size());
+			wait(self->checkBuildTeams());
+
+			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamCheckBuildTeamDone", self->distributorId)
+			    .detail("TCReady", self->readyToStart.isReady())
+			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
+			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
+			    .detail("SrcIds", describe(req.src))
+			    .detail("Primary", self->isPrimary())
+			    .detail("TeamSize", self->teams.size());
+
+			if (!self->primary && !self->readyToStart.isReady()) {
+				// When remote DC is not ready, DD shouldn't reply with a new team because
+				// a data movement to that team can't be completed and such a move
+				// may block the primary DC from reaching "storage_recovered".
+				auto team = self->findTeamFromServers(req.completeSources, /*wantHealthy=*/false);
+				TraceEvent(SevWarn, "DDBulkLoadTaskGetTeamRemoteDCNotReady", self->distributorId)
+				    .suppressFor(1.0)
+				    .detail("Primary", self->primary)
+				    .detail("Team", team.present() ? describe(team.get()->getServerIDs()) : "");
+				req.reply.send(std::make_pair(team, true));
+				return Void();
+			}
+
+			self->updateTeamPivotValues();
+
+			std::vector<Reference<TCTeamInfo>> candidateTeams;
+			int unhealthyTeamCount = 0;
+			int notEligibileTeamCount = 0;
+			int duplicatedCount = 0;
+			for (const auto& dest : self->teams) {
+				if (!dest->isHealthy()) {
+					unhealthyTeamCount++;
+					continue;
+				}
+				bool allDestServerHaveLowDiskUtil =
+				    dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0;
+				if (!allDestServerHaveLowDiskUtil) {
+					notEligibileTeamCount++;
+					continue;
+				}
+				bool ok = true;
+				for (const auto& srcId : req.src) {
+					std::vector<UID> serverIds = dest->getServerIDs();
+					for (const auto& serverId : serverIds) {
+						if (serverId == srcId) {
+							ok = false; // Do not select a team that has a server owning the bulk loading range
+							break;
+						}
+					}
+					if (!ok) {
+						break;
+					}
+				}
+				if (!ok) {
+					duplicatedCount++;
+					continue;
+				}
+				candidateTeams.push_back(dest);
+			}
+			Optional<Reference<IDataDistributionTeam>> res;
+			if (candidateTeams.size() >= 1) {
+				res = deterministicRandom()->randomChoice(candidateTeams);
+				TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReply", self->distributorId)
+				    .detail("TCReady", self->readyToStart.isReady())
+				    .detail("SrcIds", describe(req.src))
+				    .detail("Primary", self->isPrimary())
+				    .detail("TeamSize", self->teams.size())
+				    .detail("CandidateSize", candidateTeams.size())
+				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
+				    .detail("DuplicatedCount", duplicatedCount)
+				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
+				    .detail("DestIds", describe(res.get()->getServerIDs()))
+				    .detail("DestTeam", res.get()->getTeamID());
+			} else {
+				TraceEvent(SevWarnAlways, "DDBulkLoadTaskGetTeamFailedToFindValidTeam", self->distributorId)
+				    .detail("TCReady", self->readyToStart.isReady())
+				    .detail("SrcIds", describe(req.src))
+				    .detail("Primary", self->isPrimary())
+				    .detail("TeamSize", self->teams.size())
+				    .detail("CandidateSize", candidateTeams.size())
+				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
+				    .detail("DuplicatedCount", duplicatedCount)
+				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
+			}
+			req.reply.send(std::make_pair(res, false));
+			return Void();
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled && req.reply.canBeSet())
+				req.reply.sendError(e);
+			throw;
+		}
 	}
 
 	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
@@ -766,6 +869,7 @@ public:
 			}
 
 			TraceEvent("BuildTeamsBegin", self->distributorId)
+			    .detail("Primary", self->isPrimary())
 			    .detail("TeamsToBuild", teamsToBuild)
 			    .detail("DesiredTeams", desiredTeams)
 			    .detail("MaxTeams", maxTeams)
@@ -3022,6 +3126,8 @@ public:
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
 			if (req.findTeamByServers) {
 				getTeamByServers(self, req);
+			} else if (req.findTeamForBulkLoad) {
+				self->addActor.send(getTeamForBulkLoad(self, req));
 			} else {
 				self->addActor.send(self->getTeam(req));
 			}
@@ -3575,7 +3681,7 @@ public:
 
 			for (i = 0; i < machineTeams.size(); i++) {
 				const auto& team = machineTeams[i];
-				TraceEvent("MachineTeamInfo", self->getDistributorId())
+				TraceEvent(g_network->isSimulated() ? SevVerbose : SevInfo, "MachineTeamInfo", self->getDistributorId())
 				    .detail("TeamIndex", i)
 				    .detail("MachineIDs", team->getMachineIDsStr())
 				    .detail("ServerTeams", team->getServerTeams().size())

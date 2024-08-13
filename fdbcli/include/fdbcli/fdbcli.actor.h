@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -204,7 +204,12 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
                                            std::vector<StringRef> tokens);
 // Retrieve audit storage status
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
+// Retrieve shard information command
 ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
+// Bulk loading command
+ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                       Database cx,
+                                       std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command

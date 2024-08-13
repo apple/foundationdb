@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1969,6 +1969,7 @@ ACTOR Future<bool> runTest(Database cx,
 			fTestResults = timeoutError(fTestResults, spec.timeout);
 		}
 		DistributedTestResults _testResults = wait(fTestResults);
+		printf("Test complete\n");
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
 		if (g_network->isSimulated() && savedDisableDuration > 0) {
@@ -1992,6 +1993,7 @@ ACTOR Future<bool> runTest(Database cx,
 	state bool ok = testResults.ok();
 
 	if (spec.useDB) {
+		printf("%d test clients passed; %d test clients failed\n", testResults.successes, testResults.failures);
 		if (spec.dumpAfterTest) {
 			try {
 				wait(timeoutError(dumpDatabase(cx, "dump after " + printable(spec.title) + ".html", allKeys), 30.0));
@@ -2006,13 +2008,16 @@ ACTOR Future<bool> runTest(Database cx,
 		// Disable consistency scan before checkConsistency because otherwise it will prevent quiet database from
 		// quiescing
 		wait(checkConsistencyScanAfterTest(cx, consistencyScanState));
+		printf("Consistency scan done\n");
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
 			state bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 			try {
+				printf("Running urgent consistency check...\n");
 				// For testing urgent consistency check
 				wait(timeoutError(checkConsistencyUrgentSim(cx, testers), 20000.0));
+				printf("Urgent consistency check done\nRunning consistency check...\n");
 				wait(timeoutError(checkConsistency(cx,
 				                                   testers,
 				                                   quiescent,
@@ -2023,6 +2028,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   spec.databasePingDelay,
 				                                   dbInfo),
 				                  20000.0));
+				printf("Consistency check done\n");
 			} catch (Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
 				ok = false;

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/AccumulativeChecksum.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
 #include "fdbclient/StorageServerInterface.h"
@@ -42,7 +43,9 @@ enum class DataMoveType : uint8_t {
 	LOGICAL = 0,
 	PHYSICAL = 1,
 	PHYSICAL_EXP = 2,
-	NUMBER_OF_TYPES = 3,
+	LOGICAL_BULKLOAD = 3,
+	PHYSICAL_BULKLOAD = 4,
+	NUMBER_OF_TYPES = 5,
 };
 
 // One-to-one relationship to the priority knobs
@@ -517,6 +520,12 @@ extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 
 extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
+
+extern const KeyRef bulkLoadModeKey;
+extern const KeyRangeRef bulkLoadKeys;
+extern const KeyRef bulkLoadPrefix;
+const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
+BulkLoadState decodeBulkLoadState(const ValueRef& value);
 
 // Keys to view and control tag throttling
 extern const KeyRangeRef tagThrottleKeys;

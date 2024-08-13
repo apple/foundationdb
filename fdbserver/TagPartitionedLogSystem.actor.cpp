@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,17 +21,42 @@
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
 #include <boost/dynamic_bitset.hpp>
 
+#include <utility>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
-	wait(f);
-	Version minVersion = std::numeric_limits<Version>::max();
-	for (auto& reply : replies) {
-		if (reply.isReady() && !reply.isError()) {
-			minVersion = std::min(minVersion, reply.get().version);
+ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
+                                          std::vector<std::pair<UID, Future<TLogCommitReply>>> replies) {
+	try {
+		wait(f);
+		Version minVersion = std::numeric_limits<Version>::max();
+		for (const auto& [_tlogID, reply] : replies) {
+			if (reply.isReady() && !reply.isError()) {
+				minVersion = std::min(minVersion, reply.get().version);
+			}
 		}
+		return minVersion;
+	} catch (Error& err) {
+		if (err.code() == error_code_operation_cancelled) {
+			TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled");
+			int index = 0;
+			for (const auto& [tlogID, reply] : replies) {
+				if (reply.isReady()) {
+					continue;
+				}
+				std::string message;
+				if (reply.isError()) {
+					// FIXME Use C++20 format when it is available
+					message = format("TLogPushRespondError%04d", index++);
+				} else {
+					message = format("TLogPushNoResponse%04d", index++);
+				}
+				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, message.c_str())
+				    .detail("TLogID", tlogID);
+			}
+		}
+		throw;
 	}
-	return minVersion;
 }
 
 LogSet::LogSet(const TLogSet& tLogSet)
@@ -546,32 +571,27 @@ ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Referen
 	return t;
 }
 
-Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
-                                              Version version,
-                                              Version knownCommittedVersion,
-                                              Version minKnownCommittedVersion,
+Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& versionSet,
                                               LogPushData& data,
                                               SpanContext const& spanContext,
                                               Optional<UID> debugID,
                                               Optional<std::unordered_map<uint16_t, Version>> tpcvMap) {
 	// FIXME: Randomize request order as in LegacyLogSystem?
-	std::vector<Future<Void>> quorumResults;
-	std::vector<Future<TLogCommitReply>> allReplies;
-	int location = 0;
-	Version seqPrevVersion = prevVersion; // prevVersion provided by the sequencer
-	Span span("TPLS:push"_loc, spanContext);
+	Version prevVersion = versionSet.prevVersion; // this might be updated when version vector unicast is enabled
+	Version seqPrevVersion = versionSet.prevVersion; // a copy of the prevVersion provided by the sequencer
 
 	std::unordered_map<int, int> tLogCount;
 	std::unordered_map<int, std::vector<int>> tLogLocIds;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		int location = 0;
 		int logGroupLocal = 0;
-		for (auto& it : tLogs) {
+		const auto& tpcvMapRef = tpcvMap.get();
+		for (const auto& it : tLogs) {
 			if (!it->isLocal) {
 				continue;
 			}
-			for (int loc = 0; loc < it->logServers.size(); loc++) {
-				if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
+			for (size_t loc = 0; loc < it->logServers.size(); loc++) {
+				if (tpcvMapRef.contains(location)) {
 					tLogCount[logGroupLocal]++;
 					tLogLocIds[logGroupLocal].push_back(location);
 				}
@@ -580,59 +600,74 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 			logGroupLocal++;
 		}
 	}
-	int logGroupLocal = 0;
-	for (auto& it : tLogs) {
-		if (it->isLocal && it->logServers.size()) {
-			if (it->connectionResetTrackers.size() == 0) {
-				for (int i = 0; i < it->logServers.size(); i++) {
-					it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
-				}
-			}
-			if (it->tlogPushDistTrackers.empty()) {
-				for (int i = 0; i < it->logServers.size(); i++) {
-					it->tlogPushDistTrackers.push_back(
-					    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
-					                            it->logServers[i]->get().interf().address().toString(),
-					                            Histogram::Unit::milliseconds));
-				}
-			}
-			std::vector<Future<Void>> tLogCommitResults;
-			for (int loc = 0; loc < it->logServers.size(); loc++) {
-				Standalone<StringRef> msg = data.getMessages(location);
-				data.recordEmptyMessage(location, msg);
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-					if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
-						prevVersion = tpcvMap.get()[location];
-					} else {
-						location++;
-						continue;
-					}
-				}
 
-				allReplies.push_back(recordPushMetrics(
-				    it->connectionResetTrackers[loc],
-				    it->tlogPushDistTrackers[loc],
-				    it->logServers[loc]->get().interf().address(),
-				    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
-				                                                                          msg.arena(),
-				                                                                          prevVersion,
-				                                                                          version,
-				                                                                          knownCommittedVersion,
-				                                                                          minKnownCommittedVersion,
-				                                                                          seqPrevVersion,
-				                                                                          msg,
-				                                                                          tLogCount[logGroupLocal],
-				                                                                          tLogLocIds[logGroupLocal],
-				                                                                          debugID),
-				                                                        TaskPriority::ProxyTLogCommitReply)));
-				Future<Void> commitSuccess = success(allReplies.back());
-				addActor.get().send(commitSuccess);
-				tLogCommitResults.push_back(commitSuccess);
-				location++;
-			}
-			quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
-			logGroupLocal++;
+	int location = 0;
+	int logGroupLocal = 0;
+	std::vector<Future<Void>> quorumResults;
+	std::vector<std::pair<UID, Future<TLogCommitReply>>> allReplies;
+	const Span span("TPLS:push"_loc, spanContext);
+	for (auto& it : tLogs) {
+		if (!it->isLocal) {
+			// Remote TLogs should read from LogRouter
+			continue;
 		}
+		if (it->logServers.size() == 0) {
+			// Empty TLog set
+			continue;
+		}
+
+		if (it->connectionResetTrackers.size() == 0) {
+			for (int i = 0; i < it->logServers.size(); i++) {
+				it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
+			}
+		}
+		if (it->tlogPushDistTrackers.empty()) {
+			for (int i = 0; i < it->logServers.size(); i++) {
+				it->tlogPushDistTrackers.push_back(
+				    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
+				                            it->logServers[i]->get().interf().address().toString(),
+				                            Histogram::Unit::milliseconds));
+			}
+		}
+
+		std::vector<Future<Void>> tLogCommitResults;
+		for (size_t loc = 0; loc < it->logServers.size(); loc++) {
+			Standalone<StringRef> msg = data.getMessages(location);
+			data.recordEmptyMessage(location, msg);
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				if (tpcvMap.get().contains(location)) {
+					prevVersion = tpcvMap.get()[location];
+				} else {
+					location++;
+					continue;
+				}
+			}
+
+			const auto& interface = it->logServers[loc]->get().interf();
+			const auto request = TLogCommitRequest(spanContext,
+			                                       msg.arena(),
+			                                       prevVersion,
+			                                       versionSet.version,
+			                                       versionSet.knownCommittedVersion,
+			                                       versionSet.minKnownCommittedVersion,
+			                                       seqPrevVersion,
+			                                       msg,
+			                                       tLogCount[logGroupLocal],
+			                                       tLogLocIds[logGroupLocal],
+			                                       debugID);
+			auto tLogReply = recordPushMetrics(it->connectionResetTrackers[loc],
+			                                   it->tlogPushDistTrackers[loc],
+			                                   interface.address(),
+			                                   interface.commit.getReply(request, TaskPriority::ProxyTLogCommitReply));
+
+			allReplies.emplace_back(interface.id(), tLogReply);
+			Future<Void> commitSuccess = success(tLogReply);
+			addActor.get().send(commitSuccess);
+			tLogCommitResults.push_back(commitSuccess);
+			location++;
+		}
+		quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
+		logGroupLocal++;
 	}
 
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
@@ -1701,6 +1736,10 @@ Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	                remoteLocality,
 	                allTags,
 	                recruitmentStalled);
+}
+
+LogSystemType TagPartitionedLogSystem::getLogSystemType() const {
+	return logSystemType;
 }
 
 LogSystemConfig TagPartitionedLogSystem::getLogSystemConfig() const {

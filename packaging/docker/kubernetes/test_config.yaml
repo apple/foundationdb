@@ -18,7 +18,7 @@
 #
 
 # This file provides an example of using a statefulset to launch FDB processes
-# using the foundationdb-kubernetes image.
+# using the fdb-kubernetes-monitor image.
 #
 # This is not a recommended way to run production clusters, but it can be useful
 # to test the image in development.
@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: foundationdb
-          image: foundationdb/foundationdb-kubernetes:7.1.5-local
+          image: foundationdb/fdb-kubernetes-monitor:7.1.5-local
           imagePullPolicy: IfNotPresent
           args:
             - --input-dir
@@ -91,7 +91,7 @@ spec:
             - name: logs
               mountPath: /var/fdb/logs
         - name: foundationdb-sidecar
-          image: foundationdb/foundationdb-kubernetes:7.1.6-local
+          image: foundationdb/fdb-kubernetes-monitor:7.1.6-local
           imagePullPolicy: IfNotPresent
           args:
             - --mode
@@ -239,8 +239,8 @@ spec:
         - name: dynamic-conf
           emptyDir: {}
       initContainers:
-        - name: foundationdb-kubernetes-init
-          image: foundationdb/foundationdb-kubernetes:7.1.5-local
+        - name: fdb-kubernetes-monitor-init
+          image: foundationdb/fdb-kubernetes-monitor:7.1.5-local
           imagePullPolicy: IfNotPresent
           args:
             - "--mode"

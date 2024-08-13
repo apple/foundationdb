@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2790,6 +2790,173 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 	}
 
 	return auditId;
+}
+
+ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
+	state Transaction tr(cx);
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			if (oldMode != mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				BinaryWriter wrLastWrite(Unversioned());
+				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
+				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+				tr.set(bulkLoadModeKey, wr.toValue());
+				wait(tr.commit());
+				TraceEvent("DDBulkLoadModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(
+    Database cx,
+    KeyRange rangeToRead,
+    size_t limit = 10,
+    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>()) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state std::vector<BulkLoadState> res;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkLoadPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadState bulkLoadState = decodeBulkLoadState(rangeResult[i].value);
+			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
+			if (range != bulkLoadState.getRange()) {
+				ASSERT(bulkLoadState.getRange().contains(range));
+				continue;
+			}
+			if (!phase.present() || phase.get() == bulkLoadState.phase) {
+				res.push_back(bulkLoadState);
+			}
+			if (res.size() >= limit) {
+				return res;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	return res;
+}
+
+// Submit bulkload task and overwrite any existing task
+ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (bulkLoadTask.phase != BulkLoadPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Task", bulkLoadTask.toString());
+				throw bulkload_task_failed();
+			}
+			bulkLoadTask.submitTime = now();
+			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadTask.getRange(), bulkLoadStateValue(bulkLoadTask)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+// Get bulk load task metadata with range and taskId and phase selector
+// Throw error if the task is outdated or the task is not in any input phase at the tr read version
+ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
+                                            KeyRange range,
+                                            UID taskId,
+                                            std::vector<BulkLoadPhase> phases) {
+	state BulkLoadState bulkLoadState;
+	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
+	if (result.size() > 2) {
+		throw bulkload_task_outdated();
+	} else if (result[0].value.empty()) {
+		throw bulkload_task_outdated();
+	}
+	ASSERT(result.size() == 2);
+	bulkLoadState = decodeBulkLoadState(result[0].value);
+	ASSERT(bulkLoadState.getTaskId().isValid());
+	if (taskId != bulkLoadState.getTaskId()) {
+		// This task is overwritten by a newer task
+		throw bulkload_task_outdated();
+	}
+	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
+	if (bulkLoadState.getRange() != currentRange) {
+		// This task is partially overwritten by a newer task
+		ASSERT(bulkLoadState.getRange().contains(currentRange));
+		throw bulkload_task_outdated();
+	}
+	if (phases.size() > 0 && !bulkLoadState.onAnyPhase(phases)) {
+		throw bulkload_task_outdated();
+	}
+	return bulkLoadState;
+}
+
+// Update bulkload task to acknowledge state
+ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
+	loop {
+		state Transaction tr(cx);
+		state BulkLoadState bulkLoadState;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(store(bulkLoadState,
+			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
+			bulkLoadState.phase = BulkLoadPhase::Acknowledged;
+			ASSERT(range == bulkLoadState.getRange() && taskId == bulkLoadState.getTaskId());
+			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadState.getRange(), bulkLoadStateValue(bulkLoadState)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {

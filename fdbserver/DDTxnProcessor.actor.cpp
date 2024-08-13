@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -298,6 +298,14 @@ class DDTxnProcessorImpl {
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 					return result;
 				}
+
+				result->bulkLoadMode = 0;
+				Optional<Value> bulkLoadMode = wait(tr.get(bulkLoadModeKey));
+				if (bulkLoadMode.present()) {
+					BinaryReader rd(bulkLoadMode.get(), Unversioned());
+					rd >> result->bulkLoadMode;
+				}
+				TraceEvent(SevInfo, "DDBulkLoadInitMode").detail("Mode", result->bulkLoadMode);
 
 				state Future<std::vector<ProcessData>> workers = getWorkers(&tr);
 				state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);

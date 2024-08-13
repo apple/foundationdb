@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -357,7 +357,7 @@ func (o DatabaseOptions) SetMachineId(param string) error {
 
 // Specify the datacenter ID that was passed to fdbserver processes running in the same datacenter as this client, for better location-aware load balancing.
 //
-// Parameter: Hexadecimal ID
+// Parameter: A string identifier for the datacenter
 func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 #define FDBCLIENT_STORAGCHECKPOINT_H
 #pragma once
 
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 
 const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
@@ -173,6 +174,7 @@ struct DataMoveMetaData {
 	std::set<UID> checkpoints;
 	int16_t phase; // DataMoveMetaData::Phase.
 	int8_t mode;
+	Optional<BulkLoadState> bulkLoadState; // set if the data move is a bulk load data move
 
 	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
@@ -192,12 +194,15 @@ struct DataMoveMetaData {
 		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
 		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest) +
 		                  ", [Checkpoints]: " + describe(checkpoints);
+		if (bulkLoadState.present()) {
+			res = res + ", [BulkLoadState]: " + bulkLoadState.get().toString();
+		}
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode);
+		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadState);
 	}
 };
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1710,6 +1710,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					bool _result = wait(makeInterruptable(locationMetadataCommandActor(localDb, tokens)));
 					if (!_result) {
 						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "bulkload")) {
+					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(ccf, localDb, tokens)));
+					if (taskId.isValid()) {
+						printf("Received bulkload task: %s\n", taskId.toString().c_str());
 					}
 					continue;
 				}

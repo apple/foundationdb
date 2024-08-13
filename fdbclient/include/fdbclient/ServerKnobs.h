@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -249,7 +249,8 @@ public:
 	// shard metrics will update immediately
 	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
 	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // Experimental. Enable to enforce shard split when write traffic is high
-
+	int DD_SHARD_USABLE_REGION_CHECK_RATE; // Assuming all shards need to repair, the (rough) number of shards moving
+	                                       // for usable region per second. Set 0 to disable shard usable region check
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
@@ -379,6 +380,13 @@ public:
 	                            // requested
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
+	int BULKLOAD_FILE_BYTES_MAX; // the maximum bytes of files to inject by bulk loading
+	double DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC; // seconds to delay shard boundary change when blocked by bulk
+	                                                    // loading
+	int DD_BULKLOAD_TASK_METADATA_READ_SIZE; // the number of bulk load tasks read from metadata at a time
+	int DD_BULKLOAD_PARALLELISM; // the maximum number of running bulk load tasks
+	double DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk load scheduler has to wait
+	                                              // between two rounds
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

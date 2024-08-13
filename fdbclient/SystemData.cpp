@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1223,6 +1223,22 @@ const KeyRef moveKeysLockWriteKey = "\xff/moveKeysLock/Write"_sr;
 
 const KeyRef dataDistributionModeKey = "\xff/dataDistributionMode"_sr;
 const UID dataDistributionModeLock = UID(6345, 3425);
+
+// Bulk loading keys
+const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
+const KeyRangeRef bulkLoadKeys = KeyRangeRef("\xff/bulkLoad/"_sr, "\xff/bulkLoad0"_sr);
+const KeyRef bulkLoadPrefix = bulkLoadKeys.begin;
+
+const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {
+	return ObjectWriter::toValue(bulkLoadState, IncludeVersion());
+}
+
+BulkLoadState decodeBulkLoadState(const ValueRef& value) {
+	BulkLoadState bulkLoadState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkLoadState);
+	return bulkLoadState;
+}
 
 // Keys to view and control tag throttling
 const KeyRangeRef tagThrottleKeys = KeyRangeRef("\xff\x02/throttledTags/tag/"_sr, "\xff\x02/throttledTags/tag0"_sr);
