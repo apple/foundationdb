@@ -1813,6 +1813,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	// if tLog locked for recovery, return an empty message at the cluster recovery version
 	// if requested version is greater than any received.
 	state Optional<Version> clusterRecoveryVersion = Optional<Version>();
+	ASSERT(!clusterRecoveryVersion.present() || reqBegin <= clusterRecoveryVersion.get());
 	if (logData->stopped() && logData->version.get() < reqBegin && self->clusterRecoveryVersion.present()) {
 		clusterRecoveryVersion = self->clusterRecoveryVersion.get();
 		TraceEvent("TLogPeekMessagesClusterRecoveryVersion").detail("V", clusterRecoveryVersion.get());

@@ -46,7 +46,7 @@ struct TestTLogOptions {
 	std::string kvStoreExtension;
 	std::vector<Version> versions;
 	int64_t kvMemoryLimit;
-	int numTags;
+	int numTagsPerServer;
 	int numLogServers;
 	int numCommits;
 	int initVersion;
@@ -59,9 +59,9 @@ struct TestTLogOptions {
 		kvStoreFilename = params.get("kvStoreFilename").orDefault("kvstore");
 		dataFolder = params.get("dataFolder").orDefault("simfdb");
 		kvMemoryLimit = params.getDouble("kvMemoryLimit").orDefault(0x500e6);
-		numTags = params.getInt("numTags").orDefault(1);
+		numTagsPerServer = params.getInt("numTagsPerServer").orDefault(1);
 		numLogServers = params.getInt("numLogServers").orDefault(2);
-		numCommits = params.getInt("numCommits").orDefault(10);
+		numCommits = params.getInt("numCommits").orDefault(3);
 		initVersion = params.getInt("initVersion").orDefault(1);
 		recover = params.getInt("recover").orDefault(1);
 	}
@@ -107,7 +107,7 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	// paramaters
 	std::string diskQueueBasename;
 	int numCommits;
-	int numTags;
+	int numTagsPerServer;
 	int numLogServers;
 	int initVersion;
 	int recover;
