@@ -2092,7 +2092,7 @@ void populateBitset(boost::dynamic_bitset<>& bs, std::vector<int>& ids) {
 // TODO: unit tests to stress UNICAST
 Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
-                                 Version minMaxDVEnd,
+                                 Version minDVEnd,
                                  Version minKCVEnd) {
 	std::vector<std::vector<int>> tLogLocIds;
 	int maxTLogLocId = std::numeric_limits<int>::min();
@@ -2100,10 +2100,10 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 	int bsSize = maxTLogLocId + 1; // bitset size, used below
 
 	// NOTE: We think the unicast recovery version is always greater than or equal to
-	// "min(DV)" (= "minMaxDVEnd"). To be conservative we use "min(KCV)" (= "minKCVEnd")
+	// "min(DV)" (= "minDVEnd"). To be conservative we use "min(KCV)" (= "minKCVEnd")
 	// as the default (starting) recovery version and later verify that the computed
-	// recovery version is greater than or equal to "minMaxDVEnd".
-	// @todo modify code to use "minMaxDVEnd" as the default (starting) recovery version
+	// recovery version is greater than or equal to "minDVEnd".
+	// @todo modify code to use "minDVEnd" as the default (starting) recovery version
 	Version minEnd = minKCVEnd;
 	std::vector<Version> RVs(maxTLogLocId + 1, minEnd); // recovery versions of various tLogs
 
@@ -2175,7 +2175,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 		minLogGroup = std::min(minLogGroup, minTLogs);
 		tLogGroupIdx++;
 	}
-	ASSERT_WE_THINK(minLogGroup >= minMaxDVEnd);
+	ASSERT_WE_THINK(minLogGroup >= minDVEnd);
 	return minLogGroup;
 }
 
