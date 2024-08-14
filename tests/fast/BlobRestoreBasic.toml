@@ -4,7 +4,7 @@ blobGranulesEnabled = true
 extraDatabaseMode = 'Single'
 allowDefaultTenant = false
 disableTss = true
-storageEngineExcludeTypes = [4, 5]
+storageEngineExcludeTypes = [5]
 
 [[knobs]]
 bg_consistency_check_enabled = 0
