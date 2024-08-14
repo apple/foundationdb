@@ -24,6 +24,7 @@
 #include <cinttypes>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <filesystem>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <sys/event.h>

@@ -37,6 +37,7 @@ TLSPolicy::~TLSPolicy() {}
 #include <sstream>
 #include <utility>
 #include <vector>
+#include <filesystem>
 
 #include <boost/asio/ssl/context.hpp>
 #include <boost/lexical_cast.hpp>
@@ -192,8 +193,8 @@ std::string TLSConfig::getCertificatePathSync() const {
 	}
 
 	const char* defaultCertFileName = "cert.pem";
-	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
-		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	if (fileExists(platform::getDefaultConfigPath() / defaultCertFileName)) {
+		return platform::getDefaultConfigPath() / defaultCertFileName;
 	}
 
 	return std::string();
@@ -210,8 +211,8 @@ std::string TLSConfig::getKeyPathSync() const {
 	}
 
 	const char* defaultKeyFileName = "key.pem";
-	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultKeyFileName))) {
-		return joinPath(platform::getDefaultConfigPath(), defaultKeyFileName);
+	if (fileExists(platform::getDefaultConfigPath() / defaultKeyFileName)) {
+		return platform::getDefaultConfigPath() / defaultKeyFileName;
 	}
 
 	return std::string();
