@@ -494,9 +494,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_QUEUE_SOFT_MAX,                           500 );
 	init( ROCKSDB_FETCH_QUEUE_HARD_MAX,                          100 );
 	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                           50 );
-	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( randomize && BUGGIFY ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
-	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if (isSimulated) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 120.0;
-	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                  true ); // if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
+	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( isSimulated ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
+	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 );
+	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                  true ); if( isSimulated ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = false;
 	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false );
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); // if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
@@ -508,7 +508,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                   "fdb" );
 	init( ROCKSDB_DISABLE_AUTO_COMPACTIONS,                    false ); // RocksDB default
 
-	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip();
+	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); // if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip();
 	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE,                    0.0001 );
 	init( ROCKSDB_METRICS_SAMPLE_INTERVAL,						 0.0 );
 	init( ROCKSDB_MAX_SUBCOMPACTIONS,                              3 );
@@ -519,7 +519,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT,       100000000000 ); // 100GB, Commit waits.
 	init( ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT,            8 ); // INT_MAX disables this feature. This value <= ROCKSDB_MAX_WRITE_BUFFER_NUMBER will enable the feature.
 	// Enabling ROCKSDB_PARANOID_FILE_CHECKS knob will have overhead. Be cautious to enable in prod.
-	init( ROCKSDB_PARANOID_FILE_CHECKS,                        false ); if( randomize && BUGGIFY ) ROCKSDB_PARANOID_FILE_CHECKS = deterministicRandom()->coinflip();
+	init( ROCKSDB_PARANOID_FILE_CHECKS,                        false ); // if( isSimulated ) ROCKSDB_PARANOID_FILE_CHECKS = deterministicRandom()->coinflip();
 	init( ROCKSDB_WAL_TTL_SECONDS,                                 0 );
 	init( ROCKSDB_WAL_SIZE_LIMIT_MB,                               0 );
 	init( ROCKSDB_LOG_LEVEL_DEBUG,                             false );
@@ -532,7 +532,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// ROCKSDB_STATS_LEVEL=1 indicates rocksdb::StatsLevel::kExceptHistogramOrTimers
 	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 	init( ROCKSDB_STATS_LEVEL,                                     1 );
-	init( ROCKSDB_ENABLE_COMPACT_ON_DELETION,                  false );
+	init( ROCKSDB_ENABLE_COMPACT_ON_DELETION,                  false ); if (isSimulated) ROCKSDB_ENABLE_COMPACT_ON_DELETION = true;
 	// CDCF: CompactOnDeletionCollectorFactory. The below 3 are parameters of the CompactOnDeletionCollectorFactory
 	// which controls the compaction on deleted data.
 	init( ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,                      128 );
@@ -549,11 +549,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 256 << 10 : 64 << 20 ); // 64 MB
 	init( ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                        10 ); // RocksDB default. Changing this will affect ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT
 	init( ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE,                1 ); // RocksDB default.
-	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               4 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               4 ); if (isSimulated) ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER = 2;
 	init( ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,                 20 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,                     36 ); // RocksDB default.
 	init( ROCKSDB_MAX_TOTAL_WAL_SIZE, isSimulated? 256 <<20 : 1 << 30 ); // 1GB.
-	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
+	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 );
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 300.0 : 15.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
 	init( ROCKSDB_EMPTY_RANGE_CHECK,       isSimulated ? true : false);
@@ -581,7 +581,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
 	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
-	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && BUGGIFY ) ROCKSDB_FULLFILE_CHECKSUM = true;
+	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( isSimulated ) ROCKSDB_FULLFILE_CHECKSUM = false;
 	// Enabling the below three PROTECTION_BYTES_PER_KEY knobs will have overhead(memory and performance). Be cautious to enable in prod.
 	// Writebatch key-value checksum
 	init( ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY,             0 ); if ( randomize && BUGGIFY ) ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 8

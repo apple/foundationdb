@@ -113,6 +113,8 @@ private:
 	rocksdb::DBOptions initialDbOptions();
 	rocksdb::ReadOptions initialReadOptions();
 
+	// std::shared_ptr<rocksdb::Cache> cache = g_network->isSimulated() ? rocksdb::NewLRUCache(16 << 20) : nullptr;
+
 	bool closing;
 	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
@@ -125,6 +127,23 @@ SharedRocksDBState::SharedRocksDBState(UID id)
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
+
+	/*if (g_network->isSimulated()) {
+	    options.write_buffer_size = 2 << 20;
+	    options.target_file_size_base = 2 * 1048576;
+	    options.max_bytes_for_level_base = 10 * 1048576;
+	    options.soft_pending_compaction_bytes_limit = 256 * 1048576;
+	    options.hard_pending_compaction_bytes_limit = 1073741824ul;
+
+	    rocksdb::BlockBasedTableOptions table_options;
+	    table_options.block_cache = (cache != nullptr) ? cache : std::shared_ptr<rocksdb::Cache>();
+	    table_options.cache_index_and_filter_blocks = true;
+	    // Two level iterator to avoid LRU cache imbalance
+	    table_options.index_type = rocksdb::BlockBasedTableOptions::IndexType::kTwoLevelIndexSearch;
+	    options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
+	    return options;
+	}*/
+
 	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	if (SERVER_KNOBS->ROCKSDB_LEVEL_STYLE_COMPACTION) {
 		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
@@ -232,6 +251,19 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 
 rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	rocksdb::DBOptions options;
+	/*if (g_network->isSimulated()) {
+	    options.max_file_opening_threads = 1;
+	    options.max_open_files = 5000;
+	    options.create_if_missing = true;
+
+	    // Cost memtable to block cache too.
+	    std::shared_ptr<ROCKSDB_NAMESPACE::WriteBufferManager> wbm =
+	        std::make_shared<ROCKSDB_NAMESPACE::WriteBufferManager>(
+	            0, (cache != nullptr) ? cache : std::shared_ptr<rocksdb::Cache>());
+	    options.write_buffer_manager = wbm;
+	    return options;
+	}*/
+
 	options.use_direct_reads = SERVER_KNOBS->ROCKSDB_USE_DIRECT_READS;
 	options.use_direct_io_for_flush_and_compaction = SERVER_KNOBS->ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
 	options.avoid_unnecessary_blocking_io = true;
@@ -966,6 +998,9 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
                                        std::shared_ptr<ReadIteratorPool> readIterPool,
                                        Counters* counters,
                                        CF cf) {
+	if (g_network->isSimulated()) {
+		return Void();
+	}
 	state std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
 		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
 		{ "BytesRead", rocksdb::BYTES_READ, 0 },
