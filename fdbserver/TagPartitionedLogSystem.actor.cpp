@@ -580,11 +580,11 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 	Version prevVersion = versionSet.prevVersion; // this might be updated when version vector unicast is enabled
 	Version seqPrevVersion = versionSet.prevVersion; // a copy of the prevVersion provided by the sequencer
 
-	std::unordered_map<int, int> tLogCount;
-	std::unordered_map<int, std::vector<int>> tLogLocIds;
+	std::unordered_map<uint8_t, uint16_t> tLogCount;
+	std::unordered_map<uint8_t, std::vector<uint16_t>> tLogLocIds;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		int location = 0;
-		int logGroupLocal = 0;
+		uint16_t location = 0;
+		uint8_t logGroupLocal = 0;
 		const auto& tpcvMapRef = tpcvMap.get();
 		for (const auto& it : tLogs) {
 			if (!it->isLocal) {
@@ -601,8 +601,8 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 		}
 	}
 
-	int location = 0;
-	int logGroupLocal = 0;
+	uint16_t location = 0;
+	uint8_t logGroupLocal = 0;
 	std::vector<Future<Void>> quorumResults;
 	std::vector<std::pair<UID, Future<TLogCommitReply>>> allReplies;
 	const Span span("TPLS:push"_loc, spanContext);
@@ -2088,27 +2088,27 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 
 void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
                    std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
-                   std::vector<std::vector<int>>& tLogLocIds,
-                   int& maxTLogLocId) {
+                   std::vector<std::vector<uint16_t>>& tLogLocIds,
+                   uint16_t& maxTLogLocId) {
 	// Initialization.
 	tLogLocIds.clear();
 	tLogLocIds.resize(logGroupResults.size());
-	maxTLogLocId = std::numeric_limits<int>::min();
+	maxTLogLocId = std::numeric_limits<uint16_t>::min();
 
 	// Map the interfaces of all (local) tLogs to their corresponding locations in LogSets.
-	std::map<UID, int> interfLocMap;
-	int location = 0;
+	std::map<UID, uint16_t> interfLocMap;
+	uint16_t location = 0;
 	for (auto& it : tLogs) {
 		if (!it->isLocal) {
 			continue;
 		}
-		for (int i = 0; i < it->logServers.size(); i++) {
+		for (uint16_t i = 0; i < it->logServers.size(); i++) {
 			interfLocMap[it->logServers[i]->get().interf().id()] = location++;
 		}
 	}
 
 	// Find the locations of tLogs in "logGroupResults".
-	int logGroupId = 0;
+	uint8_t logGroupId = 0;
 	for (auto& logGroupResult : logGroupResults) {
 		for (auto& tLogResult : std::get<1>(logGroupResult)) {
 			ASSERT(interfLocMap.find(tLogResult.logId) != interfLocMap.end());
@@ -2119,7 +2119,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 	}
 }
 
-void populateBitset(boost::dynamic_bitset<>& bs, std::vector<int>& ids) {
+void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 	for (auto& id : ids) {
 		bs.set(id);
 	}
@@ -2133,10 +2133,10 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
                                  Version minDVEnd,
                                  Version minKCVEnd) {
-	std::vector<std::vector<int>> tLogLocIds;
-	int maxTLogLocId = std::numeric_limits<int>::min();
+	std::vector<std::vector<uint16_t>> tLogLocIds;
+	uint16_t maxTLogLocId = std::numeric_limits<uint16_t>::min();
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
-	int bsSize = maxTLogLocId + 1; // bitset size, used below
+	uint16_t bsSize = maxTLogLocId + 1; // bitset size, used below
 
 	// NOTE: We think the unicast recovery version is always greater than or equal to
 	// "min(DV)" (= "minDVEnd"). To be conservative we use "min(KCV)" (= "minKCVEnd")
@@ -2146,10 +2146,10 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 	Version minEnd = minKCVEnd;
 	std::vector<Version> RVs(maxTLogLocId + 1, minEnd); // recovery versions of various tLogs
 
-	int tLogGroupIdx = 0;
+	uint8_t tLogGroupIdx = 0;
 	Version minLogGroup = std::numeric_limits<Version>::max();
 	for (auto& logGroupResult : logGroupResults) {
-		int tLogIdx = 0;
+		uint16_t tLogIdx = 0;
 		boost::dynamic_bitset<> availableTLogs(bsSize);
 		// version -> tLogs (that are avaiable) that have received the version
 		std::unordered_map<Version, boost::dynamic_bitset<>> versionAvailableTLogs;
@@ -2159,7 +2159,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 		std::map<Version, Version> prevVersionMap;
 		int replicationFactor = std::get<0>(logGroupResult);
 		for (auto& tLogResult : std::get<1>(logGroupResult)) {
-			int tLogLocId = tLogLocIds[tLogGroupIdx][tLogIdx];
+			uint16_t tLogLocId = tLogLocIds[tLogGroupIdx][tLogIdx];
 			availableTLogs.set(tLogLocId);
 			bool logGroupCandidate = false;
 			for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
