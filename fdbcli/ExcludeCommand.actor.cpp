@@ -42,6 +42,7 @@ ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
 			if (force && servers.size())
 				tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
@@ -78,6 +79,7 @@ ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 				            : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
 				return false;
 			}
+			TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
 			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
@@ -99,6 +101,7 @@ ACTOR Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> d
 			}
 			return exclusions;
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "GetExcludedServersError").error(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -164,6 +167,7 @@ ACTOR Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> 
 			}
 			return excludedLocalities;
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -221,6 +225,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
 
 			wait(delayJittered(1.0)); // SOMEDAY: watches!
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "CheckForExcludingServersError").error(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -241,6 +246,7 @@ ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<Addres
 			coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "CheckForCoordinatorsError").error(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}

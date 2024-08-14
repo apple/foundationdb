@@ -148,6 +148,7 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 
 			return true;
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "GetWorkersError").error(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -174,6 +175,7 @@ ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 			}
 			return Void();
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
