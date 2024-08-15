@@ -2134,7 +2134,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  Version minDVEnd,
                                  Version minKCVEnd) {
 	std::vector<std::vector<uint16_t>> tLogLocIds;
-	uint16_t maxTLogLocId = std::numeric_limits<uint16_t>::min();
+	uint16_t maxTLogLocId;
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
 	uint16_t bsSize = maxTLogLocId + 1; // bitset size, used below
 
@@ -2192,7 +2192,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 			// - the commit proxy sent this version to LS (i.e., LS is present in "versionAllTLogs[version]")
 			// - LS is available (i.e., LS is present in "availableTLogs")
 			// - LS didn't receive this version (i.e., LS is not present in "versionAvailableTLogs[version]")
-			if (!(((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).none())) {
+			if (((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).any()) {
 				break;
 			}
 			// If the commit proxy sent this version to "N" log servers then at least
