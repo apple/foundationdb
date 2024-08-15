@@ -340,7 +340,11 @@ bool deleteFile(std::filesystem::path const& path);
 void renameFile(std::filesystem::path const& fromPath, std::filesystem::path const& toPath);
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace(std::filesystem::path const& path, std::string const& content, bool textmode = true); // Maybe the content should also be filesystem? Not sure if there's an alternative but there might be some security issues if we leave it as std::string. (Could be a victim of injection attacks)
+void atomicReplace(std::filesystem::path const& path,
+                   std::string const& content,
+                   bool textmode = true); // Maybe the content should also be filesystem? Not sure if there's an
+                                          // alternative but there might be some security issues if we leave it as
+                                          // std::string. (Could be a victim of injection attacks)
 
 // Read a file into memory
 // This requires the file to be seekable
@@ -392,10 +396,12 @@ std::filesystem::path abspath(std::filesystem::path const& path, bool resolveLin
 // with a single trailing path separator.
 // It uses absPath() with the same bool options to initially obtain a canonical form, and upon success
 // removes the final path component, if present.
-//std::filesystem::path parentDirectory(std::filesystem::path const& path, bool resolveLinks = true, bool mustExist = false); // This doesn't need to exist. Will commit this out to track references.
+// std::filesystem::path parentDirectory(std::filesystem::path const& path, bool resolveLinks = true, bool mustExist =
+// false); // This doesn't need to exist. Will commit this out to track references.
 
 // Returns the portion of the path following the last path separator (e.g. the filename or directory name)
-//std::string basename(std::string const& filename); // This doesn't need to exist. Will commit this out to track references.
+// std::string basename(std::string const& filename); // This doesn't need to exist. Will commit this out to track
+// references.
 
 // Returns the home directory of the current user
 std::string getUserHomeDirectory(); // Not sure if this needs to change.
