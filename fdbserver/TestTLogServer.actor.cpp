@@ -51,7 +51,7 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
 	if (oldTLogTestContext.present()) {
 		OldTLogConf oldTLogConf;
 		oldTLogConf.tLogs = oldTLogTestContext.get()->dbInfo.logSystemConfig.tLogs;
-		for (int i = 0; i < context->numLogServers; i++) {
+		for (uint32_t i = 0; i < context->numLogServers; i++) {
 			oldTLogConf.tLogs[i].locality = oldTLogTestContext.get()->primaryLocality;
 			oldTLogConf.tLogs[i].isLocal = true;
 		}
@@ -63,6 +63,7 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
 		context->tagLocality = oldTLogTestContext.get()->primaryLocality;
 		context->epoch = oldTLogTestContext.get()->epoch + 1;
 		context->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
+		context->commitHistory = oldTLogTestContext.get()->commitHistory;
 	}
 	context->dbInfo.logSystemConfig.logSystemType = LogSystemType::tagPartitioned;
 	context->dbInfo.logSystemConfig.recruitmentID = deterministicRandom()->randomUniqueID();
@@ -191,7 +192,7 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 		ASSERT_EQ(tLogReady, true);
 	}
 
-	state int i = 0;
+	state uint32_t i = 0;
 	state Version prev = pTLogTestContext->initVersion - 1;
 	state Version next = pTLogTestContext->initVersion;
 
@@ -207,7 +208,7 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 
 		std::unordered_map<uint16_t, Version> tpcvMap;
 
-		uint32_t replicaCount = 2; // SOMEDAY: paramaterize
+		uint32_t replicaCount = pTLogTestContext->tLogOptions.replicaCount;
 		uint32_t startLogServer = 0;
 		uint32_t teamSize = pTLogTestContext->numLogServers / replicaCount;
 		for (uint32_t tagID = 0; tagID < pTLogTestContext->numTags; tagID++, startLogServer++) {
@@ -222,7 +223,8 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 				toCommit.addTags(tags);
 				toCommit.writeTypedMessage(m, false, true);
 				tpcvMap[logServer] = prev;
-				TraceEvent("AddTags").detail("C", i).detail("T", tag).detail("L", logServer);
+				pTLogTestContext->commitHistory[std::tuple(tagID, logServer)].push_back(next);
+				TraceEvent("AddTags").detail("C", i).detail("T", tag).detail("L", logServer).detail("N", next);
 			}
 		}
 		if (toCommit.getMutationCount()) {
@@ -245,8 +247,8 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 
 // send peek/pop through a given TLog interface and tag
 ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTestContext,
-                                                       uint16_t logID,
-                                                       uint32_t tagID) {
+                                                       uint16_t tagID,
+                                                       uint32_t logID) {
 	state Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
 	bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
 	ASSERT_EQ(tLogReady, true);
@@ -256,21 +258,22 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 
 	TraceEvent("TestTLogServerEnterPeek", pTLogTestContext->workerID).detail("LogID", logID).detail("Tag", tag);
 
-	state Version begin;
-	state int i;
-	for (i = 0; i < pTLogTestContext->numCommits; i++) {
-		// if (!tagID && i > pTLogTestContext->numCommits / 2) {
-		// 	continue;
-		// }
+	state uint32_t i = 0;
+	state std::vector<Version> versions = pTLogTestContext->commitHistory[std::tuple(tagID, logID)];
+	for (Version v : versions) {
+		state Version begin = v;
 		// wait for next message commit
-		begin = pTLogTestContext->tLogOptions.versions[i];
 		::TLogPeekRequest request(begin, tag, false, false);
 		::TLogPeekReply reply = wait(pTLogContext->TestTLogInterface.peekMessages.getReply(request));
 		TraceEvent("TestTLogServerTryValidateDataOnPeek", pTLogTestContext->workerID)
 		    .detail("R", begin)
 		    .detail("B", reply.begin.present() ? reply.begin.get() : -1)
+		    .detail("P", reply.popped)
 		    .detail("To", pTLogContext->TestTLogInterface.toString());
 
+		if (reply.popped.present() && reply.popped.get() > begin) {
+			break;
+		}
 		// validate versions
 		ASSERT_GE(reply.maxKnownVersion, i);
 
@@ -312,13 +315,14 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 		ASSERT_WE_THINK(m.param2 == expectedVal);
 
 		TraceEvent("TestTLogServerValidatedDataOnPeek", pTLogTestContext->workerID)
-		    .detail("Commit count", i)
+		    .detail("CommitCount", i)
 		    .detail("LogID", logID)
 		    .detail("TagID", tag);
 
 		// go directly to pop as there is no SS.
 		::TLogPopRequest requestPop(begin, begin, tag);
 		wait(pTLogContext->TestTLogInterface.popMessages.getReply(requestPop));
+		i++;
 	}
 
 	TraceEvent("TestTLogServerExitPeek", pTLogTestContext->workerID).detail("LogID", logID).detail("TagID", tag);
@@ -386,16 +390,13 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 
 	wait(pTLogTestContextEpochOne->sendPushMessages());
 
-	state uint32_t replicaCount = 2; // SOMEDAY: paramaterize
-	state uint32_t teamSize = pTLogTestContextEpochOne->numLogServers / replicaCount;
-	state uint32_t startLogServer = 0;
 	state uint32_t tagID = 0;
-	state uint32_t logID = startLogServer;
+	state std::map<std::tuple<uint32_t, uint32_t>, std::vector<Version>> commitHistory;
+
 	if (!pTLogTestContextEpochOne->recover) {
-		for (; tagID < pTLogTestContextEpochOne->numTags; tagID++, startLogServer++) {
-			for (; logID < pTLogTestContextEpochOne->numLogServers; startLogServer += teamSize) {
-				wait(pTLogTestContextEpochOne->peekCommitMessages(logID, tagID));
-			}
+		commitHistory = pTLogTestContextEpochOne->commitHistory;
+		for (const auto& [loc, ver] : commitHistory) {
+			wait(pTLogTestContextEpochOne->peekCommitMessages(std::get<0>(loc), std::get<1>(loc)));
 		}
 	} else {
 		// Done with old generation. Lock the old generations of tLogs.
@@ -403,29 +404,36 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		    initTLogTestContext(TestTLogOptions(params), pTLogTestContextEpochOne);
 		// for validation: the expected versions in EpochTwo that were written in EpochOne
 		pTLogTestContextEpochTwo->tLogOptions.versions = pTLogTestContextEpochOne->tLogOptions.versions;
-
-		for (tLogIdx = 0; tLogIdx < pTLogTestContextEpochOne->numLogServers; tLogIdx++) {
+		commitHistory = pTLogTestContextEpochTwo->commitHistory;
+		pTLogTestContextEpochTwo->pTLogContextList.resize(commitHistory.size());
+		for (const auto& [loc, ver] : commitHistory) {
+			tLogIdx = std::get<1>(loc);
+			tagID = std::get<0>(loc);
 			TLogLockResult data = wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
 			                               ->TestTLogInterface.lock.template getReply<TLogLockResult>());
-			TraceEvent("TestTLogServerLockResult").detail("KCV", data.knownCommittedVersion);
+			TraceEvent("TestTLogServerLockResult")
+			    .detail("KCV", data.knownCommittedVersion)
+			    .detail("T", tagID)
+			    .detail("L", tLogIdx);
 
 			Reference<TLogContext> pNewTLogContext(new TLogContext(tLogIdx));
-			pTLogTestContextEpochTwo->pTLogContextList.push_back(pNewTLogContext);
+			pTLogTestContextEpochTwo->pTLogContextList[tLogIdx] = pNewTLogContext;
 			state InitializeTLogRequest req;
 			req.recruitmentID = pTLogTestContextEpochTwo->dbInfo.logSystemConfig.recruitmentID;
-			req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back() + 10;
+			req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back();
+			// for testing + 10;
 			// wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
 			//          ->TestTLogInterface.setClusterRecoveryVersion.getReply(
 			//              setClusterRecoveryVersionRequest(req.recoverAt + 1)));
 			req.startVersion = pTLogTestContextEpochOne->initVersion + 1;
 			req.recoveryTransactionVersion = pTLogTestContextEpochOne->initVersion;
-			req.knownCommittedVersion = pTLogTestContextEpochOne->initVersion;
+			req.knownCommittedVersion = 0;
 			req.epoch = pTLogTestContextEpochTwo->epoch;
 			req.logVersion = TLogVersion::V6;
 			req.locality = pTLogTestContextEpochTwo->primaryLocality;
 			req.isPrimary = true;
 			req.logRouterTags = 0;
-			req.recoverTags = { Tag(pTLogTestContextEpochTwo->primaryLocality, 0) };
+			req.recoverTags = { Tag(pTLogTestContextEpochTwo->primaryLocality, tagID) };
 			req.recoverFrom = pTLogTestContextEpochOne->dbInfo.logSystemConfig;
 			req.recoverFrom.logRouterTags = 0;
 
@@ -441,17 +449,14 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 			bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
 			ASSERT_EQ(isCreated, true);
 			pTLogContext->TLogStarted.send(true);
+		}
 
-			if (!pTLogTestContextEpochOne->recover) {
-				for (; tagID < pTLogTestContextEpochTwo->numTags; tagID++, startLogServer++) {
-					logID = startLogServer;
-					for (; logID < pTLogTestContextEpochTwo->numLogServers; startLogServer += teamSize) {
-						wait(pTLogTestContextEpochTwo->peekCommitMessages(logID, tagID));
-					}
-				}
-			}
+		for (const auto& [loc, ver] : commitHistory) {
+			wait(pTLogTestContextEpochTwo->peekCommitMessages(std::get<0>(loc), std::get<1>(loc)));
+		}
 
-			// signal that tLogs can be destroyed
+		// signal that tLogs can be destroyed
+		for (tLogIdx = 0; tLogIdx < pTLogTestContextEpochOne->numLogServers; tLogIdx++) {
 			pTLogTestContextEpochTwo->pTLogContextList[tLogIdx]->TestTLogServerCompleted.send(true);
 		}
 	}

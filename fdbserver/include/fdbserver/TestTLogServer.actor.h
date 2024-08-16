@@ -46,11 +46,12 @@ struct TestTLogOptions {
 	std::string kvStoreExtension;
 	std::vector<Version> versions;
 	int64_t kvMemoryLimit;
-	int numTags;
-	int numLogServers;
-	int numCommits;
-	int initVersion;
-	int recover;
+	uint32_t numTags;
+	uint32_t numLogServers;
+	uint32_t numCommits;
+	uint32_t initVersion;
+	uint32_t recover;
+	uint32_t replicaCount;
 
 	explicit TestTLogOptions(const UnitTestParameters& params) {
 		diskQueueBasename = params.get("diskQueueBasename").orDefault("folder");
@@ -64,6 +65,7 @@ struct TestTLogOptions {
 		numCommits = params.getInt("numCommits").orDefault(10);
 		initVersion = params.getInt("initVersion").orDefault(1);
 		recover = params.getInt("recover").orDefault(1);
+		replicaCount = params.getInt("replicaCount").orDefault(2);
 	}
 };
 
@@ -82,7 +84,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	TLogContext(int inProcessID = 0) : tagProcessID(inProcessID){};
+	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
 // test state
@@ -96,8 +98,8 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 
 	Future<Void> sendCommitMessages(uint16_t processID = 0) { return sendCommitMessages(this, processID); }
 
-	Future<Void> peekCommitMessages(uint16_t logGroupID = 0, uint32_t tag = 0) {
-		return peekCommitMessages(this, logGroupID, tag);
+	Future<Void> peekCommitMessages(uint32_t tagID = 0, uint16_t logID = 0) {
+		return peekCommitMessages(this, tagID, logID);
 	}
 
 	ACTOR static Future<Void> peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t logGroupID, uint32_t tag);
@@ -106,15 +108,16 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 
 	// paramaters
 	std::string diskQueueBasename;
-	int numCommits;
-	int numTags;
-	int numLogServers;
-	int initVersion;
-	int recover;
+	uint32_t numCommits;
+	uint32_t numTags;
+	uint32_t numLogServers;
+	uint32_t initVersion;
+	uint32_t recover;
 
 	// tLog state
 	std::vector<Reference<TLogContext>> pTLogContextList;
 	TestTLogOptions tLogOptions;
+	std::map<std::tuple<uint32_t, uint32_t>, std::vector<Version>> commitHistory;
 
 	// system state
 	UID logID;
@@ -125,8 +128,8 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	Standalone<StringRef> dcID;
 	Optional<Standalone<StringRef>> zoneID;
 	int8_t tagLocality;
-	int epoch;
-	const int primaryLocality = 0;
+	uint32_t epoch;
+	const uint32_t primaryLocality = 0;
 };
 
 #include "flow/unactorcompiler.h"
