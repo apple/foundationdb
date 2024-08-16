@@ -553,6 +553,15 @@ public:
 
 	// Called on every read operation.
 	ReadIterator getIterator(KeyRange keyRange) {
+		// Reusing iterator in simulation can cause slow down
+		// We avoid to always reuse iterator in simulation to speed up the simulation
+		if (g_network->isSimulated() &&
+		    deterministicRandom()->random01() > SERVER_KNOBS->ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM) {
+			index++;
+			ReadIterator iter(cf, index, db, sharedState, keyRange);
+			return iter;
+		}
+
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
