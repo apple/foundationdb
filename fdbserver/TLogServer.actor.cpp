@@ -1816,7 +1816,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	ASSERT(!clusterRecoveryVersion.present() || reqBegin <= clusterRecoveryVersion.get());
 	if (logData->stopped() && logData->version.get() < reqBegin && self->clusterRecoveryVersion.present()) {
 		clusterRecoveryVersion = self->clusterRecoveryVersion.get();
-		TraceEvent("TLogPeekMessagesClusterRecoveryVersion").detail("V", clusterRecoveryVersion.get());
+		TraceEvent("TLogPeekMessagesClusterRecoveryVersion").detail("Version", clusterRecoveryVersion.get());
 	}
 
 	if (!clusterRecoveryVersion.present() && reqReturnIfBlocked && logData->version.get() < reqBegin) {
@@ -3009,7 +3009,6 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 				if (!foundMessage) {
 					ver--;
-
 					if (ver > logData->version.get()) {
 						if (logData->stopped() || (endVersion.present() && ver > endVersion.get())) {
 							return Void();
