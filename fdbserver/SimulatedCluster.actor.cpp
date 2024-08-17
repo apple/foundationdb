@@ -1836,7 +1836,9 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		    std::find(std::begin(SIMULATION_STORAGE_ENGINE), std::end(SIMULATION_STORAGE_ENGINE), result) ==
 		        std::end(SIMULATION_STORAGE_ENGINE)) {
 
-			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
+			TraceEvent(SevError, "StorageEngineNotSupported")
+			    .detail("StorageEngineType", result)
+			    .detail("ExcludeEngineType", describe(testConfig.storageEngineExcludeTypes));
 			ASSERT(false);
 		}
 	} else {
