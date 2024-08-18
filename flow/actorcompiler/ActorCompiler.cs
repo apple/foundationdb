@@ -27,6 +27,25 @@ using System.Text;
 
 namespace actorcompiler
 {
+    class ActorInformation
+    {
+        public UInt64 guid1 { get; set; }
+        public UInt64 guid2 { get; set; }
+        public string fileName { get; set; }
+        public int lineNumber { get; set; }
+        public string type { get; set; }
+        public string name { get; set; }
+
+        public static (UInt64, UInt64) GetGuidPair()
+        {
+            var guid = Guid.NewGuid();
+            var bytes = guid.ToByteArray();
+            var ulong1 = BitConverter.ToUInt64(bytes, 0);
+            var ulong2 = BitConverter.ToUInt64(bytes, 8);
+            return (ulong1, ulong2);
+        }
+    }
+
     class TypeSwitch<R>
     {
         object value;
@@ -443,7 +462,7 @@ namespace actorcompiler
             whenCount = 0;
         string This;
         bool generateProbes;
-        public Dictionary<(ulong, ulong), string> uidObjects { get; private set; }
+        public List<ActorInformation> uidObjects;
 
         public ActorCompiler(
             Actor actor,
@@ -458,7 +477,7 @@ namespace actorcompiler
             this.isTopLevel = isTopLevel;
             this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
-            this.uidObjects = new Dictionary<(ulong, ulong), string>();
+            this.uidObjects = new List<ActorInformation>();
 
             FindState();
         }
@@ -543,23 +562,38 @@ namespace actorcompiler
             writer.WriteLine("\tusing FastAllocated<{0}>::operator new;", fullClassName);
             writer.WriteLine("\tusing FastAllocated<{0}>::operator delete;", fullClassName);
 
-            var actorIdentifierKey = this.sourceFile + ":" + this.actor.name;
-            var actorIdentifier = GetUidFromString(actorIdentifierKey);
-            uidObjects.Add((actorIdentifier.Item1, actorIdentifier.Item2), actorIdentifierKey);
-            // NOTE UL is required as a u64 postfix for large integers, otherwise Clang would complain
-            writer.WriteLine(
-                "\tstatic constexpr ActorIdentifier __actorIdentifier = UID({0}UL, {1}UL);",
-                actorIdentifier.Item1,
-                actorIdentifier.Item2
-            );
-            writer.WriteLine("\tActiveActorHelper activeActorHelper;");
+            {
+                var actorIdentifier = ActorInformation.GetGuidPair();
+                this.uidObjects.Add(
+                    new ActorInformation
+                    {
+                        guid1 = actorIdentifier.Item1,
+                        guid2 = actorIdentifier.Item2,
+                        fileName = this.sourceFile,
+                        lineNumber = this.actor.SourceLine,
+                        type = "ACTOR",
+                        name = this.actor.name
+                    }
+                );
+
+                writer.WriteLine("#if ACTOR_MONITORING != ACTOR_MONITORING_DISABLED");
+                writer.WriteLine(
+                    "\tstatic constexpr ActorMonitoring::ActorIdentifier __actorIdentifier = ActorMonitoring::ActorIdentifier({0}ULL, {1}ULL);",
+                    actorIdentifier.Item1,
+                    actorIdentifier.Item2
+                );
+                writer.WriteLine("\tActorMonitoring::ActiveActorHelper activeActorHelper;");
+                writer.WriteLine("#endif // ACTOR_MONITORING");
+            }
 
             writer.WriteLine("#pragma clang diagnostic push");
             writer.WriteLine("#pragma clang diagnostic ignored \"-Wdelete-non-virtual-dtor\"");
             if (actor.returnType != null)
                 writer.WriteLine(
                     @"    void destroy() override {{
+#if ACTOR_MONITORING != ACTOR_MONITORING_DISABLED
         activeActorHelper.~ActiveActorHelper();
+#endif // ACTOR_MONITORING
         static_cast<Actor<{0}>*>(this)->~Actor();
         operator delete(this);
     }}",
@@ -568,7 +602,9 @@ namespace actorcompiler
             else
                 writer.WriteLine(
                     @"    void destroy() {{
+#if ACTOR_MONITORING != ACTOR_MONITORING_DISABLED
         activeActorHelper.~ActiveActorHelper();
+#endif // ACTOR_MONITORING
         static_cast<Actor<void>*>(this)->~Actor();
         operator delete(this);
     }}"
@@ -722,18 +758,6 @@ namespace actorcompiler
                     index
                 );
             }
-            var blockIdentifier = GetUidFromString(fun.name);
-            fun.WriteLine("#ifdef WITH_ACAC");
-            fun.WriteLine(
-                "static constexpr ActorBlockIdentifier __identifier = UID({0}UL, {1}UL);",
-                blockIdentifier.Item1,
-                blockIdentifier.Item2
-            );
-            fun.WriteLine(
-                "ActorExecutionContextHelper __helper(static_cast<{0}*>(this)->activeActorHelper.actorID, __identifier);",
-                className
-            );
-            fun.WriteLine("#endif // WITH_ACAC");
         }
 
         void ProbeExit(Function fun, string name, int index = -1)
@@ -742,6 +766,60 @@ namespace actorcompiler
             {
                 fun.WriteLine("fdb_probe_actor_exit(\"{0}\", {1}, {2});", name, thisAddress, index);
             }
+        }
+
+        void ActorMonitoringEnter(Function fun, int sourceLine, string type)
+        {
+            var blockIdentifier = ActorInformation.GetGuidPair();
+            fun.WriteLineUnindented("#if ACTOR_MONITORING != ACTOR_MONITORING_DISABLED");
+            fun.WriteLine(
+                "static constexpr ActorMonitoring::ActorBlockIdentifier __identifier = ActorMonitoring::ActorBlockIdentifier({0}ULL, {1}ULL);",
+                blockIdentifier.Item1,
+                blockIdentifier.Item2
+            );
+            this.uidObjects.Add(
+                new ActorInformation
+                {
+                    guid1 = blockIdentifier.Item1,
+                    guid2 = blockIdentifier.Item2,
+                    fileName = sourceFile,
+                    lineNumber = sourceLine,
+                    type = type,
+                    name = this.actor.name
+                }
+            );
+            fun.WriteLine(
+                "ActorMonitoring::ActorExecutionContextHelper __helper(static_cast<{0}*>(this)->activeActorHelper.actorID, __identifier);",
+                className
+            );
+            fun.WriteLineUnindented("#endif // ACTOR_MONITORING");
+        }
+
+        void ActorMonitoringYield(Function fun, int sourceLine)
+        {
+            var blockIdentifier = ActorInformation.GetGuidPair();
+            fun.WriteLineUnindented("#if ACTOR_MONITORING != ACTOR_MONITORING_DISABLED");
+            fun.WriteLine(
+                "static constexpr ActorMonitoring::ActorBlockIdentifier __identifier = ActorMonitoring::ActorBlockIdentifier({0}ULL, {1}ULL);",
+                blockIdentifier.Item1,
+                blockIdentifier.Item2
+            );
+            this.uidObjects.Add(
+                new ActorInformation
+                {
+                    guid1 = blockIdentifier.Item1,
+                    guid2 = blockIdentifier.Item2,
+                    fileName = sourceFile,
+                    lineNumber = sourceLine,
+                    type = "YIELD",
+                    name = this.actor.name
+                }
+            );
+            fun.WriteLine(
+                "ActorMonitoring::ActorYieldHelper __helper(static_cast<{0}*>(this)->activeActorHelper.actorID, __identifier);",
+                className
+            );
+            fun.WriteLineUnindented("#endif // ACTOR_MONITORING");
         }
 
         void ProbeCreate(Function fun, string name)
@@ -1358,6 +1436,7 @@ namespace actorcompiler
                 functions.Add(string.Format("{0}#{1}", cbFunc.name, ch.Index), cbFunc);
                 cbFunc.Indent(codeIndent);
                 ProbeEnter(cbFunc, actor.name, ch.Index);
+                ActorMonitoringEnter(cbFunc, ch.Stmt.wait.FirstSourceLine, "FIRE");
                 cbFunc.WriteLine("{0};", exitFunc.call());
 
                 Function _overload = cbFunc.popOverload();
@@ -1401,6 +1480,7 @@ namespace actorcompiler
                 functions.Add(string.Format("{0}#{1}", errFunc.name, ch.Index), errFunc);
                 errFunc.Indent(codeIndent);
                 ProbeEnter(errFunc, actor.name, ch.Index);
+                ActorMonitoringEnter(errFunc, ch.Stmt.wait.FirstSourceLine, "ERROR");
                 errFunc.WriteLine("{0};", exitFunc.call());
                 TryCatch(
                     cx.WithTarget(errFunc),
@@ -1465,6 +1545,8 @@ namespace actorcompiler
                 );
             }
             cx.target.WriteLine("loopDepth = 0;"); //cx.target.WriteLine("return 0;");
+
+            ActorMonitoringYield(cx.target, stmt.FirstSourceLine);
 
             if (!reachable)
                 cx.unreachable();
@@ -1940,23 +2022,26 @@ namespace actorcompiler
                 " : Actor<" + (actor.returnType == null ? "void" : actor.returnType) + ">(),"
             );
             constructor.WriteLine(
-                "   {0}({1}),",
+                "   {0}({1})",
                 fullStateClassName,
                 string.Join(", ", actor.parameters.Select(p => p.name))
             );
-            constructor.WriteLine("   activeActorHelper(__actorIdentifier)");
+            constructor.WriteLineUnindented("#if ACTOR_MONITORING != ACTOR_MONITORING_DISABLED");
+            constructor.WriteLine("   ,activeActorHelper(__actorIdentifier)");
+            constructor.WriteLineUnindented("#endif // ACTOR_MONITORING");
             constructor.Indent(-1);
 
             constructor.WriteLine("{");
             constructor.Indent(+1);
 
             ProbeEnter(constructor, actor.name);
+            ActorMonitoringEnter(constructor, actor.SourceLine, "SPAWN");
 
-            constructor.WriteLine("#ifdef ENABLE_SAMPLING");
+            constructor.WriteLineUnindented("#ifdef ENABLE_SAMPLING");
             constructor.WriteLine("this->lineage.setActorName(\"{0}\");", actor.name);
             constructor.WriteLine("LineageScope _(&this->lineage);");
             // constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = \"{0}\"_sr;", actor.name);
-            constructor.WriteLine("#endif");
+            constructor.WriteLineUnindented("#endif");
 
             constructor.WriteLine("this->{0};", body.call());
 

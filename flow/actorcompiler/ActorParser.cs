@@ -328,7 +328,7 @@ namespace actorcompiler
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
         public bool generateProbes;
-        public Dictionary<(ulong, ulong), string> uidObjects { get; private set; }
+        public List<ActorInformation> uidObjects;
 
         public ActorParser(
             string text,
@@ -340,7 +340,7 @@ namespace actorcompiler
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
             this.generateProbes = generateProbes;
-            this.uidObjects = new Dictionary<(ulong, ulong), string>();
+            this.uidObjects = new List<ActorInformation>();
             tokens = Tokenize(text).Select(t => new Token { Value = t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
@@ -460,9 +460,7 @@ namespace actorcompiler
                         generateProbes
                     );
                     actorCompiler.Write(actorWriter);
-                    actorCompiler
-                        .uidObjects.ToList()
-                        .ForEach(x => this.uidObjects.TryAdd(x.Key, x.Value));
+                    this.uidObjects.AddRange(actorCompiler.uidObjects);
 
                     string[] actorLines = actorWriter.ToString().Split('\n');
 

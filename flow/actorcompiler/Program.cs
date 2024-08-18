@@ -85,13 +85,18 @@ namespace actorcompiler
 
                 using (var outputStream = new StreamWriter(outputtmp))
                 {
-                    foreach (var entry in parser.uidObjects)
+                    // FIXME The only reason this ugly format is used is that System.Text.Json is not supported
+                    // in the build environment of Mono/.NET framework.
+                    foreach (var item in parser.uidObjects)
                     {
                         outputStream.WriteLine(
-                            "{0}|{1}|{2}",
-                            entry.Key.Item1,
-                            entry.Key.Item2,
-                            entry.Value
+                            "{0}|{1}|{2}|{3}|{4}|{5}",
+                            item.guid1,
+                            item.guid2,
+                            item.fileName,
+                            item.lineNumber,
+                            item.type,
+                            item.name
                         );
                     }
                 }
