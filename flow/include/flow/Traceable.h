@@ -83,7 +83,9 @@ struct Traceable : std::false_type {};
 #define FORMAT_TRACEABLE(type, fmt)                                                                                    \
 	template <>                                                                                                        \
 	struct Traceable<type> : std::true_type {                                                                          \
-		static std::string toString(type value) { return format(fmt, value); }                                         \
+		static std::string toString(type value) {                                                                      \
+			return format(fmt, value);                                                                                 \
+		}                                                                                                              \
 	}
 
 FORMAT_TRACEABLE(bool, "%d");
@@ -178,6 +180,11 @@ struct TraceableStringImpl : std::true_type {
 	static constexpr bool isPrintable(char c) { return 32 <= c && c <= 126; }
 
 	template <class Str>
+	static std::string toString(std::filesystem::path& value) {
+		return value.string();
+	}
+
+	template <class Str>
 	static std::string toString(Str&& value) {
 		// if all characters are printable ascii, we simply return the string
 		int nonPrintables = 0;
@@ -239,6 +246,8 @@ template <size_t S>
 struct Traceable<char[S]> : TraceableStringImpl<char[S]> {};
 template <>
 struct Traceable<std::string> : TraceableStringImpl<std::string> {};
+template <>
+struct Traceable<std::filesystem::path> : TraceableStringImpl<std::filesystem::path> {};
 template <>
 struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 
