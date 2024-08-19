@@ -533,7 +533,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// ROCKSDB_STATS_LEVEL=1 indicates rocksdb::StatsLevel::kExceptHistogramOrTimers
 	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 	init( ROCKSDB_STATS_LEVEL,                                     1 );
-	init( ROCKSDB_ENABLE_COMPACT_ON_DELETION,                  false );
+	init( ROCKSDB_ENABLE_COMPACT_ON_DELETION,                  false ); if ( isSimulated ) ROCKSDB_ENABLE_COMPACT_ON_DELETION = true;
 	// CDCF: CompactOnDeletionCollectorFactory. The below 3 are parameters of the CompactOnDeletionCollectorFactory
 	// which controls the compaction on deleted data.
 	init( ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,                      128 );
@@ -612,7 +612,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_RATE_LIMITER_MODE,                       2 );
 	init( SHARDED_ROCKSDB_BACKGROUND_PARALLELISM,                  2 );
 	init( SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS,                      0 );
-	init( SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,       4 );
+	init( SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,       4 ); if (isSimulated) SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER = 2;
 	init( SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,         20 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,             36 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,      false ); if (isSimulated) SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE = deterministicRandom()->coinflip();
