@@ -2093,7 +2093,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 	// Initialization.
 	tLogLocIds.clear();
 	tLogLocIds.resize(logGroupResults.size());
-	maxTLogLocId = std::numeric_limits<uint16_t>::min();
+	maxTLogLocId = 0;
 
 	// Map the interfaces of all (local) tLogs to their corresponding locations in LogSets.
 	std::map<UID, uint16_t> interfLocMap;
@@ -2214,7 +2214,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 		minLogGroup = std::min(minLogGroup, minTLogs);
 		tLogGroupIdx++;
 	}
-	ASSERT_WE_THINK(minLogGroup >= minDVEnd);
+	ASSERT_WE_THINK(minLogGroup >= minDVEnd && minLogGroup != std::numeric_limits<Version>::max());
 	return minLogGroup;
 }
 
