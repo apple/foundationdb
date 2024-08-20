@@ -496,6 +496,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                           50 );
 	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( randomize && BUGGIFY ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
+	init( ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM,               0.01 );
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                   true ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_REUSE_ITERATORS,                     false );
 	init( ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS,          false ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS = deterministicRandom()->coinflip();
@@ -549,7 +550,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 256 << 10 : 64 << 20 ); // 64 MB
 	init( ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                        10 ); // RocksDB default. Changing this will affect ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT
 	init( ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE,                1 ); // RocksDB default.
-	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               4 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               4 );
 	init( ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,                 20 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,                     36 ); // RocksDB default.
 	init( ROCKSDB_MAX_TOTAL_WAL_SIZE, isSimulated? 256 <<20 : 1 << 30 ); // 1GB.
@@ -591,7 +592,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY,                  0 ); if ( randomize && BUGGIFY ) ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
 	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,               0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01();
 	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                  10485760 ); // 10MB
-	init( ROCKSDB_MAX_MANIFEST_FILE_SIZE,                  100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
+	init( ROCKSDB_MAX_MANIFEST_FILE_SIZE,                  100 << 20 );
 	init( SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,          100 );
 	init( SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                 8 << 20 ); // 8MB
 	init( SHARDED_ROCKSDB_COMPACTION_PERIOD, isSimulated? 3600 : 2592000 ); // 30d
@@ -1099,6 +1100,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
+	init( PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM,           2 ); // default is 1
+	init( PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM,          2 ); // default is 1
+	init( PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM,           2 ); // default is 1
 
 	// Coordination
 	init( COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL,            1.0 ); if( randomize && BUGGIFY ) COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL = 10.0;
@@ -1211,6 +1215,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_BLOB_GRANULE_COMPRESSION,                     false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_COMPRESSION = deterministicRandom()->coinflip(); }
 	init( BLOB_GRANULE_COMPRESSION_FILTER,                    "NONE" ); if ( randomize && BUGGIFY ) { BLOB_GRANULE_COMPRESSION_FILTER = CompressionUtils::toString(CompressionUtils::getRandomFilter()); }
 	init( ENCRYPTION_LOGGING_INTERVAL,                           5.0 );
+	init( DISABLED_ENCRYPTION_PROBABILITY_SIM,                  0.90 );
 
 	// KMS connector type
 	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );

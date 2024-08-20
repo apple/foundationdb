@@ -6,7 +6,7 @@ tenantModes = ['optional', 'required']
 injectTargetedSSRestart = true
 injectSSDelay = true
 disableTss = true
-storageEngineExcludeTypes = [4, 5]
+storageEngineExcludeTypes = [5]
 
 [[knobs]]
 bg_metadata_source = "tenant"

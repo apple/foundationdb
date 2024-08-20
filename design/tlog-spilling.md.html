@@ -61,7 +61,7 @@ will accumulate on the TLog destined for the failed storage server, in case it
 comes back and is able to rejoin the cluster.
 
 When this accumulation causes the memory required to hold all the unpopped data
-to exceed `TLOG_SPILL_THREASHOLD` bytes, the transaction log offloads the
+to exceed `TLOG_SPILL_THRESHOLD` bytes, the transaction log offloads the
 oldest data to disk.  This writing of data to disk to reduce TLog memory
 pressure is referred to as *spilling*.
 
@@ -262,8 +262,8 @@ the TLog implementation, the transaction log is split into two parts.  A
 A TLog is all the data that is private to one generation.  Most notably, the
 1.5GB mutation buffer and the on-disk files are owned by the `SharedTLog`.  The
 index for the data added to that buffer is maintained within each TLog.  In the
-code, a SharedTLog is `struct TLogData`, and a TLog is `struct LogData`.
-(I didn't choose these names.)
+code, a SharedTLog is called `struct TLogData`, and a TLog is `struct LogData`.
+(These names can be confusing at first).
 
 This background is required, because one needs to keep in mind that we might be
 committing in one TLog instance, a different one might be spilling, and yet
@@ -636,6 +636,13 @@ With the new changes, we must ensure that sufficient information has been expose
 The following metrics were added to `TLogMetrics`:
 
 ### Spilling
+
+`PersistentDataVersion`
+: The version of the last commit that is being spilled to disk. If there's no
+  spill in progress, this will be equal to `PersistentDataDurableVersion`.
+
+`PersistentDataDurableVersion`
+: The version of the last commit that has been durably spilled to disk.
 
 ### Peeking
 
