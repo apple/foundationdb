@@ -137,12 +137,13 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
-	std::deque<std::tuple<Version, int>> unknownCommittedVersions;
-	UID id;
+	std::deque<std::tuple<Version, Version, std::vector<uint16_t>>> unknownCommittedVersions;
+	UID id; // captures TLogData::dbgid
+	UID logId; // captures LogData::logId
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion, unknownCommittedVersions, id);
+		serializer(ar, end, knownCommittedVersion, unknownCommittedVersions, id, logId);
 	}
 };
 
@@ -303,12 +304,13 @@ struct TLogCommitRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	SpanContext spanContext;
 	Arena arena;
-	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
+	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, seqPrevVersion;
 
 	StringRef messages; // Each message prefixed by a 4-byte length
 
 	ReplyPromise<TLogCommitReply> reply;
-	int tLogCount;
+	uint16_t tLogCount;
+	std::vector<uint16_t> tLogLocIds;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
@@ -318,12 +320,15 @@ struct TLogCommitRequest : TimedRequest {
 	                  Version version,
 	                  Version knownCommittedVersion,
 	                  Version minKnownCommittedVersion,
+	                  Version seqPrevVersion,
 	                  StringRef messages,
-	                  int tLogCount,
+	                  uint16_t tLogCount,
+	                  std::vector<uint16_t>& tLogLocIds,
 	                  Optional<UID> debugID)
 	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
-	    messages(messages), tLogCount(tLogCount), debugID(debugID) {}
+	    seqPrevVersion(seqPrevVersion), messages(messages), tLogCount(tLogCount), tLogLocIds(tLogLocIds),
+	    debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -331,10 +336,12 @@ struct TLogCommitRequest : TimedRequest {
 		           version,
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,
+		           seqPrevVersion,
 		           messages,
 		           reply,
 		           debugID,
 		           tLogCount,
+		           tLogLocIds,
 		           spanContext,
 		           arena);
 	}
