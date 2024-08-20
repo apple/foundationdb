@@ -4188,10 +4188,10 @@ int main(int argc, char* argv[]) {
 				// most cases.
 				int64_t timeout = 60000;
 				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
-				              Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
+				                    Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
 				int64_t retryLimit = 5;
 				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
-				              Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
+				                    Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
 			}
 
 			return result.present();
