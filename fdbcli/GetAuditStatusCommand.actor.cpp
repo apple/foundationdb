@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <fmt/core.h>
+
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.actor.h"
@@ -44,9 +46,9 @@ ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID
 				for (int i = 0; i < auditStates.size(); i++) {
 					AuditPhase phase = auditStates[i].getPhase();
 					if (phase == AuditPhase::Invalid) {
-						printf("( Ongoing ) %s\n", auditStates[i].range.toString().c_str());
+						fmt::println("( Ongoing ) {}", auditStates[i].range.toString());
 					} else if (phase == AuditPhase::Error) {
-						printf("( Error   ) %s\n", auditStates[i].range.toString().c_str());
+						fmt::println("( Error   ) {}", auditStates[i].range.toString());
 						++finishCount;
 					} else {
 						++finishCount;
@@ -60,7 +62,7 @@ ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID
 					throw e;
 				}
 				if (retryCount > 30) {
-					printf("Incomplete check\n");
+					fmt::println("Incomplete check");
 					return Void();
 				}
 				wait(delay(0.5));
@@ -68,7 +70,7 @@ ACTOR Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID
 			}
 		}
 	}
-	printf("Finished range count: %ld\n", finishCount);
+	fmt::println("Finished range count: {}", finishCount);
 	return Void();
 }
 
@@ -156,15 +158,15 @@ ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditI
 			} else if (serverPhase == AuditPhase::Error) {
 				numErrorServers++;
 			} else if (serverPhase == AuditPhase::Invalid) {
-				printf("SS %s partial progress fetched\n", interfs[i].id().toString().c_str());
+				fmt::println("SS {} partial progress fetched", interfs[i].id().toString());
 			}
 		}
-		printf("CompleteServers: %d\n", numCompleteServers);
-		printf("OngoingServers: %d\n", numOngoingServers);
-		printf("ErrorServers: %d\n", numErrorServers);
-		printf("IgnoredTSSes: %d\n", numTSSes);
+		fmt::println("CompleteServers: {}", numCompleteServers);
+		fmt::println("OngoingServers: {}", numOngoingServers);
+		fmt::println("ErrorServers: {}", numErrorServers);
+		fmt::println("IgnoredTSSes: {}", numTSSes);
 	} else {
-		printf("AuditType not implemented\n");
+		fmt::println("AuditType not implemented");
 	}
 	return Void();
 }
@@ -196,7 +198,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		const UID id = UID::fromString(tokens[3].toString());
 		AuditStorageState res = wait(getAuditState(cx, type, id));
-		printf("Audit result is:\n%s", res.toString().c_str());
+		fmt::println("Audit result is:\n{}", res.toString());
 	} else if (tokencmp(tokens[2], "progress")) {
 		if (tokens.size() != 4) {
 			printUsage(tokens[0]);
@@ -207,7 +209,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		if (res.getPhase() == AuditPhase::Running) {
 			wait(getAuditProgress(cx, res.getType(), res.id, res.range));
 		} else {
-			printf("Already complete\n");
+			fmt::println("Already complete");
 		}
 	} else if (tokencmp(tokens[2], "recent")) {
 		int count = CLIENT_KNOBS->TOO_MANY;
@@ -216,7 +218,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count));
 		for (const auto& it : res) {
-			printf("Audit result is:\n%s\n", it.toString().c_str());
+			fmt::println("Audit result is:\n{}", it.toString());
 		}
 	} else if (tokencmp(tokens[2], "phase")) {
 		AuditPhase phase = stringToAuditPhase(tokens[3].toString());
@@ -230,7 +232,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count, phase));
 		for (const auto& it : res) {
-			printf("Audit result is:\n%s\n", it.toString().c_str());
+			fmt::println("Audit result is:\n{}", it.toString());
 		}
 	} else {
 		printUsage(tokens[0]);
