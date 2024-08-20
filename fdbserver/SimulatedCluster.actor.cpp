@@ -1645,6 +1645,18 @@ void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
 }
 
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
+	// Enable encryption siginificantly reduces chance that a storage engine other than redwood got selected
+	// We want storage servers are selected by simulation tests with roughly equal chance
+	// If encryptMode is not specified explicitly, with high probability, we disable encryption
+	if (testConfig.encryptModes.empty() &&
+	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
+		EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
+		TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
+		CODE_PROBE(true, "Enforce to disable encryption in simulation");
+		set_config("encryption_at_rest_mode=" + encryptionMode.toString());
+		return;
+	}
+
 	std::vector<bool> available;
 	std::vector<double> probability;
 	if (!testConfig.encryptModes.empty()) {
@@ -1707,10 +1719,34 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	} else if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
-		// Continuously re-pick the storage engine type if it's the one we want to exclude
-		while (testConfig.excludedStorageEngineType(storage_engine_type)) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 6);
+		// Randomly choose one from available set of storage engines
+		std::unordered_set<int> storageEngineAvailable = { 0, 1, 2, 3, 4, 5 };
+		for (const auto& storageEngineExcluded : testConfig.storageEngineExcludeTypes) {
+			storageEngineAvailable.erase(storageEngineExcluded);
 		}
+		ASSERT(storageEngineAvailable.size() > 0);
+		std::vector<int> storageEngineCandidates;
+		for (const auto& storageEngine : storageEngineAvailable) {
+			if (storageEngine == 1) { // Memory engine
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that Memory is selected
+				}
+			} else if (storageEngine == 0) { // SQLite engine
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that SQLite is selected
+				}
+			} else if (storageEngine == 4) { // RocksDB engine
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that RocksDB is selected
+				}
+			} else {
+				storageEngineCandidates.push_back(storageEngine);
+			}
+		}
+		storage_engine_type = deterministicRandom()->randomChoice(storageEngineCandidates);
 	}
 
 	if (storage_engine_type == 5) {
