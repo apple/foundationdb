@@ -4187,10 +4187,10 @@ int main(int argc, char* argv[]) {
 				// enough for all cases to finish and 5 retries should also be good enough for
 				// most cases.
 				int64_t timeout = 60000;
-				sourceDB->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
+				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
 				              Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
 				int64_t retryLimit = 5;
-				sourceDB->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
+				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
 				              Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
 			}
 
