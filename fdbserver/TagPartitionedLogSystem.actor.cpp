@@ -2125,7 +2125,7 @@ void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 	}
 }
 
-// If VERSION_VECTOR_UNICAST is enabled, one tLog's DV may advance beyond the min(DV) over all tLogs.
+// If ENABLE_VERSION_VECTOR_TLOG_UNICAST is set, one tLog's DV may advance beyond the min(DV) over all tLogs.
 // This function finds the highest recoverable version for each tLog group over all log groups.
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
@@ -2396,7 +2396,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		lockResults[i].logSet = logServers[i];
 		for (int t = 0; t < logServers[i]->logServers.size(); t++) {
 			lockResults[i].replies.push_back(
-			    TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t], lockResultsInterf));
+			    TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t], &lockResultsInterf));
 		}
 	}
 
@@ -2418,7 +2418,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				lockResult.logSet = log;
 				for (int t = 0; t < log->logServers.size(); t++) {
 					lockResult.replies.push_back(
-					    TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t], lockResultsInterf));
+					    TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t], &lockResultsInterf));
 				}
 				lockResults.push_back(lockResult);
 			}
@@ -2435,7 +2435,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			lockResult.logSet = old.tLogs[0];
 			for (int t = 0; t < old.tLogs[0]->logServers.size(); t++) {
 				lockResult.replies.push_back(
-				    TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t], lockResultsInterf));
+				    TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t], &lockResultsInterf));
 			}
 			allLockResults.push_back(lockResult);
 		}
@@ -2505,9 +2505,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			    makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 
 			logSystem->recoverAt = minEnd;
-
 			lastEnd = minEnd;
-
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
@@ -2527,7 +2525,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
 
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				logSystem->recoverAt = getRecoverVersionUnicast(logGroupResults, minEnd);
+				logSystem->recoverAt = getRecoverVersionUnicast(logServers, logGroupResults, minEnd, minKCVEnd);
 				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
 				// When a new log system is created, inform the surviving tLogs of the RV.
 				// SOMEDAY: Assert surviving tLogs use the RV from the latest log system.
@@ -3414,7 +3412,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
     Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
-    Optional<std::map<UID, TLogInterface>> lockInterf) {
+    Optional<std::map<UID, TLogInterface>*> lockInterf) {
 
 	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
 	loop {
@@ -3424,7 +3422,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			                               : Never())) {
 				TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
 				if (lockInterf.present()) {
-					lockInterf.get()[tlog->get().id()] = tlog->get().interf();
+					(*lockInterf.get())[tlog->get().id()] = tlog->get().interf();
 				}
 				return data;
 			}

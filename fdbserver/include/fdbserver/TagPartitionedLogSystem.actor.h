@@ -391,7 +391,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<TLogLockResult> lockTLog(
 	    UID myID,
 	    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
-	    Optional<std::map<UID, TLogInterface>> lockInterf = Optional<std::map<UID, TLogInterface>>());
+	    Optional<std::map<UID, TLogInterface>*> lockInterf = Optional<std::map<UID, TLogInterface>*>());
 
 	template <class T>
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
