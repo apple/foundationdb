@@ -255,8 +255,7 @@ struct Traceable<BooleanParamSub, std::enable_if_t<std::is_base_of_v<BooleanPara
 // Adapter to redirect fmt::formatter calls to Traceable for a supported type
 template <typename T>
 struct FormatUsingTraceable : fmt::formatter<std::string> {
-	template <typename FormatContext>
-	auto format(const T& val, FormatContext& ctx) {
+	auto format(const T& val, fmt::format_context& ctx) const {
 		return fmt::formatter<std::string>::format(Traceable<T>::toString(val), ctx);
 	}
 };

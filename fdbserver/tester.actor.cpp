@@ -30,6 +30,8 @@
 #include <iterator>
 #include <map>
 #include <streambuf>
+
+#include <fmt/ranges.h>
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
