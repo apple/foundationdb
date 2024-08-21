@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>C API &#8212; FoundationDB 7.1</title>
+    <title>C API &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -73,6 +73,7 @@
 <li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
@@ -80,6 +81,7 @@
 <li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
@@ -91,12 +93,14 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
@@ -145,6 +149,7 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -178,6 +183,8 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -313,8 +320,8 @@
 </section>
 <section id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 710.</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 710</span>
+<p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 730.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 730</span>
 <span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span>
 </pre></div>
 </div>
@@ -344,7 +351,7 @@
 <dt><code class="docutils literal notranslate"><span class="pre">runtime_version</span></code></dt><dd><p>The version of run-time behavior the API is requested to provide. Must be less than or equal to <code class="docutils literal notranslate"><span class="pre">header_version</span></code>, and should almost always be equal.</p>
 <p>Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">header_version</span></code></dt><dd><p>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 710). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">header_version</span></code></dt><dd><p>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 730). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</p>
 </dd>
 </dl>
 <div class="admonition warning">
@@ -520,6 +527,13 @@
 <dt class="sig sig-object c" id="c.fdb_future_get_int64">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_int64</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Extracts a 64-bit integer from a pointer to <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable of type <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. <code class="docutils literal notranslate"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_future_get_double">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_double</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Extracts a double from a pointer to <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable of type <code class="docutils literal notranslate"><span class="pre">double</span></code>. <code class="docutils literal notranslate"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
 <p>Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 </dd></dl>
 
@@ -728,6 +742,56 @@
 <dt class="sig sig-object c" id="c.fdb_database_get_main_thread_busyness">
 <span class="kt"><span class="pre">double</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_get_main_thread_busyness</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_database_get_client_status">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_get_client_status</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">db</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Returns a JSON string containing database client-side status information. At the top level the report describes the status of the
+Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w">  </span><span class="s">&quot;Healthy&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">overall</span><span class="w"> </span><span class="n">health</span><span class="w"> </span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="n">or</span><span class="w"> </span><span class="nb">false</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;InitializationState&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">initializing</span><span class="o">|</span><span class="n">initialization_failed</span><span class="o">|</span><span class="n">created</span><span class="o">|</span><span class="n">incompatible</span><span class="o">|</span><span class="n">closed</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;InitializationError&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">initialization</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="n">code</span><span class="p">,</span><span class="w"> </span><span class="n">present</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">initialization</span><span class="w"> </span><span class="n">failed</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;ProtocolVersion&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">determined</span><span class="w"> </span><span class="n">protocol</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">cluster</span><span class="p">,</span><span class="w"> </span><span class="n">present</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">determined</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;ConnectionRecord&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">connection</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="n">or</span><span class="w"> </span><span class="n">connection</span><span class="w"> </span><span class="n">string</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;DatabaseStatus&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">Native</span><span class="w"> </span><span class="n">Database</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="n">report</span><span class="p">,</span><span class="w"> </span><span class="n">present</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">successfully</span><span class="w"> </span><span class="n">retrieved</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;ErrorRetrievingDatabaseStatus&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">error</span><span class="w"> </span><span class="n">code</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">retrieving</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">Native</span><span class="w"> </span><span class="n">Database</span><span class="p">,</span><span class="w"> </span><span class="n">present</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">failed</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;AvailableClients&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="s">&quot;ProtocolVersion&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">protocol</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">client</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">         </span><span class="s">&quot;ReleaseVersion&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">release</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">client</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">         </span><span class="s">&quot;ThreadIndex&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">the</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">client</span><span class="w"> </span><span class="kr">thread</span><span class="w"> </span><span class="n">serving</span><span class="w"> </span><span class="n">this</span><span class="w"> </span><span class="n">database</span><span class="o">&gt;</span>
+<span class="w">      </span><span class="p">},</span><span class="w">  </span><span class="p">...</span>
+<span class="w">   </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The status of the actual version-specific database is embedded within the <code class="docutils literal notranslate"><span class="pre">DatabaseStatus</span></code> attribute. It lists the addresses of various FDB
+server roles the client is aware of and their connection status. The schema of the <code class="docutils literal notranslate"><span class="pre">DatabaseStatus</span></code> object is:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w">  </span><span class="s">&quot;Healthy&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">overall</span><span class="w"> </span><span class="n">health</span><span class="w"> </span><span class="n">status</span><span class="o">:</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="n">or</span><span class="w"> </span><span class="nb">false</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;ClusterID&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">UUID</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">   </span><span class="s">&quot;Coordinators&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="o">&lt;</span><span class="n">address</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="p">...</span><span class="w">  </span><span class="p">],</span>
+<span class="w">   </span><span class="s">&quot;CurrentCoordinator&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">address</span><span class="o">&gt;</span>
+<span class="w">   </span><span class="s">&quot;GrvProxies&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="o">&lt;</span><span class="n">address</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="p">...</span><span class="w">  </span><span class="p">],</span>
+<span class="w">   </span><span class="s">&quot;CommitProxies&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="o">&lt;</span><span class="n">address</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">],</span>
+<span class="w">   </span><span class="s">&quot;StorageServers&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">&quot;Address&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">address</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;SSID&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">Storage</span><span class="w"> </span><span class="n">Server</span><span class="w"> </span><span class="n">ID</span><span class="o">&gt;</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">],</span>
+<span class="w">   </span><span class="s">&quot;Connections&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">   </span><span class="p">{</span><span class="w"> </span><span class="s">&quot;Address&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">address</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;Status&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">failed</span><span class="o">|</span><span class="n">connected</span><span class="o">|</span><span class="n">connecting</span><span class="o">|</span><span class="n">disconnected</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;Compatible&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">is</span><span class="w"> </span><span class="n">protocol</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="n">compatible</span><span class="w"> </span><span class="n">with</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">client</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;ConnectFailedCount&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">number</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">failed</span><span class="w"> </span><span class="n">connection</span><span class="w"> </span><span class="n">attempts</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;LastConnectTime&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">elapsed</span><span class="w"> </span><span class="n">time</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">seconds</span><span class="w"> </span><span class="n">since</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">last</span><span class="w"> </span><span class="n">connection</span><span class="w"> </span><span class="n">attempt</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;PingCount&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">total</span><span class="w"> </span><span class="n">ping</span><span class="w"> </span><span class="n">count</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;PingTimeoutCount&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">number</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">ping</span><span class="w"> </span><span class="n">timeouts</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;BytesSampleTime&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">elapsed</span><span class="w"> </span><span class="n">time</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">reported</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="n">received</span><span class="w"> </span><span class="n">and</span><span class="w"> </span><span class="n">sent</span><span class="w"> </span><span class="n">values</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;BytesReceived&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">bytes</span><span class="w"> </span><span class="n">received</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;BytesSent&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">bytes</span><span class="w"> </span><span class="n">sent</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">      </span><span class="s">&quot;ProtocolVersion&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">protocol</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="n">of</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">server</span><span class="p">,</span><span class="w"> </span><span class="n">missing</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">unknown</span><span class="o">&gt;</span>
+<span class="w">   </span><span class="p">},</span>
+<span class="w">   </span><span class="p">...</span>
+<span class="w">   </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
 </dd></dl>
 
 </section>
@@ -1046,6 +1110,18 @@
 </dd></dl>
 
 <dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_transaction_get_tag_throttled_duration">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_transaction_get_tag_throttled_duration</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">transaction</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_double" title="fdb_future_get_double"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_double()</span></code></a> to extract the duration, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_transaction_get_total_cost">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_transaction_get_total_cost</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">transaction</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the cost, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="c function">
 <dt class="sig sig-object c" id="c.fdb_transaction_get_approximate_size">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_transaction_get_approximate_size</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">transaction</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the approximate transaction size so far in the returned future, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the size, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
@@ -1232,8 +1308,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Mar 14, 2024.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>

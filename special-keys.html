@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Special Keys &#8212; FoundationDB 7.1</title>
+    <title>Special Keys &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -73,6 +73,7 @@
 <li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
@@ -80,6 +81,7 @@
 <li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
@@ -91,12 +93,14 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
@@ -145,6 +149,7 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -178,6 +183,8 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -213,6 +220,8 @@
 <li><a class="reference internal" href="#tracing-module">Tracing module</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#deprecated-keys">Deprecated Keys</a></li>
+<li><a class="reference internal" href="#versioning">Versioning</a></li>
 </ul>
 </li>
 </ul>
@@ -276,6 +285,8 @@
 <li><a class="reference internal" href="#tracing-module">Tracing module</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#deprecated-keys">Deprecated Keys</a></li>
+<li><a class="reference internal" href="#versioning">Versioning</a></li>
 </ul>
 </li>
 </ul>
@@ -296,17 +307,20 @@ The error indicates the read would always return an empty set of keys if it proc
 Users will also (by default) see a <code class="docutils literal notranslate"><span class="pre">special_keys_cross_module_read</span></code> error if their read spans a module boundary.
 The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
 Users may opt out of these restrictions by setting the <code class="docutils literal notranslate"><span class="pre">special_key_space_relaxed</span></code> transaction option.</p>
-<p>Each special key that existed before api version 630 is its own module. These are</p>
+<p>Each special key that existed before api version 630 is its own module. These are:</p>
 <ol class="arabic simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/cluster_file_path</span></code> See <a class="reference internal" href="administration.html#cluster-file-client-access"><span class="std std-ref">cluster file client access</span></a></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/status/json</span></code> See <a class="reference internal" href="mr-status.html"><span class="doc">Machine-readable status</span></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/cluster_file_path</span></code> - See <a class="reference internal" href="administration.html#cluster-file-client-access"><span class="std std-ref">cluster file client access</span></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/status/json</span></code> - See <a class="reference internal" href="mr-status.html"><span class="doc">Machine-readable status</span></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code> - key as the worker’s network address and value as the serialized ClientWorkerInterface, not transactional</p></li>
 </ol>
-<p>Prior to api version 630, it was also possible to read a range starting at
-<code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code>. This is mostly an implementation detail of fdbcli,
+<p>Prior to api version 630, it was also possible to read a range starting at <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code>. This is mostly an implementation detail of fdbcli,
 but it’s available in api version 630 as a module with prefix <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces/</span></code>.</p>
-<p>Api version 630 includes two new modules with prefixes
-<code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/</span></code> (information about the current transaction), and
-<code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/</span></code> (various metrics, not transactional).</p>
+<p>Api version 630 includes three new modules:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/</span></code> - information about the current transaction</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/</span></code> - various metrics, not transactional</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/clusterId</span></code> - returns an immutable unique ID for a cluster</p></li>
+</ol>
 <section id="transaction-module">
 <h3>Transaction module</h3>
 <p>Reads from the transaction module generally do not require an rpc and only inspect in-memory state for the current transaction.</p>
@@ -502,7 +516,6 @@ that process, and wait for necessary data to be moved away.</p>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/excluded/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded/&lt;exclusion&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/failed/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed/&lt;exclusion&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/min_required_commit_version</span></code> Read/write. Changing this key will change the corresponding system key <code class="docutils literal notranslate"><span class="pre">\xff/minRequiredCommitVersion</span> <span class="pre">=</span> <span class="pre">[[Version]]</span></code>. The value of this special key is the literal text of the underlying <code class="docutils literal notranslate"><span class="pre">Version</span></code>, which is <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. If you set the key with a value failed to be parsed as <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>, <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> will be thrown. In addition, the given <code class="docutils literal notranslate"><span class="pre">Version</span></code> should be larger than the current read version and smaller than the upper bound(<code class="docutils literal notranslate"><span class="pre">2**63-1-version_per_second*3600*24*365*1000</span></code>). Otherwise, <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> is thrown. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">advanceversion</span></code>.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/profiling/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code> Read/write. Changing these two keys will change the corresponding system keys <code class="docutils literal notranslate"><span class="pre">\xff\x02/fdbClientInfo/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code>, respectively. The value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/client_txn_sample_rate</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">double</span></code>, and the value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/client_txn_size_limit</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. A special value <code class="docutils literal notranslate"><span class="pre">default</span></code> can be set to or read from these two keys, representing the client profiling is disabled. In addition, <code class="docutils literal notranslate"><span class="pre">clear</span></code> in this range is not allowed. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">profile</span> <span class="pre">client</span></code>.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/maintenance/&lt;zone_id&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;seconds&gt;</span></code> Read/write. Set/clear a key in this range will change the corresponding system key <code class="docutils literal notranslate"><span class="pre">\xff\x02/healthyZone</span></code>. The value is a literal text of a non-negative <code class="docutils literal notranslate"><span class="pre">double</span></code> which represents the remaining time for the zone to be in maintenance. Commiting with an invalid value will throw <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code>. Only one zone is allowed to be in maintenance at the same time. Setting a new key in the range will override the old one and the transaction will throw <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error if more than one zone is given. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">maintenance</span></code>.
 In addition, a special key <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/maintenance/IgnoreSSFailures</span></code> in the range, if set, will disable datadistribution for storage server failures.
 It is doing the same thing as the fdbcli command <code class="docutils literal notranslate"><span class="pre">datadistribution</span> <span class="pre">disable</span> <span class="pre">ssfailure</span></code>.
@@ -516,7 +529,9 @@ While the key is set, any commit that tries to set a key in the range will fail 
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed_locality/&lt;locality&gt;</span></code> Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/excluded_locality/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded_locality/&lt;locality&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/failed_locality/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed_locality/&lt;locality&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/tenant_map/&lt;tenant&gt;</span></code> Read/write. Setting a key in this range to any value will result in a tenant being created with name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code>. Clearing a key in this range will delete the tenant with name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code>. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/tenant/map/&lt;tenant&gt;</span></code> Read/write. Setting a key in this range to any value will result in a tenant being created with name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code>. Clearing a key in this range will delete the tenant with name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code>. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/tenant/rename/&lt;tenant&gt;</span></code> Read/write. Setting a key in this range to an unused tenant name will result in the tenant with the name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code> to be renamed to the value provided. If the rename operation is a transaction retried in a loop, it is possible for the rename to be applied twice, in which case <code class="docutils literal notranslate"><span class="pre">tenant_not_found</span></code> or <code class="docutils literal notranslate"><span class="pre">tenant_already_exists</span></code> errors may be returned. This can be avoided by checking for the tenant’s existence first.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/worker_interfaces/verify</span></code> Read/write. Setting this key will add a verification phase in reading <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit. Try to establish connections with every worker from the list returned by Cluster Controller and only return those workers that the client can connect to. This option is now only used in fdbcli commands <code class="docutils literal notranslate"><span class="pre">kill</span></code>, <code class="docutils literal notranslate"><span class="pre">suspend</span></code> and <code class="docutils literal notranslate"><span class="pre">expensive_data_check</span></code> to populate the worker list.</p></li>
 </ol>
 <p>An exclusion is syntactically either an ip address (e.g. <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code>), or
 an ip address and port (e.g. <code class="docutils literal notranslate"><span class="pre">127.0.0.1:4500</span></code>) or any locality (e.g <code class="docutils literal notranslate"><span class="pre">locality_dcid:primary-satellite</span></code> or
@@ -582,6 +597,21 @@ clients can connect FoundationDB transactions to outside events.</p>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/tracing/transaction_id</span> <span class="pre">:=</span> <span class="pre">&lt;transaction_id&gt;</span></code> Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/tracing/token</span> <span class="pre">:=</span> <span class="pre">&lt;tracing_enabled&gt;</span></code> Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).</p></li>
 </ol>
+</section>
+</section>
+<section id="deprecated-keys">
+<span id="special-key-space-deprecation"></span><h2>Deprecated Keys</h2>
+<p>Listed below are the special keys that have been deprecated. Special key(s) will no longer be accessible when the client specifies an API version equal to or larger than the version where they were deprecated. Clients specifying older API versions will be able to continue using the deprecated key(s).</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/profiling/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code> Deprecated as of API version 720. The corresponding functionalities are now covered by the global configuration module. For details, see <a class="reference internal" href="global-configuration.html"><span class="doc">Global Configuration</span></a>. Read/write. Changing these two keys will change the corresponding system keys <code class="docutils literal notranslate"><span class="pre">\xff\x02/fdbClientInfo/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code>, respectively. The value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/client_txn_sample_rate</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">double</span></code>, and the value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/client_txn_size_limit</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. A special value <code class="docutils literal notranslate"><span class="pre">default</span></code> can be set to or read from these two keys, representing the client profiling is disabled. In addition, <code class="docutils literal notranslate"><span class="pre">clear</span></code> in this range is not allowed. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">profile</span> <span class="pre">client</span></code>.</p></li>
+</ol>
+</section>
+<section id="versioning">
+<h2>Versioning</h2>
+<p>For how FDB clients deal with versioning, see <a class="reference internal" href="api-general.html#api-versions"><span class="std std-ref">API versions</span></a>. The special key space deals with versioning by using the <code class="docutils literal notranslate"><span class="pre">API_VERSION</span></code> passed to initialize the client. Any module added at a version larger than the API version set by the client will be inaccessible. For example, if a module is added in version 7.0 and the client sets its API version to 630, then the module will not available. When removing or updating existing modules, module developers need to continue to provide the old behavior for clients that specify old API versions.</p>
+<p>To remove the functionality of a certain special key(s), specify the API version where the function is being deprecated in the <code class="docutils literal notranslate"><span class="pre">registerSpecialKeysImpl</span></code> function. When a client specifies an API version greater than or equal to the deprecation version, the functionality will not be available. Move and update its documentation to <a class="reference internal" href="#special-key-space-deprecation"><span class="std std-ref">Deprecated Keys</span></a>.</p>
+<p>To update the implementation of any special keys, add the new implementation and use <code class="docutils literal notranslate"><span class="pre">API_VERSION</span></code> to switch between different implementations.</p>
+<p>Add notes in <code class="docutils literal notranslate"><span class="pre">api-version-upgrade-guide.rst</span></code> if you either remove or update a special key(s) implementation.</p>
 <aside class="footnote-list brackets">
 <aside class="footnote brackets" id="conflicting-keys" role="note">
 <span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">1</a><span class="fn-bracket">]</span></span>
@@ -596,7 +626,6 @@ clients can connect FoundationDB transactions to outside events.</p>
 <p>Enabling this option enables other transaction options, such as <code class="docutils literal notranslate"><span class="pre">ACCESS_SYSTEM_KEYS</span></code>. This may change in the future.</p>
 </aside>
 </aside>
-</section>
 </section>
 </section>
 
@@ -619,8 +648,8 @@ clients can connect FoundationDB transactions to outside events.</p>
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Mar 14, 2024.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>

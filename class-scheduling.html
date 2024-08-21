@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Class Scheduling &#8212; FoundationDB 7.1</title>
+    <title>Class Scheduling &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -73,6 +73,7 @@
 <li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
@@ -80,6 +81,7 @@
 <li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
@@ -91,12 +93,14 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
@@ -145,6 +149,7 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -178,6 +183,8 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -313,7 +320,7 @@
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">730</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a>.</p>
@@ -331,7 +338,7 @@
 </div>
 <p>If this is all working, it looks like we are ready to start building a real application. For reference, here’s the full code for “hello world”:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">730</span><span class="p">)</span>
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;world&#39;</span>
 <span class="nb">print</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
@@ -368,7 +375,7 @@
 <p>FoundationDB includes a few tools that make it easy to model data using this approach. Let’s begin by
 opening a <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directory</span></a> in the database:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">730</span><span class="p">)</span>
 
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="n">scheduling</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">directory</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;scheduling&#39;</span><span class="p">,))</span>
@@ -581,7 +588,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <span class="kn">import</span> <span class="nn">fdb</span>
 <span class="kn">import</span> <span class="nn">fdb.tuple</span>
 
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">730</span><span class="p">)</span>
 
 
 <span class="c1">####################################</span>
@@ -735,8 +742,8 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Mar 14, 2024.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>

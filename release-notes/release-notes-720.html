@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes &#8212; FoundationDB 7.2</title>
+    <title>Release Notes &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
     <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
@@ -14,6 +14,7 @@
     <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
     <script src="../_static/doctools.js"></script>
     <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Release Notes" href="release-notes-730.html" />
     <link rel="prev" title="Release Notes" href="release-notes-710.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -37,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -72,6 +73,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
@@ -79,6 +81,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
@@ -97,6 +100,7 @@
 <li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
@@ -180,6 +184,7 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes-710.html">Release Notes</a></li>
 <li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -196,7 +201,7 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.2.0</a><ul>
+<li><a class="reference internal" href="#id1">7.2.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -219,6 +224,10 @@
                 
   <li>
     <a href="release-notes-710.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="release-notes-730.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
     </a>
   </li>
               
@@ -247,7 +256,7 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.2.0</a><ul>
+<li><a class="reference internal" href="#id1">7.2.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -267,11 +276,14 @@
     <div class="body col-md-9 content" role="main">
       
   <section id="release-notes">
-<span id="id1"></span><h1>Release Notes</h1>
-<section id="id2">
+<h1>Release Notes</h1>
+<section id="id1">
 <h2>7.2.0</h2>
 <section id="features">
 <h3>Features</h3>
+<ul class="simple">
+<li><p>Read-aware Data Distribution feature is developed for balance the read bytes bandwidth among storage servers.</p></li>
+</ul>
 </section>
 <section id="performance">
 <h3>Performance</h3>
@@ -347,8 +359,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 19, 2023.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>

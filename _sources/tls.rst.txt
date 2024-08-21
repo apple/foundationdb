@@ -126,11 +126,11 @@ Default Values
 Certificate file default location
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:
+The default behavior when the certificate or key file is not specified is to look for files named ``cert.pem`` or  ``key.pem`` respectively, in system-dependent locations as follows:
 
-* Linux: ``/etc/foundationdb/fdb.pem``
-* macOS: ``/usr/local/etc/foundationdb/fdb.pem``
-* Windows: ``C:\ProgramData\foundationdb\fdb.pem``
+* Linux: ``/etc/foundationdb/cert.pem`` and ``/etc/foundationdb/key.pem``
+* macOS: ``/usr/local/etc/foundationdb/cert.pem`` and ``/usr/local/etc/foundationdb/key.pem``
+* Windows: ``C:\ProgramData\foundationdb\cert.pem`` and ``C:\ProgramData\foundationdb\key.pem``
 
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -214,9 +214,12 @@ Certificate creation
 
 If your organization already makes use of certificates for access control and securing communications, you should ask your security expert for organizational procedure for obtaining and verifying certificates. If the goal of enabling TLS is to make sure that only known machines can join or access the FoundationDB cluster and for securing communications, then creating your own certificates can serve these purposes.
 
-The following set of commands uses the OpenSSL command-line tools to create a self-signed certificate and private key. The certificate is then joined with the private key in the output ``fdb.pem`` file::
+The following set of commands uses the OpenSSL command-line tools to create a self-signed certificate and private key::
 
-  user@host:> openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout private.key -out cert.crt
+  user@host:> openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem
+
+Optionally, the certificate can be joined with the private key as supplied as both certificate and key files::
+
   user@host:> cat cert.crt private.key > fdb.pem
 
 Peer verification

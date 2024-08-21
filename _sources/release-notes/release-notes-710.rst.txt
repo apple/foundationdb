@@ -1,8 +1,30 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
+
+7.1.61
+======
+* Same as 7.1.60 release with AVX enabled.
+
+7.1.60
+======
+* Released with AVX disabled.
+* Fixed a DR corruption bug due to a race condition. `(PR #11245) <https://github.com/apple/foundationdb/pull/11245>`_
+* Added Go tenanting support for 7.1. `(PR #11278) <https://github.com/apple/foundationdb/pull/11278>`_
+* Increased visibility of gray failure actions. `(PR #11314) <https://github.com/apple/foundationdb/pull/11314>`_
+* Increase visibility of CommitProxyTerminated events for failed_to_progress errors. `(PR #11316) <https://github.com/apple/foundationdb/pull/11316>`_
+* Fixed an infinite retry of GRV request bug. `(PR #11352) <https://github.com/apple/foundationdb/pull/11352>`_
+* Improved distributed consistency checker to continuously run by default and visibility of recruitment errors. `(PR #11351) <https://github.com/apple/foundationdb/pull/11351>`_
+* Fixed an assertion failure of cluster controller when waiting for recovery. `(PR #11398) <https://github.com/apple/foundationdb/pull/11398>`_
+
+7.1.59
+======
+* Same as 7.1.59 release with AVX enabled.
+
+7.1.58
+======
+* Released with AVX disabled.
+* Fixed a bug in consistency checker urgent mode. `(PR #11230) <https://github.com/apple/foundationdb/pull/11230>`_
 
 7.1.57
 ======
@@ -203,7 +225,6 @@ Release Notes
 7.1.26
 ======
 * Released with AVX disabled.
-* Fixed status json to not report fdbserver processes as clients. `(PR #9252) <https://github.com/apple/foundationdb/pull/9252>`_
 * Added detection of disconnection to satellite TLog in gray failure detection. `(PR #9107) <https://github.com/apple/foundationdb/pull/9107>`_
 * Fixed (non)empty peeks stats in TLogMetrics. `(PR #9074) <https://github.com/apple/foundationdb/pull/9074>`_
 * Fixed a data distribution bug where exclusions can become stuck because DD cannot build new teams. `(PR #9035) <https://github.com/apple/foundationdb/pull/9035>`_

@@ -31,7 +31,7 @@ Because TSS recruitment only pairs *new* storage processes, you must add process
 Example commands
 ----------------
 
-Set the desired TSS processes count to 4, using the redwood storage engine: ``configure tss ssd-redwood-1-experimental count=4``.
+Set the desired TSS processes count to 4, using the redwood storage engine: ``configure tss ssd-redwood-1 count=4``.
 
 Change the desired TSS process count to 2: ``configure tss count=2``.
 

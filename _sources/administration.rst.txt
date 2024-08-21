@@ -12,6 +12,7 @@ Administration
    configuration
    moving-a-cluster
    tls
+   authorization
 
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 

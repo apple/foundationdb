@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>API Version Upgrade Guide &#8212; FoundationDB 7.1</title>
+    <title>API Version Upgrade Guide &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -73,6 +73,7 @@
 <li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
@@ -80,6 +81,7 @@
 <li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1 current"><a class="reference internal" href="client-design.html">Client Design</a><ul class="current">
@@ -91,12 +93,14 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2 current"><a class="current reference internal" href="#">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
@@ -145,6 +149,7 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -178,6 +183,8 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -195,50 +202,58 @@
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">API Version Upgrade Guide</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
-<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
+<li><a class="reference internal" href="#api-version-730">API version 730</a><ul>
 <li><a class="reference internal" href="#general">General</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#api-version-720">API version 720</a><ul>
 <li><a class="reference internal" href="#id1">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
+<li><a class="reference internal" href="#id2">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#id3">General</a></li>
 <li><a class="reference internal" href="#python-bindings">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-630">API version 630</a><ul>
-<li><a class="reference internal" href="#id2">General</a></li>
+<li><a class="reference internal" href="#id4">General</a></li>
 <li><a class="reference internal" href="#c-bindings">C bindings</a></li>
-<li><a class="reference internal" href="#id3">Python bindings</a></li>
+<li><a class="reference internal" href="#id5">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-620">API version 620</a><ul>
-<li><a class="reference internal" href="#id4">C bindings</a></li>
+<li><a class="reference internal" href="#id6">C bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-610">API version 610</a><ul>
-<li><a class="reference internal" href="#id5">General</a></li>
-<li><a class="reference internal" href="#id6">C bindings</a></li>
-<li><a class="reference internal" href="#id7">Python bindings</a></li>
+<li><a class="reference internal" href="#id7">General</a></li>
+<li><a class="reference internal" href="#id8">C bindings</a></li>
+<li><a class="reference internal" href="#id9">Python bindings</a></li>
 <li><a class="reference internal" href="#java-bindings">Java bindings</a></li>
 <li><a class="reference internal" href="#ruby-bindings">Ruby bindings</a></li>
 <li><a class="reference internal" href="#go-bindings">Go bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-600">API version 600</a><ul>
-<li><a class="reference internal" href="#id8">General</a></li>
+<li><a class="reference internal" href="#id10">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-520">API version 520</a><ul>
-<li><a class="reference internal" href="#id9">General</a></li>
+<li><a class="reference internal" href="#id11">General</a></li>
 <li><a class="reference internal" href="#java-and-python-bindings">Java and Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-510">API version 510</a><ul>
-<li><a class="reference internal" href="#id10">General</a></li>
-<li><a class="reference internal" href="#id11">Java bindings</a></li>
+<li><a class="reference internal" href="#id12">General</a></li>
+<li><a class="reference internal" href="#id13">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-500">API version 500</a><ul>
-<li><a class="reference internal" href="#id12">Java bindings</a></li>
+<li><a class="reference internal" href="#id14">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-460">API version 460</a></li>
@@ -247,23 +262,23 @@
 <li><a class="reference internal" href="#api-version-430">API version 430</a></li>
 <li><a class="reference internal" href="#api-version-420">API version 420</a></li>
 <li><a class="reference internal" href="#api-version-410">API version 410</a><ul>
-<li><a class="reference internal" href="#id13">General</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
-<li><a class="reference internal" href="#id14">Java bindings</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
 <li><a class="reference internal" href="#id15">General</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
+<li><a class="reference internal" href="#id16">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
+<li><a class="reference internal" href="#id17">General</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
-<li><a class="reference internal" href="#id16">General</a></li>
+<li><a class="reference internal" href="#id18">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-100">API version 100</a><ul>
-<li><a class="reference internal" href="#id17">Java bindings</a></li>
+<li><a class="reference internal" href="#id19">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#older-api-versions">Older API versions</a></li>
@@ -312,50 +327,58 @@
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">API Version Upgrade Guide</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
-<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
+<li><a class="reference internal" href="#api-version-730">API version 730</a><ul>
 <li><a class="reference internal" href="#general">General</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#api-version-720">API version 720</a><ul>
 <li><a class="reference internal" href="#id1">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
+<li><a class="reference internal" href="#id2">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#id3">General</a></li>
 <li><a class="reference internal" href="#python-bindings">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-630">API version 630</a><ul>
-<li><a class="reference internal" href="#id2">General</a></li>
+<li><a class="reference internal" href="#id4">General</a></li>
 <li><a class="reference internal" href="#c-bindings">C bindings</a></li>
-<li><a class="reference internal" href="#id3">Python bindings</a></li>
+<li><a class="reference internal" href="#id5">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-620">API version 620</a><ul>
-<li><a class="reference internal" href="#id4">C bindings</a></li>
+<li><a class="reference internal" href="#id6">C bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-610">API version 610</a><ul>
-<li><a class="reference internal" href="#id5">General</a></li>
-<li><a class="reference internal" href="#id6">C bindings</a></li>
-<li><a class="reference internal" href="#id7">Python bindings</a></li>
+<li><a class="reference internal" href="#id7">General</a></li>
+<li><a class="reference internal" href="#id8">C bindings</a></li>
+<li><a class="reference internal" href="#id9">Python bindings</a></li>
 <li><a class="reference internal" href="#java-bindings">Java bindings</a></li>
 <li><a class="reference internal" href="#ruby-bindings">Ruby bindings</a></li>
 <li><a class="reference internal" href="#go-bindings">Go bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-600">API version 600</a><ul>
-<li><a class="reference internal" href="#id8">General</a></li>
+<li><a class="reference internal" href="#id10">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-520">API version 520</a><ul>
-<li><a class="reference internal" href="#id9">General</a></li>
+<li><a class="reference internal" href="#id11">General</a></li>
 <li><a class="reference internal" href="#java-and-python-bindings">Java and Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-510">API version 510</a><ul>
-<li><a class="reference internal" href="#id10">General</a></li>
-<li><a class="reference internal" href="#id11">Java bindings</a></li>
+<li><a class="reference internal" href="#id12">General</a></li>
+<li><a class="reference internal" href="#id13">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-500">API version 500</a><ul>
-<li><a class="reference internal" href="#id12">Java bindings</a></li>
+<li><a class="reference internal" href="#id14">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-460">API version 460</a></li>
@@ -364,23 +387,23 @@
 <li><a class="reference internal" href="#api-version-430">API version 430</a></li>
 <li><a class="reference internal" href="#api-version-420">API version 420</a></li>
 <li><a class="reference internal" href="#api-version-410">API version 410</a><ul>
-<li><a class="reference internal" href="#id13">General</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
-<li><a class="reference internal" href="#id14">Java bindings</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
 <li><a class="reference internal" href="#id15">General</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
+<li><a class="reference internal" href="#id16">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
+<li><a class="reference internal" href="#id17">General</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
-<li><a class="reference internal" href="#id16">General</a></li>
+<li><a class="reference internal" href="#id18">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-100">API version 100</a><ul>
-<li><a class="reference internal" href="#id17">Java bindings</a></li>
+<li><a class="reference internal" href="#id19">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#older-api-versions">Older API versions</a></li>
@@ -399,9 +422,24 @@
 <p>This document provides an overview of changes that an application developer may need to make or effects that they should consider when upgrading the API version in their code. For each version, a list is provided that details the relevant changes when upgrading to that version from a prior version. To upgrade across multiple versions, make sure you apply changes from each version starting after your start version up to and including your target version.</p>
 <p>For more details about API versions, see <a class="reference internal" href="api-general.html#api-versions"><span class="std std-ref">API versions</span></a>.</p>
 </section>
+<section id="api-version-730">
+<span id="api-version-upgrade-guide-730"></span><h2>API version 730</h2>
+<section id="general">
+<h3>General</h3>
+</section>
+</section>
+<section id="api-version-720">
+<span id="api-version-upgrade-guide-720"></span><h2>API version 720</h2>
+<section id="id1">
+<h3>General</h3>
+<ul class="simple">
+<li><p>Special keys <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/profiling/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code> are removed in 7.2 and the functionalities they provide are now covered by the global configuration module.</p></li>
+</ul>
+</section>
+</section>
 <section id="api-version-710">
 <span id="api-version-upgrade-guide-710"></span><h2>API version 710</h2>
-<section id="general">
+<section id="id2">
 <h3>General</h3>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> API is replaced by <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_mapped_range</span></code> in version 710. The function <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> is not supported in any API version.</p></li>
@@ -410,7 +448,7 @@
 </section>
 <section id="api-version-700">
 <span id="api-version-upgrade-guide-700"></span><h2>API version 700</h2>
-<section id="id1">
+<section id="id3">
 <h3>General</h3>
 <ul class="simple">
 <li><p>Committing a transaction will no longer partially reset it. In particular, getting the read version from a transaction that has committed or failed to commit with an error will return the original read version.</p></li>
@@ -425,7 +463,7 @@
 </section>
 <section id="api-version-630">
 <span id="api-version-upgrade-guide-630"></span><h2>API version 630</h2>
-<section id="id2">
+<section id="id4">
 <h3>General</h3>
 <ul class="simple">
 <li><p>In previous api versions, a get range starting at <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code> ignored its arguments and returned keys outside the range requested. In api version 630, you can get similar behavior by reading from <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces/</span></code> to <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces0</span></code> and stripping the prefix <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces/</span></code> from each key in the result.</p></li>
@@ -439,7 +477,7 @@
 <li><p>The <code class="docutils literal notranslate"><span class="pre">FDBKeyValue</span></code> struct’s <code class="docutils literal notranslate"><span class="pre">key</span></code> and <code class="docutils literal notranslate"><span class="pre">value</span></code> members have changed type from <code class="docutils literal notranslate"><span class="pre">void*</span></code> to <code class="docutils literal notranslate"><span class="pre">uint8_t*</span></code>.</p></li>
 </ul>
 </section>
-<section id="id3">
+<section id="id5">
 <h3>Python bindings</h3>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code> decorated functions will now throw an error if they return a generator. Previously, it was very easy to write these generators in a way that resulted them committing or retrying earlier than intended.</p></li>
@@ -448,7 +486,7 @@
 </section>
 <section id="api-version-620">
 <span id="api-version-upgrade-guide-620"></span><h2>API version 620</h2>
-<section id="id4">
+<section id="id6">
 <h3>C bindings</h3>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">fdb_future_get_version</span></code> has been renamed to <code class="docutils literal notranslate"><span class="pre">fdb_future_get_int64</span></code>.</p></li>
@@ -457,7 +495,7 @@
 </section>
 <section id="api-version-610">
 <span id="api-version-upgrade-guide-610"></span><h2>API version 610</h2>
-<section id="id5">
+<section id="id7">
 <h3>General</h3>
 <ul class="simple">
 <li><p>The concept of opening a cluster has been removed from the API. Instead, databases are opened directly. See binding specific notes for the details as they apply to your language binding.</p></li>
@@ -466,14 +504,14 @@
 <li><p>The <code class="docutils literal notranslate"><span class="pre">TRANSACTION_LOGGING_ENABLE</span></code> option has been deprecated. Its behavior can be replicated by setting the <code class="docutils literal notranslate"><span class="pre">DEBUG_TRANSACTION_IDENTIFIER</span></code> and <code class="docutils literal notranslate"><span class="pre">LOG_TRANSACTION</span></code> options.</p></li>
 </ul>
 </section>
-<section id="id6">
+<section id="id8">
 <h3>C bindings</h3>
 <ul class="simple">
 <li><p>Creating a database is now done by calling <code class="docutils literal notranslate"><span class="pre">fdb_create_database</span></code>, which is a synchronous operation.</p></li>
 <li><p>The <code class="docutils literal notranslate"><span class="pre">FDBCluster</span></code> type has been eliminated and the following functions have been removed: <code class="docutils literal notranslate"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_future_get_cluster</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdb_future_get_database</span></code>.</p></li>
 </ul>
 </section>
-<section id="id7">
+<section id="id9">
 <h3>Python bindings</h3>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">fdb.open</span></code> no longer accepts a <code class="docutils literal notranslate"><span class="pre">database_name</span></code> parameter.</p></li>
@@ -503,7 +541,7 @@
 </section>
 <section id="api-version-600">
 <span id="api-version-upgrade-guide-600"></span><h2>API version 600</h2>
-<section id="id8">
+<section id="id10">
 <h3>General</h3>
 <ul class="simple">
 <li><p>The <code class="docutils literal notranslate"><span class="pre">TLS_PLUGIN</span></code> option is now a no-op and has been deprecated. TLS support is now included in the published binaries.</p></li>
@@ -512,7 +550,7 @@
 </section>
 <section id="api-version-520">
 <span id="api-version-upgrade-guide-520"></span><h2>API version 520</h2>
-<section id="id9">
+<section id="id11">
 <h3>General</h3>
 <ul class="simple">
 <li><p>The <code class="docutils literal notranslate"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code> atomic operation now uses four bytes instead of two to specify the versionstamp offset.</p></li>
@@ -529,13 +567,13 @@
 </section>
 <section id="api-version-510">
 <span id="api-version-upgrade-guide-510"></span><h2>API version 510</h2>
-<section id="id10">
+<section id="id12">
 <h3>General</h3>
 <ul class="simple">
 <li><p>The atomic operations <code class="docutils literal notranslate"><span class="pre">AND</span></code> and <code class="docutils literal notranslate"><span class="pre">MIN</span></code> have changed behavior when used on a key that isn’t present in the database. Previously, these operations would set an unset key to a value of equal length with the specified value but containing all null bytes (0x00). Now, an unset key will be set with the value passed to the operation (equivalent to a set).</p></li>
 </ul>
 </section>
-<section id="id11">
+<section id="id13">
 <h3>Java bindings</h3>
 <ul class="simple">
 <li><p>Note: the Java bindings as of 5.1 no longer support API versions older that 510.</p></li>
@@ -551,7 +589,7 @@
 </section>
 <section id="api-version-500">
 <span id="api-version-upgrade-guide-500"></span><h2>API version 500</h2>
-<section id="id12">
+<section id="id14">
 <h3>Java bindings</h3>
 <ul class="simple">
 <li><p>Note: the Java bindings as of 5.0 no longer support API versions older than 500.</p></li>
@@ -583,7 +621,7 @@
 </section>
 <section id="api-version-410">
 <span id="api-version-upgrade-guide-410"></span><h2>API version 410</h2>
-<section id="id13">
+<section id="id15">
 <h3>General</h3>
 <ul class="simple">
 <li><p>Transactions no longer reset after a successful commit.</p></li>
@@ -592,7 +630,7 @@
 </section>
 <section id="api-version-400">
 <span id="api-version-upgrade-guide-400"></span><h2>API version 400</h2>
-<section id="id14">
+<section id="id16">
 <h3>Java bindings</h3>
 <ul class="simple">
 <li><p>The Java bindings have moved packages from <code class="docutils literal notranslate"><span class="pre">com.foundationdb</span></code> to <code class="docutils literal notranslate"><span class="pre">com.apple.cie.foundationdb</span></code>.</p></li>
@@ -601,7 +639,7 @@
 </section>
 <section id="api-version-300">
 <span id="api-version-upgrade-guide-300"></span><h2>API version 300</h2>
-<section id="id15">
+<section id="id17">
 <h3>General</h3>
 <ul class="simple">
 <li><p>Snapshot reads now see the effects of prior writes within the same transaction. The previous behavior can be achieved using the <code class="docutils literal notranslate"><span class="pre">SNAPSHOT_RYW_DISABLE</span></code> transaction option.</p></li>
@@ -612,7 +650,7 @@
 </section>
 <section id="api-version-200">
 <span id="api-version-upgrade-guide-200"></span><h2>API version 200</h2>
-<section id="id16">
+<section id="id18">
 <h3>General</h3>
 <ul class="simple">
 <li><p>Read version requests will now fail when the transaction is reset or has experienced another error.</p></li>
@@ -621,7 +659,7 @@
 </section>
 <section id="api-version-100">
 <span id="api-version-upgrade-guide-100"></span><h2>API version 100</h2>
-<section id="id17">
+<section id="id19">
 <h3>Java bindings</h3>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">Transaction.clearRangeStartsWith</span></code> has been deprecated. <code class="docutils literal notranslate"><span class="pre">Transaction.clear(Range)</span></code> should be used instead.</p></li>
@@ -653,8 +691,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Mar 14, 2024.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>

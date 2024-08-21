@@ -14,8 +14,12 @@ Detailed FoundationDB Architecture
 
 The FoundationDB architecture chooses a decoupled design, where
 processes are assigned different heterogeneous roles (e.g.,
-Coordinators, Storage Servers, Master). Scaling the database is achieved
-by horizontally expanding the number of processes for separate roles:
+Coordinators, Storage Servers, Master). Cluster attempts to recruit
+different roles as separate processes, however, it is possible that
+multiple Stateless roles gets colocated (recruited) on a single
+process to meet the cluster recruitment goals. Scaling the database
+is achieved by horizontally expanding the number of processes for
+separate roles:
 
 Coordinators
 ~~~~~~~~~~~~

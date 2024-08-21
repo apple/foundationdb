@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Transport Layer Security &#8212; FoundationDB 7.1</title>
+    <title>Transport Layer Security &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -14,7 +14,7 @@
     <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
     <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Monitored Metrics" href="monitored-metrics.html" />
+    <link rel="next" title="Authorization" href="authorization.html" />
     <link rel="prev" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -73,6 +73,7 @@
 <li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
@@ -80,6 +81,7 @@
 <li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
@@ -91,12 +93,14 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
@@ -145,6 +149,7 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2 current"><a class="current reference internal" href="#">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -178,6 +183,8 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -246,7 +253,7 @@
     </a>
   </li>
   <li>
-    <a href="monitored-metrics.html" title="Next Chapter: Monitored Metrics"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Monitored Metrics &raquo;</span>
+    <a href="authorization.html" title="Next Chapter: Authorization"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Authorization &raquo;</span>
     </a>
   </li>
               
@@ -452,11 +459,11 @@ to trust</p></td>
 <h3>Default Values</h3>
 <section id="certificate-file-default-location">
 <h4>Certificate file default location</h4>
-<p>The default behavior when the certificate or key file is not specified is to look for a file named <code class="docutils literal notranslate"><span class="pre">fdb.pem</span></code> in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:</p>
+<p>The default behavior when the certificate or key file is not specified is to look for files named <code class="docutils literal notranslate"><span class="pre">cert.pem</span></code> or  <code class="docutils literal notranslate"><span class="pre">key.pem</span></code> respectively, in system-dependent locations as follows:</p>
 <ul class="simple">
-<li><p>Linux: <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/fdb.pem</span></code></p></li>
-<li><p>macOS: <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/fdb.pem</span></code></p></li>
-<li><p>Windows: <code class="docutils literal notranslate"><span class="pre">C:\ProgramData\foundationdb\fdb.pem</span></code></p></li>
+<li><p>Linux: <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/cert.pem</span></code> and <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/key.pem</span></code></p></li>
+<li><p>macOS: <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/cert.pem</span></code> and <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/key.pem</span></code></p></li>
+<li><p>Windows: <code class="docutils literal notranslate"><span class="pre">C:\ProgramData\foundationdb\cert.pem</span></code> and <code class="docutils literal notranslate"><span class="pre">C:\ProgramData\foundationdb\key.pem</span></code></p></li>
 </ul>
 </section>
 <section id="default-peer-verification">
@@ -525,9 +532,12 @@ to trust</p></td>
 <section id="certificate-creation">
 <h3>Certificate creation</h3>
 <p>If your organization already makes use of certificates for access control and securing communications, you should ask your security expert for organizational procedure for obtaining and verifying certificates. If the goal of enabling TLS is to make sure that only known machines can join or access the FoundationDB cluster and for securing communications, then creating your own certificates can serve these purposes.</p>
-<p>The following set of commands uses the OpenSSL command-line tools to create a self-signed certificate and private key. The certificate is then joined with the private key in the output <code class="docutils literal notranslate"><span class="pre">fdb.pem</span></code> file:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">openssl</span> <span class="n">req</span> <span class="o">-</span><span class="n">x509</span> <span class="o">-</span><span class="n">nodes</span> <span class="o">-</span><span class="n">days</span> <span class="mi">365</span> <span class="o">-</span><span class="n">newkey</span> <span class="n">rsa</span><span class="p">:</span><span class="mi">2048</span> <span class="o">-</span><span class="n">keyout</span> <span class="n">private</span><span class="o">.</span><span class="n">key</span> <span class="o">-</span><span class="n">out</span> <span class="n">cert</span><span class="o">.</span><span class="n">crt</span>
-<span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">cat</span> <span class="n">cert</span><span class="o">.</span><span class="n">crt</span> <span class="n">private</span><span class="o">.</span><span class="n">key</span> <span class="o">&gt;</span> <span class="n">fdb</span><span class="o">.</span><span class="n">pem</span>
+<p>The following set of commands uses the OpenSSL command-line tools to create a self-signed certificate and private key:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">openssl</span> <span class="n">req</span> <span class="o">-</span><span class="n">x509</span> <span class="o">-</span><span class="n">nodes</span> <span class="o">-</span><span class="n">days</span> <span class="mi">365</span> <span class="o">-</span><span class="n">newkey</span> <span class="n">rsa</span><span class="p">:</span><span class="mi">2048</span> <span class="o">-</span><span class="n">keyout</span> <span class="n">key</span><span class="o">.</span><span class="n">pem</span> <span class="o">-</span><span class="n">out</span> <span class="n">cert</span><span class="o">.</span><span class="n">pem</span>
+</pre></div>
+</div>
+<p>Optionally, the certificate can be joined with the private key as supplied as both certificate and key files:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">cat</span> <span class="n">cert</span><span class="o">.</span><span class="n">crt</span> <span class="n">private</span><span class="o">.</span><span class="n">key</span> <span class="o">&gt;</span> <span class="n">fdb</span><span class="o">.</span><span class="n">pem</span>
 </pre></div>
 </div>
 </section>
@@ -744,8 +754,8 @@ to proceed.</p></td>
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Mar 14, 2024.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Machine-Readable Status &#8212; FoundationDB 7.1</title>
+    <title>Machine-Readable Status &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.49</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -71,6 +71,7 @@
 <li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
 <li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
@@ -78,6 +79,7 @@
 <li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
 <li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
 <li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
@@ -89,12 +91,14 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
@@ -143,6 +147,7 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -176,6 +181,8 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -388,6 +395,36 @@
 <span class="w">                     </span><span class="s2">&quot;router&quot;</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">&quot;coordinator&quot;</span>
 <span class="w">                  </span><span class="p">]</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">&quot;tss&quot;</span><span class="o">:</span><span class="kc">false</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">&quot;storage_metadata&quot;</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">&quot;created_time_datetime&quot;</span><span class="o">:</span><span class="s2">&quot;1970-01-01 00:00:00.000 +0000&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;created_time_timestamp&quot;</span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;storage_engine&quot;</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
+<span class="w">                  </span><span class="s2">&quot;ssd&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;ssd-1&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;ssd-redwood-1&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;memory-radixtree-beta&quot;</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;unknown&quot;</span>
+<span class="w">                  </span><span class="p">]}</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">&quot;rocksdb_metrics&quot;</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">&quot;block_cache_hits&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;block_cache_misses&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;pending_compaction_bytes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;memtable_bytes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;sst_reader_bytes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;block_cache_usage&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;block_cache_limit&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;throttled_commits&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">&quot;write_stall_microseconds&quot;</span><span class="o">:</span><span class="mf">12341234</span>
 <span class="w">               </span><span class="p">},</span>
 <span class="w">               </span><span class="s2">&quot;data_version&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;durable_version&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
@@ -656,7 +693,9 @@
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;storage_server_durability_lag&quot;</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span>
+<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_lag&quot;</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_missing&quot;</span>
 <span class="w">            </span><span class="p">]</span>
 <span class="w">         </span><span class="p">},</span>
 <span class="w">         </span><span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span>
@@ -677,7 +716,9 @@
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;storage_server_durability_lag&quot;</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span>
+<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_lag&quot;</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_missing&quot;</span>
 <span class="w">            </span><span class="p">]</span>
 <span class="w">         </span><span class="p">},</span>
 <span class="w">         </span><span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span>
@@ -801,7 +842,8 @@
 <span class="w">               </span><span class="s2">&quot;duplicate_mutation_fetch_timeout&quot;</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;primary_dc_missing&quot;</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">&quot;fetch_primary_dc_timeout&quot;</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">&quot;fetch_storage_wiggler_stats_timeout&quot;</span>
+<span class="w">               </span><span class="s2">&quot;fetch_storage_wiggler_stats_timeout&quot;</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">&quot;fetch_consistency_scan_info_timeout&quot;</span>
 <span class="w">            </span><span class="p">]</span>
 <span class="w">         </span><span class="p">},</span>
 <span class="w">         </span><span class="s2">&quot;issues&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -876,7 +918,7 @@
 <span class="w">            </span><span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
 <span class="w">            </span><span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
 <span class="w">         </span><span class="p">},</span>
-<span class="w">         </span><span class="s2">&quot;memory_errors&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// measures number of proxy_memory_limit_exceeded errors</span>
+<span class="w">         </span><span class="s2">&quot;memory_errors&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// measures number of (commit/grv)_proxy_memory_limit_exceeded errors</span>
 <span class="w">            </span><span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
 <span class="w">            </span><span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
 <span class="w">            </span><span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
@@ -1006,15 +1048,28 @@
 <span class="w">      </span><span class="s2">&quot;storage_replication_policy&quot;</span><span class="o">:</span><span class="s2">&quot;(zoneid^3x1)&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="s2">&quot;logs&quot;</span><span class="o">:</span><span class="mf">2</span><span class="p">,</span><span class="w"> </span><span class="c1">// this field will be absent if a value has not been explicitly set</span>
 <span class="w">      </span><span class="s2">&quot;log_version&quot;</span><span class="o">:</span><span class="mf">2</span><span class="p">,</span>
-<span class="w">      </span><span class="s2">&quot;log_engine&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;log_engine&quot;</span><span class="o">:</span><span class="p">{</span>
+<span class="w">      </span><span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
+<span class="w">          </span><span class="s2">&quot;ssd&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-redwood-1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;memory-radixtree-beta&quot;</span>
+<span class="w">      </span><span class="p">]},</span>
 <span class="w">      </span><span class="s2">&quot;log_spill&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
 <span class="w">      </span><span class="s2">&quot;storage_engine&quot;</span><span class="o">:</span><span class="p">{</span>
 <span class="w">      </span><span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
 <span class="w">          </span><span class="s2">&quot;ssd&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
-<span class="w">          </span><span class="s2">&quot;ssd-redwood-1-experimental&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-redwood-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
@@ -1026,8 +1081,9 @@
 <span class="w">          </span><span class="s2">&quot;ssd&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
-<span class="w">          </span><span class="s2">&quot;ssd-redwood-1-experimental&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-redwood-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
@@ -1057,6 +1113,7 @@
 <span class="w">          </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-redwood-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
@@ -1074,6 +1131,11 @@
 <span class="w">          </span><span class="s2">&quot;disabled&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;optional_experimental&quot;</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">&quot;required_experimental&quot;</span>
+<span class="w">      </span><span class="p">]},</span>
+<span class="w">      </span><span class="s2">&quot;encryption_at_rest_mode&quot;</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">          </span><span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
+<span class="w">          </span><span class="s2">&quot;disabled&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;aes_256_ctr&quot;</span>
 <span class="w">      </span><span class="p">]}</span>
 <span class="w">   </span><span class="p">},</span>
 <span class="w">   </span><span class="s2">&quot;data&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -1167,6 +1229,30 @@
 <span class="w">            </span><span class="s2">&quot;logical_core_utilization&quot;</span><span class="o">:</span><span class="mf">0.4</span><span class="w"> </span><span class="c1">// computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading</span>
 <span class="w">         </span><span class="p">}</span>
 <span class="w">      </span><span class="p">}</span>
+<span class="w">   </span><span class="p">},</span>
+<span class="w">   </span><span class="s2">&quot;metacluster&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="s2">&quot;cluster_type&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;management&quot;</span><span class="p">,</span><span class="w">         </span><span class="c1">// management, data, or standalone</span>
+<span class="w">      </span><span class="s2">&quot;metacluster_name&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;metacluster1&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;metacluster_id&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">12345</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;data_cluster_name&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;data_cluster1&quot;</span><span class="p">,</span><span class="w"> </span><span class="c1">// data cluster only</span>
+<span class="w">      </span><span class="s2">&quot;data_cluster_id&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">12346</span><span class="p">,</span><span class="w">             </span><span class="c1">// data cluster only</span>
+<span class="w">      </span><span class="s2">&quot;num_data_clusters&quot;</span><span class="o">:</span><span class="w"> </span><span class="mf">10</span><span class="w">                </span><span class="c1">// management cluster only</span>
+<span class="w">   </span><span class="p">},</span>
+<span class="w">   </span><span class="s2">&quot;tenants&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="s2">&quot;num_tenants&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="c1">// on data cluster, local count; on management cluster, total metacluster count</span>
+<span class="w">      </span><span class="s2">&quot;num_tenant_groups&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">10</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;tenant_group_capacity&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">20</span><span class="p">,</span>
+<span class="w">   </span><span class="p">},</span>
+<span class="w">   </span><span class="s2">&quot;idempotency_ids&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="s2">&quot;size_bytes&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="c1">// An estimate of the current number of bytes used in the database to store idempotency ids.</span>
+<span class="w">      </span><span class="s2">&quot;expired_version&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="c1">// The commit status of a transaction whose commit version could be &lt;= expired_version can no longer be determined.</span>
+<span class="w">      </span><span class="s2">&quot;expired_age&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="c1">// The age in seconds of expired_version.</span>
+<span class="w">      </span><span class="s2">&quot;oldest_id_version&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="c1">// The version of the oldest idempotency id still stored in the database.</span>
+<span class="w">      </span><span class="s2">&quot;oldest_id_age&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="w"> </span><span class="c1">// The age in seconds of the oldest_id_version.</span>
+<span class="w">   </span><span class="p">},</span>
+<span class="w">   </span><span class="s2">&quot;version_epoch&quot;</span><span class="o">:</span><span class="p">{</span>
+<span class="w">      </span><span class="s2">&quot;enabled&quot;</span><span class="o">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;epoch&quot;</span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="w"> </span><span class="c1">// The version epoch, as an offset from the Unix epoch. This field will be excluded if enabled is false.</span>
 <span class="w">   </span><span class="p">}</span>
 <span class="p">},</span>
 <span class="s2">&quot;client&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -1436,6 +1522,15 @@
 <tr class="row-even"><td><p>storage_server_durability_lag</p></td>
 <td><p>Storage server durable version falling behind.</p></td>
 </tr>
+<tr class="row-odd"><td><p>storage_server_list_fetch_failed</p></td>
+<td><p>Unable to fetch storage server list.</p></td>
+</tr>
+<tr class="row-even"><td><p>blob_worker_lag</p></td>
+<td><p>Blob worker granule version falling behind.</p></td>
+</tr>
+<tr class="row-odd"><td><p>blob_worker_missing</p></td>
+<td><p>No blob workers are reporting metrics.</p></td>
+</tr>
 </tbody>
 </table>
 <p>The JSON path <code class="docutils literal notranslate"><span class="pre">cluster.qos.throttled_tags</span></code>, when it exists, is an Object containing <code class="docutils literal notranslate"><span class="pre">&quot;auto&quot;</span></code> , <code class="docutils literal notranslate"><span class="pre">&quot;manual&quot;</span></code> and <code class="docutils literal notranslate"><span class="pre">&quot;recommended&quot;</span></code>.  The possible fields for those object are in the following table:</p>
@@ -1480,8 +1575,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Mar 14, 2024.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 19, 2024.<br/>
     </p>
   </div>
 </footer>
