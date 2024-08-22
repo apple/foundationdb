@@ -65,6 +65,10 @@ struct OldLogData {
 	}
 };
 
+struct IdToInterf : ReferenceCounted<IdToInterf> {
+	std::map<UID, TLogInterface> lockInterf;
+};
+
 struct LogLockInfo {
 	Version epochEnd;
 	bool isCurrent;
@@ -391,8 +395,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<TLogLockResult> lockTLog(
 	    UID myID,
 	    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
-	    Optional<std::map<UID, TLogInterface>*> lockInterf = Optional<std::map<UID, TLogInterface>*>());
-
+	    Optional<Reference<IdToInterf>> lockInterf = Optional<Reference<IdToInterf>>());
 	template <class T>
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
 };

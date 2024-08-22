@@ -2353,7 +2353,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their
 	// TLogInterfaces
 	state std::vector<LogLockInfo> lockResults;
-	state std::map<UID, TLogInterface> lockResultsInterf;
+	state Reference<IdToInterf> lockResultsInterf = makeReference<IdToInterf>();
 	state std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
 	    allLogServers;
 	state std::vector<Reference<LogSet>> logServers;
@@ -2396,7 +2396,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		lockResults[i].logSet = logServers[i];
 		for (int t = 0; t < logServers[i]->logServers.size(); t++) {
 			lockResults[i].replies.push_back(
-			    TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t], &lockResultsInterf));
+			    TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t], lockResultsInterf));
 		}
 	}
 
@@ -2418,7 +2418,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				lockResult.logSet = log;
 				for (int t = 0; t < log->logServers.size(); t++) {
 					lockResult.replies.push_back(
-					    TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t], &lockResultsInterf));
+					    TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t], lockResultsInterf));
 				}
 				lockResults.push_back(lockResult);
 			}
@@ -2435,7 +2435,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			lockResult.logSet = old.tLogs[0];
 			for (int t = 0; t < old.tLogs[0]->logServers.size(); t++) {
 				lockResult.replies.push_back(
-				    TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t], &lockResultsInterf));
+				    TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t], lockResultsInterf));
 			}
 			allLockResults.push_back(lockResult);
 		}
@@ -2533,11 +2533,11 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 					state std::vector<TLogLockResult> tLogResults = std::get<1>(logGroupResult);
 					for (auto& tLogResult : tLogResults) {
 						wait(transformErrors(
-						    throwErrorOr(
-						        lockResultsInterf[tLogResult.id].setClusterRecoveryVersion.getReplyUnlessFailedFor(
-						            setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
-						            SERVER_KNOBS->TLOG_TIMEOUT,
-						            SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.id]
+						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
+						                         setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
+						                         SERVER_KNOBS->TLOG_TIMEOUT,
+						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 						    cluster_recovery_failed()));
 					}
 				}
@@ -3412,8 +3412,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
     Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
-    Optional<std::map<UID, TLogInterface>*> lockInterf) {
-
+    Optional<Reference<IdToInterf>> lockInterf) {
 	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
 	loop {
 		choose {
@@ -3422,7 +3421,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			                               : Never())) {
 				TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
 				if (lockInterf.present()) {
-					(*lockInterf.get())[tlog->get().id()] = tlog->get().interf();
+					lockInterf.get()->lockInterf[tlog->get().id()] = tlog->get().interf();
 				}
 				return data;
 			}
