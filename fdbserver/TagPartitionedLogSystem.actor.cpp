@@ -2089,8 +2089,12 @@ void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 	}
 }
 
+<<<<<<< HEAD
 // If VERSION_VECTOR_UNICAST is enabled, one tLog's DV may advance beyond the min(DV) over all tLogs.
 >>>>>>> 8803455e3 (Cherry-pick PR #11565 (Recovery version computation when version vector unicast is enabled) (#11590))
+=======
+// If ENABLE_VERSION_VECTOR_TLOG_UNICAST is set, one tLog's DV may advance beyond the min(DV) over all tLogs.
+>>>>>>> 2329628e5 (cluster level RV when tLogs advance at different rates (#11557))
 // This function finds the highest recoverable version for each tLog group over all log groups.
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
@@ -2470,7 +2474,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			    makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 
 			logSystem->recoverAt = minEnd;
-
 			lastEnd = minEnd;
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
