@@ -2041,7 +2041,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 	return Void();
 }
 
-// If VERSION_VECTOR_UNICAST is enabled, one tLog's DV may advance beyond the min(DV) over all tLogs.
+// If ENABLE_VERSION_VECTOR_TLOG_UNICAST is set, one tLog's DV may advance beyond the min(DV) over all tLogs.
 // This function finds the highest recoverable version for each tLog group over all log groups.
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
@@ -2214,6 +2214,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their
 	// TLogInterfaces
 	state std::vector<LogLockInfo> lockResults;
+	state Reference<IdToInterf> lockResultsInterf = makeReference<IdToInterf>();
 	state std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
 	    allLogServers;
 	state std::vector<Reference<LogSet>> logServers;
@@ -2255,7 +2256,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		lockResults[i].isCurrent = true;
 		lockResults[i].logSet = logServers[i];
 		for (int t = 0; t < logServers[i]->logServers.size(); t++) {
-			lockResults[i].replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t]));
+			lockResults[i].replies.push_back(
+			    TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t], lockResultsInterf));
 		}
 	}
 
@@ -2276,7 +2278,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				lockResult.epochEnd = old.epochEnd;
 				lockResult.logSet = log;
 				for (int t = 0; t < log->logServers.size(); t++) {
-					lockResult.replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t]));
+					lockResult.replies.push_back(
+					    TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t], lockResultsInterf));
 				}
 				lockResults.push_back(lockResult);
 			}
@@ -2292,7 +2295,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			lockResult.epochEnd = old.epochEnd;
 			lockResult.logSet = old.tLogs[0];
 			for (int t = 0; t < old.tLogs[0]->logServers.size(); t++) {
-				lockResult.replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t]));
+				lockResult.replies.push_back(
+				    TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t], lockResultsInterf));
 			}
 			allLockResults.push_back(lockResult);
 		}
@@ -2337,8 +2341,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	loop {
 		Version minEnd = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
-		std::vector<Future<Void>> changes;
-		std::vector<std::tuple<int, std::vector<TLogLockResult>>> logGroupResults;
+		state std::vector<Future<Void>> changes;
+		state std::vector<std::tuple<int, std::vector<TLogLockResult>>> logGroupResults;
 		for (int log = 0; log < logServers.size(); log++) {
 			if (!logServers[log]->isLocal) {
 				continue;
@@ -2356,16 +2360,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
 			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
 
-			auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
+			state Reference<TagPartitionedLogSystem> logSystem =
+			    makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 
 			logSystem->recoverAt = minEnd;
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				logSystem->recoverAt = getRecoverVersionUnicast(logGroupResults, minEnd);
-				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
-			}
 
 			lastEnd = minEnd;
-
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
@@ -2383,6 +2383,25 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->remoteLogsWrittenToCoreState = true;
 			logSystem->stopped = true;
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
+
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				logSystem->recoverAt = getRecoverVersionUnicast(logServers, logGroupResults, minEnd, minKCVEnd);
+				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
+				// When a new log system is created, inform the surviving tLogs of the RV.
+				// SOMEDAY: Assert surviving tLogs use the RV from the latest log system.
+				for (auto logGroupResult : logGroupResults) {
+					state std::vector<TLogLockResult> tLogResults = std::get<1>(logGroupResult);
+					for (auto& tLogResult : tLogResults) {
+						wait(transformErrors(
+						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.id]
+						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
+						                         setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
+						                         SERVER_KNOBS->TLOG_TIMEOUT,
+						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+						    cluster_recovery_failed()));
+					}
+				}
+			}
 
 			outLogSystem->set(logSystem);
 		}
@@ -3252,8 +3271,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 
 ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
-    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
-
+    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
+    Optional<Reference<IdToInterf>> lockInterf) {
 	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
 	loop {
 		choose {
@@ -3261,6 +3280,9 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			         tlog->get().present() ? brokenPromiseToNever(tlog->get().interf().lock.getReply<TLogLockResult>())
 			                               : Never())) {
 				TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
+				if (lockInterf.present()) {
+					lockInterf.get()->lockInterf[tlog->get().id()] = tlog->get().interf();
+				}
 				return data;
 			}
 			when(wait(tlog->onChange())) {}
