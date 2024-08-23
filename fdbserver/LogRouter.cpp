@@ -56,7 +56,7 @@ struct LogRouterData {
 		}
 
 		// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
-		Future<Void> eraseMessagesBefore(Version before, LogRouterData* tlogData, TaskPriority taskID) {
+		Future<Void> eraseMessagesBefore(Version before, TaskPriority taskID) {
 			while (!version_messages.empty() && version_messages.front().first < before) {
 				Version version = version_messages.front().first;
 
@@ -191,9 +191,56 @@ struct LogRouterData {
 			                          te.detail("RouterTag", this->routerTag.toString());
 		                          });
 	}
+
+	std::deque<std::pair<Version, LengthPrefixedStringRef>>& get_version_messages(Tag tag) {
+		auto tagData = getTagData(tag);
+		if (!tagData) {
+			static std::deque<std::pair<Version, LengthPrefixedStringRef>> empty;
+			return empty;
+		}
+		return tagData->version_messages;
+	}
+
+	Version getTagPopVersion(Tag tag) {
+		auto tagData = getTagData(tag);
+		if (!tagData)
+			return Version(0);
+		return tagData->popped;
+	}
+
+	// Copy pulled messages into memory blocks owned by each tag, i.e., tag_data.
+	void commitMessages(Version version, const std::vector<TagsAndMessage>& taggedMessages);
+
+	Future<Void> waitForVersion(Version ver);
+	Future<Void> waitForVersionAndLog(Version ver);
+
+	void peekMessagesFromMemory(Tag tag, Version begin, BinaryWriter& messages, Version& endVersion);
+
+	// Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
+	template <typename PromiseType>
+	Future<Void> logRouterPeekMessages(PromiseType replyPromise,
+	                                   Version reqBegin,
+	                                   Tag reqTag,
+	                                   bool reqReturnIfBlocked = false,
+	                                   bool reqOnlySpilled = false,
+	                                   Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>());
+
+	// Keeps pushing TLogPeekStreamReply until it's removed from the cluster or should recover
+	Future<Void> logRouterPeekStream(const TLogPeekStreamRequest& req);
+
+	// Log router (LR) asynchronously pull data from satellite tLogs (preferred) or primary tLogs at tag
+	// (self->routerTag) for the version range from the LR's current version (exclusive) to its epoch's end version or
+	// recovery version.
+	Future<Void> pullAsyncData();
+
+	Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(Reference<ILogSystem::IPeekCursor> r,
+	                                                             Version startVersion);
+
+	Future<Void> logRouterPop(const TLogPopRequest& req);
+	Future<Void> cleanupPeekTrackers();
 };
 
-void commitMessages(LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages) {
+void LogRouterData::commitMessages(Version version, const std::vector<TagsAndMessage>& taggedMessages) {
 	if (!taggedMessages.size()) {
 		return;
 	}
@@ -206,27 +253,27 @@ void commitMessages(LogRouterData* self, Version version, const std::vector<Tags
 	// Grab the last block in the blocks list so we can share its arena
 	// We pop all of the elements of it to create a "fresh" vector that starts at the end of the previous vector
 	Standalone<VectorRef<uint8_t>> block;
-	if (self->messageBlocks.empty()) {
+	if (messageBlocks.empty()) {
 		block = Standalone<VectorRef<uint8_t>>();
 		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 	} else {
-		block = self->messageBlocks.back().second;
+		block = messageBlocks.back().second;
 	}
 
 	block.pop_front(block.size());
 
 	for (const auto& msg : taggedMessages) {
 		if (msg.message.size() > block.capacity() - block.size()) {
-			self->messageBlocks.emplace_back(version, block);
+			messageBlocks.emplace_back(version, block);
 			block = Standalone<VectorRef<uint8_t>>();
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for (const auto& tag : msg.tags) {
-			auto tagData = self->getTagData(tag);
+			auto tagData = getTagData(tag);
 			if (!tagData) {
-				tagData = self->createTagData(tag, 0, 0);
+				tagData = createTagData(tag, 0, 0);
 			}
 
 			if (version >= tagData->popped) {
@@ -241,56 +288,55 @@ void commitMessages(LogRouterData* self, Version version, const std::vector<Tags
 
 		msgSize -= msg.message.size();
 	}
-	self->messageBlocks.emplace_back(version, block);
+	messageBlocks.emplace_back(version, block);
 }
 
-Future<Void> waitForVersion(LogRouterData* self, Version ver) {
+Future<Void> LogRouterData::waitForVersion(Version ver) {
 	// The only time the log router should allow a gap in versions larger than MAX_READ_TRANSACTION_LIFE_VERSIONS is
 	// when processing epoch end. Since one set of log routers is created per generation of transaction logs, the gap
 	// caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
 
 	double startTime = now();
-	if (self->version.get() < self->startVersion) {
+	if (version.get() < startVersion) {
 		// Log router needs to wait for remote tLogs to process data, whose version is less than self->startVersion,
 		// before the log router can pull more data (i.e., data after self->startVersion) from satellite tLog;
 		// This prevents LR from getting OOM due to it pulls too much data from satellite tLog at once;
 		// Note: each commit writes data to both primary tLog and satellite tLog. Satellite tLog can be viewed as
 		//       a part of primary tLogs.
-		if (ver > self->startVersion) {
-			self->version.set(self->startVersion);
+		if (ver > startVersion) {
+			version.set(startVersion);
 			// Wait for remote tLog to peek and pop from LR,
 			// so that LR's minPopped version can increase to self->startVersion
-			co_await self->minPopped.whenAtLeast(self->version.get());
+			co_await minPopped.whenAtLeast(version.get());
 		}
-		self->waitForVersionTime += now() - startTime;
-		self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
+		waitForVersionTime += now() - startTime;
+		maxWaitForVersionTime = std::max(maxWaitForVersionTime, now() - startTime);
 		co_return;
 	}
-	if (!self->foundEpochEnd) {
+	if (!foundEpochEnd) {
 		// Similar to proxy that does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions outstanding;
 		// Log router does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions outstanding because
 		// remote SS cannot roll back to more than MAX_READ_TRANSACTION_LIFE_VERSIONS ago.
-		co_await self->minPopped.whenAtLeast(
-		    std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		co_await minPopped.whenAtLeast(std::min(version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 	} else {
-		while (self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < ver) {
-			if (self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS > self->version.get()) {
-				self->version.set(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+		while (minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < ver) {
+			if (minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS > version.get()) {
+				version.set(minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
 				co_await yield(TaskPriority::TLogCommit);
 			} else {
-				co_await self->minPopped.whenAtLeast((self->minPopped.get() + 1));
+				co_await minPopped.whenAtLeast((minPopped.get() + 1));
 			}
 		}
 	}
-	if (ver >= self->startVersion + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT) {
-		self->foundEpochEnd = true;
+	if (ver >= startVersion + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT) {
+		foundEpochEnd = true;
 	}
-	self->waitForVersionTime += now() - startTime;
-	self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
+	waitForVersionTime += now() - startTime;
+	maxWaitForVersionTime = std::max(maxWaitForVersionTime, now() - startTime);
 }
 
-Future<Void> waitForVersionAndLog(LogRouterData* self, Version ver) {
-	Future<Void> f = waitForVersion(self, ver);
+Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
+	Future<Void> f = waitForVersion(ver);
 	double emitInterval = 60.0;
 	loop {
 		bool shouldExit = false;
@@ -298,12 +344,12 @@ Future<Void> waitForVersionAndLog(LogRouterData* self, Version ver) {
 		    .When(f, [&](const Void&) { shouldExit = true; })
 		    .When(delay(emitInterval),
 		          [&](const Void&) {
-			          TraceEvent("LogRouterWaitForVersionLongDelay", self->dbgid)
+			          TraceEvent("LogRouterWaitForVersionLongDelay", dbgid)
 			              .detail("WaitForVersion", ver)
-			              .detail("StartVersion", self->startVersion)
-			              .detail("Version", self->version.get())
-			              .detail("MinPopped", self->minPopped.get())
-			              .detail("FoundEpochEnd", self->foundEpochEnd);
+			              .detail("StartVersion", startVersion)
+			              .detail("Version", version.get())
+			              .detail("MinPopped", minPopped.get())
+			              .detail("FoundEpochEnd", foundEpochEnd);
 		          })
 		    .run();
 		if (shouldExit) {
@@ -312,9 +358,8 @@ Future<Void> waitForVersionAndLog(LogRouterData* self, Version ver) {
 	}
 }
 
-Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData* self,
-                                                             Reference<ILogSystem::IPeekCursor> r,
-                                                             Version startVersion) {
+Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Reference<ILogSystem::IPeekCursor> r,
+                                                                            Version startVersion) {
 	Reference<ILogSystem::IPeekCursor> result = r;
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;
@@ -323,9 +368,9 @@ Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData* self
 		Future<Void> getMoreF = Never();
 		if (result) {
 			getMoreF = result->getMore(TaskPriority::TLogCommit);
-			++self->getMoreCount;
+			++getMoreCount;
 			if (!getMoreF.isReady()) {
-				++self->getMoreBlockedCount;
+				++getMoreBlockedCount;
 			}
 		}
 		double startTime = now();
@@ -334,43 +379,40 @@ Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData* self
 		    .When(getMoreF,
 		          [&](const Void&) {
 			          double peekTime = now() - startTime;
-			          self->peekLatencyDist->sampleSeconds(peekTime);
-			          self->getMoreTime += peekTime;
-			          self->maxGetMoreTime = std::max(self->maxGetMoreTime, peekTime);
+			          peekLatencyDist->sampleSeconds(peekTime);
+			          getMoreTime += peekTime;
+			          maxGetMoreTime = std::max(maxGetMoreTime, peekTime);
 			          shouldExit = true;
 		          })
-		    .When(self->logSystemChanged,
+		    .When(logSystemChanged,
 		          [&](const Void&) {
-			          if (self->logSystem->get()) {
-				          result = self->logSystem->get()->peekLogRouter(
-				              self->dbgid, startVersion, self->routerTag, useSatellite);
-				          self->primaryPeekLocation = result->getPrimaryPeekLocation();
-				          TraceEvent("LogRouterPeekLocation", self->dbgid)
+			          if (logSystem->get()) {
+				          result = logSystem->get()->peekLogRouter(dbgid, startVersion, routerTag, useSatellite);
+				          primaryPeekLocation = result->getPrimaryPeekLocation();
+				          TraceEvent("LogRouterPeekLocation", dbgid)
 				              .detail("LogID", result->getPrimaryPeekLocation())
-				              .trackLatest(self->eventCacheHolder->trackingKey);
+				              .trackLatest(eventCacheHolder->trackingKey);
 			          } else {
 				          result = Reference<ILogSystem::IPeekCursor>();
 			          }
-			          self->logSystemChanged = self->logSystem->onChange();
+			          logSystemChanged = logSystem->onChange();
 		          })
 		    .When(result ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never(),
 		          [&](const Void&) {
 			          // Peek has become stuck for a while, trying switching between primary DC and satellite
 			          CODE_PROBE(true, "Detect log router slow peeks");
-			          TraceEvent(SevWarnAlways, "LogRouterSlowPeek", self->dbgid)
-			              .detail("NextTrySatellite", !useSatellite);
+			          TraceEvent(SevWarnAlways, "LogRouterSlowPeek", dbgid).detail("NextTrySatellite", !useSatellite);
 			          useSatellite = !useSatellite;
-			          result = self->logSystem->get()->peekLogRouter(
-			              self->dbgid, startVersion, self->routerTag, useSatellite);
-			          self->primaryPeekLocation = result->getPrimaryPeekLocation();
-			          TraceEvent("LogRouterPeekLocation", self->dbgid)
+			          result = logSystem->get()->peekLogRouter(dbgid, startVersion, routerTag, useSatellite);
+			          primaryPeekLocation = result->getPrimaryPeekLocation();
+			          TraceEvent("LogRouterPeekLocation", dbgid)
 			              .detail("LogID", result->getPrimaryPeekLocation())
-			              .trackLatest(self->eventCacheHolder->trackingKey);
+			              .trackLatest(eventCacheHolder->trackingKey);
 			          // If no primary peek location after many tries, flag an error for manual intervention.
 			          // The LR may become a bottleneck on the system and need to be excluded.
-			          noPrimaryPeekLocation = self->primaryPeekLocation.present() ? 0 : ++noPrimaryPeekLocation;
+			          noPrimaryPeekLocation = primaryPeekLocation.present() ? 0 : ++noPrimaryPeekLocation;
 			          if (!(noPrimaryPeekLocation % 4)) {
-				          TraceEvent(SevWarnAlways, "NoPrimaryPeekLocationForLR", self->dbgid);
+				          TraceEvent(SevWarnAlways, "NoPrimaryPeekLocationForLR", dbgid);
 			          }
 		          })
 		    .run();
@@ -380,18 +422,16 @@ Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData* self
 	}
 }
 
-// Log router (LR) asynchronously pull data from satellite tLogs (preferred) or primary tLogs at tag (self->routerTag)
-// for the version range from the LR's current version (exclusive) to its epoch's end version or recovery version.
-Future<Void> pullAsyncData(LogRouterData* self) {
+Future<Void> LogRouterData::pullAsyncData() {
 	Reference<ILogSystem::IPeekCursor> r;
-	Version tagAt = self->version.get() + 1;
+	Version tagAt = version.get() + 1;
 	Version lastVer = 0;
 	std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
 	loop {
-		r = co_await getPeekCursorData(self, r, tagAt);
+		r = co_await getPeekCursorData(r, tagAt);
 
-		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
+		minKnownCommittedVersion = std::max(minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
 		Version ver = 0;
 		std::vector<TagsAndMessage> messages;
@@ -401,10 +441,10 @@ Future<Void> pullAsyncData(LogRouterData* self) {
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					co_await waitForVersionAndLog(self, ver);
+					co_await waitForVersionAndLog(ver);
 
-					commitMessages(self, ver, messages);
-					self->version.set(ver);
+					commitMessages(ver, messages);
+					version.set(ver);
 					co_await yield(TaskPriority::TLogCommit);
 					//TraceEvent("LogRouterVersion").detail("Ver",ver);
 				}
@@ -415,10 +455,10 @@ Future<Void> pullAsyncData(LogRouterData* self) {
 
 				if (!foundMessage) {
 					ver--; // ver is the next possible version we will get data for
-					if (ver > self->version.get() && ver >= r->popped()) {
-						co_await waitForVersionAndLog(self, ver);
+					if (ver > version.get() && ver >= r->popped()) {
+						co_await waitForVersionAndLog(ver);
 
-						self->version.set(ver);
+						version.set(ver);
 						co_await yield(TaskPriority::TLogCommit);
 					}
 					break;
@@ -428,7 +468,7 @@ Future<Void> pullAsyncData(LogRouterData* self) {
 			TagsAndMessage tagAndMsg;
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
-			self->logSet.getPushLocations(r->getTags(), tags, 0);
+			logSet.getPushLocations(r->getTags(), tags, 0);
 			tagAndMsg.tags.reserve(arena, tags.size());
 			for (const auto& t : tags) {
 				tagAndMsg.tags.push_back(arena, Tag(tagLocalityRemoteLog, t));
@@ -438,24 +478,15 @@ Future<Void> pullAsyncData(LogRouterData* self) {
 			r->nextMessage();
 		}
 
-		tagAt = std::max(r->version().version, self->version.get() + 1);
+		tagAt = std::max(r->version().version, version.get() + 1);
 	}
 }
 
-std::deque<std::pair<Version, LengthPrefixedStringRef>>& get_version_messages(LogRouterData* self, Tag tag) {
-	auto tagData = self->getTagData(tag);
-	if (!tagData) {
-		static std::deque<std::pair<Version, LengthPrefixedStringRef>> empty;
-		return empty;
-	}
-	return tagData->version_messages;
-};
-
-void peekMessagesFromMemory(LogRouterData* self, Tag tag, Version begin, BinaryWriter& messages, Version& endVersion) {
+void LogRouterData::peekMessagesFromMemory(Tag tag, Version begin, BinaryWriter& messages, Version& endVersion) {
 	ASSERT(!messages.getLength());
 
-	auto& deque = get_version_messages(self, tag);
-	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
+	auto& deque = get_version_messages(tag);
+	//TraceEvent("TLogPeekMem", dbgid).detail("Tag", req.tag1).detail("PDS", persistentDataSequence).detail("PDDS", persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
 	auto it = std::lower_bound(deque.begin(),
 	                           deque.end(),
@@ -479,43 +510,33 @@ void peekMessagesFromMemory(LogRouterData* self, Tag tag, Version begin, BinaryW
 	}
 }
 
-Version poppedVersion(LogRouterData* self, Tag tag) {
-	auto tagData = self->getTagData(tag);
-	if (!tagData)
-		return Version(0);
-	return tagData->popped;
-}
-
-// Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
 template <typename PromiseType>
-Future<Void> logRouterPeekMessages(PromiseType replyPromise,
-                                   LogRouterData* self,
-                                   Version reqBegin,
-                                   Tag reqTag,
-                                   bool reqReturnIfBlocked = false,
-                                   bool reqOnlySpilled = false,
-                                   Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>()) {
+Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
+                                                  Version reqBegin,
+                                                  Tag reqTag,
+                                                  bool reqReturnIfBlocked,
+                                                  bool reqOnlySpilled,
+                                                  Optional<std::pair<UID, int>> reqSequence) {
 	BinaryWriter messages(Unversioned());
 	int sequence = -1;
 	UID peekId;
 
-	DebugLogTraceEvent("LogRouterPeek0", self->dbgid)
+	DebugLogTraceEvent("LogRouterPeek0", dbgid)
 	    .detail("ReturnIfBlocked", reqReturnIfBlocked)
 	    .detail("Tag", reqTag.toString())
 	    .detail("Seq", reqSequence.present() ? reqSequence.get().second : -1)
 	    .detail("SeqCursor", reqSequence.present() ? reqSequence.get().first : UID())
-	    .detail("Ver", self->version.get())
+	    .detail("Ver", version.get())
 	    .detail("Begin", reqBegin);
 
 	if (reqSequence.present()) {
 		try {
 			peekId = reqSequence.get().first;
 			sequence = reqSequence.get().second;
-			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
-			    self->peekTracker.find(peekId) == self->peekTracker.end()) {
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && peekTracker.find(peekId) == peekTracker.end()) {
 				throw operation_obsolete();
 			}
-			auto& trackerData = self->peekTracker[peekId];
+			auto& trackerData = peekTracker[peekId];
 			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
 				trackerData.sequence_version[0].send(std::make_pair(reqBegin, reqOnlySpilled));
 			}
@@ -540,7 +561,7 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			reqOnlySpilled = prevPeekData.second;
 			co_await yield();
 		} catch (Error& e) {
-			DebugLogTraceEvent("LogRouterPeekError", self->dbgid)
+			DebugLogTraceEvent("LogRouterPeekError", dbgid)
 			    .error(e)
 			    .detail("Tag", reqTag.toString())
 			    .detail("Seq", reqSequence.present() ? reqSequence.get().second : -1)
@@ -556,10 +577,10 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		}
 	}
 
-	if (reqReturnIfBlocked && self->version.get() < reqBegin) {
+	if (reqReturnIfBlocked && version.get() < reqBegin) {
 		replyPromise.sendError(end_of_stream());
 		if (reqSequence.present()) {
-			auto& trackerData = self->peekTracker[peekId];
+			auto& trackerData = peekTracker[peekId];
 			auto& sequenceData = trackerData.sequence_version[sequence + 1];
 			if (!sequenceData.isSet()) {
 				sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
@@ -568,8 +589,8 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		co_return;
 	}
 
-	if (self->version.get() < reqBegin) {
-		co_await self->version.whenAtLeast(reqBegin);
+	if (version.get() < reqBegin) {
+		co_await version.whenAtLeast(reqBegin);
 		co_await delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask());
 	}
 
@@ -580,18 +601,18 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
 	loop {
 
-		poppedVer = poppedVersion(self, reqTag);
+		poppedVer = getTagPopVersion(reqTag);
 
-		if (poppedVer > reqBegin || reqBegin < self->startVersion) {
+		if (poppedVer > reqBegin || reqBegin < startVersion) {
 			// This should only happen if a packet is sent multiple times and the reply is not needed.
 			// Since we are using popped differently, do not send a reply.
-			TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid)
+			TraceEvent(SevWarnAlways, "LogRouterPeekPopped", dbgid)
 			    .detail("Begin", reqBegin)
 			    .detail("Popped", poppedVer)
 			    .detail("Tag", reqTag.toString())
 			    .detail("Seq", reqSequence.present() ? reqSequence.get().second : -1)
 			    .detail("SeqCursor", reqSequence.present() ? reqSequence.get().first : UID())
-			    .detail("Start", self->startVersion);
+			    .detail("Start", startVersion);
 			if (std::is_same<PromiseType, Promise<TLogPeekReply>>::value) {
 				// kills logRouterPeekStream actor, otherwise that actor becomes stuck
 				throw operation_obsolete();
@@ -607,10 +628,10 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			co_return;
 		}
 
-		ASSERT(reqBegin >= poppedVersion(self, reqTag) && reqBegin >= self->startVersion);
+		ASSERT(reqBegin >= getTagPopVersion(reqTag) && reqBegin >= startVersion);
 
-		endVersion = self->version.get() + 1;
-		peekMessagesFromMemory(self, reqTag, reqBegin, messages, endVersion);
+		endVersion = version.get() + 1;
+		peekMessagesFromMemory(reqTag, reqBegin, messages, endVersion);
 
 		// Reply the peek request when
 		//   - Have data return to the caller, or
@@ -621,31 +642,31 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			break;
 		}
 
-		Version waitUntilVersion = self->version.get() + 1;
+		Version waitUntilVersion = version.get() + 1;
 
 		// Currently, from `reqBegin` to self->version are all empty peeks. Wait for more version, or the empty batching
 		// interval has expired.
-		auto ready = self->version.whenAtLeast(waitUntilVersion) ||
+		auto ready = version.whenAtLeast(waitUntilVersion) ||
 		             delay(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL - (now() - startTime));
 		co_await ready;
-		if (self->version.get() < waitUntilVersion) {
+		if (version.get() < waitUntilVersion) {
 			break; // We know that from `reqBegin` to self->version are all empty messages. Skip re-executing the peek
 			       // logic.
 		}
 	}
 
 	TLogPeekReply reply;
-	reply.maxKnownVersion = self->version.get();
-	reply.minKnownCommittedVersion = self->poppedVersion;
+	reply.maxKnownVersion = version.get();
+	reply.minKnownCommittedVersion = poppedVersion;
 	auto messagesValue = messages.toValue();
 	reply.arena.dependsOn(messagesValue.arena());
 	reply.messages = messagesValue;
-	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
+	reply.popped = minPopped.get() >= startVersion ? minPopped.get() : 0;
 	reply.end = endVersion;
 	reply.onlySpilled = false;
 
 	if (reqSequence.present()) {
-		auto& trackerData = self->peekTracker[peekId];
+		auto& trackerData = peekTracker[peekId];
 		trackerData.lastUpdate = now();
 		auto& sequenceData = trackerData.sequence_version[sequence + 1];
 		if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
@@ -667,17 +688,16 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	}
 
 	replyPromise.send(reply);
-	DebugLogTraceEvent("LogRouterPeek4", self->dbgid)
+	DebugLogTraceEvent("LogRouterPeek4", dbgid)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
 	    .detail("End", reply.end)
 	    .detail("MessageSize", reply.messages.size())
-	    .detail("PoppedVersion", self->poppedVersion);
+	    .detail("PoppedVersion", poppedVersion);
 }
 
-// This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
-Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req) {
-	self->activePeekStreams++;
+Future<Void> LogRouterData::logRouterPeekStream(const TLogPeekStreamRequest& req) {
+	activePeekStreams++;
 
 	Version begin = req.begin;
 	bool onlySpilled = false;
@@ -688,21 +708,21 @@ Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req)
 		Future<TLogPeekReply> future(promise.getFuture());
 		try {
 			auto ready = req.reply.onReady() && store(reply.rep, future) &&
-			             logRouterPeekMessages(promise, self, begin, req.tag, req.returnIfBlocked, onlySpilled);
+			             logRouterPeekMessages(promise, begin, req.tag, req.returnIfBlocked, onlySpilled);
 			co_await ready;
 
 			reply.rep.begin = begin;
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-			if (reply.rep.end > self->version.get()) {
+			if (reply.rep.end > version.get()) {
 				co_await delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask());
 			} else {
 				co_await delay(0, g_network->getCurrentTask());
 			}
 		} catch (Error& e) {
-			self->activePeekStreams--;
-			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid)
+			activePeekStreams--;
+			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", dbgid)
 			    .errorUnsuppressed(e)
 			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
@@ -718,11 +738,11 @@ Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamRequest req)
 	}
 }
 
-Future<Void> cleanupPeekTrackers(LogRouterData* self) {
+Future<Void> LogRouterData::cleanupPeekTrackers() {
 	loop {
 		double minTimeUntilExpiration = SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME;
-		auto it = self->peekTracker.begin();
-		while (it != self->peekTracker.end()) {
+		auto it = peekTracker.begin();
+		while (it != peekTracker.end()) {
 			double timeUntilExpiration = it->second.lastUpdate + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME - now();
 			if (timeUntilExpiration < 1.0e-6) {
 				for (auto seq : it->second.sequence_version) {
@@ -730,7 +750,7 @@ Future<Void> cleanupPeekTrackers(LogRouterData* self) {
 						seq.second.sendError(timed_out());
 					}
 				}
-				it = self->peekTracker.erase(it);
+				it = peekTracker.erase(it);
 			} else {
 				minTimeUntilExpiration = std::min(minTimeUntilExpiration, timeUntilExpiration);
 				++it;
@@ -741,38 +761,38 @@ Future<Void> cleanupPeekTrackers(LogRouterData* self) {
 	}
 }
 
-Future<Void> logRouterPop(LogRouterData* self, TLogPopRequest req) {
-	auto tagData = self->getTagData(req.tag);
+Future<Void> LogRouterData::logRouterPop(const TLogPopRequest& req) {
+	auto tagData = getTagData(req.tag);
 	if (!tagData) {
-		tagData = self->createTagData(req.tag, req.to, req.durableKnownCommittedVersion);
+		tagData = createTagData(req.tag, req.to, req.durableKnownCommittedVersion);
 	} else if (req.to > tagData->popped) {
-		DebugLogTraceEvent("LogRouterPop", self->dbgid).detail("Tag", req.tag.toString()).detail("PopVersion", req.to);
+		DebugLogTraceEvent("LogRouterPop", dbgid).detail("Tag", req.tag.toString()).detail("PopVersion", req.to);
 		tagData->popped = req.to;
 		tagData->durableKnownCommittedVersion = req.durableKnownCommittedVersion;
-		co_await tagData->eraseMessagesBefore(req.to, self, TaskPriority::TLogPop);
+		co_await tagData->eraseMessagesBefore(req.to, TaskPriority::TLogPop);
 	}
 
-	Version minPopped = std::numeric_limits<Version>::max();
-	Version minKnownCommittedVersion = std::numeric_limits<Version>::max();
-	for (auto it : self->tag_data) {
+	Version newMinPopped = std::numeric_limits<Version>::max();
+	Version minKCV = std::numeric_limits<Version>::max();
+	for (auto it : tag_data) {
 		if (it) {
-			minPopped = std::min(it->popped, minPopped);
-			minKnownCommittedVersion = std::min(it->durableKnownCommittedVersion, minKnownCommittedVersion);
+			newMinPopped = std::min(it->popped, newMinPopped);
+			minKCV = std::min(it->durableKnownCommittedVersion, minKCV);
 		}
 	}
 
-	while (!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
-		self->messageBlocks.pop_front();
+	while (!messageBlocks.empty() && messageBlocks.front().first < newMinPopped) {
+		messageBlocks.pop_front();
 		co_await yield(TaskPriority::TLogPop);
 	}
 
-	self->poppedVersion = std::min(minKnownCommittedVersion, self->minKnownCommittedVersion);
-	if (self->logSystem->get() && self->allowPops) {
-		const Tag popTag = self->logSystem->get()->getPseudoPopTag(self->routerTag, ProcessClass::LogRouterClass);
-		self->logSystem->get()->pop(self->poppedVersion, popTag);
+	poppedVersion = std::min(minKCV, minKnownCommittedVersion);
+	if (logSystem->get() && allowPops) {
+		const Tag popTag = logSystem->get()->getPseudoPopTag(routerTag, ProcessClass::LogRouterClass);
+		logSystem->get()->pop(poppedVersion, popTag);
 	}
 	req.reply.send(Void());
-	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
+	minPopped.set(std::max(newMinPopped, minPopped.get()));
 }
 
 Future<Void> logRouterCore(TLogInterface interf,
@@ -783,8 +803,8 @@ Future<Void> logRouterCore(TLogInterface interf,
 	Future<Void> error = actorCollection(addActor.getFuture());
 	Future<Void> dbInfoChange = Void();
 
-	addActor.send(pullAsyncData(&logRouterData));
-	addActor.send(cleanupPeekTrackers(&logRouterData));
+	addActor.send(logRouterData.pullAsyncData());
+	addActor.send(logRouterData.cleanupPeekTrackers());
 	addActor.send(traceRole(Role::LOG_ROUTER, interf.id()));
 
 	loop {
@@ -797,26 +817,26 @@ Future<Void> logRouterCore(TLogInterface interf,
 			          logRouterData.logSystem->set(ILogSystem::fromServerDBInfo(logRouterData.dbgid, db->get(), true));
 		          })
 		    .When(interf.peekMessages.getFuture(),
-		          [&](TLogPeekRequest req) {
-			          addActor.send(logRouterPeekMessages(req.reply,
-			                                              &logRouterData,
-			                                              req.begin,
-			                                              req.tag,
-			                                              req.returnIfBlocked,
-			                                              req.onlySpilled,
-			                                              req.sequence));
+		          [&](const TLogPeekRequest& req) {
+			          addActor.send(logRouterData.logRouterPeekMessages(req.reply,
+
+			                                                            req.begin,
+			                                                            req.tag,
+			                                                            req.returnIfBlocked,
+			                                                            req.onlySpilled,
+			                                                            req.sequence));
 		          })
 		    .When(interf.peekStreamMessages.getFuture(),
-		          [&](TLogPeekStreamRequest req) {
+		          [&](const TLogPeekStreamRequest& req) {
 			          TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
 			              .detail("Tag", req.tag)
 			              .detail("Token", interf.peekStreamMessages.getEndpoint().token);
-			          addActor.send(logRouterPeekStream(&logRouterData, req));
+			          addActor.send(logRouterData.logRouterPeekStream(req));
 		          })
 		    .When(interf.popMessages.getFuture(),
-		          [&](TLogPopRequest req) {
+		          [&](const TLogPopRequest& req) {
 			          // Request from remote tLog to pop data from LR
-			          addActor.send(logRouterPop(&logRouterData, req));
+			          addActor.send(logRouterData.logRouterPop(req));
 		          })
 		    .When(error, [](const Void&) {})
 		    .run();
