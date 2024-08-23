@@ -100,7 +100,7 @@ co_await Choose()
     })
     .When(foo(), [](Foo const& f) {
         // do something else
-    }).Run();
+    }).run();
 ```
 
 While `Choose` and `choose` behave very similarly, there are some minor differences between

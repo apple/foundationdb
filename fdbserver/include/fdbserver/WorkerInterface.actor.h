@@ -1274,9 +1274,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> logRouter(TLogInterface interf,
-                             InitializeLogRouterRequest req,
-                             Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> logRouter(TLogInterface interf,
+                       InitializeLogRouterRequest req,
+                       Reference<AsyncVar<ServerDBInfo> const> db);
 Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
