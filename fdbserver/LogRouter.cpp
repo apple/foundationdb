@@ -1,5 +1,5 @@
 /*
- * LogRouter.actor.cpp
+ * LogRouter.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -775,40 +775,51 @@ Future<Void> logRouterPop(LogRouterData* self, TLogPopRequest req) {
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
 }
 
-ACTOR Future<Void> logRouterCore(TLogInterface interf,
-                                 InitializeLogRouterRequest req,
-                                 Reference<AsyncVar<ServerDBInfo> const> db) {
-	state LogRouterData logRouterData(interf.id(), req);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection(addActor.getFuture());
-	state Future<Void> dbInfoChange = Void();
+Future<Void> logRouterCore(TLogInterface interf,
+                           InitializeLogRouterRequest req,
+                           Reference<AsyncVar<ServerDBInfo> const> db) {
+	LogRouterData logRouterData(interf.id(), req);
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error = actorCollection(addActor.getFuture());
+	Future<Void> dbInfoChange = Void();
 
 	addActor.send(pullAsyncData(&logRouterData));
 	addActor.send(cleanupPeekTrackers(&logRouterData));
 	addActor.send(traceRole(Role::LOG_ROUTER, interf.id()));
 
-	loop choose {
-		when(wait(dbInfoChange)) {
-			dbInfoChange = db->onChange();
-			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
-			                          db->get().recoveryCount >= req.recoveryCount;
-			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo(logRouterData.dbgid, db->get(), true));
-		}
-		when(TLogPeekRequest req = waitNext(interf.peekMessages.getFuture())) {
-			addActor.send(logRouterPeekMessages(
-			    req.reply, &logRouterData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
-		}
-		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
-			TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
-			    .detail("Tag", req.tag)
-			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
-			addActor.send(logRouterPeekStream(&logRouterData, req));
-		}
-		when(TLogPopRequest req = waitNext(interf.popMessages.getFuture())) {
-			// Request from remote tLog to pop data from LR
-			addActor.send(logRouterPop(&logRouterData, req));
-		}
-		when(wait(error)) {}
+	loop {
+		co_await Choose()
+		    .When(dbInfoChange,
+		          [&](const Void&) {
+			          dbInfoChange = db->onChange();
+			          logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+			                                    db->get().recoveryCount >= req.recoveryCount;
+			          logRouterData.logSystem->set(ILogSystem::fromServerDBInfo(logRouterData.dbgid, db->get(), true));
+		          })
+		    .When(interf.peekMessages.getFuture(),
+		          [&](TLogPeekRequest req) {
+			          addActor.send(logRouterPeekMessages(req.reply,
+			                                              &logRouterData,
+			                                              req.begin,
+			                                              req.tag,
+			                                              req.returnIfBlocked,
+			                                              req.onlySpilled,
+			                                              req.sequence));
+		          })
+		    .When(interf.peekStreamMessages.getFuture(),
+		          [&](TLogPeekStreamRequest req) {
+			          TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
+			              .detail("Tag", req.tag)
+			              .detail("Token", interf.peekStreamMessages.getEndpoint().token);
+			          addActor.send(logRouterPeekStream(&logRouterData, req));
+		          })
+		    .When(interf.popMessages.getFuture(),
+		          [&](TLogPopRequest req) {
+			          // Request from remote tLog to pop data from LR
+			          addActor.send(logRouterPop(&logRouterData, req));
+		          })
+		    .When(error, [](const Void&) {})
+		    .run();
 	}
 }
 
