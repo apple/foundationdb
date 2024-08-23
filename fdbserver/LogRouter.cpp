@@ -234,9 +234,9 @@ struct LogRouterData {
 	Future<Void> pullAsyncData();
 
 	Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(Reference<ILogSystem::IPeekCursor> r,
-	                                                             Version startVersion);
+	                                                             Version beginVersion);
 
-	Future<Void> logRouterPop(const TLogPopRequest& req);
+	// Future<Void> logRouterPop(const TLogPopRequest& req);
 	Future<Void> cleanupPeekTrackers();
 };
 
@@ -359,7 +359,7 @@ Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
 }
 
 Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Reference<ILogSystem::IPeekCursor> r,
-                                                                            Version startVersion) {
+                                                                            Version beginVersion) {
 	Reference<ILogSystem::IPeekCursor> result = r;
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;
@@ -387,7 +387,7 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 		    .When(logSystemChanged,
 		          [&](const Void&) {
 			          if (logSystem->get()) {
-				          result = logSystem->get()->peekLogRouter(dbgid, startVersion, routerTag, useSatellite);
+				          result = logSystem->get()->peekLogRouter(dbgid, beginVersion, routerTag, useSatellite);
 				          primaryPeekLocation = result->getPrimaryPeekLocation();
 				          TraceEvent("LogRouterPeekLocation", dbgid)
 				              .detail("LogID", result->getPrimaryPeekLocation())
@@ -403,7 +403,7 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 			          CODE_PROBE(true, "Detect log router slow peeks");
 			          TraceEvent(SevWarnAlways, "LogRouterSlowPeek", dbgid).detail("NextTrySatellite", !useSatellite);
 			          useSatellite = !useSatellite;
-			          result = logSystem->get()->peekLogRouter(dbgid, startVersion, routerTag, useSatellite);
+			          result = logSystem->get()->peekLogRouter(dbgid, beginVersion, routerTag, useSatellite);
 			          primaryPeekLocation = result->getPrimaryPeekLocation();
 			          TraceEvent("LogRouterPeekLocation", dbgid)
 			              .detail("LogID", result->getPrimaryPeekLocation())
@@ -761,38 +761,38 @@ Future<Void> LogRouterData::cleanupPeekTrackers() {
 	}
 }
 
-Future<Void> LogRouterData::logRouterPop(const TLogPopRequest& req) {
-	auto tagData = getTagData(req.tag);
+Future<Void> logRouterPop(LogRouterData* self, TLogPopRequest req) {
+	auto tagData = self->getTagData(req.tag);
 	if (!tagData) {
-		tagData = createTagData(req.tag, req.to, req.durableKnownCommittedVersion);
+		tagData = self->createTagData(req.tag, req.to, req.durableKnownCommittedVersion);
 	} else if (req.to > tagData->popped) {
-		DebugLogTraceEvent("LogRouterPop", dbgid).detail("Tag", req.tag.toString()).detail("PopVersion", req.to);
+		DebugLogTraceEvent("LogRouterPop", self->dbgid).detail("Tag", req.tag.toString()).detail("PopVersion", req.to);
 		tagData->popped = req.to;
 		tagData->durableKnownCommittedVersion = req.durableKnownCommittedVersion;
 		co_await tagData->eraseMessagesBefore(req.to, TaskPriority::TLogPop);
 	}
 
-	Version newMinPopped = std::numeric_limits<Version>::max();
-	Version minKCV = std::numeric_limits<Version>::max();
-	for (auto it : tag_data) {
+	Version minPopped = std::numeric_limits<Version>::max();
+	Version minKnownCommittedVersion = std::numeric_limits<Version>::max();
+	for (auto it : self->tag_data) {
 		if (it) {
-			newMinPopped = std::min(it->popped, newMinPopped);
-			minKCV = std::min(it->durableKnownCommittedVersion, minKCV);
+			minPopped = std::min(it->popped, minPopped);
+			minKnownCommittedVersion = std::min(it->durableKnownCommittedVersion, minKnownCommittedVersion);
 		}
 	}
 
-	while (!messageBlocks.empty() && messageBlocks.front().first < newMinPopped) {
-		messageBlocks.pop_front();
+	while (!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
+		self->messageBlocks.pop_front();
 		co_await yield(TaskPriority::TLogPop);
 	}
 
-	poppedVersion = std::min(minKCV, minKnownCommittedVersion);
-	if (logSystem->get() && allowPops) {
-		const Tag popTag = logSystem->get()->getPseudoPopTag(routerTag, ProcessClass::LogRouterClass);
-		logSystem->get()->pop(poppedVersion, popTag);
+	self->poppedVersion = std::min(minKnownCommittedVersion, self->minKnownCommittedVersion);
+	if (self->logSystem->get() && self->allowPops) {
+		const Tag popTag = self->logSystem->get()->getPseudoPopTag(self->routerTag, ProcessClass::LogRouterClass);
+		self->logSystem->get()->pop(self->poppedVersion, popTag);
 	}
 	req.reply.send(Void());
-	minPopped.set(std::max(newMinPopped, minPopped.get()));
+	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
 }
 
 Future<Void> logRouterCore(TLogInterface interf,
@@ -818,13 +818,8 @@ Future<Void> logRouterCore(TLogInterface interf,
 		          })
 		    .When(interf.peekMessages.getFuture(),
 		          [&](const TLogPeekRequest& req) {
-			          addActor.send(logRouterData.logRouterPeekMessages(req.reply,
-
-			                                                            req.begin,
-			                                                            req.tag,
-			                                                            req.returnIfBlocked,
-			                                                            req.onlySpilled,
-			                                                            req.sequence));
+			          addActor.send(logRouterData.logRouterPeekMessages(
+			              req.reply, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		          })
 		    .When(interf.peekStreamMessages.getFuture(),
 		          [&](const TLogPeekStreamRequest& req) {
@@ -836,7 +831,7 @@ Future<Void> logRouterCore(TLogInterface interf,
 		    .When(interf.popMessages.getFuture(),
 		          [&](const TLogPopRequest& req) {
 			          // Request from remote tLog to pop data from LR
-			          addActor.send(logRouterData.logRouterPop(req));
+			          addActor.send(logRouterPop(&logRouterData, req));
 		          })
 		    .When(error, [](const Void&) {})
 		    .run();
