@@ -119,6 +119,9 @@ public:
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
+	template <std::invocable<Transaction*> Fun>
+	Future<Void> run(Fun fun);
+
 private:
 	Reference<DatabaseContext> db;
 };
@@ -577,6 +580,24 @@ private:
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };
+
+template <std::invocable<Transaction*> Fun>
+Future<Void> Database::run(Fun fun) {
+	Transaction tr(*this);
+	Future<Void> onError;
+	while (true) {
+		if (onError.isValid()) {
+			co_await onError;
+			onError = Future<Void>();
+		}
+		try {
+			co_await fun(&tr);
+			co_return;
+		} catch (Error& e) {
+			onError = tr.onError(e);
+		}
+	}
+}
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
