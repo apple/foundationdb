@@ -55,6 +55,7 @@ void forceLinkRandomKeyValueUtilsTests();
 void forceLinkSimKmsVaultTests();
 void forceLinkRESTSimKmsVaultTest();
 void forceLinkActorFuzzUnitTests();
+void forceLinkGrpcTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -125,6 +126,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkSimKmsVaultTests();
 		forceLinkRESTSimKmsVaultTest();
 		forceLinkActorFuzzUnitTests();
+		forceLinkGrpcTests();
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -154,6 +156,7 @@ struct UnitTestWorkload : TestWorkload {
 		state std::vector<UnitTest*> tests;
 
 		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
+			std::cout << "Matching with: " << test->name << std::endl;
 			if (self->testMatched(test->name)) {
 				++self->testsAvailable;
 				tests.push_back(test);
