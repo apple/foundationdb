@@ -226,7 +226,7 @@ struct LogRouterData {
 	                                   Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>());
 
 	// Keeps pushing TLogPeekStreamReply until it's removed from the cluster or should recover
-	Future<Void> logRouterPeekStream(const TLogPeekStreamRequest& req);
+	Future<Void> logRouterPeekStream(TLogPeekStreamRequest req);
 
 	// Log router (LR) asynchronously pull data from satellite tLogs (preferred) or primary tLogs at tag
 	// (self->routerTag) for the version range from the LR's current version (exclusive) to its epoch's end version or
@@ -696,7 +696,7 @@ Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
 	    .detail("PoppedVersion", poppedVersion);
 }
 
-Future<Void> LogRouterData::logRouterPeekStream(const TLogPeekStreamRequest& req) {
+Future<Void> LogRouterData::logRouterPeekStream(TLogPeekStreamRequest req) {
 	activePeekStreams++;
 
 	Version begin = req.begin;
