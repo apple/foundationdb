@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes &#8212; FoundationDB OFF documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Release Notes" href="release-notes-720.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="../index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.43</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="../contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="../index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../experimental-features.html">Experimental-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency-check-urgent.html">Consistency Checker Urgent</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../automatic-idempotency.html">Automatic Idempotency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="../earlier-release-notes.html">Earlier Release Notes</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id2">7.3.37</a></li>
+<li><a class="reference internal" href="#id3">7.3.36</a></li>
+<li><a class="reference internal" href="#id4">7.3.35</a></li>
+<li><a class="reference internal" href="#id5">7.3.34</a></li>
+<li><a class="reference internal" href="#id6">7.3.33</a></li>
+<li><a class="reference internal" href="#id7">7.3.32</a></li>
+<li><a class="reference internal" href="#id8">7.3.31</a></li>
+<li><a class="reference internal" href="#id9">7.3.30</a></li>
+<li><a class="reference internal" href="#id10">7.3.29</a></li>
+<li><a class="reference internal" href="#id11">7.3.28</a></li>
+<li><a class="reference internal" href="#id12">7.3.27</a></li>
+<li><a class="reference internal" href="#id13">7.3.26</a></li>
+<li><a class="reference internal" href="#id14">7.3.25</a></li>
+<li><a class="reference internal" href="#id15">7.3.24</a></li>
+<li><a class="reference internal" href="#id16">7.3.19</a></li>
+<li><a class="reference internal" href="#id17">7.3.18</a></li>
+<li><a class="reference internal" href="#id22">7.3.17</a></li>
+<li><a class="reference internal" href="#id23">7.3.16</a></li>
+<li><a class="reference internal" href="#id24">7.3.0</a><ul>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#reliability">Reliability</a></li>
+<li><a class="reference internal" href="#status">Status</a></li>
+<li><a class="reference internal" href="#other-changes">Other Changes</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="release-notes-720.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="../search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id2">7.3.37</a></li>
+<li><a class="reference internal" href="#id3">7.3.36</a></li>
+<li><a class="reference internal" href="#id4">7.3.35</a></li>
+<li><a class="reference internal" href="#id5">7.3.34</a></li>
+<li><a class="reference internal" href="#id6">7.3.33</a></li>
+<li><a class="reference internal" href="#id7">7.3.32</a></li>
+<li><a class="reference internal" href="#id8">7.3.31</a></li>
+<li><a class="reference internal" href="#id9">7.3.30</a></li>
+<li><a class="reference internal" href="#id10">7.3.29</a></li>
+<li><a class="reference internal" href="#id11">7.3.28</a></li>
+<li><a class="reference internal" href="#id12">7.3.27</a></li>
+<li><a class="reference internal" href="#id13">7.3.26</a></li>
+<li><a class="reference internal" href="#id14">7.3.25</a></li>
+<li><a class="reference internal" href="#id15">7.3.24</a></li>
+<li><a class="reference internal" href="#id16">7.3.19</a></li>
+<li><a class="reference internal" href="#id17">7.3.18</a></li>
+<li><a class="reference internal" href="#id22">7.3.17</a></li>
+<li><a class="reference internal" href="#id23">7.3.16</a></li>
+<li><a class="reference internal" href="#id24">7.3.0</a><ul>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#reliability">Reliability</a></li>
+<li><a class="reference internal" href="#status">Status</a></li>
+<li><a class="reference internal" href="#other-changes">Other Changes</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="release-notes">
+<span id="id1"></span><h1>Release Notes</h1>
+<section id="id2">
+<h2>7.3.37</h2>
+<ul class="simple">
+<li><p>Same as 7.3.36 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id3">
+<h2>7.3.36</h2>
+<ul class="simple">
+<li><p>Fixed a DR corruption issue where destination cluster gets no mutations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11246">(PR #11246)</a></p></li>
+<li><p>Added rocksdb direct_io knobs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11267">(PR #11267)</a></p></li>
+</ul>
+</section>
+<section id="id4">
+<h2>7.3.35</h2>
+<ul class="simple">
+<li><p>Same as 7.3.34 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id5">
+<h2>7.3.34</h2>
+<ul class="simple">
+<li><p>Added storage-queue-aware load balancer for data distributor. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11195">(PR #11195)</a></p></li>
+<li><p>Added a checksum field in MutationRef. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11193">(PR #11193)</a></p></li>
+<li><p>Abort processes when abnormal shutdown is initiated to enable coredumps. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11198">(PR #11198)</a></p></li>
+<li><p>Fixed fdbcli’s checkall debug command. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11208">(PR #11208)</a></p></li>
+<li><p>Added knobs for enabling RocksDB in-memory checksums for data structures. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11214">(PR #11214)</a></p></li>
+<li><p>Fixed calculation of EmptyMessageRatio when version vector was enabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11227">(PR #11227)</a></p></li>
+<li><p>Added consistency checker urgent mode. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11228">(PR #11228)</a></p></li>
+<li><p>Disabled compaction compaction for newly added shard and fixed block cache usage reporting. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11247">(PR #11247)</a></p></li>
+<li><p>Fixed setting perpetual_storage_wiggle_engine is considered as wrongly configured. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11252">(PR #11252)</a></p></li>
+<li><p>Added a max range deletions knob before flush. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11243">(PR #11243)</a></p></li>
+</ul>
+</section>
+<section id="id6">
+<h2>7.3.33</h2>
+<ul class="simple">
+<li><p>Same as 7.3.32 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id7">
+<h2>7.3.32</h2>
+<ul class="simple">
+<li><p>Enabled data distributor verbose tracing by default. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11159">(PR #11159)</a></p></li>
+<li><p>Added RocksDB file checksum knobs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11171">(PR #11171)</a></p></li>
+<li><p>Fixed a regression that caused rebalance data moves to be scheduled at a much lower frequency. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11167">(PR #11167)</a></p></li>
+<li><p>Added throttling of RocksDB flushes when memtable layers exceed a limit. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11182">(PR #11182)</a></p></li>
+<li><p>Added a trace event when a log router cannot find its primary peek location. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11180">(PR #11180)</a></p></li>
+<li><p>Upgraded RocksDB version to 8.10.0. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11175">(PR #11175)</a></p></li>
+<li><p>Added periodical logging for RocksDB compaction reasons. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11186">(PR #11186)</a></p></li>
+</ul>
+</section>
+<section id="id8">
+<h2>7.3.31</h2>
+<ul class="simple">
+<li><p>Same as 7.3.30 release with AVX disabled.</p></li>
+</ul>
+</section>
+<section id="id9">
+<h2>7.3.30</h2>
+<ul class="simple">
+<li><p>Fixed an issue in Ratekeeper that could cause StorageQueueInfo loss. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11124">(PR #11124)</a></p></li>
+<li><p>Fixed checkall command for large shards. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11121">(PR #11121)</a></p></li>
+</ul>
+</section>
+<section id="id10">
+<h2>7.3.29</h2>
+<ul class="simple">
+<li><p>Same as 7.3.28 release with AVX disabled.</p></li>
+</ul>
+</section>
+<section id="id11">
+<h2>7.3.28</h2>
+<ul class="simple">
+<li><p>Fixed a race condition in kvstorerockddb when accessing latencySample. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11114">(PR #11114)</a></p></li>
+<li><p>Added support for physical shard move. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11086">(PR #11086)</a></p></li>
+<li><p>Disabled CPU based team selection in rebalance data move. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11110">(PR #11110)</a></p></li>
+</ul>
+</section>
+<section id="id12">
+<h2>7.3.27</h2>
+<ul class="simple">
+<li><p>Same as 7.3.26 release with AVX disabled.</p></li>
+</ul>
+</section>
+<section id="id13">
+<h2>7.3.26</h2>
+<ul class="simple">
+<li><p>Updated RocskDB version to 8.6.7. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11043">(PR #11043)</a></p></li>
+<li><p>Changed RocksDB rate limiter to all IO. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11016">(PR #11016)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">fdb_c_apiversion.g.h</span></code> to OSX package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11042">(PR #11042)</a></p></li>
+<li><p>Added write traffic metrics to ddMetricsGetRange. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10998">(PR #10998)</a></p></li>
+<li><p>Fixed several locality-based exclusion bugs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11024">(PR #11024)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/11007">(PR #11007)</a>, and <a class="reference external" href="https://github.com/apple/foundationdb/pull/11005">(PR #11005)</a></p></li>
+<li><p>Fixed the null pointer issue in proxy setup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11039">(PR #11039)</a></p></li>
+</ul>
+</section>
+<section id="id14">
+<h2>7.3.25</h2>
+<ul class="simple">
+<li><p>Same as 7.3.24 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id15">
+<h2>7.3.24</h2>
+<ul class="simple">
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Added support for large shard. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10965">(PR#10965)</a></p></li>
+<li><p>Fixed perpetual wiggle locality match regex. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10973">(PR#10973)</a></p></li>
+<li><p>Added a knob to throttle perpetual wiggle data move. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10957">(PR#10957)</a></p></li>
+</ul>
+</section>
+<section id="id16">
+<h2>7.3.19</h2>
+<ul class="simple">
+<li><p>Same as 7.3.18 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id17">
+<h2>7.3.18</h2>
+<ul class="simple">
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Changed Event to use std::latch from c++20. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10929">(PR #10929)</a></p></li>
+<li><p>Added support for preinstalled libfmt. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10929">(PR #10929)</a></p></li>
+<li><p>Changed perpetual_storage_wiggle_locality database option to take a list of localities. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10928">(PR #10928)</a></p></li>
+<li><p>Fixed the trailing newline in c++filt output for Implib.so. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10921">(PR #10921)</a></p></li>
+<li><p>Stopped tracking a storage server after its removal. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10921">(PR #10921)</a></p></li>
+<li><p>Fixed Ratekeeper for not accounting dropped requests. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10921">(PR #10921)</a></p></li>
+<li><p>Fixed a memory leak of cluster controller’s status json invocation. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10921">(PR #10921)</a></p></li>
+<li><p>Fixed cluster controller from issuing many point reads for storage metadata. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10906">(PR #10906)</a></p></li>
+<li><p>Fixed multiple issues with AuditStorage. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10895">(PR #10895)</a></p></li>
+<li><p>Disabled storage server read sampling by default. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10899">(PR #10899)</a></p></li>
+</ul>
+</section>
+<section id="id22">
+<h2>7.3.17</h2>
+<ul class="simple">
+<li><p>Same as 7.3.16 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id23">
+<h2>7.3.16</h2>
+<ul class="simple">
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Added location_metadata fdbcli to query shard locations and assignements. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10428">(PR #10428)</a></p></li>
+<li><p>Added degraded/disconnected peer recovery in gray failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10541">(PR #10541)</a></p></li>
+<li><p>Added replica and metadata audit support. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10631">(PR #10631)</a></p></li>
+<li><p>Added a SecurityMode for data distributor where data movements are not allowed but auditStorage is enabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10660">(PR #10660)</a></p></li>
+<li><p>Remove SS entries from RateKeeper once it is down. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10681/files">(PR #10681)</a></p></li>
+<li><p>Added the support of manual compaction for Sharded RocksDB. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10838">(PR #10815)</a></p></li>
+</ul>
+</section>
+<section id="id24">
+<h2>7.3.0</h2>
+<section id="fixes">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><p>Fixed a consistency scan infinite looping without progress bug when a storage server is removed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9154">(PR #9154)</a></p></li>
+<li><p>Fixed a backup worker assertion failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8886">(PR #8886)</a></p></li>
+<li><p>Fixed a DD stuck issue when the remote data center is dead. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9338">(PR #9338)</a></p></li>
+<li><p>Exclude command will not perform a write if the addresses being excluded are already excluded. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9873">(PR #9873)</a></p></li>
+<li><p>ConsistencyCheck should finish after complete scan than failing on first mismatch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8539">(PR #8539)</a></p></li>
+</ul>
+</section>
+<section id="bindings">
+<h3>Bindings</h3>
+<ul class="simple">
+<li><p>Allow Ruby bindings to run on arm64. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9575">(PR #9575)</a></p></li>
+</ul>
+</section>
+<section id="performance">
+<h3>Performance</h3>
+<ul class="simple">
+<li><p>Improvements on physical shard creation to reduce shard count. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9067">(PR #9067)</a></p></li>
+<li><p>Older TLog generations are garbage collected as soon as they are no longer needed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10289">(PR #10289)</a></p></li>
+</ul>
+</section>
+<section id="reliability">
+<h3>Reliability</h3>
+<ul class="simple">
+<li><p>Gray failure will monitor satellite TLog disconnections.</p></li>
+<li><p>Storage progress is logged during the slow recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9041">(PR #9041)</a></p></li>
+<li><p>Added a new network option fail_incompatible_client. If the option is set, transactions are failing with fail_incompatible_client in case of an attempt to connect to a cluster without providing a compatible client library</p></li>
+</ul>
+</section>
+<section id="status">
+<h3>Status</h3>
+</section>
+<section id="other-changes">
+<h3>Other Changes</h3>
+<ul class="simple">
+<li><p>Added MonotonicTime field, based on system clock, to CommitDebug
+trace events, for accurate timing.</p></li>
+<li><p>Added a new function fdb_database_get_client_status providing a
+client-side connection status information in json format.</p></li>
+<li><p>Added a new network option retain_client_library_copies to avoid
+deleting the temporary library copies after completion of the
+process. This may be useful in various debugging and profiling
+scenarios.</p></li>
+<li><p>Added a new network option trace_initialize_on_setup to enable client
+traces already on fdb_setup_network, so that traces do not get lost
+on client configuration issues</p></li>
+<li><p>TraceEvents related to TLS handshake, new connections, and tenant
+access by authorization token are no longer subject to suppression or
+throttling, using an internal “AuditedEvent” TraceEvent
+classification</p></li>
+<li><p>Usage of authorization token is logged as part of AuditedEvent, with
+5-second suppression time window for duplicate entries (suppression
+time window is controlled by AUDIT_TIME_WINDOW flow knob)</p></li>
+</ul>
+</section>
+<section id="earlier-release-notes">
+<h3>Earlier release notes</h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="release-notes-720.html"><span class="doc">7.2 (API Version 720)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-710.html"><span class="doc">7.1 (API Version 710)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-700.html"><span class="doc">7.0 (API Version 700)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-630.html"><span class="doc">6.3 (API Version 630)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-620.html"><span class="doc">6.2 (API Version 620)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-610.html"><span class="doc">6.1 (API Version 610)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="../_sources/release-notes/release-notes-730.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 24, 2024.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>
