@@ -175,19 +175,17 @@ struct TraceableString<char*> {
 
 template <>
 struct TraceableString<std::filesystem::path> {
-    static auto begin(const std::filesystem::path& value) {
-        std::string pathString = value.string();
-        return pathString.begin();
-    }
+	static auto begin(const std::filesystem::path& value) {
+		static std::string pathString = value.string();
+		return pathString.begin();
+	}
 
-    static bool atEnd(const std::filesystem::path& value, std::string::iterator iter) {
-        std::string pathString = value.string();
-        return iter == pathString.end();
-    }
+	static bool atEnd(const std::filesystem::path& value, std::string::iterator iter) {
+		static std::string pathString = value.string();
+		return iter == pathString.end();
+	}
 
-    static std::string toString(const std::filesystem::path& value) {
-        return value.string();
-    }
+	static std::string toString(const std::filesystem::path& value) { return value.string(); }
 };
 
 template <class T>
