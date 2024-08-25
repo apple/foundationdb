@@ -1277,8 +1277,8 @@ Future<DistributedTestResults> runWorkload(Database cx,
 }
 
 // Sets the database configuration by running the ChangeConfig workload
-ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface> testers, StringRef configMode) {
-	state TestSpec spec;
+Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface> testers, StringRef configMode) {
+	TestSpec spec;
 	Standalone<VectorRef<KeyValueRef>> options;
 	spec.title = "ChangeConfig"_sr;
 	spec.runFailureWorkloads = false;
@@ -1286,9 +1286,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	options.push_back_deep(options.arena(), KeyValueRef("configMode"_sr, configMode));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
-	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
-
-	return Void();
+	co_await runWorkload(cx, testers, spec, Optional<TenantName>());
 }
 
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
@@ -1364,18 +1362,18 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 }
 
 // Runs the consistency check workload, which verifies that the database is in a consistent state
-ACTOR Future<Void> checkConsistency(Database cx,
-                                    std::vector<TesterInterface> testers,
-                                    bool doQuiescentCheck,
-                                    bool doCacheCheck,
-                                    bool doTSSCheck,
-                                    double quiescentWaitTimeout,
-                                    double softTimeLimit,
-                                    double databasePingDelay,
-                                    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state TestSpec spec;
+Future<Void> checkConsistency(Database cx,
+                              const std::vector<TesterInterface>& testers,
+                              bool doQuiescentCheck,
+                              bool doCacheCheck,
+                              bool doTSSCheck,
+                              double quiescentWaitTimeout,
+                              double softTimeLimit,
+                              double databasePingDelay,
+                              Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	TestSpec spec;
 
-	state double connectionFailures;
+	double connectionFailures;
 	if (g_network->isSimulated()) {
 		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator->connectionFailuresDisableDuration;
@@ -1411,23 +1409,23 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	options.push_back_deep(options.arena(), KeyValueRef("distributed"_sr, "false"_sr));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
-	state double start = now();
-	state bool lastRun = false;
+	double start = now();
+	bool lastRun = false;
 	loop {
-		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+		DistributedTestResults testResults = co_await runWorkload(cx, testers, spec, Optional<TenantName>());
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator->connectionFailuresDisableDuration = connectionFailures;
 				g_simulator->isConsistencyChecked = false;
 			}
-			return Void();
+			co_return;
 		}
 		if (now() - start > softTimeLimit) {
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef("failureIsError"_sr, "true"_sr));
 			lastRun = true;
 		}
 
-		wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
+		co_await repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck");
 	}
 }
 
