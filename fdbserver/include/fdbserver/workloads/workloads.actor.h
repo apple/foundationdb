@@ -79,7 +79,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload(){};
+	virtual ~TestWorkload() {};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -342,15 +342,15 @@ public:
 	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx,
-                                                 std::vector<TesterInterface> testers,
-                                                 TestSpec spec,
-                                                 Optional<TenantName> defaultTenant);
+Future<DistributedTestResults> runWorkload(Database cx,
+                                           std::vector<TesterInterface> testers,
+                                           TestSpec spec,
+                                           Optional<TenantName> defaultTenant);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 
-ACTOR Future<Void> poisson(double* last, double meanInterval);
-ACTOR Future<Void> uniform(double* last, double meanInterval);
+Future<Void> poisson(double* last, double meanInterval);
+Future<Void> uniform(double* last, double meanInterval);
 
 void emplaceIndex(uint8_t* data, int offset, int64_t index);
 Key doubleToTestKey(double p);
@@ -358,7 +358,7 @@ double testKeyToDouble(const KeyRef& p);
 Key doubleToTestKey(double p, const KeyRef& prefix);
 double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 
-ACTOR Future<Void> databaseWarmer(Database cx);
+Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase(Database const& cx,
                            Reference<AsyncVar<struct ServerDBInfo> const> const&,
