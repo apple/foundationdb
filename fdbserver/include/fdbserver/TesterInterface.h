@@ -1,5 +1,5 @@
 /*
- * TesterInterface.actor.h
+ * TesterInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,14 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTERINTERFACE_ACTOR_G_H)
-#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
-#include "fdbserver/TesterInterface.actor.g.h"
-#elif !defined(FDBSERVER_TESTERINTERFACE_ACTOR_H)
-#define FDBSERVER_TESTERINTERFACE_ACTOR_H
+#ifndef FDBSERVER_TESTERINTERFACE_H
+#define FDBSERVER_TESTERINTERFACE_H
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // has to be last include
+
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
 
@@ -148,5 +145,4 @@ Future<Void> runTests(
     const Standalone<VectorRef<TenantNameRef>>& tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
     bool restartingTest = false);
 
-#include "flow/unactorcompiler.h"
-#endif
+#endif // FDBSERVER_TESTERINTERFACE_H

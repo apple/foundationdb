@@ -20,7 +20,7 @@
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "flow/CodeProbe.h"
 #include "flow/Coroutines.h"
 #include "flow/DeterministicRandom.h"

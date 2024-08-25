@@ -32,7 +32,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 

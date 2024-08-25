@@ -28,7 +28,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
 #include "fdbserver/KnobProtectiveGroups.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbrpc/simulator.h"
 
 #include <functional>

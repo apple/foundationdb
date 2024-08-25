@@ -41,7 +41,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
 #include "fdbserver/QuietDatabase.h"
