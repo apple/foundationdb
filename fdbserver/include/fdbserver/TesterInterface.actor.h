@@ -121,11 +121,11 @@ struct TesterInterface {
 	}
 };
 
-ACTOR Future<Void> testerServerCore(TesterInterface interf,
-                                    Reference<IClusterConnectionRecord> ccr,
-                                    Reference<AsyncVar<struct ServerDBInfo> const> serverDBInfo,
-                                    LocalityData locality,
-                                    Optional<std::string> expectedWorkLoad = Optional<std::string>());
+Future<Void> testerServerCore(const TesterInterface& interf,
+                              Reference<IClusterConnectionRecord> ccr,
+                              Reference<AsyncVar<struct ServerDBInfo> const> serverDBInfo,
+                              LocalityData locality,
+                              Optional<std::string> expectedWorkLoad = Optional<std::string>());
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t {
@@ -135,17 +135,17 @@ enum test_type_t {
 	TEST_TYPE_CONSISTENCY_CHECK_URGENT
 };
 
-ACTOR Future<Void> runTests(
-    Reference<IClusterConnectionRecord> connRecord,
+Future<Void> runTests(
+    const Reference<IClusterConnectionRecord>& connRecord,
     test_type_t whatToRun,
     test_location_t whereToRun,
     int minTestersExpected,
-    std::string fileName = std::string(),
+    const std::string& fileName = std::string(),
     StringRef startingConfiguration = StringRef(),
-    LocalityData locality = LocalityData(),
-    UnitTestParameters testOptions = UnitTestParameters(),
-    Optional<TenantName> defaultTenant = Optional<TenantName>(),
-    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
+    const LocalityData& locality = LocalityData(),
+    const UnitTestParameters& testOptions = UnitTestParameters(),
+    const Optional<TenantName>& defaultTenant = Optional<TenantName>(),
+    const Standalone<VectorRef<TenantNameRef>>& tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
     bool restartingTest = false);
 
 #include "flow/unactorcompiler.h"
