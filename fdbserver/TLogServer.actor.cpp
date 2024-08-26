@@ -339,7 +339,7 @@ struct TLogData : NonCopyable {
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
 	int activePeekStreams = 0;
-
+	Optional<Version> clusterRecoveryVersion;
 	WorkerCache<TLogInterface> tlogCache;
 	FlowLock peekMemoryLimiter;
 
@@ -1803,7 +1803,16 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state double blockStart = now();
 
-	if (reqReturnIfBlocked && logData->version.get() < reqBegin) {
+	// if tLog locked for recovery, return an empty message at the cluster recovery version
+	// if requested version is greater than any received.
+	state Optional<Version> clusterRecoveryVersion = Optional<Version>();
+	ASSERT(!clusterRecoveryVersion.present() || reqBegin <= clusterRecoveryVersion.get());
+	if (logData->stopped() && logData->version.get() < reqBegin && self->clusterRecoveryVersion.present()) {
+		clusterRecoveryVersion = self->clusterRecoveryVersion.get();
+		TraceEvent("TLogPeekMessagesClusterRecoveryVersion").detail("Version", clusterRecoveryVersion.get());
+	}
+
+	if (!clusterRecoveryVersion.present() && reqReturnIfBlocked && logData->version.get() < reqBegin) {
 		replyPromise.sendError(end_of_stream());
 		if (reqSequence.present()) {
 			auto& trackerData = logData->peekTracker[peekId];
@@ -1823,7 +1832,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	    .detail("Version", logData->version.get())
 	    .detail("RecoveredAt", logData->recoveredAt);
 	// Wait until we have something to return that the caller doesn't already have
-	if (logData->version.get() < reqBegin) {
+	if (!clusterRecoveryVersion.present() && logData->version.get() < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
@@ -2100,7 +2109,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	auto messagesValue = messages.toValue();
 	reply.arena.dependsOn(messagesValue.arena());
 	reply.messages = messagesValue;
-	reply.end = endVersion;
+	reply.end = clusterRecoveryVersion.present() ? clusterRecoveryVersion.get() : endVersion;
 	reply.onlySpilled = onlySpilled;
 
 	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
@@ -2348,7 +2357,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	wait(logData->version.whenAtLeast(req.prevVersion));
-
 	// Time until now has been spent waiting in the queue to do actual work.
 	state double queueWaitEndTime = g_network->timer();
 	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
@@ -2852,6 +2860,11 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
+		}
+		when(setClusterRecoveryVersionRequest req = waitNext(tli.setClusterRecoveryVersion.getFuture())) {
+			ASSERT(logData->stopped());
+			self->clusterRecoveryVersion = req.recoveryVersion;
+			req.reply.send(Void());
 		}
 	}
 }
