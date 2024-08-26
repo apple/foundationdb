@@ -63,12 +63,18 @@ class TempCluster(LocalCluster):
     def __exit__(self, xc_type, exc_value, traceback):
         super().__exit__(xc_type, exc_value, traceback)
         if self.remove_at_exit:
-            shutil.rmtree(self.tmp_dir)
+            try:
+                shutil.rmtree(self.tmp_dir)
+            except FileNotFoundError:
+                pass
 
     def close(self):
         super().__exit__(None, None, None)
         if self.remove_at_exit:
-            shutil.rmtree(self.tmp_dir)
+            try:
+                shutil.rmtree(self.tmp_dir)
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == "__main__":
