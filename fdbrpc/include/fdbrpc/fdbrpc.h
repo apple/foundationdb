@@ -605,7 +605,7 @@ public:
 
 	// Must be called on the server before using a ReplyPromiseStream to limit the amount of outstanding bytes to the
 	// client
-	void setByteLimit(int64_t byteLimit) { queue->acknowledgements.bytesLimit = byteLimit; }
+	void setByteLimit(int64_t byteLimit) const { queue->acknowledgements.bytesLimit = byteLimit; }
 
 	void operator=(const ReplyPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();

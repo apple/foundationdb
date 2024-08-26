@@ -100,7 +100,7 @@ co_await Choose()
     })
     .When(foo(), [](Foo const& f) {
         // do something else
-    }).Run();
+    }).run();
 ```
 
 While `Choose` and `choose` behave very similarly, there are some minor differences between
@@ -589,16 +589,16 @@ Luckily, with coroutines, we can do one better: generalize the retry loop. The a
 
 ```c++
 co_await db.run([&](ReadYourWritesTransaction* tr) -> Future<Void> {
-    Value v = wait(tr.get(key));
-    tr.set(key2, val2);
-    wait(tr.commit());
+    Value v = wait(tr->get(key));
+    tr->set(key2, val2);
+    wait(tr->commit());
 });
 ```
 
 A possible implementation of `Database::run` would be:
 
 ```c++
-template <std:invocable<ReadYourWritesTransaction*> Fun>
+template <std::invocable<ReadYourWritesTransaction*> Fun>
 Future<Void> Database::run(Fun fun) {
     ReadYourWritesTransaction tr(*this);
     Future<Void> onError;
@@ -609,6 +609,7 @@ Future<Void> Database::run(Fun fun) {
         }
         try {
             co_await fun(&tr);
+            co_return;
         } catch (Error& e) {
             onError = tr.onError(e);
         }
