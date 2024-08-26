@@ -2064,7 +2064,9 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 			continue;
 		}
 		for (uint16_t i = 0; i < it->logServers.size(); i++) {
-			interfLocMap[it->logServers[i]->get().interf().id()] = location++;
+			if (it->logServers[i]->get().present()) {
+				interfLocMap[it->logServers[i]->get().interf().id()] = location++;
+			}
 		}
 	}
 
