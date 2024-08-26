@@ -205,8 +205,8 @@ private:
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
-			CODE_PROBE(!forResolver, "encrypting metadata mutations");
-			CODE_PROBE(forResolver, "encrypting resolver mutations");
+			CODE_PROBE(!forResolver, "encrypting metadata mutations", probe::decoration::rare);
+			CODE_PROBE(forResolver, "encrypting resolver mutations", probe::decoration::rare);
 			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
 	}

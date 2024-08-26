@@ -5603,7 +5603,7 @@ ACTOR Future<Void> checkUpdateEncryptionAtRestMode(Reference<BlobWorkerData> sel
 	} else {
 		self->persistedEncryptMode = encryptionAtRestMode;
 		if (self->storage) {
-			CODE_PROBE(true, "BlobWorker: Persisting encryption at rest mode");
+			CODE_PROBE(true, "BlobWorker: Persisting encryption at rest mode", probe::decoration::rare);
 			self->storage->set(KeyValueRef(persistEncryptionAtRestModeKey, self->persistedEncryptMode.get().toValue()));
 			wait(self->storage->commit());
 			TraceEvent("BlobWorkerPersistEncryptionAtRestMode", self->id)
@@ -5702,7 +5702,7 @@ ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 	ASSERT(recoveredID != self->id);
 
 	if (fEncryptionAtRestMode.get().present()) {
-		CODE_PROBE(true, "BlobWorker: Retrieved persisted encryption at rest mode");
+		CODE_PROBE(true, "BlobWorker: Retrieved persisted encryption at rest mode", probe::decoration::rare);
 		self->persistedEncryptMode =
 		    Optional<EncryptionAtRestMode>(EncryptionAtRestMode::fromValue(fEncryptionAtRestMode.get()));
 		TraceEvent("BlobWorkerPersistEncryptionAtRestModeRead", self->id)
