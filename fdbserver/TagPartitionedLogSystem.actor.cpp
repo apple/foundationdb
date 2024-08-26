@@ -3384,7 +3384,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			                               : Never())) {
 				TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
 				if (lockInterf.present()) {
-					lockInterf.get()->lockInterf[tlog->get().id()] = tlog->get().interf();
+					lockInterf.get()->lockInterf[data.id] = tlog->get().interf();
 				}
 				return data;
 			}
