@@ -974,7 +974,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state int thisTry = 1;
 	state int badRequestCode = 400;
-	state bool s3TokenError = true;
+	state bool s3TokenError = false;
 	state double nextRetryDelay = 2.0;
 
 	loop {
