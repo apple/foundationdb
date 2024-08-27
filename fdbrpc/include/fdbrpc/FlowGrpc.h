@@ -1,5 +1,5 @@
 /**
- * gRPC.h
+ * FlowGrpc.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBRPC_GRPC_H
-#define FDBRPC_GRPC_H
+#ifndef FDBRPC_FLOW_GRPC_H
+#define FDBRPC_FLOW_GRPC_H
 
 #include <memory>
 #include <thread>
@@ -35,6 +35,7 @@ public:
 	Future<Void> run();
 	void runSync();
 	void shutdown();
+
 	void registerService(std::shared_ptr<grpc::Service> service);
 
 private:
@@ -45,4 +46,4 @@ private:
 	std::vector<std::shared_ptr<grpc::Service>> registered_services_;
 };
 
-#endif //
+#endif // FDBRPC_FLOW_GRPC_H

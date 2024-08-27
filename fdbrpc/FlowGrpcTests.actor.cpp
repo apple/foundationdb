@@ -1,5 +1,5 @@
 /**
- * gRPC.actor.cpp
+ * grpc_tests.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,65 +18,33 @@
  * limitations under the License.
  */
 
+
 #include <cstdio>
 #include <thread>
 
+#include "echo.pb.h"
 #include "flow/UnitTest.h"
-#include "fdbrpc/gRPC.h"
+#include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/test/echo.grpc.pb.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-using test_fdbrpc::EchoRequest;
-using test_fdbrpc::EchoResponse;
-using test_fdbrpc::TestEchoService;
-using grpc::ServerContext;
-using grpc::Status;
-
-GRPCServer::~GRPCServer() {
-	server_promise_.sendError(unknown_error());
-}
-
-Future<Void> GRPCServer::run() {
-	server_thread_ = std::thread([&] {
-		runSync();
-		server_promise_.send(Void());
-	});
-
-	return server_promise_.getFuture();
-}
-
-void GRPCServer::runSync() {
-	auto cq = builder_.AddCompletionQueue();
-	for (auto& service : registered_services_) {
-		builder_.RegisterService(service.get());
-	}
-	builder_.AddListeningPort("0.0.0.0:50051", grpc::InsecureServerCredentials());
-	server_ = builder_.BuildAndStart();
-	server_->Wait();
-}
-
-void GRPCServer::shutdown() {
-	server_->Shutdown();
-}
-
-void GRPCServer::registerService(std::shared_ptr<grpc::Service> service) {
-	registered_services_.push_back(service);
-}
-
-//-- Tests --
 
 // So that tests are not optimized out. :/
 void forceLinkGrpcTests() {}
 
 using grpc::Channel;
 using grpc::ClientContext;
+using grpc::ServerContext;
 using grpc::Status;
 
+using fdbrpc::test::TestEchoService;
+using fdbrpc::test::EchoRequest;
+using fdbrpc::test::EchoResponse;
+
 // Service implementation
-class FDBRpcServiceImpl final : public TestEchoService::Service {
+class TestEchoServiceImpl final : public TestEchoService::Service {
 	Status Echo(ServerContext* context, const EchoRequest* request, EchoResponse* reply) override {
-		reply->set_message(request->message());
+		reply->set_message("Echo: " + request->message());
 		return Status::OK;
 	}
 };
@@ -106,18 +74,36 @@ private:
 	std::unique_ptr<TestEchoService::Stub> stub_;
 };
 
-TEST_CASE("/fdbrpc/grpc/basic") {
-	state std::shared_ptr<FDBRpcServiceImpl> service = std::make_shared<FDBRpcServiceImpl>();
+TEST_CASE("/fdbrpc/grpc/basic_thread") {
+	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
 	state GRPCServer s;
-	//s.registerService(service);
+	s.registerService(service);
 	auto server = std::thread([&] { s.runSync(); });
 
 	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
-	std::string message = "Hello, gRPC!";
+	std::string message = "Ping!";
 	std::string reply = client.Echo(message);
 	std::cout << "Echo received: " << reply << std::endl;
+	ASSERT_EQ(reply, "Echo: Ping!");
 
 	s.shutdown();
 	server.join();
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/grpc/basic_async") {
+	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
+	state GRPCServer s;
+	s.registerService(service);
+	state Future<Void> r = s.run();
+
+	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
+	std::string message = "Ping!";
+	std::string reply = client.Echo(message);
+	std::cout << "Echo received: " << reply << std::endl;
+	ASSERT_EQ(reply, "Echo: Ping!");
+
+	s.shutdown();
+	wait(r);
 	return Void();
 }

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package test_fdbrpc;
+package fdbrpc.test;
 
 service TestEchoService {
     rpc Echo(EchoRequest) returns (EchoResponse);
