@@ -125,6 +125,7 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 	state EchoResponse response;
   	request.set_message("Ping!");
 	grpc::Status result = wait(client.call(&TestEchoService::Stub::Echo, request, &response));
+	ASSERT(result.ok());
 	std::cout << "Echo received: " << response.message() << std::endl;
 	ASSERT_EQ(response.message(), "Echo: Ping!");
 
@@ -132,6 +133,16 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 	wait(server_future);
 	return Void();
 }
+
+// TEST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
+// 	using namespace fdbrpc::test;
+
+// 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
+// 	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+// 	s->registerService(service);
+// 	state Future<Void> server_future = s->run();
+// 	return Void();
+// }
 
 
 } // namespace fdbrpc_test
