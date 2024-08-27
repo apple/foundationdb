@@ -516,7 +516,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 					TraceEvent(SevWarn, "BlobMetadataFetchMissingTenants")
 					    .suppressFor(30.0)
 					    .detail("Count", missingIds.size());
-					CODE_PROBE(true, "blob metadata fetch missing tenants");
+					CODE_PROBE(true, "blob metadata fetch missing tenants", probe::decoration::rare);
 
 					req.domainIds.clear();
 					for (auto& id : missingIds) {
@@ -537,7 +537,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
 			}
-			CODE_PROBE(true, "blob metadata fetch error");
+			CODE_PROBE(true, "blob metadata fetch error", probe::decoration::rare);
 			TraceEvent(SevWarn, "BlobMetadataFetchError").errorUnsuppressed(e).suppressFor(30.0);
 			// need to reset request on error
 			prevEKPID = UID();
@@ -598,7 +598,7 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 			return tenant;
 		} else if (!tenant->startedLoadingBStore || (tenant->bstore.isValid() && tenant->bstore->isExpired())) {
 			tenant->startedLoadingBStore = true;
-			CODE_PROBE(true, "re-fetching expired blob metadata");
+			CODE_PROBE(true, "re-fetching expired blob metadata", probe::decoration::rare);
 
 			// even if this actor gets cancelled, we marked it as startedLoading, so finish the load in the actor
 			// collection
@@ -659,7 +659,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(BGTenantMap*
 				wait(delay(0));
 				return data->bstore;
 			} else {
-				CODE_PROBE(true, "bstore for unknown tenant");
+				CODE_PROBE(true, "bstore for unknown tenant", probe::decoration::rare);
 				// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
 				// loading to be versioned anyway. 10 retries means it's likely not a transient race with
 				// loading tenants, and instead a persistent issue.
