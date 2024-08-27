@@ -170,6 +170,12 @@ if(NOT WIN32)
   set(TEST_PACKAGE_ADD_DIRECTORIES "" CACHE STRING "A ;-separated list of directories. All files within each directory will be added to the test package")
 endif()
 
+function(add_fdb_unit_test TEST_NAME PATTERN)
+  add_test(NAME ${TEST_NAME}
+           WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+           COMMAND ${CMAKE_BINARY_DIR}/bin/fdbserver -r unittests -f "${PATTERN}")
+endfunction()
+
 # This sets up a directory with the correctness files common to all correctness packages.
 # This function should be called with the following arguments:
 #

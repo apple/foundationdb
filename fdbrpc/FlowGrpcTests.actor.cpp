@@ -18,11 +18,9 @@
  * limitations under the License.
  */
 
-
 #include <cstdio>
 #include <thread>
 
-#include "echo.pb.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/test/echo.grpc.pb.h"
@@ -32,14 +30,16 @@
 // So that tests are not optimized out. :/
 void forceLinkGrpcTests() {}
 
+namespace fdbrpc_test {
+
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ServerContext;
 using grpc::Status;
 
-using fdbrpc::test::TestEchoService;
 using fdbrpc::test::EchoRequest;
 using fdbrpc::test::EchoResponse;
+using fdbrpc::test::TestEchoService;
 
 // Service implementation
 class TestEchoServiceImpl final : public TestEchoService::Service {
@@ -76,9 +76,9 @@ private:
 
 TEST_CASE("/fdbrpc/grpc/basic_thread") {
 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state GRPCServer s;
-	s.registerService(service);
-	auto server = std::thread([&] { s.runSync(); });
+	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+	s->registerService(service);
+	auto server = std::thread([=] { s->runSync(); });
 
 	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
 	std::string message = "Ping!";
@@ -86,16 +86,18 @@ TEST_CASE("/fdbrpc/grpc/basic_thread") {
 	std::cout << "Echo received: " << reply << std::endl;
 	ASSERT_EQ(reply, "Echo: Ping!");
 
-	s.shutdown();
+	s->shutdown();
 	server.join();
 	return Void();
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async") {
+	using namespace fdbrpc::test;
+
 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state GRPCServer s;
-	s.registerService(service);
-	state Future<Void> r = s.run();
+	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+	s->registerService(service);
+	state Future<Void> server_future = s->run();
 
 	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
 	std::string message = "Ping!";
@@ -103,7 +105,33 @@ TEST_CASE("/fdbrpc/grpc/basic_async") {
 	std::cout << "Echo received: " << reply << std::endl;
 	ASSERT_EQ(reply, "Echo: Ping!");
 
-	s.shutdown();
-	wait(r);
+	s->shutdown();
+	wait(server_future);
 	return Void();
 }
+
+TEST_CASE("/fdbrpc/grpc/basic_async_client") {
+	using namespace fdbrpc::test;
+
+	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
+	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+	s->registerService(service);
+	state Future<Void> server_future = s->run();
+
+	state std::shared_ptr<boost::asio::thread_pool> pool = std::make_shared<boost::asio::thread_pool>(4);
+	state AsyncGrpcClient<TestEchoService> client(pool, "localhost:50051");
+
+	state EchoRequest request;
+	state EchoResponse response;
+  	request.set_message("Ping!");
+	grpc::Status result = wait(client.call(&TestEchoService::Stub::Echo, request, &response));
+	std::cout << "Echo received: " << response.message() << std::endl;
+	ASSERT_EQ(response.message(), "Echo: Ping!");
+
+	s->shutdown();
+	wait(server_future);
+	return Void();
+}
+
+
+} // namespace fdbrpc_test

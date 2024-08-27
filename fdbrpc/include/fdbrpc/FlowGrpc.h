@@ -25,12 +25,14 @@
 #include <thread>
 #include <grpcpp/grpcpp.h>
 
+#include <boost/asio.hpp>
+
 #include "flow/IThreadPool.h"
 #include "flow/flow.h"
 
-class GRPCServer {
+class GrpcServer {
 public:
-	~GRPCServer();
+	~GrpcServer();
 
 	Future<Void> run();
 	void runSync();
@@ -39,11 +41,50 @@ public:
 	void registerService(std::shared_ptr<grpc::Service> service);
 
 private:
-	grpc::ServerBuilder builder_;
-	std::unique_ptr<grpc::Server> server_;
-	std::thread server_thread_;
-	ThreadReturnPromise<Void> server_promise_;
 	std::vector<std::shared_ptr<grpc::Service>> registered_services_;
+	std::unique_ptr<grpc::Server> server_;
+	ThreadReturnPromise<Void> server_promise_;
+	std::thread server_thread_;
 };
+
+template <typename ServiceType>
+class AsyncGrpcClient {
+  using RpcStub = typename ServiceType::Stub;
+
+  template <class RequestType, class ResponseType>
+  using RpcFn = grpc::Status (RpcStub::*)(grpc::ClientContext *, const RequestType &,
+                                          ResponseType *);
+
+ public:
+  using Rpc = typename ServiceType::Stub;
+
+  AsyncGrpcClient() {}
+  AsyncGrpcClient(std::shared_ptr<boost::asio::thread_pool> pool,
+                  const std::string &endpoint)
+      : pool_(pool),
+        channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
+        stub_(ServiceType::NewStub(channel_)) {}
+
+  template <class RequestType, class ResponseType,
+            class RpcFn = RpcFn<RequestType, ResponseType>>
+  Future<grpc::Status> call(RpcFn rpc, const RequestType &request,
+                                 ResponseType *response) {
+    auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
+
+    boost::asio::post(*pool_, [this, promise, rpc, request, response]() {
+      grpc::ClientContext context;
+      auto status = (stub_.get()->*rpc)(&context, request, response);
+      promise->send(status);
+    });
+
+    return promise->getFuture();
+  }
+
+ private:
+  std::shared_ptr<boost::asio::thread_pool> pool_;
+  std::shared_ptr<grpc::Channel> channel_;
+  std::unique_ptr<RpcStub> stub_;
+};
+
 
 #endif // FDBRPC_FLOW_GRPC_H

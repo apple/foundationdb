@@ -24,35 +24,35 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-GRPCServer::~GRPCServer() {
-	shutdown();
-	server_thread_.join();
-	server_promise_.sendError(unknown_error());
+GrpcServer::~GrpcServer() {
+	if (server_thread_.joinable()) {
+		server_thread_.join();
+	}
 }
 
-Future<Void> GRPCServer::run() {
+Future<Void> GrpcServer::run() {
 	server_thread_ = std::thread([&] {
 		runSync();
-		server_promise_.send(Void());
 	});
 
 	return server_promise_.getFuture();
 }
 
-void GRPCServer::runSync() {
-	auto cq = builder_.AddCompletionQueue();
+void GrpcServer::runSync() {
+	grpc::ServerBuilder builder_;
 	for (auto& service : registered_services_) {
 		builder_.RegisterService(service.get());
 	}
 	builder_.AddListeningPort("0.0.0.0:50051", grpc::InsecureServerCredentials());
 	server_ = builder_.BuildAndStart();
 	server_->Wait();
+	server_promise_.send(Void());
 }
 
-void GRPCServer::shutdown() {
+void GrpcServer::shutdown() {
 	server_->Shutdown();
 }
 
-void GRPCServer::registerService(std::shared_ptr<grpc::Service> service) {
+void GrpcServer::registerService(std::shared_ptr<grpc::Service> service) {
 	registered_services_.push_back(service);
 }
