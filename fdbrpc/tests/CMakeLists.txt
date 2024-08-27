@@ -7,3 +7,5 @@ if(NOT WIN32)
     set_tests_properties(authorization_tls_unittest PROPERTIES TIMEOUT 120)
   endif()
 endif()
+
+generate_grpc_protobuf(fdbrpc.test echo.proto)

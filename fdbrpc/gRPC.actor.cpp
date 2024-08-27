@@ -1,4 +1,4 @@
-/*
+/**
  * gRPC.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
@@ -19,21 +19,17 @@
  */
 
 #include <cstdio>
-#include <grpcpp/impl/service_type.h>
-#include <grpcpp/server.h>
-#include <grpcpp/server_builder.h>
 #include <thread>
 
 #include "flow/UnitTest.h"
 #include "fdbrpc/gRPC.h"
+#include "fdbrpc/test/echo.grpc.pb.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using fdbrpc::EchoRequest;
-using fdbrpc::EchoResponse;
-using fdbrpc::FDBRpcService;
-using grpc::Server;
-using grpc::ServerBuilder;
+using test_fdbrpc::EchoRequest;
+using test_fdbrpc::EchoResponse;
+using test_fdbrpc::TestEchoService;
 using grpc::ServerContext;
 using grpc::Status;
 
@@ -78,7 +74,7 @@ using grpc::ClientContext;
 using grpc::Status;
 
 // Service implementation
-class FDBRpcServiceImpl final : public FDBRpcService::Service {
+class FDBRpcServiceImpl final : public TestEchoService::Service {
 	Status Echo(ServerContext* context, const EchoRequest* request, EchoResponse* reply) override {
 		reply->set_message(request->message());
 		return Status::OK;
@@ -87,7 +83,7 @@ class FDBRpcServiceImpl final : public FDBRpcService::Service {
 
 class EchoClient {
 public:
-	EchoClient(std::shared_ptr<Channel> channel) : stub_(FDBRpcService::NewStub(channel)) {}
+	EchoClient(std::shared_ptr<Channel> channel) : stub_(TestEchoService::NewStub(channel)) {}
 
 	std::string Echo(const std::string& message) {
 		EchoRequest request;
@@ -107,13 +103,13 @@ public:
 	}
 
 private:
-	std::unique_ptr<FDBRpcService::Stub> stub_;
+	std::unique_ptr<TestEchoService::Stub> stub_;
 };
 
 TEST_CASE("/fdbrpc/grpc/basic") {
 	state std::shared_ptr<FDBRpcServiceImpl> service = std::make_shared<FDBRpcServiceImpl>();
-	state GRPCServer s();
-	s.registerService(service);
+	state GRPCServer s;
+	//s.registerService(service);
 	auto server = std::thread([&] { s.runSync(); });
 
 	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));

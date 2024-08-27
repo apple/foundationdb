@@ -156,7 +156,6 @@ struct UnitTestWorkload : TestWorkload {
 		state std::vector<UnitTest*> tests;
 
 		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-			std::cout << "Matching with: " << test->name << std::endl;
 			if (self->testMatched(test->name)) {
 				++self->testsAvailable;
 				tests.push_back(test);

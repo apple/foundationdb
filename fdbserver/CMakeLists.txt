@@ -158,10 +158,7 @@ if(USE_JEMALLOC)
   target_link_libraries(fdbserver PRIVATE jemalloc::jemalloc)
 endif()
 
-set(gRPC_DIR /usr/local/lib/cmake/grpc)
-find_package(gRPC CONFIG REQUIRED)
-
-target_link_libraries(fdbserver PRIVATE toml11_target rapidjson gRPC::grpc++)
+target_link_libraries(fdbserver PRIVATE toml11_target rapidjson)
 if(WITH_ROCKSDB)
   target_compile_definitions(fdbserver PRIVATE WITH_ROCKSDB)
 endif()

@@ -1,4 +1,4 @@
-/*
+/**
  * gRPC.h
  *
  * This source file is part of the FoundationDB open source project
@@ -21,19 +21,12 @@
 #ifndef FDBRPC_GRPC_H
 #define FDBRPC_GRPC_H
 
-#include <grpcpp/server.h>
 #include <memory>
 #include <thread>
+#include <grpcpp/grpcpp.h>
 
-#include <grpc++/grpc++.h>
-#include <vector>
-
-#include "flow/IConnection.h"
 #include "flow/IThreadPool.h"
-#include "flow/NetworkAddress.h"
 #include "flow/flow.h"
-#include "flow/ActorCollection.h"
-#include "fdbrpc/fdbrpc.grpc.pb.h"
 
 class GRPCServer {
 public:
