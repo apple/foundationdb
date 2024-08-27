@@ -97,7 +97,7 @@ function(generate_grpc_protobuf pkg_name)
 
   protobuf_generate(
       TARGET ${target_name}
-      LANGUGE grpc
+      LANGUAGE grpc
       PROTOC_OUT_DIR ${protoc_out_dir}
       PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
       GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
