@@ -32,6 +32,11 @@ void forceLinkGrpcTests() {}
 
 namespace fdbrpc_test {
 
+using std::make_shared;
+using std::shared_ptr;
+using std::thread;
+namespace asio = boost::asio;
+
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ServerContext;
@@ -51,7 +56,7 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 
 class EchoClient {
 public:
-	EchoClient(std::shared_ptr<Channel> channel) : stub_(TestEchoService::NewStub(channel)) {}
+	EchoClient(shared_ptr<Channel> channel) : stub_(TestEchoService::NewStub(channel)) {}
 
 	std::string Echo(const std::string& message) {
 		EchoRequest request;
@@ -75,74 +80,72 @@ private:
 };
 
 TEST_CASE("/fdbrpc/grpc/basic_thread") {
-	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50000");
-	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
-	s->registerService(service);
-	auto server = std::thread([=] { s->runSync(); });
+	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50000"));
+	state GrpcServer server(addr);
+	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
+	server.registerService(service);
+	thread server_thread([&] { server.runSync(); });
 
 	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
-	std::string message = "Ping!";
-	std::string reply = client.Echo(message);
+	auto reply = client.Echo("Ping!");
 	std::cout << "Echo received: " << reply << std::endl;
 	ASSERT_EQ(reply, "Echo: Ping!");
 
-	s->shutdown();
-	server.join();
+	server.shutdown();
+	server_thread.join();
 	return Void();
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async_server") {
-	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50001");
-	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
-	s->registerService(service);
-	state Future<Void> server_future = s->run();
+	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50001"));
+	state GrpcServer server(addr);
+	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
+	server.registerService(service);
+	state Future<Void> server_actor = server.run();
 
 	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
-	std::string message = "Ping!";
-	std::string reply = client.Echo(message);
+	std::string reply = client.Echo("Ping!");
 	std::cout << "Echo received: " << reply << std::endl;
 	ASSERT_EQ(reply, "Echo: Ping!");
 
-	s->shutdown();
-	wait(server_future);
+	server.shutdown();
+	wait(server_actor);
 	return Void();
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async_client_1") {
-	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50002");
-	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
-	s->registerService(service);
-	state Future<Void> server_future = s->run();
+	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50002"));
+	state GrpcServer server(addr);
+	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
+	server.registerService(service);
+	state Future<Void> server_actor = server.run();
 
-	state std::shared_ptr<boost::asio::thread_pool> pool = std::make_shared<boost::asio::thread_pool>(4);
-	state AsyncGrpcClient<TestEchoService> client(pool, addr.toString());
+	state shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	state EchoRequest request;
 	state EchoResponse response;
-  	request.set_message("Ping!");
+	request.set_message("Ping!");
 	grpc::Status result = wait(client.call(&TestEchoService::Stub::Echo, request, &response));
 	ASSERT(result.ok());
 	std::cout << "Echo received: " << response.message() << std::endl;
 	ASSERT_EQ(response.message(), "Echo: Ping!");
 
-	s->shutdown();
-	wait(server_future);
+	server.shutdown();
+	wait(server_actor);
 
 	return Void();
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async_client_2") {
-	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50002");
-	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
-	s->registerService(service);
-	state Future<Void> server_future = s->run();
+	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50003"));
+	state GrpcServer server(addr);
+	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
+	server.registerService(service);
+	state Future<Void> server_actor = server.run();
 
-	state std::shared_ptr<boost::asio::thread_pool> pool = std::make_shared<boost::asio::thread_pool>(4);
-	state AsyncGrpcClient<TestEchoService> client(pool, addr.toString());
+	state shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	try {
 		state EchoRequest request;
@@ -155,16 +158,16 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client_2") {
 		ASSERT(false);
 	}
 
-	s->shutdown();
-	wait(server_future);
+	server.shutdown();
+	wait(server_actor);
 
 	return Void();
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async_client_without_server_error") {
-	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50002");
-	state std::shared_ptr<boost::asio::thread_pool> pool = std::make_shared<boost::asio::thread_pool>(4);
-	state AsyncGrpcClient<TestEchoService> client(pool, addr.toString());
+	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50004"));
+	state shared_ptr<asio::thread_pool> pool(make_shared<asio::thread_pool>(4));
+	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	try {
 		state EchoRequest request;
@@ -178,16 +181,14 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client_without_server_error") {
 	return Void();
 }
 
-
 // T_EST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
 // 	using namespace fdbrpc::test;
 
-// 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-// 	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+// 	state shared_ptr<TestEchoServiceImpl> service = make_shared<TestEchoServiceImpl>();
+// 	state shared_ptr<GrpcServer> s = make_shared<GrpcServer>();
 // 	s->registerService(service);
 // 	state Future<Void> server_future = s->run();
 // 	return Void();
 // }
-
 
 } // namespace fdbrpc_test

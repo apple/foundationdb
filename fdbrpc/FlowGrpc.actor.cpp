@@ -24,8 +24,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-GrpcServer::GrpcServer(const NetworkAddress& addr): address_(addr) {
-}
+GrpcServer::GrpcServer(const NetworkAddress& addr) : address_(addr) {}
 
 GrpcServer::~GrpcServer() {
 	if (server_thread_.joinable()) {
@@ -35,7 +34,6 @@ GrpcServer::~GrpcServer() {
 
 Future<Void> GrpcServer::run() {
 	server_thread_ = std::thread([&] { runSync(); });
-
 	return server_promise_.getFuture();
 }
 
