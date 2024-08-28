@@ -2123,6 +2123,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 
 void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 	for (auto& id : ids) {
+		ASSERT(id < bs.size());
 		bs.set(id);
 	}
 }
