@@ -1703,7 +1703,7 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
 		EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
 		TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-		CODE_PROBE(true, "Enforce to disable encryption in simulation");
+		CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
 		set_config("encryption_at_rest_mode=" + encryptionMode.toString());
 		return;
 	}
@@ -1757,9 +1757,14 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		r -= probability[mode];
 	}
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation");
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE, "Enabled cluster-aware encryption in simulation");
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE, "Enabled domain-aware encryption in simulation");
+	CODE_PROBE(
+	    encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation", probe::decoration::rare);
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE,
+	           "Enabled cluster-aware encryption in simulation",
+	           probe::decoration::rare);
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE,
+	           "Enabled domain-aware encryption in simulation",
+	           probe::decoration::rare);
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
 }
 

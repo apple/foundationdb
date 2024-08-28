@@ -644,3 +644,6 @@ if(WITH_PYTHON)
 else()
   message(WARNING "Python not found, won't configure ctest")
 endif()
+
+# Add all unit tests as ctests
+collect_unit_tests(${CMAKE_SOURCE_DIR})

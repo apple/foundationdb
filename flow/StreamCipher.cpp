@@ -121,7 +121,7 @@ EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* key, const
 }
 
 StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
-	CODE_PROBE(true, "Encrypting data with StreamCipher");
+	CODE_PROBE(true, "Encrypting data with StreamCipher", probe::decoration::rare);
 	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
 	int bytes{ 0 };
 	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);

@@ -402,7 +402,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					    .detail("TenantId", domainId);
 					if (e.code() == error_code_encrypt_keys_fetch_failed ||
 					    e.code() == error_code_encrypt_key_not_found) {
-						CODE_PROBE(true, "mutation log restore encrypt keys not found");
+						CODE_PROBE(true, "mutation log restore encrypt keys not found", probe::decoration::rare);
 						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 						continue;
 					} else {

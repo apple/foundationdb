@@ -981,7 +981,7 @@ Future<Void> waitAfterCancel(int* output) {
 
 } // namespace
 
-TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel") {
+TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel_coro") {
 	int a = -1;
 	Future<Void> f = waitAfterCancel(&a);
 	ASSERT(a == 0);
