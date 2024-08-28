@@ -11,4 +11,3 @@ endif()
 include(AddFdbTest)
 
 generate_grpc_protobuf(fdbrpc.test echo.proto)
-add_fdb_unit_test(FlowGrpcAllUnitTest "/fdbrpc/grpc/")

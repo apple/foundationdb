@@ -91,7 +91,7 @@ TEST_CASE("/fdbrpc/grpc/basic_thread") {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/grpc/basic_async") {
+TEST_CASE("/fdbrpc/grpc/basic_async_server") {
 	using namespace fdbrpc::test;
 
 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
@@ -131,10 +131,11 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 
 	s->shutdown();
 	wait(server_future);
+
 	return Void();
 }
 
-// TEST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
+// T_EST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
 // 	using namespace fdbrpc::test;
 
 // 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
