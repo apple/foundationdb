@@ -581,7 +581,7 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 	Version seqPrevVersion = versionSet.prevVersion; // a copy of the prevVersion provided by the sequencer
 
 	std::unordered_map<uint8_t, uint16_t> tLogCount;
-	std::unordered_map<uint8_t, std::vector<uint16_t>> tLogLocIds;
+	std::unordered_map<uint8_t, std::vector<uint32_t>> tLogLocIds;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		uint16_t location = 0;
 		uint8_t logGroupLocal = 0;
@@ -2088,15 +2088,15 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 
 void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
                    std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
-                   std::vector<std::vector<uint16_t>>& tLogLocIds,
-                   uint16_t& maxTLogLocId) {
+                   std::vector<std::vector<uint32_t>>& tLogLocIds,
+                   uint32_t& maxTLogLocId) {
 	// Initialization.
 	tLogLocIds.clear();
 	tLogLocIds.resize(logGroupResults.size());
 	maxTLogLocId = 0;
 
 	// Map the interfaces of all (local) tLogs to their corresponding locations in LogSets.
-	std::map<UID, uint16_t> interfLocMap;
+	std::map<UID, uint32_t> interfLocMap;
 	uint16_t location = 0;
 	for (auto& it : tLogs) {
 		if (!it->isLocal) {
@@ -2121,7 +2121,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 	}
 }
 
-void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
+void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint32_t>& ids) {
 	for (auto& id : ids) {
 		bs.set(id);
 	}
@@ -2135,8 +2135,8 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
                                  Version minDVEnd,
                                  Version minKCVEnd) {
-	std::vector<std::vector<uint16_t>> tLogLocIds;
-	uint16_t maxTLogLocId;
+	std::vector<std::vector<uint32_t>> tLogLocIds;
+	uint32_t maxTLogLocId;
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
 	uint16_t bsSize = maxTLogLocId + 1; // bitset size, used below
 

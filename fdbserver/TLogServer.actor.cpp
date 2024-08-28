@@ -320,7 +320,7 @@ struct TLogData : NonCopyable {
 	// For each version above knownCommittedVersion, track:
 	// <Version, PrevVersion (that the sequencer provided), TLogs that the version has been sent to (the tLogs
 	//  are represented by their corresponding positions in "TagPartitionedLogSystem::tLogs")>
-	std::deque<std::tuple<Version, Version, std::vector<uint16_t>>> unknownCommittedVersions;
+	std::deque<std::tuple<Version, Version, std::vector<uint32_t>>> unknownCommittedVersions;
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool>

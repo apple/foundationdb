@@ -141,7 +141,7 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
-	std::deque<std::tuple<Version, Version, std::vector<uint16_t>>> unknownCommittedVersions;
+	std::deque<std::tuple<Version, Version, std::vector<uint32_t>>> unknownCommittedVersions;
 	UID id; // captures TLogData::dbgid
 	UID logId; // captures LogData::logId
 
@@ -314,7 +314,7 @@ struct TLogCommitRequest : TimedRequest {
 
 	ReplyPromise<TLogCommitReply> reply;
 	uint16_t tLogCount;
-	std::vector<uint16_t> tLogLocIds;
+	std::vector<uint32_t> tLogLocIds;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
@@ -327,7 +327,7 @@ struct TLogCommitRequest : TimedRequest {
 	                  Version seqPrevVersion,
 	                  StringRef messages,
 	                  uint16_t tLogCount,
-	                  std::vector<uint16_t>& tLogLocIds,
+	                  std::vector<uint32_t>& tLogLocIds,
 	                  Optional<UID> debugID)
 	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
