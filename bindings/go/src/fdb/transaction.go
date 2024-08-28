@@ -42,6 +42,7 @@ type ReadTransaction interface {
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
 	Options() TransactionOptions
+	Cancel()
 
 	ReadTransactor
 }
@@ -89,6 +90,10 @@ func (opt TransactionOptions) setOpt(code int, param []byte) error {
 
 func (t *transaction) destroy() {
 	C.fdb_transaction_destroy(t.ptr)
+}
+
+func (t *transaction) cancel() {
+	C.fdb_transaction_cancel(t.ptr)
 }
 
 // GetDatabase returns a handle to the database with which this transaction is
@@ -155,7 +160,7 @@ func (t Transaction) ReadTransact(f func(ReadTransaction) (interface{}, error)) 
 // error, the commit may have occurred or may occur in the future. This can make
 // it more difficult to reason about the order in which transactions occur.
 func (t Transaction) Cancel() {
-	C.fdb_transaction_cancel(t.ptr)
+	t.transaction.cancel()
 }
 
 // (Infrequently used) SetReadVersion sets the database version that the transaction will read from
