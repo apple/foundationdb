@@ -75,12 +75,13 @@ private:
 };
 
 TEST_CASE("/fdbrpc/grpc/basic_thread") {
+	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50000");
 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
 	s->registerService(service);
 	auto server = std::thread([=] { s->runSync(); });
 
-	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
+	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
 	std::string message = "Ping!";
 	std::string reply = client.Echo(message);
 	std::cout << "Echo received: " << reply << std::endl;
@@ -92,14 +93,13 @@ TEST_CASE("/fdbrpc/grpc/basic_thread") {
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async_server") {
-	using namespace fdbrpc::test;
-
+	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50001");
 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
 	s->registerService(service);
 	state Future<Void> server_future = s->run();
 
-	EchoClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
+	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
 	std::string message = "Ping!";
 	std::string reply = client.Echo(message);
 	std::cout << "Echo received: " << reply << std::endl;
@@ -111,15 +111,14 @@ TEST_CASE("/fdbrpc/grpc/basic_async_server") {
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_async_client") {
-	using namespace fdbrpc::test;
-
+	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50002");
 	state std::shared_ptr<TestEchoServiceImpl> service = std::make_shared<TestEchoServiceImpl>();
-	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>();
+	state std::shared_ptr<GrpcServer> s = std::make_shared<GrpcServer>(addr);
 	s->registerService(service);
 	state Future<Void> server_future = s->run();
 
 	state std::shared_ptr<boost::asio::thread_pool> pool = std::make_shared<boost::asio::thread_pool>(4);
-	state AsyncGrpcClient<TestEchoService> client(pool, "localhost:50051");
+	state AsyncGrpcClient<TestEchoService> client(pool, addr.toString());
 
 	state EchoRequest request;
 	state EchoResponse response;

@@ -24,6 +24,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+GrpcServer::GrpcServer(const NetworkAddress& addr): address_(addr) {
+}
+
 GrpcServer::~GrpcServer() {
 	if (server_thread_.joinable()) {
 		server_thread_.join();
@@ -31,9 +34,7 @@ GrpcServer::~GrpcServer() {
 }
 
 Future<Void> GrpcServer::run() {
-	server_thread_ = std::thread([&] {
-		runSync();
-	});
+	server_thread_ = std::thread([&] { runSync(); });
 
 	return server_promise_.getFuture();
 }
@@ -43,7 +44,7 @@ void GrpcServer::runSync() {
 	for (auto& service : registered_services_) {
 		builder_.RegisterService(service.get());
 	}
-	builder_.AddListeningPort("0.0.0.0:50051", grpc::InsecureServerCredentials());
+	builder_.AddListeningPort(address_.toString(), grpc::InsecureServerCredentials());
 	server_ = builder_.BuildAndStart();
 	server_->Wait();
 	server_promise_.send(Void());

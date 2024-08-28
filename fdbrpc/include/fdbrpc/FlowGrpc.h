@@ -32,6 +32,7 @@
 
 class GrpcServer {
 public:
+   GrpcServer(const NetworkAddress& addr);
 	~GrpcServer();
 
 	Future<Void> run();
@@ -39,12 +40,14 @@ public:
 	void shutdown();
 
 	void registerService(std::shared_ptr<grpc::Service> service);
+  std::vector<int> listeningPort() const;
 
 private:
-	std::vector<std::shared_ptr<grpc::Service>> registered_services_;
+  NetworkAddress address_;
 	std::unique_ptr<grpc::Server> server_;
 	ThreadReturnPromise<Void> server_promise_;
 	std::thread server_thread_;
+	std::vector<std::shared_ptr<grpc::Service>> registered_services_;
 };
 
 template <typename ServiceType>

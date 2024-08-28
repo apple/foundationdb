@@ -16,7 +16,7 @@ class TestDirectory:
 
     def create_new_test_dir(self):
         t = self.get_test_root()
-        ts = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
+        ts = datetime.now().strftime("%Y_%m_%d__%H_%M_%S_%f")
         r = os.path.join(t, ts)
         os.mkdir(r)
         return r
