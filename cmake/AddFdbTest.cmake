@@ -555,6 +555,9 @@ function(add_fdb_unit_test TEST_NAME PATTERN)
   add_test(NAME ${TEST_NAME}
            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
            COMMAND ${CMAKE_BINARY_DIR}/bin/fdbserver -r unittests -f "${PATTERN}")
+  set_tests_properties(${TEST_NAME} PROPERTIES
+    FAIL_REGULAR_EXPRESSION "0 tests passed; 1 tests failed."
+  )
 endfunction()
 
 function(collect_unit_tests SOURCE_DIR)
