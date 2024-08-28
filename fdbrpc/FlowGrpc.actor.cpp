@@ -27,29 +27,29 @@
 GrpcServer::GrpcServer(const NetworkAddress& addr) : address_(addr) {}
 
 GrpcServer::~GrpcServer() {
+	if (server_) {
+		shutdown();
+	}
+
 	if (server_thread_.joinable()) {
 		server_thread_.join();
 	}
 }
 
 Future<Void> GrpcServer::run() {
-	server_thread_ = std::thread([&] { runSync(); });
-	return server_promise_.getFuture();
-}
-
-void GrpcServer::runSync() {
 	grpc::ServerBuilder builder_;
+	builder_.AddListeningPort(address_.toString(), grpc::InsecureServerCredentials());
 	for (auto& service : registered_services_) {
 		builder_.RegisterService(service.get());
 	}
-	builder_.AddListeningPort(address_.toString(), grpc::InsecureServerCredentials());
 	server_ = builder_.BuildAndStart();
-	server_->Wait();
-	server_promise_.send(Void());
+	return server_promise_.getFuture();
 }
 
 void GrpcServer::shutdown() {
-	server_->Shutdown();
+	server_->Shutdown(); // TODO (Vishesh): This needs to be Future.
+	server_promise_.send(Void());
+	server_ = nullptr;
 }
 
 void GrpcServer::registerService(std::shared_ptr<grpc::Service> service) {

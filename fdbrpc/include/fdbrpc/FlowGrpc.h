@@ -49,11 +49,9 @@ public:
 	~GrpcServer();
 
 	Future<Void> run();
-	void runSync();
 	void shutdown();
 
 	void registerService(std::shared_ptr<grpc::Service> service);
-	std::vector<int> listeningPort() const;
 
 private:
 	NetworkAddress address_;
