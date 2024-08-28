@@ -551,6 +551,26 @@ function(package_bindingtester)
   add_custom_target(bindingtester ALL DEPENDS ${tar_file} copy_bindingtester_binaries)
 endfunction()
 
+function(add_fdb_unit_test TEST_NAME PATTERN)
+  add_test(NAME ${TEST_NAME}
+           WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+           COMMAND ${CMAKE_BINARY_DIR}/bin/fdbserver -r unittests -f "${PATTERN}")
+endfunction()
+
+function(collect_unit_tests SOURCE_DIR)
+  message("Collecting unit_tests in ${SOURCE_DIR}")
+  execute_process(
+    COMMAND grep --include \*.h --include \*.cpp --include \*.hpp -rhoP "TEST_CASE\\(\\\"\\K[^\\\"]+(?=\\\"\\))" "${SOURCE_DIR}"
+    OUTPUT_VARIABLE TEST_NAMES
+  )
+  string(REGEX REPLACE "\n" ";" TEST_NAMES "${TEST_NAMES}")
+
+  foreach(TEST_NAME ${TEST_NAMES})
+    message("ADDING DISCOVERED UNIT TEST: ${TEST_NAME}")
+    add_fdb_unit_test(UnitTest_${TEST_NAME} ${TEST_NAME})
+  endforeach()
+endfunction()
+
 # Test for setting up Python venv for client tests.
 # Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
 # by installing dependencies from requirements.txt

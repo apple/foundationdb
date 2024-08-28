@@ -1284,7 +1284,7 @@ ACTOR static Future<Void> waitAfterCancel(int* output) {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel") {
+TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel_flow") {
 	int a = -1;
 	Future<Void> f = waitAfterCancel(&a);
 	ASSERT(a == 0);
