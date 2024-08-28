@@ -1,5 +1,5 @@
 /**
- * grpc_tests.actor.cpp
+ * FlowGrpcTests.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,7 @@
 
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
-#include "fdbrpc/test/echo.grpc.pb.h"
+#include "FlowGrpcTests.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -31,53 +31,7 @@
 void forceLinkGrpcTests() {}
 
 namespace fdbrpc_test {
-
-using std::make_shared;
-using std::shared_ptr;
-using std::thread;
 namespace asio = boost::asio;
-
-using grpc::Channel;
-using grpc::ClientContext;
-using grpc::ServerContext;
-using grpc::Status;
-
-using fdbrpc::test::EchoRequest;
-using fdbrpc::test::EchoResponse;
-using fdbrpc::test::TestEchoService;
-
-// Service implementation
-class TestEchoServiceImpl final : public TestEchoService::Service {
-	Status Echo(ServerContext* context, const EchoRequest* request, EchoResponse* reply) override {
-		reply->set_message("Echo: " + request->message());
-		return Status::OK;
-	}
-};
-
-class EchoClient {
-public:
-	EchoClient(shared_ptr<Channel> channel) : stub_(TestEchoService::NewStub(channel)) {}
-
-	std::string Echo(const std::string& message) {
-		EchoRequest request;
-		request.set_message(message);
-
-		EchoResponse reply;
-		ClientContext context;
-
-		Status status = stub_->Echo(&context, request, &reply);
-
-		if (status.ok()) {
-			return reply.message();
-		} else {
-			std::cout << "RPC failed" << std::endl;
-			return "RPC failed";
-		}
-	}
-
-private:
-	std::unique_ptr<TestEchoService::Stub> stub_;
-};
 
 TEST_CASE("/fdbrpc/grpc/basic_server") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50001"));
@@ -117,7 +71,7 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client_1") {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/grpc/basic_async_client_2") {
+TEST_CASE("/fdbrpc/grpc/basic_async_client_with") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50003"));
 	state GrpcServer server(addr);
 	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());

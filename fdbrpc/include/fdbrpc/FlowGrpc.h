@@ -90,6 +90,7 @@ public:
 		return promise->getFuture();
 	}
 
+	// Retuned future can be waited safely only from the originating thread.
 	template <class RequestType, class RpcFn, class ResponseType = get_response_type<RpcFn>>
 	Future<ResponseType> call(RpcFn rpc, const RequestType& request) {
 		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
@@ -107,6 +108,37 @@ public:
 
 		return promise->getFuture();
 	}
+
+	//::grpc::ClientReader< ::fdbrpc::test::EchoResponse>* TestEchoService::Stub::EchoRepeat10Raw(::grpc::ClientContext* context, const ::fdbrpc::test::EchoRequest& request) {
+
+	// loop {
+	// 	try {
+	// 		T nextInput = waitNext(input);
+	// 		output.send(func(nextInput));
+	// 	} catch (Error& e) {
+	// 		if (e.code() == error_code_end_of_stream) {
+	// 			break;
+	// 		} else
+	// 			throw;
+	// 	}
+
+	// template <class RequestType, class RpcFn, class ResponseType = get_response_type<RpcFn>>
+	// Future<ResponseType> call(RpcFn rpc, const RequestType& request) {
+	// 	auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
+
+	// 	boost::asio::post(*pool_, [this, promise, rpc, request]() {
+	// 		grpc::ClientContext context;
+	// 		ResponseType response;
+	// 		auto status = (stub_.get()->*rpc)(&context, request, &response);
+	// 		if (status.ok()) {
+	// 			promise->send(response);
+	// 		} else {
+	// 			promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+	// 		}
+	// 	});
+
+	// 	return promise->getFuture();
+	// }
 
 private:
 	std::shared_ptr<boost::asio::thread_pool> pool_;
