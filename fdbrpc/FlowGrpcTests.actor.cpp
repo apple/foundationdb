@@ -161,6 +161,24 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client_2") {
 	return Void();
 }
 
+TEST_CASE("/fdbrpc/grpc/basic_async_client_without_server_error") {
+	state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:50002");
+	state std::shared_ptr<boost::asio::thread_pool> pool = std::make_shared<boost::asio::thread_pool>(4);
+	state AsyncGrpcClient<TestEchoService> client(pool, addr.toString());
+
+	try {
+		state EchoRequest request;
+		request.set_message("Ping!");
+		EchoResponse response = wait(client.call(&TestEchoService::Stub::Echo, request));
+		ASSERT(false); // RPC should fail as there is no server running.;
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_grpc_error);
+	}
+
+	return Void();
+}
+
+
 // T_EST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
 // 	using namespace fdbrpc::test;
 
