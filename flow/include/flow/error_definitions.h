@@ -406,6 +406,10 @@ ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
 ERROR( authorization_token_verify_failed, 6003, "Failed to verify authorization token" )
 ERROR( pkey_decode_error, 6004, "Failed to decode public/private key" )
 ERROR( pkey_encode_error, 6005, "Failed to encode public/private key" )
+
+// gRPC error
+ERROR( grpc_error, 7000, "gRPC Error" )
+
 // clang-format on
 
 #undef ERROR

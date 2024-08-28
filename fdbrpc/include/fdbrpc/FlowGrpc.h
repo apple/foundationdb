@@ -30,9 +30,22 @@
 #include "flow/IThreadPool.h"
 #include "flow/flow.h"
 
+namespace {
+template <typename T>
+struct get_response_type_impl;
+
+template <typename Stub, typename Request, typename Response>
+struct get_response_type_impl<grpc::Status (Stub::*)(grpc::ClientContext*, const Request&, Response*)> {
+	using type = Response;
+};
+
+template <typename T>
+using get_response_type = typename get_response_type_impl<T>::type;
+} // namespace
+
 class GrpcServer {
 public:
-   GrpcServer(const NetworkAddress& addr);
+	GrpcServer(const NetworkAddress& addr);
 	~GrpcServer();
 
 	Future<Void> run();
@@ -40,10 +53,10 @@ public:
 	void shutdown();
 
 	void registerService(std::shared_ptr<grpc::Service> service);
-  std::vector<int> listeningPort() const;
+	std::vector<int> listeningPort() const;
 
 private:
-  NetworkAddress address_;
+	NetworkAddress address_;
 	std::unique_ptr<grpc::Server> server_;
 	ThreadReturnPromise<Void> server_promise_;
 	std::thread server_thread_;
@@ -72,21 +85,39 @@ class AsyncGrpcClient {
             class RpcFn = RpcFn<RequestType, ResponseType>>
   Future<grpc::Status> call(RpcFn rpc, const RequestType &request,
                                  ResponseType *response) {
-    auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
+	  auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
 
-    boost::asio::post(*pool_, [this, promise, rpc, request, response]() {
-      grpc::ClientContext context;
-      auto status = (stub_.get()->*rpc)(&context, request, response);
-      promise->send(status);
-    });
+	  boost::asio::post(*pool_, [this, promise, rpc, request, response]() {
+		  grpc::ClientContext context;
+		  auto status = (stub_.get()->*rpc)(&context, request, response);
+		  promise->send(status);
+	  });
 
-    return promise->getFuture();
+	  return promise->getFuture();
+  }
+
+  template <class RequestType, class RpcFn, class ResponseType = get_response_type<RpcFn>>
+  Future<ResponseType> call(RpcFn rpc, const RequestType& request) {
+	  auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
+
+	  boost::asio::post(*pool_, [this, promise, rpc, request]() {
+		  grpc::ClientContext context;
+		  ResponseType response;
+		  auto status = (stub_.get()->*rpc)(&context, request, &response);
+		  if (status.ok()) {
+			  promise->send(response);
+		  } else {
+			  promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+		  }
+	  });
+
+	  return promise->getFuture();
   }
 
  private:
-  std::shared_ptr<boost::asio::thread_pool> pool_;
-  std::shared_ptr<grpc::Channel> channel_;
-  std::unique_ptr<RpcStub> stub_;
+	 std::shared_ptr<boost::asio::thread_pool> pool_;
+	 std::shared_ptr<grpc::Channel> channel_;
+	 std::unique_ptr<RpcStub> stub_;
 };
 
 
