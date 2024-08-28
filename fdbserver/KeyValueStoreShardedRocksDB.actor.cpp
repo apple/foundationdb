@@ -2635,16 +2635,31 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(OpenAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			auto status = a.shardManager->init();
 
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalOpenTime = g_network->totalOpenTime + duration_s;
+					g_network->totalSSOpenError++;
+				}
 				return;
 			}
 
 			TraceEvent(SevInfo, "ShardedRocksDB").detail("Method", "Open");
 			a.done.send(Void());
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalOpenTime = g_network->totalOpenTime + duration_s;
+				g_network->totalSSOpen++;
+			}
 		}
 
 		struct AddShardAction : TypedAction<Writer, AddShardAction> {
@@ -2656,15 +2671,30 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(AddShardAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			auto s = a.shard->init();
 			if (!s.ok()) {
 				TraceEvent(SevError, "AddShardError").detail("Status", s.ToString()).detail("ShardId", a.shard->id);
 				a.done.sendError(statusToError(s));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalAddShardTime = g_network->totalAddShardTime + duration_s;
+					g_network->totalSSAddShardError++;
+				}
 				return;
 			}
 			ASSERT(a.shard->cf);
 			(*columnFamilyMap)[a.shard->cf->GetID()] = a.shard->cf;
 			a.done.send(Void());
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalAddShardTime = g_network->totalAddShardTime + duration_s;
+				g_network->totalSSAddShard++;
+			}
 		}
 
 		struct RemoveShardAction : TypedAction<Writer, RemoveShardAction> {
@@ -2678,6 +2708,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(RemoveShardAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			auto start = now();
 			for (auto& shard : a.shards) {
 				shard->deletePending = true;
@@ -2688,6 +2719,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			TraceEvent("RemoveShardTime").detail("Duration", now() - start).detail("Size", a.shards.size());
 			a.shards.clear();
 			a.done.send(Void());
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalRemoveShardTime = g_network->totalRemoveShardTime + duration_s;
+				g_network->totalSSRemoveShard++;
+			}
 		}
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
@@ -2782,6 +2820,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void action(CommitAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double commitBeginTime;
 			if (a.getHistograms) {
 				commitBeginTime = timer_monotonic();
@@ -2792,6 +2831,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (!s.ok()) {
 				TraceEvent(SevError, "CommitError").detail("Status", s.ToString());
 				a.done.sendError(statusToError(s));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalCommitTime = g_network->totalCommitTime + duration_s;
+					g_network->totalSSCommitError++;
+				}
 				return;
 			}
 
@@ -2839,6 +2885,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			sample();
 
 			a.done.send(Void());
+
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalCommitTime = g_network->totalCommitTime + duration_s;
+				g_network->totalSSCommit++;
+			}
 		}
 
 		struct CloseAction : TypedAction<Writer, CloseAction> {
@@ -2851,6 +2905,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(CloseAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			if (a.deleteOnClose) {
 				a.shardManager->destroyAllShards();
 			} else {
@@ -2858,6 +2913,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 			TraceEvent(SevInfo, "ShardedRocksDB").detail("Method", "Close");
 			a.done.send(Void());
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalCloseTime = g_network->totalCloseTime + duration_s;
+				g_network->totalSSClose++;
+			}
 		}
 
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
@@ -2872,6 +2934,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(CheckpointAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			TraceEvent(SevInfo, "ShardedRocksCheckpointBegin", logId)
 			    .detail("CheckpointID", a.request.checkpointID)
 			    .detail("Version", a.request.version)
@@ -2891,6 +2954,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Format", static_cast<int>(a.request.format))
 				    .detail("CheckpointDir", a.request.checkpointDir);
 				a.reply.sendError(failed_to_create_checkpoint());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+					g_network->totalSSCheckpointError++;
+				}
 				return;
 			}
 
@@ -2911,6 +2981,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (!s.ok() && !s.IsNotFound()) {
 				logRocksDBError(s, "ShardedRocksCheckpointReadPersistVersion");
 				a.reply.sendError(failed_to_create_checkpoint());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+					g_network->totalSSCheckpointError++;
+				}
 				return;
 			}
 
@@ -2928,6 +3005,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (!s.ok()) {
 				logRocksDBError(s, "CreateRocksDBCheckpoint");
 				a.reply.sendError(failed_to_create_checkpoint());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+					g_network->totalSSCheckpointError++;
+				}
 				return;
 			}
 
@@ -2939,6 +3023,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (!s.ok()) {
 					logRocksDBError(s, "CheckpointExportColumnFamily");
 					a.reply.sendError(failed_to_create_checkpoint());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+						g_network->totalSSCheckpointError++;
+					}
 					return;
 				}
 
@@ -2961,6 +3053,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("CheckpointVersion", a.request.version)
 						    .detail("PersistVersion", version);
 						a.reply.sendError(failed_to_create_checkpoint());
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e9;
+							g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+							g_network->totalSSCheckpointError++;
+						}
 						return;
 					}
 
@@ -2979,6 +3080,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 							    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
 
 							a.reply.sendError(failed_to_create_checkpoint());
+							if (g_network->isSimulated()) {
+								auto realEndTime = std::chrono::high_resolution_clock::now();
+								double duration_s =
+								    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+								        .count() /
+								    1e9;
+								g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+								g_network->totalSSCheckpointError++;
+							}
 							return;
 						}
 						oriIter->Next();
@@ -2986,6 +3096,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					}
 					if (oriIter->Valid() || resIter->Valid()) {
 						a.reply.sendError(failed_to_create_checkpoint());
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e9;
+							g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+							g_network->totalSSCheckpointError++;
+						}
 						return;
 					}
 					delete oriIter;
@@ -2995,12 +3114,30 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					if (!s.ok()) {
 						logRocksDBError(s, "CheckpointDropColumnFamily");
 						a.reply.sendError(failed_to_create_checkpoint());
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e9;
+							g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+							g_network->totalSSCheckpointError++;
+						}
 						return;
 					}
 					s = a.shardManager->getDb()->DestroyColumnFamilyHandle(handle);
 					if (!s.ok()) {
 						logRocksDBError(s, "CheckpointDestroyColumnFamily");
 						a.reply.sendError(failed_to_create_checkpoint());
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e9;
+							g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+							g_network->totalSSCheckpointError++;
+						}
 						return;
 					}
 					TraceEvent(SevDebug, "ShardedRocksCheckpointValidateSuccess", logId)
@@ -3012,12 +3149,27 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					delete checkpoint;
 				}
 				a.reply.sendError(not_implemented());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+					g_network->totalSSCheckpointError++;
+				}
 				return;
 			}
 
 			res.setState(CheckpointMetaData::Complete);
 			res.dir = a.request.checkpointDir;
 			a.reply.send(res);
+
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalCheckpointTime = g_network->totalCheckpointTime + duration_s;
+				g_network->totalSSCheckpoint++;
+			}
 
 			if (checkpoint != nullptr) {
 				delete checkpoint;
@@ -3047,6 +3199,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(RestoreAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
+
 			TraceEvent(SevInfo, "ShardedRocksDBRestoreBegin", logId)
 			    .detail("Path", a.path)
 			    .detail("Checkpoints", describe(a.checkpoints));
@@ -3079,6 +3233,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Path", a.path)
 					    .detail("Checkpoints", describe(a.checkpoints));
 					a.done.sendError(failed_to_restore_checkpoint());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+						g_network->totalSSRestoreError++;
+					}
 					return;
 				}
 				CheckpointMetaData& checkpoint = a.checkpoints.front();
@@ -3091,6 +3253,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Ranges", describe(a.ranges))
 					    .detail("Checkpoints", describe(a.checkpoints));
 					a.done.sendError(failed_to_restore_checkpoint());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+						g_network->totalSSRestoreError++;
+					}
 					return;
 				}
 
@@ -3101,6 +3271,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("Ranges", describe(a.ranges))
 						    .detail("Checkpoints", describe(a.checkpoints));
 						a.done.sendError(failed_to_restore_checkpoint());
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e9;
+							g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+							g_network->totalSSRestoreError++;
+						}
 						return;
 					}
 				}
@@ -3115,6 +3294,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 				if (!status.ok()) {
 					a.done.sendError(failed_to_restore_checkpoint());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+						g_network->totalSSRestoreError++;
+					}
 					return;
 				} else {
 					ASSERT(ps->initialized());
@@ -3137,6 +3324,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						if (!status.ok()) {
 							logRocksDBError(status, "RestoreClearnExtraRanges");
 							a.done.sendError(statusToError(status));
+							if (g_network->isSimulated()) {
+								auto realEndTime = std::chrono::high_resolution_clock::now();
+								double duration_s =
+								    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+								        .count() /
+								    1e9;
+								g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+								g_network->totalSSRestoreError++;
+							}
 							return;
 						}
 					}
@@ -3182,6 +3378,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .setMaxFieldLength(1000)
 					    .detail("FetchedFiles", describe(rkvs));
 					a.done.sendError(failed_to_restore_checkpoint());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+						g_network->totalSSRestoreError++;
+					}
 					return;
 				}
 
@@ -3194,6 +3398,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					if (!status.ok()) {
 						logRocksDBError(status, "RestoreInitPhysicalShard");
 						a.done.sendError(statusToError(status));
+						if (g_network->isSimulated()) {
+							auto realEndTime = std::chrono::high_resolution_clock::now();
+							double duration_s =
+							    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime)
+							        .count() /
+							    1e9;
+							g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+							g_network->totalSSRestoreError++;
+						}
 						return;
 					}
 					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
@@ -3201,6 +3414,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (!status.ok()) {
 					logRocksDBError(status, "RestoreInitPhysicalShard");
 					a.done.sendError(statusToError(status));
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+						g_network->totalSSRestoreError++;
+					}
 					return;
 				}
 
@@ -3236,10 +3457,25 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("RestoreRanges", describe(a.ranges));
 					}
 					a.done.sendError(failed_to_restore_checkpoint());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+						g_network->totalSSRestoreError++;
+					}
 					return;
 				}
 			} else if (format == RocksDB) {
 				a.done.sendError(not_implemented());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+					g_network->totalSSRestoreError++;
+				}
 				return;
 			}
 
@@ -3247,6 +3483,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Path", a.path)
 			    .detail("Checkpoints", describe(a.checkpoints));
 			a.done.send(Void());
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalRestoreTime = g_network->totalRestoreTime + duration_s;
+				g_network->totalSSRestore++;
+			}
 		}
 	};
 
@@ -3296,6 +3539,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(ReadValueAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadValueQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
@@ -3315,6 +3559,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					a.result.sendError(server_overloaded());
 				} else {
 					a.result.sendError(key_value_store_deadline_exceeded());
+				}
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadTime = g_network->totalReadTime + duration_s;
+					g_network->totalSSReadError++;
 				}
 				return;
 			}
@@ -3343,11 +3594,32 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadTime = g_network->totalReadTime + duration_s;
+					g_network->totalSSRead++;
+				}
 			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadTime = g_network->totalReadTime + duration_s;
+					g_network->totalSSRead++;
+				}
 			} else {
 				logRocksDBError(s, "ReadValue");
 				a.result.sendError(statusToError(s));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadTime = g_network->totalReadTime + duration_s;
+					g_network->totalSSReadError++;
+				}
 			}
 
 			if (a.getHistograms) {
@@ -3380,6 +3652,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(ReadValuePrefixAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadPrefixQueueWaitHistogram(threadIndex)
@@ -3403,6 +3676,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					a.result.sendError(server_overloaded());
 				} else {
 					a.result.sendError(key_value_store_deadline_exceeded());
+				}
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
+					g_network->totalSSReadPrefixError++;
 				}
 				return;
 			}
@@ -3434,11 +3714,32 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
+					g_network->totalSSReadPrefix++;
+				}
 			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
+					g_network->totalSSReadPrefix++;
+				}
 			} else {
 				logRocksDBError(s, "ReadValuePrefix");
 				a.result.sendError(statusToError(s));
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadPrefixTime = g_network->totalReadPrefixTime + duration_s;
+					g_network->totalSSReadPrefixError++;
+				}
 			}
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
@@ -3478,6 +3779,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(ReadRangeAction& a) {
+			auto realStartTime = std::chrono::high_resolution_clock::now();
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
@@ -3493,6 +3795,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					a.result.sendError(server_overloaded());
 				} else {
 					a.result.sendError(key_value_store_deadline_exceeded());
+				}
+				if (g_network->isSimulated()) {
+					auto realEndTime = std::chrono::high_resolution_clock::now();
+					double duration_s =
+					    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+					g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+					g_network->totalSSReadRangeError++;
 				}
 				return;
 			}
@@ -3526,6 +3835,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (bytesRead < 0) {
 					// Error reading an instance.
 					a.result.sendError(internal_error());
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+						g_network->totalSSReadRangeError++;
+					}
 					return;
 				}
 				byteLimit -= bytesRead;
@@ -3547,6 +3864,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					} else {
 						a.result.sendError(key_value_store_deadline_exceeded());
 					}
+					if (g_network->isSimulated()) {
+						auto realEndTime = std::chrono::high_resolution_clock::now();
+						double duration_s =
+						    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() /
+						    1e9;
+						g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+						g_network->totalSSReadRangeError++;
+					}
 					return;
 				}
 			}
@@ -3554,6 +3879,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			a.result.send(result);
+
+			if (g_network->isSimulated()) {
+				auto realEndTime = std::chrono::high_resolution_clock::now();
+				double duration_s =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime - realStartTime).count() / 1e9;
+				g_network->totalReadRangeTime = g_network->totalReadRangeTime + duration_s;
+				g_network->totalSSReadRange++;
+			}
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
 				rocksDBMetrics->getReadRangeActionHistogram(threadIndex)->sampleSeconds(currTime - readBeginTime);

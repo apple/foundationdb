@@ -20,6 +20,7 @@
 
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
+#include <cstdint>
 #pragma once
 
 #include "flow/ProtocolVersion.h"
@@ -141,6 +142,92 @@ inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool =
 
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork {
 public:
+	uint64_t totalSSRead = 0;
+	uint64_t totalSSOpen = 0;
+	uint64_t totalSSClose = 0;
+	uint64_t totalSSCheckpoint = 0;
+	uint64_t totalSSRestore = 0;
+	uint64_t totalSSCommit = 0;
+	uint64_t totalSSSet = 0;
+	uint64_t totalSSClear = 0;
+	uint64_t totalSSReadPrefix = 0;
+	uint64_t totalSSReadRange = 0;
+	uint64_t totalSSAddShard = 0;
+	uint64_t totalSSRemoveShard = 0;
+
+	uint64_t totalSSReadError = 0;
+	uint64_t totalSSOpenError = 0;
+	uint64_t totalSSCloseError = 0;
+	uint64_t totalSSCheckpointError = 0;
+	uint64_t totalSSRestoreError = 0;
+	uint64_t totalSSCommitError = 0;
+	uint64_t totalSSSetError = 0;
+	uint64_t totalSSClearError = 0;
+	uint64_t totalSSReadPrefixError = 0;
+	uint64_t totalSSReadRangeError = 0;
+	uint64_t totalSSTrTooOldError = 0;
+	uint64_t totalSSAddShardError = 0;
+	uint64_t totalSSRemoveShardError = 0;
+
+	double totalReadTime = 0;
+	double totalOpenTime = 0;
+	double totalCloseTime = 0;
+	double totalCheckpointTime = 0;
+	double totalRestoreTime = 0;
+	double totalCommitTime = 0;
+	double totalSetTime = 0;
+	double totalClearTime = 0;
+	double totalReadPrefixTime = 0;
+	double totalReadRangeTime = 0;
+	double totalAddShardTime = 0;
+	double totalRemoveShardTime = 0;
+
+	void printSSOps() {
+		printf("Total SS Open %lu\n", totalSSOpen);
+		printf("Total SS Add Shard %lu\n", totalSSAddShard);
+		printf("Total SS Remove Shard %lu\n", totalSSRemoveShard);
+		printf("Total SS Close %lu\n", totalSSClose);
+		printf("Total SS Checkpoint %lu\n", totalSSCheckpoint);
+		printf("Total SS Restore %lu\n", totalSSRestore);
+		printf("Total SS Read %lu\n", totalSSRead);
+		printf("Total SS Read Range %lu\n", totalSSReadRange);
+		printf("Total SS Read Prefix %lu\n", totalSSReadPrefix);
+		printf("Total SS Set %lu\n", totalSSSet);
+		printf("Total SS Clear %lu\n", totalSSClear);
+		printf("Total SS Commit %lu\n", totalSSCommit);
+	}
+
+	void printSSOpsError() {
+		printf("Total SS Open Error %lu\n", totalSSOpenError);
+		printf("Total SS Add Shard %lu\n", totalSSAddShardError);
+		printf("Total SS Remove Shard %lu\n", totalSSRemoveShardError);
+		printf("Total SS Close Error %lu\n", totalSSCloseError);
+		printf("Total SS Checkpoint Error %lu\n", totalSSCheckpointError);
+		printf("Total SS Restore Error %lu\n", totalSSRestoreError);
+		printf("Total SS Read Error %lu\n", totalSSReadError);
+		printf("Total SS Read Range Error %lu\n", totalSSReadRangeError);
+		printf("Total SS Read Prefix Error %lu\n", totalSSReadPrefixError);
+		printf("Total SS Set Error %lu\n", totalSSSetError);
+		printf("Total SS Clear Error %lu\n", totalSSClearError);
+		printf("Total SS Commit Error %lu\n", totalSSCommitError);
+		printf("Total SS Tr Too Old Error %lu\n", totalSSTrTooOldError);
+	}
+
+	void printSSOpsTime() {
+		printf("Total SS Open Time %f\n", totalOpenTime);
+		printf("Total SS AddShard Time %f\n", totalAddShardTime);
+		printf("Total SS RemoveShard Time %f\n", totalRemoveShardTime);
+		printf("Total SS Close Time %f\n", totalCloseTime);
+		printf("Total SS Checkpoint Time %f\n", totalCheckpointTime);
+		printf("Total SS Restore Time %lu\n", totalRestoreTime);
+		printf("Total SS Read Time %f\n", totalReadTime);
+		printf("Total SS Read Range Time %f\n", totalReadRangeTime);
+		printf("Total SS Read Prefix Time %f\n", totalReadPrefixTime);
+		printf("Total SS Set Time %f\n", totalSetTime);
+		printf("Total SS Clear Time %f\n", totalClearTime);
+		printf("Total SS Commit Time %f\n", totalCommitTime);
+	}
+
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
 	// on. Note that there are tools for disk access, scheduling, etc as well as networking, and that almost all access
 	//   to the network should be through FlowTransport, not directly through these low level interfaces!
