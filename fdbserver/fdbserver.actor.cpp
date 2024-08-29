@@ -2535,6 +2535,9 @@ int main(int argc, char* argv[]) {
 
 		int unseed = noUnseed ? -1 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Stats", g_network->getStatsString())
 		    .detail("SimTime", now() - startNow)
 		    .detail("RealTime", timer() - start)
 		    .detail("RandomUnseed", unseed);

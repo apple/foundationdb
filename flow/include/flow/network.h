@@ -219,13 +219,70 @@ public:
 		printf("Total SS RemoveShard Time %f\n", totalRemoveShardTime);
 		printf("Total SS Close Time %f\n", totalCloseTime);
 		printf("Total SS Checkpoint Time %f\n", totalCheckpointTime);
-		printf("Total SS Restore Time %lu\n", totalRestoreTime);
+		printf("Total SS Restore Time %f\n", totalRestoreTime);
 		printf("Total SS Read Time %f\n", totalReadTime);
 		printf("Total SS Read Range Time %f\n", totalReadRangeTime);
 		printf("Total SS Read Prefix Time %f\n", totalReadPrefixTime);
 		printf("Total SS Set Time %f\n", totalSetTime);
 		printf("Total SS Clear Time %f\n", totalClearTime);
 		printf("Total SS Commit Time %f\n", totalCommitTime);
+	}
+
+	std::string getSSOpsString() {
+		std::string res;
+		res = res + "open_c=" + std::to_string(totalSSOpen) + ", ";
+		res = res + "addshard_c=" + std::to_string(totalSSAddShard) + ", ";
+		res = res + "removeshard_c=" + std::to_string(totalSSRemoveShard) + ", ";
+		res = res + "close_c=" + std::to_string(totalSSClose) + ", ";
+		res = res + "checkpoint_c=" + std::to_string(totalSSCheckpoint) + ", ";
+		res = res + "restore_c=" + std::to_string(totalSSRestore) + ", ";
+		res = res + "read_c=" + std::to_string(totalSSRead) + ", ";
+		res = res + "readrange_c=" + std::to_string(totalSSReadRange) + ", ";
+		res = res + "readprefix_c=" + std::to_string(totalSSReadPrefix) + ", ";
+		res = res + "set_c=" + std::to_string(totalSSSet) + ", ";
+		res = res + "clear_c=" + std::to_string(totalSSClear) + ", ";
+		res = res + "commit_c=" + std::to_string(totalSSCommit);
+		return res;
+	}
+
+	std::string getSSOpsErrorString() {
+		std::string res;
+		res = res + "open_ec=" + std::to_string(totalSSOpenError) + ", ";
+		res = res + "addshard_ec=" + std::to_string(totalSSAddShardError) + ", ";
+		res = res + "removeshard_ec=" + std::to_string(totalSSRemoveShardError) + ", ";
+		res = res + "close_ec=" + std::to_string(totalSSCloseError) + ", ";
+		res = res + "checkpoint_ec=" + std::to_string(totalSSCheckpointError) + ", ";
+		res = res + "restore_ec=" + std::to_string(totalSSRestoreError) + ", ";
+		res = res + "read_ec=" + std::to_string(totalSSReadError) + ", ";
+		res = res + "readrange_ec=" + std::to_string(totalSSReadRangeError) + ", ";
+		res = res + "readprefix_ec=" + std::to_string(totalSSReadPrefixError) + ", ";
+		res = res + "set_ec=" + std::to_string(totalSSSetError) + ", ";
+		res = res + "clear_ec=" + std::to_string(totalSSClearError) + ", ";
+		res = res + "commit_ec=" + std::to_string(totalSSCommitError);
+		return res;
+	}
+
+	std::string getSSOpsTimeString() {
+		std::string res;
+		res = res + "open_t=" + std::to_string(totalOpenTime) + ", ";
+		res = res + "addshard_t=" + std::to_string(totalAddShardTime) + ", ";
+		res = res + "removeshard_t=" + std::to_string(totalRemoveShardTime) + ", ";
+		res = res + "close_t=" + std::to_string(totalCloseTime) + ", ";
+		res = res + "checkpoint_t=" + std::to_string(totalCheckpointTime) + ", ";
+		res = res + "restore_t=" + std::to_string(totalRestoreTime) + ", ";
+		res = res + "read_t=" + std::to_string(totalReadTime) + ", ";
+		res = res + "readrange_t=" + std::to_string(totalReadRangeTime) + ", ";
+		res = res + "readprefix_t=" + std::to_string(totalReadPrefixTime) + ", ";
+		res = res + "set_t=" + std::to_string(totalSetTime) + ", ";
+		res = res + "clear_t=" + std::to_string(totalClearTime) + ", ";
+		res = res + "commit_t=" + std::to_string(totalCommitTime);
+		return res;
+	}
+
+	std::string getStatsString() {
+		std::string res;
+		res = getSSOpsString() + ", " + getSSOpsErrorString() + ", " + getSSOpsTimeString();
+		return res;
 	}
 
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
