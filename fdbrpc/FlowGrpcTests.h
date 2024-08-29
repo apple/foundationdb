@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <thread>
+#include "flow/Error.h"
 #include "fdbrpc/test/echo.grpc.pb.h"
 
 namespace fdbrpc_test {
@@ -31,6 +32,7 @@ using std::thread;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ServerContext;
+using grpc::ServerReader;
 using grpc::ServerWriter;
 using grpc::Status;
 
@@ -54,6 +56,18 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		return Status::OK;
 	}
 
+	Status EchoSend10(ServerContext* context, ServerReader<EchoRequest>* reader, EchoResponse* reply) override {
+		EchoRequest request;
+		std::string res;
+		int count = 0;
+		while (reader->Read(&request)) {
+            count++;
+			res += request.message();
+        }
+        reply->set_message(res);
+		ASSERT_EQ(count, 10);
+		return Status::OK;
+	}
 };
 
 class EchoClient {

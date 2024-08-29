@@ -49,7 +49,7 @@ TEST_CASE("/fdbrpc/grpc/basic_coro") {
 	}
 }
 
-TEST_CASE("/fdbrpc/grpc/basic_server_stream") {
+TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
@@ -77,5 +77,34 @@ TEST_CASE("/fdbrpc/grpc/basic_server_stream") {
 	}
 	co_return;
 }
+
+// T_EST_CASE("/fdbrpc/grpc/basic_stream_client") {
+// 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50502"));
+// 	GrpcServer server(addr);
+// 	server.registerService(make_shared<TestEchoServiceImpl>());
+// 	Future<Void> _ = server.run();
+
+// 	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+// 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+// 	int count = 0;
+// 	try {
+// 		EchoRequest request;
+// 		request.set_message("Ping!");
+// 		auto stream = client.call(&TestEchoService::Stub::EchoSend10, request);
+// 		loop {
+// 			auto response = co_await stream;
+// 		    ASSERT_EQ(response.message(), "Echo: Ping!");
+// 			count += 1;
+// 		}
+// 	} catch (Error& e) {
+// 		if (e.code() == error_code_end_of_stream) {
+// 			ASSERT_EQ(count, 10); // Should send 10 reponses.
+// 			co_return;
+// 		}
+// 		ASSERT(false);
+// 	}
+// 	co_return;
+// }
 
 } // namespace fdbrpc_test

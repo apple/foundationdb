@@ -57,6 +57,10 @@ class AsyncGrpcClient {
 	using ServerStreamingRpcFn =
 	    std::unique_ptr<grpc::ClientReader<Response>> (ServiceType::Stub::*)(grpc::ClientContext*, const Request&);
 
+	template <class Request, class Response>
+	using ClientStreamingRpcFn =
+	    std::unique_ptr<grpc::ClientWriter<Request>> (ServiceType::Stub::*)(grpc::ClientContext*, Response*);
+
 public:
 	using Rpc = typename ServiceType::Stub;
 
@@ -120,6 +124,29 @@ public:
 
 		return promise->getFuture();
 	}
+
+	// template <class RequestType, class ResponseType>
+	// void call(ClientStreamingRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
+	// 	auto promise = std::make_shared<ThreadReturnPromiseStream<ResponseType>>();
+
+	// 	boost::asio::post(*pool_, [this, promise, rpc, request]() {
+	// 		grpc::ClientContext context;
+	// 		ResponseType response;
+	// 		auto reader = (stub_.get()->*rpc)(&context, request);
+	// 		while (reader->Read(&response)) {
+	// 			promise->send(response);
+	// 		}
+
+	// 		auto status = reader->Finish();
+	// 		if (status.ok()) {
+	// 			promise->sendError(end_of_stream());
+	// 		} else {
+	// 			promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+	// 		}
+	// 	});
+
+	// 	return promise->getFuture();
+	// }
 
 private:
 	std::shared_ptr<boost::asio::thread_pool> pool_;
