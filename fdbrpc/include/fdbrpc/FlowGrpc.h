@@ -23,57 +23,12 @@
 
 #include <memory>
 #include <thread>
-#include <type_traits>
 #include <grpcpp/grpcpp.h>
 
 #include <boost/asio.hpp>
 
 #include "flow/IThreadPool.h"
 #include "flow/flow.h"
-
-namespace {
-template <class T>
-struct get_response_type_impl;
-
-template <typename Stub, typename Request, typename Response>
-struct get_response_type_impl<grpc::Status (Stub::*)(grpc::ClientContext*, const Request&, Response*)> {
-	using type = Response;
-};
-
-template <typename Stub, typename Request, typename Response>
-struct get_response_type_impl<std::unique_ptr<grpc::ClientReader<Response>> (Stub::*)(grpc::ClientContext*, const Request&)> {
-	using type = Response;
-};
-
-template <typename T>
-using get_response_type = typename get_response_type_impl<T>::type;
-
-enum RpcMode {
-	Unary,
-	ServerStreaming,
-	ClientStreaming,
-};
-
-template <class ServiceType, class RequestType, class ResponseType, RpcMode Mode>
-struct _RpcFnHelper {
-	using type =
-	    std::conditional_t<Mode == RpcMode::Unary,
-	                       grpc::Status (ServiceType::Stub::*)(grpc::ClientContext*, const RequestType&, ResponseType*),
-	                       std::conditional_t<Mode == RpcMode::ServerStreaming,
-	                                          std::unique_ptr<grpc::ClientReader<ResponseType>> (
-	                                              ServiceType::Stub::*)(grpc::ClientContext*, const RequestType&),
-	                                          void // Fallback if other modes are added but not handled
-	                                          >>;
-
-	static_assert(Mode == RpcMode::Unary || Mode == RpcMode::ServerStreaming,
-	              "Unsupported RpcMode. Please provide a valid RpcMode.");
-};
-
-// Define the type alias using the helper struct
-template <class ServiceType, class RequestType, class ResponseType, RpcMode Mode>
-using _RpcFn = typename _RpcFnHelper<ServiceType, RequestType, ResponseType, Mode>::type;
-
-} // namespace
 
 class GrpcServer {
 public:
@@ -93,8 +48,15 @@ private:
 	std::vector<std::shared_ptr<grpc::Service>> registered_services_;
 };
 
-template <typename ServiceType>
+template <class ServiceType>
 class AsyncGrpcClient {
+	template <class Request, class Response>
+	using UnaryRpcFn = grpc::Status (ServiceType::Stub::*)(grpc::ClientContext*, const Request&, Response*);
+
+	template <class Request, class Response>
+	using ServerStreamingRpcFn =
+	    std::unique_ptr<grpc::ClientReader<Response>> (ServiceType::Stub::*)(grpc::ClientContext*, const Request&);
+
 public:
 	using Rpc = typename ServiceType::Stub;
 
@@ -103,10 +65,10 @@ public:
 	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
 	    stub_(ServiceType::NewStub(channel_)) {}
 
-	template <class RpcFn, class RequestType, class ResponseType = get_response_type<RpcFn>>
-	requires std::is_same_v<ResponseType, get_response_type<RpcFn>> &&
-		     std::is_same_v<RpcFn, _RpcFn<ServiceType, RequestType, ResponseType, RpcMode::Unary>>
-	Future<grpc::Status> call(RpcFn rpc, const RequestType& request, ResponseType* response) {
+	template <class RequestType, class ResponseType>
+	Future<grpc::Status> call(UnaryRpcFn<RequestType, ResponseType> rpc,
+	                          const RequestType& request,
+	                          ResponseType* response) {
 		auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request, response]() {
@@ -118,11 +80,8 @@ public:
 		return promise->getFuture();
 	}
 
-	// Returned future can be waited safely only from the originating thread.
-	template <class RpcFn, class RequestType, class ResponseType = get_response_type<RpcFn>>
-		requires std::is_same_v<ResponseType, get_response_type<RpcFn>> &&
-		         std::is_same_v<RpcFn, _RpcFn<ServiceType, RequestType, ResponseType, RpcMode::Unary>>
-	Future<ResponseType> call(RpcFn rpc, const RequestType& request) {
+	template <class RequestType, class ResponseType>
+	Future<ResponseType> call(UnaryRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request]() {
@@ -139,10 +98,8 @@ public:
 		return promise->getFuture();
 	}
 
-	template <class RpcFn, class RequestType, class ResponseType = get_response_type<RpcFn>>
-	    requires std::is_same_v<ResponseType, get_response_type<RpcFn>> &&
-	             std::is_same_v<RpcFn, _RpcFn<ServiceType, RequestType, ResponseType, RpcMode::ServerStreaming>>
-	FutureStream<ResponseType> call(RpcFn rpc, const RequestType& request) {
+	template <class RequestType, class ResponseType>
+	FutureStream<ResponseType> call(ServerStreamingRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		auto promise = std::make_shared<ThreadReturnPromiseStream<ResponseType>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request]() {

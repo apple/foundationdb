@@ -64,7 +64,7 @@ TEST_CASE("/fdbrpc/grpc/basic_server_stream") {
 	try {
 		EchoRequest request;
 		request.set_message("Ping!");
-		auto stream = client.call(&TestEchoService::Stub::EchoRepeat10, request);
+		auto stream = client.call(&TestEchoService::Stub::EchoRecv10, request);
 		loop {
 			auto response = co_await stream;
 		    ASSERT_EQ(response.message(), "Echo: Ping!");

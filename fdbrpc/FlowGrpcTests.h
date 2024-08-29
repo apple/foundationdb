@@ -45,7 +45,7 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		return Status::OK;
 	}
 
-	Status EchoRepeat10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
+	Status EchoRecv10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
 		for (int ii = 0; ii < 10; ii++) {
 			EchoResponse reply;
 			reply.set_message("Echo: " + request->message());
