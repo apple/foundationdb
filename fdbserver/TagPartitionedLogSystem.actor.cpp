@@ -2106,6 +2106,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 			if (it->logServers[i]->get().present()) {
 				interfLocMap[it->logServers[i]->get().interf().id()] = location++;
 			}
+			maxTLogLocId++;
 		}
 	}
 
@@ -2115,7 +2116,6 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 		for (auto& tLogResult : std::get<1>(logGroupResult)) {
 			ASSERT(interfLocMap.find(tLogResult.logId) != interfLocMap.end());
 			tLogLocIds[logGroupId].push_back(interfLocMap[tLogResult.logId]);
-			maxTLogLocId = std::max(maxTLogLocId, interfLocMap[tLogResult.logId]);
 		}
 		logGroupId++;
 	}
@@ -2123,6 +2123,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 
 void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 	for (auto& id : ids) {
+		ASSERT(id < bs.size());
 		bs.set(id);
 	}
 }
@@ -2136,7 +2137,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  Version minDVEnd,
                                  Version minKCVEnd) {
 	std::vector<std::vector<uint16_t>> tLogLocIds;
-	uint16_t maxTLogLocId;
+	uint16_t maxTLogLocId; // maximum possible id, not maximum of id's of available log servers
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
 	uint16_t bsSize = maxTLogLocId + 1; // bitset size, used below
 
