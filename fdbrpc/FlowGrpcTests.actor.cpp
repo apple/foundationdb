@@ -33,7 +33,7 @@ void forceLinkGrpcTests() {}
 namespace fdbrpc_test {
 namespace asio = boost::asio;
 
-TEST_CASE("/fdbrpc/grpc/basic_server") {
+TEST_CASE("/fdbrpc/grpc/basic_sync_client") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50001"));
 	state GrpcServer server(addr);
 	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
@@ -50,28 +50,7 @@ TEST_CASE("/fdbrpc/grpc/basic_server") {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/grpc/basic_async_client_1") {
-	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50002"));
-	state GrpcServer server(addr);
-	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
-	server.registerService(service);
-	state Future<Void> _ = server.run();
-
-	state shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
-	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
-
-	state EchoRequest request;
-	state EchoResponse response;
-	request.set_message("Ping!");
-	grpc::Status result = wait(client.call(&TestEchoService::Stub::Echo, request, &response));
-	ASSERT(result.ok());
-	std::cout << "Echo received: " << response.message() << std::endl;
-	ASSERT_EQ(response.message(), "Echo: Ping!");
-
-	return Void();
-}
-
-TEST_CASE("/fdbrpc/grpc/basic_async_client_with") {
+TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50003"));
 	state GrpcServer server(addr);
 	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
@@ -95,7 +74,7 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client_with") {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/grpc/basic_async_client_without_server_error") {
+TEST_CASE("/fdbrpc/grpc/no_server_running") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50004"));
 	state shared_ptr<asio::thread_pool> pool(make_shared<asio::thread_pool>(4));
 	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);

@@ -31,6 +31,7 @@ using std::thread;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ServerContext;
+using grpc::ServerWriter;
 using grpc::Status;
 
 using fdbrpc::test::EchoRequest;
@@ -43,6 +44,16 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		reply->set_message("Echo: " + request->message());
 		return Status::OK;
 	}
+
+	Status EchoRepeat10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
+		for (int ii = 0; ii < 10; ii++) {
+			EchoResponse reply;
+			reply.set_message("Echo: " + request->message());
+			writer->Write(reply);
+		}
+		return Status::OK;
+	}
+
 };
 
 class EchoClient {

@@ -28,7 +28,7 @@ void forceLinkGrpcTests2() {}
 namespace fdbrpc_test {
 namespace asio = boost::asio;
 
-TEST_CASE("/fdbrpc/grpc/basic_async_client_with_coroutines") {
+TEST_CASE("/fdbrpc/grpc/basic_coro") {
 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50500"));
 	GrpcServer server(addr);
 	shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
@@ -50,4 +50,34 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client_with_coroutines") {
 	}
 }
 
+TEST_CASE("/fdbrpc/grpc/basic_server_stream") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
+	GrpcServer server(addr);
+	shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
+	server.registerService(service);
+	Future<Void> _ = server.run();
+
+	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	int count = 0;
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		auto stream = client.call(&TestEchoService::Stub::EchoRepeat10, request);
+		loop {
+			auto response = co_await stream;
+		    ASSERT_EQ(response.message(), "Echo: Ping!");
+			count += 1;
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_end_of_stream) {
+			ASSERT_EQ(count, 10); // Should send 10 reponses.
+			co_return;
+		}
+		ASSERT(false);
+	}
+	co_return;
 }
+
+} // namespace fdbrpc_test

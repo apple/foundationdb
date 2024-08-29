@@ -23,6 +23,7 @@
 
 #include <memory>
 #include <thread>
+#include <type_traits>
 #include <grpcpp/grpcpp.h>
 
 #include <boost/asio.hpp>
@@ -31,7 +32,7 @@
 #include "flow/flow.h"
 
 namespace {
-template <typename T>
+template <class T>
 struct get_response_type_impl;
 
 template <typename Stub, typename Request, typename Response>
@@ -39,8 +40,39 @@ struct get_response_type_impl<grpc::Status (Stub::*)(grpc::ClientContext*, const
 	using type = Response;
 };
 
+template <typename Stub, typename Request, typename Response>
+struct get_response_type_impl<std::unique_ptr<grpc::ClientReader<Response>> (Stub::*)(grpc::ClientContext*, const Request&)> {
+	using type = Response;
+};
+
 template <typename T>
 using get_response_type = typename get_response_type_impl<T>::type;
+
+enum RpcMode {
+	Unary,
+	ServerStreaming,
+	ClientStreaming,
+};
+
+template <class ServiceType, class RequestType, class ResponseType, RpcMode Mode>
+struct _RpcFnHelper {
+	using type =
+	    std::conditional_t<Mode == RpcMode::Unary,
+	                       grpc::Status (ServiceType::Stub::*)(grpc::ClientContext*, const RequestType&, ResponseType*),
+	                       std::conditional_t<Mode == RpcMode::ServerStreaming,
+	                                          std::unique_ptr<grpc::ClientReader<ResponseType>> (
+	                                              ServiceType::Stub::*)(grpc::ClientContext*, const RequestType&),
+	                                          void // Fallback if other modes are added but not handled
+	                                          >>;
+
+	static_assert(Mode == RpcMode::Unary || Mode == RpcMode::ServerStreaming,
+	              "Unsupported RpcMode. Please provide a valid RpcMode.");
+};
+
+// Define the type alias using the helper struct
+template <class ServiceType, class RequestType, class ResponseType, RpcMode Mode>
+using _RpcFn = typename _RpcFnHelper<ServiceType, RequestType, ResponseType, Mode>::type;
+
 } // namespace
 
 class GrpcServer {
@@ -63,21 +95,17 @@ private:
 
 template <typename ServiceType>
 class AsyncGrpcClient {
-	using RpcStub = typename ServiceType::Stub;
-
-	template <class RequestType, class ResponseType>
-	using RpcFn = grpc::Status (RpcStub::*)(grpc::ClientContext*, const RequestType&, ResponseType*);
-
 public:
 	using Rpc = typename ServiceType::Stub;
 
 	AsyncGrpcClient() {}
 	AsyncGrpcClient(const std::string& endpoint, std::shared_ptr<boost::asio::thread_pool> pool)
-	  : pool_(pool),
-	    channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
+	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
 	    stub_(ServiceType::NewStub(channel_)) {}
 
-	template <class RequestType, class ResponseType, class RpcFn = RpcFn<RequestType, ResponseType>>
+	template <class RpcFn, class RequestType, class ResponseType = get_response_type<RpcFn>>
+	requires std::is_same_v<ResponseType, get_response_type<RpcFn>> &&
+		     std::is_same_v<RpcFn, _RpcFn<ServiceType, RequestType, ResponseType, RpcMode::Unary>>
 	Future<grpc::Status> call(RpcFn rpc, const RequestType& request, ResponseType* response) {
 		auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
 
@@ -90,8 +118,10 @@ public:
 		return promise->getFuture();
 	}
 
-	// Retuned future can be waited safely only from the originating thread.
-	template <class RequestType, class RpcFn, class ResponseType = get_response_type<RpcFn>>
+	// Returned future can be waited safely only from the originating thread.
+	template <class RpcFn, class RequestType, class ResponseType = get_response_type<RpcFn>>
+		requires std::is_same_v<ResponseType, get_response_type<RpcFn>> &&
+		         std::is_same_v<RpcFn, _RpcFn<ServiceType, RequestType, ResponseType, RpcMode::Unary>>
 	Future<ResponseType> call(RpcFn rpc, const RequestType& request) {
 		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
 
@@ -109,41 +139,35 @@ public:
 		return promise->getFuture();
 	}
 
-	//::grpc::ClientReader< ::fdbrpc::test::EchoResponse>* TestEchoService::Stub::EchoRepeat10Raw(::grpc::ClientContext* context, const ::fdbrpc::test::EchoRequest& request) {
+	template <class RpcFn, class RequestType, class ResponseType = get_response_type<RpcFn>>
+	    requires std::is_same_v<ResponseType, get_response_type<RpcFn>> &&
+	             std::is_same_v<RpcFn, _RpcFn<ServiceType, RequestType, ResponseType, RpcMode::ServerStreaming>>
+	FutureStream<ResponseType> call(RpcFn rpc, const RequestType& request) {
+		auto promise = std::make_shared<ThreadReturnPromiseStream<ResponseType>>();
 
-	// loop {
-	// 	try {
-	// 		T nextInput = waitNext(input);
-	// 		output.send(func(nextInput));
-	// 	} catch (Error& e) {
-	// 		if (e.code() == error_code_end_of_stream) {
-	// 			break;
-	// 		} else
-	// 			throw;
-	// 	}
+		boost::asio::post(*pool_, [this, promise, rpc, request]() {
+			grpc::ClientContext context;
+			ResponseType response;
+			auto reader = (stub_.get()->*rpc)(&context, request);
+			while (reader->Read(&response)) {
+				promise->send(response);
+			}
 
-	// template <class RequestType, class RpcFn, class ResponseType = get_response_type<RpcFn>>
-	// Future<ResponseType> call(RpcFn rpc, const RequestType& request) {
-	// 	auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
+			auto status = reader->Finish();
+			if (status.ok()) {
+				promise->sendError(end_of_stream());
+			} else {
+				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+			}
+		});
 
-	// 	boost::asio::post(*pool_, [this, promise, rpc, request]() {
-	// 		grpc::ClientContext context;
-	// 		ResponseType response;
-	// 		auto status = (stub_.get()->*rpc)(&context, request, &response);
-	// 		if (status.ok()) {
-	// 			promise->send(response);
-	// 		} else {
-	// 			promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
-	// 		}
-	// 	});
-
-	// 	return promise->getFuture();
-	// }
+		return promise->getFuture();
+	}
 
 private:
 	std::shared_ptr<boost::asio::thread_pool> pool_;
 	std::shared_ptr<grpc::Channel> channel_;
-	std::unique_ptr<RpcStub> stub_;
+	std::unique_ptr<typename ServiceType::Stub> stub_;
 };
 
 #endif // FDBRPC_FLOW_GRPC_H
