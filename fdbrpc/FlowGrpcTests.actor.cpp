@@ -19,7 +19,6 @@
  */
 
 #include <cstdio>
-#include <thread>
 
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
@@ -36,8 +35,7 @@ namespace asio = boost::asio;
 TEST_CASE("/fdbrpc/grpc/basic_sync_client") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50001"));
 	state GrpcServer server(addr);
-	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
-	server.registerService(service);
+	server.registerService(make_shared<TestEchoServiceImpl>());
 	state Future<Void> server_actor = server.run();
 
 	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
@@ -53,8 +51,7 @@ TEST_CASE("/fdbrpc/grpc/basic_sync_client") {
 TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50003"));
 	state GrpcServer server(addr);
-	state shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
-	server.registerService(service);
+	server.registerService(make_shared<TestEchoServiceImpl>());
 	state Future<Void> _ = server.run();
 
 	state shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
@@ -94,8 +91,7 @@ TEST_CASE("/fdbrpc/grpc/no_server_running") {
 TEST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50005"));
 	state GrpcServer server(addr);
-	state shared_ptr<TestEchoServiceImpl> service = make_shared<TestEchoServiceImpl>();
-	server.registerService(service);
+	server.registerService(make_shared<TestEchoServiceImpl>());
 	state Future<Void> _ = server.run();
 	return Void();
 }

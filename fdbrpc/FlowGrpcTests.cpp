@@ -31,8 +31,7 @@ namespace asio = boost::asio;
 TEST_CASE("/fdbrpc/grpc/basic_coro") {
 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50500"));
 	GrpcServer server(addr);
-	shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
-	server.registerService(service);
+	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
 
 	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
@@ -53,8 +52,7 @@ TEST_CASE("/fdbrpc/grpc/basic_coro") {
 TEST_CASE("/fdbrpc/grpc/basic_server_stream") {
 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
 	GrpcServer server(addr);
-	shared_ptr<TestEchoServiceImpl> service(make_shared<TestEchoServiceImpl>());
-	server.registerService(service);
+	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
 
 	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
