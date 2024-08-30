@@ -320,7 +320,7 @@ struct TLogData : NonCopyable {
 	// For each version above knownCommittedVersion, track:
 	// <Version, PrevVersion (that the sequencer provided), TLogs that the version has been sent to (the tLogs
 	//  are represented by their corresponding positions in "TagPartitionedLogSystem::tLogs")>
-	std::deque<std::tuple<Version, Version, std::vector<uint16_t>>> unknownCommittedVersions;
+	std::deque<UnknownCommittedVersions> unknownCommittedVersions;
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool>
@@ -853,9 +853,9 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	TLogLockResult result;
 	result.end = stopVersion;
 	result.knownCommittedVersion = logData->knownCommittedVersion;
-	result.unknownCommittedVersions = self->unknownCommittedVersions;
 	result.id = self->dbgid;
 	result.logId = logData->logId;
+	result.unknownCommittedVersions = self->unknownCommittedVersions;
 
 	TraceEvent("TLogStop2", self->dbgid)
 	    .detail("LogId", logData->logId)
@@ -2420,9 +2420,9 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.seqPrevVersion, req.tLogLocIds));
+			self->unknownCommittedVersions.emplace_front(req.version, req.seqPrevVersion, req.tLogLocIds);
 			while (!self->unknownCommittedVersions.empty() &&
-			       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
+			       self->unknownCommittedVersions.back().version <= req.knownCommittedVersion) {
 				self->unknownCommittedVersions.pop_back();
 			}
 		} else {
