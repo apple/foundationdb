@@ -21,6 +21,7 @@
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
 #include "flow/Buggify.h"
+#include <string>
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -1953,6 +1954,11 @@ bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestartin
 
 } // namespace
 
+std::string getSettingString() {
+	return "MinShardBytes=" + std::to_string(SERVER_KNOBS->MIN_SHARD_BYTES) + ", " + "MinShardBytesPerKSec" +
+	       std::to_string(SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+}
+
 int main(int argc, char* argv[]) {
 	// TODO: Remove later, this is just to force the statics to be initialized
 	// otherwise the unit test won't run
@@ -2538,6 +2544,7 @@ int main(int argc, char* argv[]) {
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Stats", g_network->getStatsString())
+		    .detail("Setting", getSettingString())
 		    .detail("SimTime", now() - startNow)
 		    .detail("RealTime", timer() - start)
 		    .detail("RandomUnseed", unseed);

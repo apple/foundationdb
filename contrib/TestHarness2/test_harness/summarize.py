@@ -658,6 +658,7 @@ class Summary:
             self.out.attributes["SimElapsedTime"] = attrs["SimTime"]
             self.out.attributes["RealElapsedTime"] = attrs["RealTime"]
             self.out.attributes["Stats"] = attrs["Stats"]
+            self.out.attributes["Setting"] = attrs["Setting"]
             if self.unseed is not None:
                 self.out.attributes["RandomUnseed"] = str(self.unseed)
 
