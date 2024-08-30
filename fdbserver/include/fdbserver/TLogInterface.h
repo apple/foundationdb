@@ -139,9 +139,9 @@ struct TLogRecoveryFinishedRequest {
 
 struct UnknownCommittedVersions {
 	constexpr static FileIdentifier file_identifier = 11822137;
-	Version version;
-	Version prev;
-	std::vector<uint16_t> tLogLocIds;
+	Version version; // version made durable on recovering tLog
+	Version prev; // previous to version; to ensure no gaps in chain
+	std::vector<uint16_t> tLogLocIds; // locations version was sent to
 	UnknownCommittedVersions() {}
 	UnknownCommittedVersions(Version version, Version prev, std::vector<uint16_t> tLogLocIds)
 	  : version(version), prev(prev), tLogLocIds(tLogLocIds) {}
