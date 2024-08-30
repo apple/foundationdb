@@ -1955,8 +1955,8 @@ bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestartin
 } // namespace
 
 std::string getSettingString() {
-	return "MinShardBytes=" + std::to_string(SERVER_KNOBS->MIN_SHARD_BYTES) + ", " + "MinShardBytesPerKSec" +
-	       std::to_string(SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+	return "MinShardBytes=" + std::to_string(SERVER_KNOBS->MIN_SHARD_BYTES) + ", " +
+	       "MinShardBytesPerKSec=" + std::to_string(SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
 }
 
 int main(int argc, char* argv[]) {
