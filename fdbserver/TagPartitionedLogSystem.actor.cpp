@@ -2127,17 +2127,17 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 			availableTLogs.set(tLogLocId);
 			bool logGroupCandidate = false;
 			for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
-				Version k = std::get<0>(unknownCommittedVersion);
+				Version k = unknownCommittedVersion.version;
 				if (k > minEnd) {
 					if (versionAvailableTLogs[k].empty()) {
 						versionAvailableTLogs[k].resize(bsSize);
 					}
 					versionAvailableTLogs[k].set(tLogLocId);
-					prevVersionMap[k] = std::get<1>(unknownCommittedVersion);
+					prevVersionMap[k] = unknownCommittedVersion.prev;
 					if (versionAllTLogs[k].empty()) {
 						versionAllTLogs[k].resize(bsSize);
 					}
-					populateBitset(versionAllTLogs[k], std::get<2>(unknownCommittedVersion));
+					populateBitset(versionAllTLogs[k], unknownCommittedVersion.tLogLocIds);
 					logGroupCandidate = true;
 				}
 			}
