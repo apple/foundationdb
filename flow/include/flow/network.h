@@ -154,6 +154,8 @@ public:
 	uint64_t totalSSReadRange = 0;
 	uint64_t totalSSAddShard = 0;
 	uint64_t totalSSRemoveShard = 0;
+	uint64_t totalKVWrite = 0;
+	uint64_t totalKVDoCommit = 0;
 
 	uint64_t totalSSReadError = 0;
 	uint64_t totalSSOpenError = 0;
@@ -181,6 +183,7 @@ public:
 	double totalReadRangeTime = 0;
 	double totalAddShardTime = 0;
 	double totalRemoveShardTime = 0;
+	double totalKVWriteTime = 0;
 
 	void printSSOps() {
 		printf("Total SS Open %lu\n", totalSSOpen);
@@ -195,6 +198,8 @@ public:
 		printf("Total SS Set %lu\n", totalSSSet);
 		printf("Total SS Clear %lu\n", totalSSClear);
 		printf("Total SS Commit %lu\n", totalSSCommit);
+		printf("Total KV Write %lu\n", totalKVWrite);
+		printf("Total KV DoCommit %lu\n", totalKVDoCommit);
 	}
 
 	void printSSOpsError() {
@@ -226,6 +231,7 @@ public:
 		printf("Total SS Set Time %f\n", totalSetTime);
 		printf("Total SS Clear Time %f\n", totalClearTime);
 		printf("Total SS Commit Time %f\n", totalCommitTime);
+		printf("Total KV Write Time %f\n", totalKVWriteTime);
 	}
 
 	std::string getSSOpsString() {
@@ -241,7 +247,9 @@ public:
 		res = res + "readprefix_c=" + std::to_string(totalSSReadPrefix) + ", ";
 		res = res + "set_c=" + std::to_string(totalSSSet) + ", ";
 		res = res + "clear_c=" + std::to_string(totalSSClear) + ", ";
-		res = res + "commit_c=" + std::to_string(totalSSCommit);
+		res = res + "commit_c=" + std::to_string(totalSSCommit) + ", ";
+		res = res + "kvwrite_c=" + std::to_string(totalKVWrite) + ", ";
+		res = res + "kvdocommit_c=" + std::to_string(totalKVDoCommit);
 		return res;
 	}
 
@@ -275,7 +283,8 @@ public:
 		res = res + "readprefix_t=" + std::to_string(totalReadPrefixTime) + ", ";
 		res = res + "set_t=" + std::to_string(totalSetTime) + ", ";
 		res = res + "clear_t=" + std::to_string(totalClearTime) + ", ";
-		res = res + "commit_t=" + std::to_string(totalCommitTime);
+		res = res + "commit_t=" + std::to_string(totalCommitTime) + ", ";
+		res = res + "kvwrite_t=" + std::to_string(totalKVWriteTime);
 		return res;
 	}
 

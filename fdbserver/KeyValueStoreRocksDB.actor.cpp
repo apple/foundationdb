@@ -1431,7 +1431,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
 			double writeBeginTime = timer_monotonic();
+			auto realStartTime2 = std::chrono::high_resolution_clock::now();
 			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
+			if (g_network->isSimulated()) {
+				auto realEndTime2 = std::chrono::high_resolution_clock::now();
+				double duration_s2 =
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(realEndTime2 - realStartTime2).count() / 1e9;
+				g_network->totalKVWriteTime = g_network->totalKVWriteTime + duration_s2;
+				g_network->totalKVWrite++;
+			}
+
 			readIterPool->update();
 			double currTime = timer_monotonic();
 			if (a.getHistograms) {

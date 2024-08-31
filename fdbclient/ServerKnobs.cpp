@@ -604,7 +604,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
-	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,          true );
+	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,          true ); if (isSimulated) SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = false;
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 );
 	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated? 134217728 : 134217728 /* 128MB */);
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
