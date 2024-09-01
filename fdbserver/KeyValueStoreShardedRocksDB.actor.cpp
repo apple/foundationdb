@@ -251,7 +251,7 @@ public:
 		    .detail("ShardedRocksDBSeverity", bg_error->severity())
 		    .detail("Status", bg_error->ToString());
 
-		std::unique_lock<std::mutex> lock(mutex);
+		// std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
 		// RocksDB generates two types of background errors, IO Error and Corruption
@@ -267,11 +267,11 @@ public:
 		}
 	}
 	Future<int> getFuture() {
-		std::unique_lock<std::mutex> lock(mutex);
+		// std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
 	~RocksDBErrorListener() {
-		std::unique_lock<std::mutex> lock(mutex);
+		// std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
 		errorPromise.send(error_code_success);
@@ -279,7 +279,7 @@ public:
 
 private:
 	ThreadReturnPromise<int> errorPromise;
-	std::mutex mutex;
+	// std::mutex mutex;
 };
 
 // Encapsulation of shared states.
@@ -490,9 +490,9 @@ rocksdb::WALRecoveryMode getWalRecoveryMode() {
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 
-	if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
-		options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
+	/*if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
+	    options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	    options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
 	}
 	options.write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_BUFFER_SIZE;
 	options.max_write_buffer_number = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
@@ -500,7 +500,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	options.target_file_size_multiplier = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
-		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	    options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
 	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
@@ -508,31 +508,31 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	options.memtable_max_range_deletions = SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
-		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	    options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
 	}
 	if (SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
-		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	    options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
 	}
 
 	// Compact sstables when there's too much deleted stuff.
 	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
-		// Creates a factory of a table property collector that marks a SST
-		// file as need-compaction when it observe at least "D" deletion
-		// entries in any "N" consecutive entries, or the ratio of tombstone
-		// entries >= deletion_ratio.
+	    // Creates a factory of a table property collector that marks a SST
+	    // file as need-compaction when it observe at least "D" deletion
+	    // entries in any "N" consecutive entries, or the ratio of tombstone
+	    // entries >= deletion_ratio.
 
-		// @param sliding_window_size "N". Note that this number will be
-		//     round up to the smallest multiple of 128 that is no less
-		//     than the specified size.
-		// @param deletion_trigger "D".  Note that even when "N" is changed,
-		//     the specified number for "D" will not be changed.
-		// @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
-		//     based on deletion ratio. Disabled by default.
-		options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(
-			SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
-			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
-			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO) };
-	}
+	    // @param sliding_window_size "N". Note that this number will be
+	    //     round up to the smallest multiple of 128 that is no less
+	    //     than the specified size.
+	    // @param deletion_trigger "D".  Note that even when "N" is changed,
+	    //     the specified number for "D" will not be changed.
+	    // @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
+	    //     based on deletion ratio. Disabled by default.
+	    options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(
+	        SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
+	        SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
+	        SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO) };
+	}*/
 
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
@@ -560,9 +560,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		bbOpts.whole_key_filtering = false;
 	}
 
-	options.level0_file_num_compaction_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
-	options.level0_slowdown_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
-	options.level0_stop_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
+	// options.level0_file_num_compaction_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
+	// options.level0_slowdown_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
+	// options.level0_stop_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 
 	if (rocksdb_block_cache == nullptr && SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE > 0) {
 		rocksdb_block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE);
@@ -571,7 +571,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
-	options.compaction_pri = getCompactionPriority();
+	// options.compaction_pri = getCompactionPriority();
 
 	return options;
 }
@@ -579,7 +579,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
 	auto options = getCFOptions();
 	// never slowdown ingest.
-	options.level0_file_num_compaction_trigger = (1 << 30);
+	/*options.level0_file_num_compaction_trigger = (1 << 30);
 	options.level0_slowdown_writes_trigger = (1 << 30);
 	options.level0_stop_writes_trigger = (1 << 30);
 	options.soft_pending_compaction_bytes_limit = 0;
@@ -595,7 +595,7 @@ rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
 	// It is better to have only 2 levels, otherwise a manual
 	// compaction would compact at every possible level, thereby
 	// increasing the total time needed for compactions.
-	options.num_levels = 2;
+	options.num_levels = 2;*/
 
 	return options;
 }
@@ -710,7 +710,7 @@ public:
 	// Called on every db commit.
 	void update() {
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			std::lock_guard<std::mutex> lock(mutex);
+			// std::lock_guard<std::mutex> lock(mutex);
 			iteratorsMap.clear();
 		}
 	}
@@ -719,7 +719,7 @@ public:
 	ReadIterator getIterator(const KeyRange& range) {
 		// Shared iterators are not bounded.
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			std::lock_guard<std::mutex> lock(mutex);
+			// std::lock_guard<std::mutex> lock(mutex);
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
 				if (!it->second.inUse) {
 					it->second.inUse = true;
@@ -741,7 +741,7 @@ public:
 	// Called on every read operation, after the keys are collected.
 	void returnIterator(ReadIterator& iter) {
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			std::lock_guard<std::mutex> lock(mutex);
+			// std::lock_guard<std::mutex> lock(mutex);
 			it = iteratorsMap.find(iter.index);
 			// iterator found: put the iterator back to the pool(inUse=false).
 			// iterator not found: update would have removed the iterator from pool, so nothing to do.
@@ -754,7 +754,7 @@ public:
 
 	// Called for every ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME seconds in a loop.
 	void refreshIterators() {
-		std::lock_guard<std::mutex> lock(mutex);
+		// std::lock_guard<std::mutex> lock(mutex);
 		it = iteratorsMap.begin();
 		while (it != iteratorsMap.end()) {
 			if (now() - it->second.creationTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME) {
@@ -774,7 +774,7 @@ private:
 	std::unordered_map<int, ReadIterator>::iterator it;
 	rocksdb::DB* db;
 	rocksdb::ColumnFamilyHandle* cf;
-	std::mutex mutex;
+	// std::mutex mutex;
 	// incrementing counter for every new iterator creation, to uniquely identify the iterator in returnIterator().
 	uint64_t index;
 	uint64_t iteratorsReuseCount;

@@ -134,7 +134,7 @@ class Config:
             "help": "Force given seed given to fdbserver -- mostly useful for debugging",
             "required": False,
         }
-        self.kill_seconds: int = 60 * 60 * 10
+        self.kill_seconds: int = 30 * 60
         self.kill_seconds_args = {"help": "Timeout for individual test"}
         self.buggify_on_ratio: float = 0.8
         self.buggify_on_ratio_args = {"help": "Probability that buggify is turned on"}
