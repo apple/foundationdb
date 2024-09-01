@@ -73,6 +73,7 @@ public:
 	Future<grpc::Status> call(UnaryRpcFn<RequestType, ResponseType> rpc,
 	                          const RequestType& request,
 	                          ResponseType* response) {
+		// ASSERT(g_network->isOnMainThread());
 		auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request, response]() {
@@ -86,6 +87,7 @@ public:
 
 	template <class RequestType, class ResponseType>
 	Future<ResponseType> call(UnaryRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
+		// ASSERT(g_network->isOnMainThread());
 		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request]() {
@@ -104,6 +106,7 @@ public:
 
 	template <class RequestType, class ResponseType>
 	FutureStream<ResponseType> call(ServerStreamingRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
+		// ASSERT(g_network->isOnMainThread());
 		auto promise = std::make_shared<ThreadReturnPromiseStream<ResponseType>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request]() {
