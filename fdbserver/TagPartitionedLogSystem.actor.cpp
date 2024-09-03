@@ -2536,9 +2536,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 					state std::vector<TLogLockResult> tLogResults = std::get<1>(logGroupResult);
 					for (auto& tLogResult : tLogResults) {
 						wait(transformErrors(
+						    // TODO: why + 1
 						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.id]
 						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
-						                         setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
+						                         setClusterRecoveryVersionRequest(logSystem->recoverAt.get() + 1),
 						                         SERVER_KNOBS->TLOG_TIMEOUT,
 						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 						    cluster_recovery_failed()));
