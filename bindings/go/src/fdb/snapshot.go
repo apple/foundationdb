@@ -53,6 +53,12 @@ func (s Snapshot) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r 
 	return
 }
 
+// Cancel cancels the underlying transaction of the snapshot.
+// See Transaction.Cancel() for more information.
+func (s Snapshot) Cancel() {
+	s.transaction.cancel()
+}
+
 // Snapshot returns the receiver and allows Snapshot to satisfy the
 // ReadTransaction interface.
 func (s Snapshot) Snapshot() Snapshot {
