@@ -577,7 +577,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                    0 );
 	init( ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
 	init( ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
-	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
+	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 ); if ( isSimulated ) ROCKSDB_CF_METRICS_DELAY = 10.0;
 	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
 	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
@@ -608,7 +608,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 );
 	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated? 16 * 1024 : 134217728 /* 128MB */);
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
-	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        300 << 20 ); if (isSimulated) SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC = 0;
+	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        300 << 20 );
 	init( SHARDED_ROCKSDB_RATE_LIMITER_MODE,                       2 );
 	init( SHARDED_ROCKSDB_BACKGROUND_PARALLELISM,                  2 );
 	init( SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS,                      0 );
@@ -618,7 +618,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,      false ); if (isSimulated) SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_MAX_OPEN_FILES,                      50000 ); // Should be smaller than OS's fd limit.
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
-	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( isSimulated )  SHARDED_ROCKSDB_PREFIX_LEN = 11;
+	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
 
 
 	// Leader election

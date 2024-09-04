@@ -142,6 +142,9 @@ inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool =
 
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork {
 public:
+	std::unordered_map<UID, uint64_t> totalShardCount;
+	std::unordered_map<UID, uint64_t> totalActiveShardCount;
+
 	uint64_t totalSSRead = 0;
 	uint64_t totalSSOpen = 0;
 	uint64_t totalSSClose = 0;
@@ -234,6 +237,24 @@ public:
 		printf("Total KV Write Time %f\n", totalKVWriteTime);
 	}
 
+	std::string getTotalShardString() {
+		std::string res;
+		uint64_t totalShards = 0;
+		for (const auto& [id, shardCount] : totalShardCount) {
+			totalShards = totalShards + shardCount;
+		}
+		uint64_t totalActiveShards = 0;
+		for (const auto& [id, activeShardCount] : totalActiveShardCount) {
+			totalActiveShards = totalActiveShards + activeShardCount;
+		}
+
+		res = res + "shard_count=" + std::to_string(totalShards) + ", ";
+		res = res + "activeshard_count=" + std::to_string(totalActiveShards) + ", ";
+		res = res + "shard_ss_count=" + std::to_string(totalShardCount.size()) + ", ";
+		res = res + "activeshard_ss_count=" + std::to_string(totalActiveShardCount.size());
+		return res;
+	}
+
 	std::string getSSOpsString() {
 		std::string res;
 		res = res + "open_c=" + std::to_string(totalSSOpen) + ", ";
@@ -290,7 +311,8 @@ public:
 
 	std::string getStatsString() {
 		std::string res;
-		res = getSSOpsString() + ", " + getSSOpsErrorString() + ", " + getSSOpsTimeString();
+		res = getSSOpsString() + ", " + getSSOpsErrorString() + ", " + getSSOpsTimeString() + ", " +
+		      getTotalShardString();
 		return res;
 	}
 

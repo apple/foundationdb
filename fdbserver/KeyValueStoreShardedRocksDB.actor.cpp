@@ -503,11 +503,13 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
-	/*options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
-	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
-	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
-	options.memtable_max_range_deletions = SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
-	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;*/
+	// options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+	// options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	// options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+	// options.memtable_max_range_deletions = SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
+	if (SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS) {
+		options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	}
 	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
 		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
 	}
@@ -1057,7 +1059,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
+	ACTOR static Future<Void> shardMetricsLogger(UID ssid,
+	                                             std::shared_ptr<ShardedRocksDBState> rState,
 	                                             Future<Void> openFuture,
 	                                             ShardManager* shardManager) {
 		state std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
@@ -1071,43 +1074,45 @@ public:
 					break;
 				}
 
-				uint64_t numSstFiles = 0;
+				/*uint64_t numSstFiles = 0;
 				for (auto& [id, shard] : *physicalShards) {
-					if (!shard->initialized()) {
-						continue;
-					}
-					uint64_t liveDataSize = 0;
-					ASSERT(shard->db->GetIntProperty(
-					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
+				    if (!shard->initialized()) {
+				        continue;
+				    }
+				    uint64_t liveDataSize = 0;
+				    ASSERT(shard->db->GetIntProperty(
+				        shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
 
-					TraceEvent e(SevInfo, "PhysicalShardStats");
-					e.detail("ShardId", id).detail("LiveDataSize", liveDataSize);
+				    TraceEvent e(SevInfo, "PhysicalShardStats");
+				    e.detail("ShardId", id).detail("LiveDataSize", liveDataSize);
 
-					// Get compression ratio for each level.
-					rocksdb::ColumnFamilyMetaData cfMetadata;
-					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
-					e.detail("NumFiles", cfMetadata.file_count);
-					numSstFiles += cfMetadata.file_count;
-					std::string levelProp;
-					int numLevels = 0;
-					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
-						std::string propValue = "";
-						ASSERT(shard->db->GetProperty(shard->cf,
-						                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
-						                                  std::to_string(it->level),
-						                              &propValue));
-						e.detail("Level" + std::to_string(it->level),
-						         std::to_string(it->size) + " " + propValue + " " + std::to_string(it->files.size()));
-						if (it->size > 0) {
-							++numLevels;
-						}
-					}
-					e.detail("NumLevels", numLevels);
+				    // Get compression ratio for each level.
+				    rocksdb::ColumnFamilyMetaData cfMetadata;
+				    shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
+				    e.detail("NumFiles", cfMetadata.file_count);
+				    numSstFiles += cfMetadata.file_count;
+				    std::string levelProp;
+				    int numLevels = 0;
+				    for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
+				        std::string propValue = "";
+				        ASSERT(shard->db->GetProperty(shard->cf,
+				                                      rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
+				                                          std::to_string(it->level),
+				                                      &propValue));
+				        e.detail("Level" + std::to_string(it->level),
+				                 std::to_string(it->size) + " " + propValue + " " + std::to_string(it->files.size()));
+				        if (it->size > 0) {
+				            ++numLevels;
+				        }
+				    }
+				    e.detail("NumLevels", numLevels);
 				}
 				TraceEvent(SevInfo, "KVSPhysialShardMetrics")
 				    .detail("NumActiveShards", shardManager->numActiveShards())
 				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards())
-				    .detail("NumSstFiles", numSstFiles);
+				    .detail("NumSstFiles", numSstFiles);*/
+				g_network->totalShardCount[ssid] = shardManager->numPhysicalShards();
+				g_network->totalActiveShardCount[ssid] = shardManager->numActiveShards();
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -3946,7 +3951,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto a = std::make_unique<Writer::OpenAction>(&shardManager, metrics, &readSemaphore, &fetchSemaphore);
 			openFuture = a->done.getFuture();
 			this->metrics =
-			    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
+			    ShardManager::shardMetricsLogger(this->id, this->rState, openFuture, &shardManager) &&
 			    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);
 			this->compactionJob = compactShards(this->rState, openFuture, &shardManager, compactionThread);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
