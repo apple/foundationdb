@@ -491,10 +491,10 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 
 	// Can cause external timeout in simulation
-	if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
-		options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-		// options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
-	}
+	// if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
+	// options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	// options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
+	// }
 	options.write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_BUFFER_SIZE;
 	options.max_write_buffer_number = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
 	options.target_file_size_base = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
@@ -581,8 +581,12 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
 	auto options = getCFOptions();
+	if (g_network->isSimulated()) {
+		return options; // can cause external timeout in simulation
+	}
+
 	// never slowdown ingest.
-	/*options.level0_file_num_compaction_trigger = (1 << 30);
+	options.level0_file_num_compaction_trigger = (1 << 30);
 	options.level0_slowdown_writes_trigger = (1 << 30);
 	options.level0_stop_writes_trigger = (1 << 30);
 	options.soft_pending_compaction_bytes_limit = 0;
@@ -598,7 +602,7 @@ rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
 	// It is better to have only 2 levels, otherwise a manual
 	// compaction would compact at every possible level, thereby
 	// increasing the total time needed for compactions.
-	options.num_levels = 2;*/
+	options.num_levels = 2;
 
 	return options;
 }
