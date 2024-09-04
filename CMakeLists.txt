@@ -37,6 +37,7 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
 endif()
 
 set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+set(AUTO_DISCOVER_UNIT_TESTS OFF CACHE BOOL "Automatically discover unit-tests")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   if (OPEN_FOR_IDE)
@@ -164,6 +165,7 @@ configure_file(fdb.cluster.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdb.cluster)
 ################################################################################
 # testing
 ################################################################################
+include(CTest)
 enable_testing()
 
 ################################################################################
@@ -254,5 +256,3 @@ endif()
 print_components()
 
 message(STATUS "CPACK_COMPONENTS_ALL ${CPACK_COMPONENTS_ALL}")
-
-
