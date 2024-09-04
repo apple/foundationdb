@@ -72,7 +72,7 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 
 class EchoClient {
 public:
-	EchoClient(shared_ptr<Channel> channel) : stub_(TestEchoService::NewStub(channel)) {}
+	EchoClient(const shared_ptr<Channel>& channel) : stub_(TestEchoService::NewStub(channel)) {}
 
 	std::string Echo(const std::string& message) {
 		EchoRequest request;

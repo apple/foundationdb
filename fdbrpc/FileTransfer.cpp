@@ -19,3 +19,5 @@
  */
 
 #include "fdbrpc/FileTransfer.h"
+#include "flow/UnitTest.h"
+

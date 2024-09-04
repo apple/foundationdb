@@ -64,9 +64,11 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
   endif()
 endif()
 
+generate_grpc_protobuf(fdbrpc.file_transfer file_transfer.proto)
+
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
-target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test)
+target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test proto_fdbrpc_file_transfer)
 target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson gRPC::grpc++)
 
 target_include_directories(fdbrpc_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)

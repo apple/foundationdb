@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package fdbrpc;
+
+service FileTransferService {
+    rpc DownloadFile(DownloadRequest) returns (stream DownloadChunk);
+}
+
+message DownloadRequest {
+    string file_name = 1;
+    int32 chunk_size = 2;
+    int32 first_chunk_index = 3;
+    int32 last_chunk_index = 4;
+}
+
+message DownloadChunk {
+    int32 offset = 2;
+    bytes data = 3;
+}
