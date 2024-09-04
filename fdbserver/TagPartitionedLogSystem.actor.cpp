@@ -2104,11 +2104,14 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 		}
 		for (uint16_t i = 0; i < it->logServers.size(); i++) {
 			if (it->logServers[i]->get().present()) {
-				interfLocMap[it->logServers[i]->get().interf().id()] = location++;
+				interfLocMap[it->logServers[i]->get().interf().id()] = location;
 			}
-			maxTLogLocId++;
+			location++;
 		}
 	}
+
+	// Set maxTLogLocId.
+	maxTLogLocId = location;
 
 	// Find the locations of tLogs in "logGroupResults".
 	uint8_t logGroupId = 0;
