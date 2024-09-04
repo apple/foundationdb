@@ -10411,9 +10411,28 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("PhysicalShard", currentShard->toStorageServerShard().toString());
 		}
 		if (!currentShard.isValid()) {
-			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
+			if (currentRange != keys) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "RangeDifferent")
+				    .detail("CurrentRange", currentRange)
+				    .detail("ModifiedRange", keys)
+				    .detail("Assigned", nowAssigned)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version);
+				throw internal_error();
+			}
 		} else if (currentShard->notAssigned()) {
-			ASSERT(nowAssigned); // Adding a new range to the server.
+			if (!nowAssigned) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "UnassignEmptyRange")
+				    .detail("Assigned", nowAssigned)
+				    .detail("ModifiedRange", keys)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version)
+				    .detail("ConflictingShard", currentShard->shardId)
+				    .detail("DesiredShardId", currentShard->desiredShardId);
+				throw internal_error();
+			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
@@ -10432,7 +10451,17 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
 		} else if (currentShard->adding) {
-			ASSERT(!nowAssigned);
+			if (nowAssigned) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "UpdateAddingShard")
+				    .detail("Assigned", nowAssigned)
+				    .detail("ModifiedRange", keys)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version)
+				    .detail("ConflictingShard", currentShard->shardId)
+				    .detail("DesiredShardId", currentShard->desiredShardId);
+				throw internal_error();
+			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
@@ -10442,7 +10471,17 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
 		} else if (currentShard->moveInShard) {
-			ASSERT(!nowAssigned);
+			if (nowAssigned) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "UpdateMoveInShard")
+				    .detail("Assigned", nowAssigned)
+				    .detail("ModifiedRange", keys)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version)
+				    .detail("ConflictingShard", currentShard->shardId)
+				    .detail("DesiredShardId", currentShard->desiredShardId);
+				throw internal_error();
+			}
 			currentShard->moveInShard->cancel();
 			updatedMoveInShards.emplace(currentShard->moveInShard->id(), currentShard->moveInShard);
 			StorageServerShard newShard = currentShard->toStorageServerShard();
