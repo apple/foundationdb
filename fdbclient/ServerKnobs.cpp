@@ -598,20 +598,20 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_COMPACTION_PERIOD, isSimulated? 3600 : 2592000 ); // 30d
 	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,               3600 ); // 1h
 	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                 -1 );
-	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 64 << 20 : 16 << 20 );  // 16MB
+	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 96 << 20 : 16 << 20 );  // 16MB
 	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE, isSimulated ? 4 << 30 : 1 << 30 ); // 1GB
-	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET, isSimulated ? 1024*1024 : 64 << 20 ); // 64MB
+	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET, isSimulated ? 1 << 20 : 64 << 20 ); // 64MB
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,          true );
-	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 ); if (isSimulated) SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS = 8;
+	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 );
 	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated? 16 * 1024 : 134217728 /* 128MB */);
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        300 << 20 );
 	init( SHARDED_ROCKSDB_RATE_LIMITER_MODE,                       2 );
-	init( SHARDED_ROCKSDB_BACKGROUND_PARALLELISM,                  2 ); if (isSimulated) SHARDED_ROCKSDB_BACKGROUND_PARALLELISM = 3;
-	init( SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS,                      0 ); if (isSimulated) SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS = 3;
+	init( SHARDED_ROCKSDB_BACKGROUND_PARALLELISM,                  2 );
+	init( SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS,                      0 );
 	init( SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,       4 );
 	init( SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,         20 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,             36 ); // RocksDB default.
