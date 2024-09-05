@@ -646,4 +646,6 @@ else()
 endif()
 
 # Add all unit tests as ctests
-collect_unit_tests(${CMAKE_SOURCE_DIR})
+if (AUTO_DISCOVER_UNIT_TESTS)
+  collect_unit_tests(${CMAKE_SOURCE_DIR})
+endif()

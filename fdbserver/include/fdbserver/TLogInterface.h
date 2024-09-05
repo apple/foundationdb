@@ -137,11 +137,25 @@ struct TLogRecoveryFinishedRequest {
 	}
 };
 
+struct UnknownCommittedVersions {
+	constexpr static FileIdentifier file_identifier = 11822137;
+	Version version; // version made durable on recovering tLog
+	Version prev; // previous to version; to ensure no gaps in chain
+	std::vector<uint16_t> tLogLocIds; // locations version was sent to
+	UnknownCommittedVersions() {}
+	UnknownCommittedVersions(Version version, Version prev, std::vector<uint16_t> tLogLocIds)
+	  : version(version), prev(prev), tLogLocIds(tLogLocIds) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, prev, tLogLocIds);
+	}
+};
+
 struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
-	std::deque<std::tuple<Version, Version, std::vector<uint16_t>>> unknownCommittedVersions;
+	std::deque<UnknownCommittedVersions> unknownCommittedVersions;
 	UID id; // captures TLogData::dbgid
 	UID logId; // captures LogData::logId
 

@@ -2104,10 +2104,14 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 		}
 		for (uint16_t i = 0; i < it->logServers.size(); i++) {
 			if (it->logServers[i]->get().present()) {
-				interfLocMap[it->logServers[i]->get().interf().id()] = location++;
+				interfLocMap[it->logServers[i]->get().interf().id()] = location;
 			}
+			location++;
 		}
 	}
+
+	// Set maxTLogLocId.
+	maxTLogLocId = location;
 
 	// Find the locations of tLogs in "logGroupResults".
 	uint8_t logGroupId = 0;
@@ -2115,7 +2119,6 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 		for (auto& tLogResult : std::get<1>(logGroupResult)) {
 			ASSERT(interfLocMap.find(tLogResult.logId) != interfLocMap.end());
 			tLogLocIds[logGroupId].push_back(interfLocMap[tLogResult.logId]);
-			maxTLogLocId = std::max(maxTLogLocId, interfLocMap[tLogResult.logId]);
 		}
 		logGroupId++;
 	}
@@ -2123,6 +2126,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 
 void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 	for (auto& id : ids) {
+		ASSERT(id < bs.size());
 		bs.set(id);
 	}
 }
@@ -2136,7 +2140,7 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
                                  Version minDVEnd,
                                  Version minKCVEnd) {
 	std::vector<std::vector<uint16_t>> tLogLocIds;
-	uint16_t maxTLogLocId;
+	uint16_t maxTLogLocId; // maximum possible id, not maximum of id's of available log servers
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
 	uint16_t bsSize = maxTLogLocId + 1; // bitset size, used below
 
@@ -2165,17 +2169,17 @@ Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
 			availableTLogs.set(tLogLocId);
 			bool logGroupCandidate = false;
 			for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
-				Version k = std::get<0>(unknownCommittedVersion);
+				Version k = unknownCommittedVersion.version;
 				if (k > minEnd) {
 					if (versionAvailableTLogs[k].empty()) {
 						versionAvailableTLogs[k].resize(bsSize);
 					}
 					versionAvailableTLogs[k].set(tLogLocId);
-					prevVersionMap[k] = std::get<1>(unknownCommittedVersion);
+					prevVersionMap[k] = unknownCommittedVersion.prev;
 					if (versionAllTLogs[k].empty()) {
 						versionAllTLogs[k].resize(bsSize);
 					}
-					populateBitset(versionAllTLogs[k], std::get<2>(unknownCommittedVersion));
+					populateBitset(versionAllTLogs[k], unknownCommittedVersion.tLogLocIds);
 					logGroupCandidate = true;
 				}
 			}
