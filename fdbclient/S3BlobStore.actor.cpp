@@ -873,7 +873,7 @@ std::string parseErrorCodeFromS3(std::string xmlResponse) {
 	return std::string(codeNode->value());
 }
 
-bool isS3TokenError(std::string s3Error) {
+bool isS3TokenError(const std::string& s3Error) {
 	return s3Error == "InvalidToken" || s3Error == "ExpiredToken";
 }
 
@@ -1059,8 +1059,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					wait(bstore->requestRate->getAllowance(1));
 					Future<Reference<HTTP::IncomingResponse>> dryrunResponse = HTTP::doRequest(
 					    rconn.conn, dryrunRequest, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
-					Reference<HTTP::IncomingResponse> dryrun_R = wait(timeoutError(dryrunResponse, requestTimeout));
-					dryrunR = dryrun_R;
+					store(dryrunR, timeoutError(dryrunResponse, requestTimeout));
 					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
 					if (dryrunR->code == badRequestCode && isS3TokenError(s3Error)) {
 						// authentication fails and s3 token error persists, retry in the hope token is corrected
