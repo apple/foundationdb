@@ -483,7 +483,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChangedOrStateTxn || req.txnStateTransactions.size()) {
+				if (shardChangedOrStateTxn || req.txnStateTransactions.size() || !req.writtenTags.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}
