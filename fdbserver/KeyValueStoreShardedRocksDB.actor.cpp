@@ -579,8 +579,11 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 }
 
 rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
-	ASSERT(false);
-
+	if (g_network->isSimulated()) {
+		return getCFOptions();
+	} else {
+		ASSERT(false);
+	}
 	auto options = getCFOptions();
 	// never slowdown ingest.
 	options.level0_file_num_compaction_trigger = (1 << 30);
