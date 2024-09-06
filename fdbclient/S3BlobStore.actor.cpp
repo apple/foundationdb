@@ -846,6 +846,102 @@ std::string awsCanonicalURI(const std::string& resource, std::vector<std::string
 	return canonicalURI;
 }
 
+// ref: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
+std::string parseErrorCodeFromS3(std::string xmlResponse) {
+	// Copy XML string to a modifiable buffer
+	std::vector<char> xmlBuffer(xmlResponse.begin(), xmlResponse.end());
+	xmlBuffer.push_back('\0'); // Ensure null-terminated string
+
+	// Parse the XML
+	xml_document<> doc;
+	doc.parse<0>(&xmlBuffer[0]);
+
+	// Find the root node
+	xml_node<>* root = doc.first_node("Error");
+	if (!root) {
+		TraceEvent(SevWarn, "ParseS3XMLResponseNoError").detail("Response", xmlResponse).log();
+		return "";
+	}
+
+	// Find the <Code> node
+	xml_node<>* codeNode = root->first_node("Code");
+	if (!codeNode) {
+		TraceEvent(SevWarn, "ParseS3XMLResponseNoErrorCode").detail("Response", xmlResponse).log();
+		return "";
+	}
+
+	return std::string(codeNode->value());
+}
+
+bool isS3TokenError(const std::string& s3Error) {
+	return s3Error == "InvalidToken" || s3Error == "ExpiredToken";
+}
+
+void setHeaders(Reference<S3BlobStoreEndpoint> bstore, Reference<HTTP::OutgoingRequest> req) {
+	// Finish/update the request headers (which includes Date header)
+	// This must be done AFTER the connection is ready because if credentials are coming from disk they are
+	// refreshed when a new connection is established and setAuthHeaders() would need the updated secret.
+	if (bstore->credentials.present() && !bstore->credentials.get().securityToken.empty())
+		req->data.headers["x-amz-security-token"] = bstore->credentials.get().securityToken;
+	if (CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+		bstore->setV4AuthHeaders(req->verb, req->resource, req->data.headers);
+	} else {
+		bstore->setAuthHeaders(req->verb, req->resource, req->data.headers);
+	}
+}
+
+std::string getCanonicalURI(Reference<S3BlobStoreEndpoint> bstore, Reference<HTTP::OutgoingRequest> req) {
+	std::vector<std::string> queryParameters;
+	std::string canonicalURI =
+	    awsCanonicalURI(req->resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+	if (!queryParameters.empty()) {
+		canonicalURI += "?";
+		canonicalURI += boost::algorithm::join(queryParameters, "&");
+	}
+
+	if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
+		// Has to be in absolute-form.
+		canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
+	}
+	return canonicalURI;
+}
+
+Reference<HTTP::OutgoingRequest> getDryrunRequest(Reference<S3BlobStoreEndpoint> bstore, std::string bucket) {
+	// dryrun with a check bucket exist request, to avoid sending duplicate data
+	UnsentPacketQueue contentCopy;
+	HTTP::Headers headers;
+	Reference<HTTP::OutgoingRequest> dryrunRequest = makeReference<HTTP::OutgoingRequest>();
+	dryrunRequest->verb = "GET";
+
+	dryrunRequest->data.content = &contentCopy;
+	dryrunRequest->data.contentLen = 0;
+
+	dryrunRequest->data.headers = headers;
+	dryrunRequest->data.headers["Host"] = bstore->host;
+	dryrunRequest->data.headers["Accept"] = "application/xml";
+
+	dryrunRequest->resource = constructResourcePath(bstore, bucket, "");
+
+	return dryrunRequest;
+}
+
+bool isWriteRequest(std::string verb) {
+	return verb == "POST" || verb == "PUT";
+}
+
+std::string parseBucketFromURI(std::string uri) {
+	if (uri.size() <= 1 || uri[0] != '/') {
+		// there is no bucket in the uri
+		return "";
+	}
+	uri = uri.substr(1);
+	size_t secondSlash = uri.find('/');
+	if (secondSlash == std::string::npos) {
+		return uri;
+	}
+	return uri.substr(0, secondSlash);
+}
+
 // Do a request, get a Response.
 // Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller
@@ -871,6 +967,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		resource = "/";
 	}
 
+	req->resource = resource;
+
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
 		std::string& fieldValue = req->data.headers[k];
@@ -891,6 +989,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state int thisTry = 1;
+	state int badRequestCode = 400;
+	state bool s3TokenError = false;
 	state double nextRetryDelay = 2.0;
 
 	loop {
@@ -898,12 +998,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state Optional<NetworkAddress> remoteAddress;
 		state bool connectionEstablished = false;
 		state Reference<HTTP::IncomingResponse> r;
+		state Reference<HTTP::IncomingResponse> dryrunR;
 		state std::string canonicalURI = resource;
 		state UID connID = UID();
 		state double reqStartTimer;
 		state double connectStartTimer = g_network->timer();
 		state bool reusingConn = false;
 		state bool fastRetry = false;
+		state bool simulateS3TokenError = false;
 
 		try {
 			// Start connecting
@@ -931,37 +1033,70 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
 
-			// Finish/update the request headers (which includes Date header)
-			// This must be done AFTER the connection is ready because if credentials are coming from disk they are
-			// refreshed when a new connection is established and setAuthHeaders() would need the updated secret.
-			if (bstore->credentials.present() && !bstore->credentials.get().securityToken.empty())
-				req->data.headers["x-amz-security-token"] = bstore->credentials.get().securityToken;
-			if (CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
-				bstore->setV4AuthHeaders(verb, resource, req->data.headers);
-			} else {
-				bstore->setAuthHeaders(verb, resource, req->data.headers);
+			try {
+				if (s3TokenError && isWriteRequest(req->verb)) {
+					// if it is a write request with s3TokenError, retry with a HEAD dryrun request
+					// to avoid sending duplicate data indefinitly to save network bandwidth
+					// because it might due to expired or invalid S3 token from the disk
+					state std::string bucket = parseBucketFromURI(resource);
+					if (bucket.empty()) {
+						TraceEvent(SevError, "EmptyBucketRequest")
+						    .detail("S3TokenError", s3TokenError)
+						    .detail("Verb", req->verb)
+						    .detail("Resource", resource)
+						    .log();
+						throw bucket_not_in_url();
+					}
+					TraceEvent("RetryS3RequestDueToTokenIssue")
+					    .detail("S3TokenError", s3TokenError)
+					    .detail("Resource", resource)
+					    .detail("Bucket", bucket)
+					    .detail("V4", CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER)
+					    .log();
+					state Reference<HTTP::OutgoingRequest> dryrunRequest = getDryrunRequest(bstore, bucket);
+					setHeaders(bstore, dryrunRequest);
+					dryrunRequest->resource = getCanonicalURI(bstore, dryrunRequest);
+					wait(bstore->requestRate->getAllowance(1));
+					Future<Reference<HTTP::IncomingResponse>> dryrunResponse = HTTP::doRequest(
+					    rconn.conn, dryrunRequest, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
+					store(dryrunR, timeoutError(dryrunResponse, requestTimeout));
+					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
+					if (dryrunR->code == badRequestCode && isS3TokenError(s3Error)) {
+						// authentication fails and s3 token error persists, retry in the hope token is corrected
+						wait(delay(bstore->knobs.max_delay_retryable_error));
+					} else if (dryrunR->code == 200 || dryrunR->code == 404) {
+						// authentication has passed, and bucket existence has been verified(200 or 404)
+						// it might work now(or it might be another error) thus reset s3TokenError.
+						TraceEvent("S3TokenIssueResolved")
+						    .detail("HttpCode", dryrunR->code)
+						    .detail("HttpResponseContent", dryrunR->data.content)
+						    .detail("S3Error", s3Error)
+						    .detail("URI", dryrunRequest->resource)
+						    .log();
+						s3TokenError = false;
+					} else {
+						TraceEvent(SevError, "S3UnexpectedError")
+						    .detail("HttpCode", dryrunR->code)
+						    .detail("HttpResponseContent", dryrunR->data.content)
+						    .detail("S3Error", s3Error)
+						    .detail("URI", dryrunRequest->resource)
+						    .log();
+						throw http_bad_response();
+					}
+					continue;
+				}
+			} catch (Error& e) {
+				// retry with GET failed, but continue to do original request anyway
+				TraceEvent(SevError, "ErrorDuringRetryS3TokenIssue").errorUnsuppressed(e);
 			}
-
-			std::vector<std::string> queryParameters;
-			canonicalURI = awsCanonicalURI(resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
-			if (!queryParameters.empty()) {
-				canonicalURI += "?";
-				canonicalURI += boost::algorithm::join(queryParameters, "&");
-			}
-
-			if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
-				// Has to be in absolute-form.
-				canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
-			}
-
-			req->resource = canonicalURI;
+			setHeaders(bstore, req);
+			req->resource = getCanonicalURI(bstore, req);
 
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 
 			Future<Reference<HTTP::IncomingResponse>> reqF =
 			    HTTP::doRequest(rconn.conn, req, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
-
 			// if we reused a connection from the pool, and immediately got an error, retry immediately discarding the
 			// connection
 			if (reqF.isReady() && reusingConn) {
@@ -969,6 +1104,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
+			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+				// simulate an error from s3
+				_r->code = badRequestCode;
+				simulateS3TokenError = true;
+			}
 			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
@@ -1007,7 +1147,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
 		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
-
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
 
@@ -1029,8 +1168,21 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 		}
 		event.suppressFor(60);
+
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
+			std::string s3Error = parseErrorCodeFromS3(r->data.content);
+			event.detail("S3ErrorCode", s3Error);
+			if (r->code == badRequestCode) {
+				if (isS3TokenError(s3Error) || simulateS3TokenError) {
+					s3TokenError = true;
+				}
+				TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
+				    .detail("HttpCode", r->code)
+				    .detail("HttpResponseContent", r->data.content)
+				    .detail("S3Error", s3Error)
+				    .log();
+			}
 		}
 
 		event.detail("ConnectionEstablished", connectionEstablished);
@@ -1060,7 +1212,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		if (fastRetry) {
 			++bstore->blobStats->fastRetries;
 			wait(delay(0));
-		} else if (retryable) {
+		} else if (retryable || s3TokenError) {
 			// We will wait delay seconds before the next retry, start with nextRetryDelay.
 			double delay = nextRetryDelay;
 			// conenctionFailed is treated specially as we know proxy to AWS can only serve 1 request per connection
@@ -1083,7 +1235,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					delay = std::max(delay, retryAfter);
 				}
 			}
-
 			// Log the delay then wait.
 
 			event.detail("RetryDelay", delay);
