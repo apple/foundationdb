@@ -2858,7 +2858,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (ekpInterf->get().present()) {
 					recruited = ekpInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a encryptKeyProxy server.");
+					CODE_PROBE(true, "Recruited while already a encryptKeyProxy server.", probe::decoration::rare);
 				} else {
 					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);

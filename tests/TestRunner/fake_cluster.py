@@ -25,10 +25,16 @@ class ClusterFileGenerator:
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
-        shutil.rmtree(self.tmp_dir)
+        try:
+            shutil.rmtree(self.tmp_dir)
+        except FileNotFoundError:
+            pass
 
     def close(self):
-        shutil.rmtree(self.tmp_dir)
+        try:
+            shutil.rmtree(self.tmp_dir)
+        except FileNotFoundError:
+            pass
 
 
 if __name__ == "__main__":

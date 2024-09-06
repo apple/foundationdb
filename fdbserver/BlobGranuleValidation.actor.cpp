@@ -200,7 +200,7 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 			if (ranges.size() == 1) {
 				return Void();
 			}
-			CODE_PROBE(true, "ClearAndAwaitMerge doing clear");
+			CODE_PROBE(true, "ClearAndAwaitMerge doing clear", probe::decoration::rare);
 			reClearCount--;
 			if (reClearCount <= 0) {
 				tr.clear(range);
@@ -284,7 +284,7 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 			}
 
 			if (lastSummaryVersion != invalidVersion) {
-				CODE_PROBE(true, "comparing multiple summaries");
+				CODE_PROBE(true, "comparing multiple summaries", probe::decoration::rare);
 				// diff with last summary ranges to ensure versions never decreased for any range
 				for (auto& it : nextSummary) {
 					auto lastSummaries = lastSummary.intersectingRanges(it.keyRange);

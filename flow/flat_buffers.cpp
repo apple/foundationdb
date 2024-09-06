@@ -492,7 +492,7 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 	return Void();
 }
 
-TEST_CASE("/flow/FlatBuffers/Standalone") {
+TEST_CASE("/flow/FlatBuffers/Standalone2") {
 	std::vector<Standalone<StringRef>> vecIn;
 	auto numElements = deterministicRandom()->randomInt(1, 20);
 	for (int i = 0; i < numElements; ++i) {

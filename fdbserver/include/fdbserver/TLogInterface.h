@@ -53,6 +53,7 @@ struct TLogInterface {
 	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream<struct TLogSnapRequest> snapRequest;
 	RequestStream<struct TrackTLogRecoveryRequest> trackRecovery;
+	RequestStream<struct setClusterRecoveryVersionRequest> setClusterRecoveryVersion;
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
@@ -87,6 +88,7 @@ struct TLogInterface {
 		streams.push_back(snapRequest.getReceiver());
 		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
 		streams.push_back(trackRecovery.getReceiver());
+		streams.push_back(setClusterRecoveryVersion.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -117,6 +119,8 @@ struct TLogInterface {
 			    RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
 			trackRecovery =
 			    RequestStream<struct TrackTLogRecoveryRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(12));
+			setClusterRecoveryVersion = RequestStream<struct setClusterRecoveryVersionRequest>(
+			    peekMessages.getEndpoint().getAdjustedEndpoint(13));
 		}
 	}
 };
@@ -133,16 +137,31 @@ struct TLogRecoveryFinishedRequest {
 	}
 };
 
+struct UnknownCommittedVersions {
+	constexpr static FileIdentifier file_identifier = 11822137;
+	Version version; // version made durable on recovering tLog
+	Version prev; // previous to version; to ensure no gaps in chain
+	std::vector<uint16_t> tLogLocIds; // locations version was sent to
+	UnknownCommittedVersions() {}
+	UnknownCommittedVersions(Version version, Version prev, std::vector<uint16_t> tLogLocIds)
+	  : version(version), prev(prev), tLogLocIds(tLogLocIds) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, prev, tLogLocIds);
+	}
+};
+
 struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
-	std::deque<std::tuple<Version, int>> unknownCommittedVersions;
-	UID id;
+	std::deque<UnknownCommittedVersions> unknownCommittedVersions;
+	UID id; // captures TLogData::dbgid
+	UID logId; // captures LogData::logId
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion, unknownCommittedVersions, id);
+		serializer(ar, end, knownCommittedVersion, unknownCommittedVersions, id, logId);
 	}
 };
 
@@ -303,12 +322,13 @@ struct TLogCommitRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	SpanContext spanContext;
 	Arena arena;
-	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
+	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, seqPrevVersion;
 
 	StringRef messages; // Each message prefixed by a 4-byte length
 
 	ReplyPromise<TLogCommitReply> reply;
-	int tLogCount;
+	uint16_t tLogCount;
+	std::vector<uint16_t> tLogLocIds;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
@@ -318,12 +338,15 @@ struct TLogCommitRequest : TimedRequest {
 	                  Version version,
 	                  Version knownCommittedVersion,
 	                  Version minKnownCommittedVersion,
+	                  Version seqPrevVersion,
 	                  StringRef messages,
-	                  int tLogCount,
+	                  uint16_t tLogCount,
+	                  std::vector<uint16_t>& tLogLocIds,
 	                  Optional<UID> debugID)
 	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
-	    messages(messages), tLogCount(tLogCount), debugID(debugID) {}
+	    seqPrevVersion(seqPrevVersion), messages(messages), tLogCount(tLogCount), tLogLocIds(tLogLocIds),
+	    debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -331,10 +354,12 @@ struct TLogCommitRequest : TimedRequest {
 		           version,
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,
+		           seqPrevVersion,
 		           messages,
 		           reply,
 		           debugID,
 		           tLogCount,
+		           tLogLocIds,
 		           spanContext,
 		           arena);
 	}
@@ -442,6 +467,21 @@ struct TrackTLogRecoveryRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, oldestGenRecoverAtVersion, reply);
+	}
+};
+
+struct setClusterRecoveryVersionRequest {
+	constexpr static FileIdentifier file_identifier = 6876464;
+
+	Version recoveryVersion;
+	ReplyPromise<Void> reply;
+
+	setClusterRecoveryVersionRequest() = default;
+	setClusterRecoveryVersionRequest(Version recoveryVersion) : recoveryVersion(recoveryVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, recoveryVersion, reply);
 	}
 };
 

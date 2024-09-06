@@ -301,13 +301,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					    allowPurging && !self->purgeAtLatest && deterministicRandom()->random01() < 0.5;
 					state bool forcePurge = doPurging && self->doForcePurge && deterministicRandom()->random01() < 0.25;
 					if (doPurging) {
-						CODE_PROBE(true, "BGV considering purge");
+						CODE_PROBE(true, "BGV considering purge", probe::decoration::rare);
 						Version maxPurgeVersion = oldRead.v;
 						for (auto& it : timeTravelChecks) {
 							maxPurgeVersion = std::min(it.second.v, maxPurgeVersion);
 						}
 						if (prevPurgeVersion < maxPurgeVersion) {
-							CODE_PROBE(true, "BGV doing purge");
+							CODE_PROBE(true, "BGV doing purge", probe::decoration::rare);
 							newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
 							prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
 							if (BGV_DEBUG) {
@@ -341,7 +341,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 								}
 								ASSERT(false);
 							}
-							CODE_PROBE(true, "BGV purge complete");
+							CODE_PROBE(true, "BGV purge complete", probe::decoration::rare);
 							if (BGV_DEBUG) {
 								fmt::print("BGV Purge complete @ {0}\n", newPurgeVersion);
 							}
@@ -1186,7 +1186,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->clearAndMergeCheck) {
-			CODE_PROBE(true, "BGV clearing database and awaiting merge");
+			CODE_PROBE(true, "BGV clearing database and awaiting merge", probe::decoration::rare);
 			wait(clearAndAwaitMerge(cx, normalKeys));
 
 			if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {

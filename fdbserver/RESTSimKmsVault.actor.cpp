@@ -755,6 +755,19 @@ TEST_CASE("/restSimKmsVault/GetByKeyIds/missingValidationTokens") {
 	return Void();
 }
 
+TEST_CASE("/restSimKmsVault/GetByKeyIds/missingValidationTokensBlob") {
+	EncryptCipherDomainIdVec domIds;
+	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::MISSING_VALIDATION_TOKEN);
+
+	VaultResponse response = handleFetchBlobMetada(requestContent);
+	ASSERT(response.failed);
+	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
+	ASSERT(detail.present());
+	ASSERT(detail->isEqual(ErrorDetail(missingTokenCode, missingTokensMsg)));
+
+	return Void();
+}
+
 TEST_CASE("/restSimKmsVault/GetByKeyIds") {
 	EncryptCipherDomainIdVec domIds;
 	std::string requestContent = getFakeBaseCipherIdsRequestContent(domIds);
@@ -786,19 +799,6 @@ TEST_CASE("/restSimKmsVault/GetBlobMetadata/invalidVersion") {
 	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
 	ASSERT(detail.present());
 	ASSERT(detail->isEqual(ErrorDetail(invalidVersionCode, invalidVersionMsg)));
-
-	return Void();
-}
-
-TEST_CASE("/restSimKmsVault/GetByKeyIds/missingValidationTokens") {
-	EncryptCipherDomainIdVec domIds;
-	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::MISSING_VALIDATION_TOKEN);
-
-	VaultResponse response = handleFetchBlobMetada(requestContent);
-	ASSERT(response.failed);
-	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
-	ASSERT(detail.present());
-	ASSERT(detail->isEqual(ErrorDetail(missingTokenCode, missingTokensMsg)));
 
 	return Void();
 }

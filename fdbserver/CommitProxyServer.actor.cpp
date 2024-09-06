@@ -1044,14 +1044,14 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 		// 2. Transaction can be a multi-key transaction spawning multiple tenants
 		// For now fallback to 'default encryption domain'
 
-		CODE_PROBE(true, "ClearRange mutation encryption");
+		CODE_PROBE(true, "ClearRange mutation encryption", probe::decoration::rare);
 	}
 
 	// Unknown tenant, fallback to fdb default encryption domain
 	if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
 		domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 
-		CODE_PROBE(true, "Default domain mutation encryption");
+		CODE_PROBE(true, "Default domain mutation encryption", probe::decoration::rare);
 	}
 
 	return domainId;
@@ -1817,7 +1817,7 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 	ASSERT(decryptedMutation.param1 == mutation->param1);
 	ASSERT(decryptedMutation.param2 == mutation->param2);
 
-	CODE_PROBE(true, "encrypting non-metadata mutations");
+	CODE_PROBE(true, "encrypting non-metadata mutations", probe::decoration::rare);
 	self->toCommit.writeTypedMessage(encryptedMutation);
 	return encryptedMutation;
 }
@@ -1852,7 +1852,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED, "using required tenant mode");
 
 		if (encryptedMutationOpt && encryptedMutationOpt->present()) {
-			CODE_PROBE(true, "using already encrypted mutation");
+			CODE_PROBE(true, "using already encrypted mutation", probe::decoration::rare);
 			encryptedMutation = encryptedMutationOpt->get();
 			ASSERT(encryptedMutation.isEncrypted());
 			// During simulation check whether the encrypted mutation matches the decrpyted mutation
@@ -1862,7 +1862,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 		} else {
 			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
 				domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-				CODE_PROBE(true, "Raw access mutation encryption");
+				CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
 			}
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 			ASSERT(self->cipherKeys.count(domainId) > 0);
@@ -1870,7 +1870,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			    mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG, encryptTime);
 		}
 		ASSERT(encryptedMutation.isEncrypted());
-		CODE_PROBE(true, "encrypting non-metadata mutations");
+		CODE_PROBE(true, "encrypting non-metadata mutations", probe::decoration::rare);
 		self->toCommit.writeTypedMessage(encryptedMutation);
 		return std::variant<MutationRef, VectorRef<MutationRef>>{ encryptedMutation };
 	} else {
@@ -1918,7 +1918,7 @@ double pushToBackupMutations(CommitBatchContext* self,
 		// Add the mutation to the relevant backup tag
 		for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
 			// If encryption is enabled make sure the mutation we are writing is also encrypted
-			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
+			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation", probe::decoration::rare);
 			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 		}
 
@@ -1938,7 +1938,7 @@ double pushToBackupMutations(CommitBatchContext* self,
 			MutationRef backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
 
 			if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-				CODE_PROBE(true, "encrypting clear range backup mutation");
+				CODE_PROBE(true, "encrypting clear range backup mutation", probe::decoration::rare);
 				if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
 				    encryptedMutation.present()) {
 					backupMutation = encryptedMutation.get();
@@ -2318,7 +2318,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
 		    self->toCommit.addTags(tags);
 		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-			    CODE_PROBE(true, "encrypting idempotency mutation");
+			    CODE_PROBE(true, "encrypting idempotency mutation", probe::decoration::rare);
 			    EncryptCipherDomainId domainId =
 			        getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
 			    MutationRef encryptedMutation =
