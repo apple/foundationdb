@@ -598,9 +598,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_COMPACTION_PERIOD, isSimulated? 3600 : 2592000 ); // 30d
 	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,               3600 ); // 1h
 	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                 -1 );
-	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 96 << 20 : 16 << 20 );  // 16MB
-	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE, isSimulated ? 4 << 30 : 1 << 30 ); // 1GB
-	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET, isSimulated ? 1 << 20 : 64 << 20 ); // 64MB
+	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 128 << 20 : 16 << 20 );  // 16MB
+	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE, isSimulated ? 0 : 1 << 30 ); // 1GB
+	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET,                  64 << 20 ); // 64MB
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
