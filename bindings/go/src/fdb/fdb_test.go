@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 )
 
 const API_VERSION int = 730
@@ -102,6 +103,26 @@ func TestVersionstamp(t *testing.T) {
 	}
 	t.Log(k)
 	t.Logf("setOne returned %s", k)
+}
+
+func TestEstimatedRangeSize(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	var f fdb.FutureInt64
+	_, e := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+		f = rtr.GetEstimatedRangeSizeBytes(subspace.AllKeys())
+
+		return nil, nil
+	})
+	if e != nil {
+		t.Error(e)
+	}
+
+	_, e = f.Get()
+	if e != nil {
+		t.Error(e)
+	}
 }
 
 func TestReadTransactionOptions(t *testing.T) {

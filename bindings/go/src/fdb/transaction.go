@@ -191,7 +191,7 @@ func (t Transaction) Snapshot() Snapshot {
 // OnError internally to implement a correct retry loop.
 func (t Transaction) OnError(e Error) FutureNil {
 	return &futureNil{
-		future: newFuture(C.fdb_transaction_on_error(t.ptr, C.fdb_error_t(e.Code))),
+		future: newFuture(t.transaction, C.fdb_transaction_on_error(t.ptr, C.fdb_error_t(e.Code))),
 	}
 }
 
@@ -207,7 +207,7 @@ func (t Transaction) OnError(e Error) FutureNil {
 // https://apple.github.io/foundationdb/developer-guide.html#transactions-with-unknown-results.
 func (t Transaction) Commit() FutureNil {
 	return &futureNil{
-		future: newFuture(C.fdb_transaction_commit(t.ptr)),
+		future: newFuture(t.transaction, C.fdb_transaction_commit(t.ptr)),
 	}
 }
 
@@ -243,13 +243,13 @@ func (t Transaction) Commit() FutureNil {
 func (t Transaction) Watch(key KeyConvertible) FutureNil {
 	kb := key.FDBKey()
 	return &futureNil{
-		future: newFuture(C.fdb_transaction_watch(t.ptr, byteSliceToPtr(kb), C.int(len(kb)))),
+		future: newFuture(t.transaction, C.fdb_transaction_watch(t.ptr, byteSliceToPtr(kb), C.int(len(kb)))),
 	}
 }
 
 func (t *transaction) get(key []byte, snapshot int) FutureByteSlice {
 	return &futureByteSlice{
-		future: newFuture(C.fdb_transaction_get(
+		future: newFuture(t, C.fdb_transaction_get(
 			t.ptr,
 			byteSliceToPtr(key),
 			C.int(len(key)),
@@ -273,7 +273,7 @@ func (t *transaction) doGetRange(r Range, options RangeOptions, snapshot bool, i
 	ekey := esel.Key.FDBKey()
 
 	return futureKeyValueArray{
-		future: newFuture(C.fdb_transaction_get_range(
+		future: newFuture(t, C.fdb_transaction_get_range(
 			t.ptr,
 			byteSliceToPtr(bkey),
 			C.int(len(bkey)),
@@ -315,7 +315,7 @@ func (t Transaction) GetRange(r Range, options RangeOptions) RangeResult {
 
 func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) FutureInt64 {
 	return &futureInt64{
-		future: newFuture(C.fdb_transaction_get_estimated_range_size_bytes(
+		future: newFuture(t, C.fdb_transaction_get_estimated_range_size_bytes(
 			t.ptr,
 			byteSliceToPtr(beginKey),
 			C.int(len(beginKey)),
@@ -343,7 +343,7 @@ func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 
 func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize int64) FutureKeyArray {
 	return &futureKeyArray{
-		future: newFuture(C.fdb_transaction_get_range_split_points(
+		future: newFuture(t, C.fdb_transaction_get_range_split_points(
 			t.ptr,
 			byteSliceToPtr(beginKey),
 			C.int(len(beginKey)),
@@ -368,7 +368,7 @@ func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKe
 
 func (t *transaction) getReadVersion() FutureInt64 {
 	return &futureInt64{
-		future: newFuture(C.fdb_transaction_get_read_version(t.ptr)),
+		future: newFuture(t, C.fdb_transaction_get_read_version(t.ptr)),
 	}
 }
 
@@ -435,12 +435,12 @@ func (t Transaction) GetCommittedVersion() (int64, error) {
 // mind that a transaction which reads keys and then sets them to their current
 // values may be optimized to a read-only transaction.
 func (t Transaction) GetVersionstamp() FutureKey {
-	return &futureKey{future: newFuture(C.fdb_transaction_get_versionstamp(t.ptr))}
+	return &futureKey{future: newFuture(t.transaction, C.fdb_transaction_get_versionstamp(t.ptr))}
 }
 
 func (t *transaction) getApproximateSize() FutureInt64 {
 	return &futureInt64{
-		future: newFuture(C.fdb_transaction_get_approximate_size(t.ptr)),
+		future: newFuture(t, C.fdb_transaction_get_approximate_size(t.ptr)),
 	}
 }
 
@@ -468,7 +468,7 @@ func boolToInt(b bool) int {
 func (t *transaction) getKey(sel KeySelector, snapshot int) FutureKey {
 	key := sel.Key.FDBKey()
 	return &futureKey{
-		future: newFuture(C.fdb_transaction_get_key(
+		future: newFuture(t, C.fdb_transaction_get_key(
 			t.ptr,
 			byteSliceToPtr(key),
 			C.int(len(key)),
@@ -587,7 +587,7 @@ func (t Transaction) Options() TransactionOptions {
 func localityGetAddressesForKey(t *transaction, key KeyConvertible) FutureStringSlice {
 	kb := key.FDBKey()
 	return &futureStringSlice{
-		future: newFuture(C.fdb_transaction_get_addresses_for_key(
+		future: newFuture(t, C.fdb_transaction_get_addresses_for_key(
 			t.ptr,
 			byteSliceToPtr(kb),
 			C.int(len(kb)),

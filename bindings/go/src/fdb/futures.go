@@ -71,11 +71,25 @@ type Future interface {
 }
 
 type future struct {
+	// db is used to hint Go's GC about the dependency on the parent database object.
+	// This prevents the database to be garbage-collected before future is out of scope.
+	db *database
+	// t is used to hint Go's GC about the dependency on the parent transaction object.
+	// This prevents the transaction to be garbage-collected before future is out of scope.
+	t   *transaction
 	ptr *C.FDBFuture
 }
 
-func newFuture(ptr *C.FDBFuture) *future {
-	f := &future{ptr}
+func newFuture(t *transaction, ptr *C.FDBFuture) *future {
+	return newFutureWithDb(nil, t, ptr)
+}
+
+func newFutureWithDb(db *database, t *transaction, ptr *C.FDBFuture) *future {
+	f := &future{
+		db:  db,
+		t:   t,
+		ptr: ptr,
+	}
 	runtime.SetFinalizer(f, func(f *future) { C.fdb_future_destroy(f.ptr) })
 	return f
 }
