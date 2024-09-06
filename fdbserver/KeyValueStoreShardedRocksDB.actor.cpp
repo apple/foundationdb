@@ -251,7 +251,7 @@ public:
 		    .detail("ShardedRocksDBSeverity", bg_error->severity())
 		    .detail("Status", bg_error->ToString());
 
-		// std::unique_lock<std::mutex> lock(mutex);
+		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
 		// RocksDB generates two types of background errors, IO Error and Corruption
@@ -267,11 +267,11 @@ public:
 		}
 	}
 	Future<int> getFuture() {
-		// std::unique_lock<std::mutex> lock(mutex);
+		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
 	~RocksDBErrorListener() {
-		// std::unique_lock<std::mutex> lock(mutex);
+		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
 		errorPromise.send(error_code_success);
@@ -279,7 +279,7 @@ public:
 
 private:
 	ThreadReturnPromise<int> errorPromise;
-	// std::mutex mutex;
+	std::mutex mutex;
 };
 
 // Encapsulation of shared states.
@@ -579,11 +579,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 }
 
 rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
-	auto options = getCFOptions();
-	if (g_network->isSimulated()) {
-		return options; // can cause external timeout in simulation
-	}
+	ASSERT(false);
 
+	auto options = getCFOptions();
 	// never slowdown ingest.
 	options.level0_file_num_compaction_trigger = (1 << 30);
 	options.level0_slowdown_writes_trigger = (1 << 30);
@@ -716,7 +714,7 @@ public:
 	// Called on every db commit.
 	void update() {
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			// std::lock_guard<std::mutex> lock(mutex);
+			std::lock_guard<std::mutex> lock(mutex);
 			iteratorsMap.clear();
 		}
 	}
@@ -725,7 +723,7 @@ public:
 	ReadIterator getIterator(const KeyRange& range) {
 		// Shared iterators are not bounded.
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			// std::lock_guard<std::mutex> lock(mutex);
+			std::lock_guard<std::mutex> lock(mutex);
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
 				if (!it->second.inUse) {
 					it->second.inUse = true;
@@ -747,7 +745,7 @@ public:
 	// Called on every read operation, after the keys are collected.
 	void returnIterator(ReadIterator& iter) {
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS) {
-			// std::lock_guard<std::mutex> lock(mutex);
+			std::lock_guard<std::mutex> lock(mutex);
 			it = iteratorsMap.find(iter.index);
 			// iterator found: put the iterator back to the pool(inUse=false).
 			// iterator not found: update would have removed the iterator from pool, so nothing to do.
@@ -760,7 +758,7 @@ public:
 
 	// Called for every ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME seconds in a loop.
 	void refreshIterators() {
-		// std::lock_guard<std::mutex> lock(mutex);
+		std::lock_guard<std::mutex> lock(mutex);
 		it = iteratorsMap.begin();
 		while (it != iteratorsMap.end()) {
 			if (now() - it->second.creationTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME) {
@@ -780,7 +778,7 @@ private:
 	std::unordered_map<int, ReadIterator>::iterator it;
 	rocksdb::DB* db;
 	rocksdb::ColumnFamilyHandle* cf;
-	// std::mutex mutex;
+	std::mutex mutex;
 	// incrementing counter for every new iterator creation, to uniquely identify the iterator in returnIterator().
 	uint64_t index;
 	uint64_t iteratorsReuseCount;
@@ -3872,9 +3870,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		// occurring.
 		if (g_network->isSimulated()) {
 			TraceEvent(SevDebug, "ShardedRocksDB").detail("Info", "Use Coro threads in simulation.");
-			writeThread = CoroThreadPool::createThreadPool(true);
-			compactionThread = CoroThreadPool::createThreadPool(true);
-			readThreads = CoroThreadPool::createThreadPool(true);
+			writeThread = CoroThreadPool::createThreadPool(false);
+			compactionThread = CoroThreadPool::createThreadPool(false);
+			readThreads = CoroThreadPool::createThreadPool(false);
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			compactionThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_COMPACTION_THREAD_PRIORITY);
