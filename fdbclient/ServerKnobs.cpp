@@ -207,10 +207,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( READ_REBALANCE_MIN_READ_BYTES_KS, std::numeric_limits<double>::max() );
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
-	bool buggifySmallShards = false; // randomize && BUGGIFY;
-	bool simulationMediumShards = false; // !buggifySmallShards && isSimulated && randomize && !BUGGIFY; // prefer smaller shards in simulation
+	bool buggifySmallShards = randomize && BUGGIFY;
+	bool simulationMediumShards = !buggifySmallShards && isSimulated && randomize && !BUGGIFY; // prefer smaller shards in simulation
 	// FIXME: increase this even more eventually
-	init( MIN_SHARD_BYTES,                                  10000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 40000; if (simulationMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
+	init( MIN_SHARD_BYTES,                                  10000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 400000; if (simulationMediumShards) MIN_SHARD_BYTES = 2000000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
 	init( SHARD_BYTES_RATIO,                                       4 );
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
@@ -235,8 +235,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 		Shard with a read bandwidth smaller than this value will never be too busy to handle the reads.
 	*/
 	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
-	bool buggifySmallBandwidthSplit = false; // randomize && BUGGIFY;
-	init( SHARD_MAX_BYTES_PER_KSEC,                 1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_PER_KSEC = 10LL*1000*1000;
+	bool buggifySmallBandwidthSplit = randomize && BUGGIFY;
+	init( SHARD_MAX_BYTES_PER_KSEC,                 1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_PER_KSEC = 1LL*100000*1000;
 	/* 1*1MB/sec * 1000sec/ksec
 		Shards with more than this bandwidth will be split immediately.
 		For a large shard (100MB), it will be split into multiple shards with sizes < SHARD_SPLIT_BYTES_PER_KSEC;
@@ -247,7 +247,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 		team indefinitely, limiting performance.
 		*/
 
-	init( SHARD_MIN_BYTES_PER_KSEC,                100 * 1000 * 1000 ); if( buggifySmallBandwidthSplit ) SHARD_MIN_BYTES_PER_KSEC = 200*1*1000;
+	init( SHARD_MIN_BYTES_PER_KSEC,                100 * 1000 * 1000 ); if( buggifySmallBandwidthSplit ) SHARD_MIN_BYTES_PER_KSEC = 20*1000*1000;
 	/* 100*1KB/sec * 1000sec/ksec
 		Shards with more than this bandwidth will not be merged.
 		Obviously this needs to be significantly less than SHARD_MAX_BYTES_PER_KSEC, else we will repeatedly merge and split.
@@ -598,7 +598,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_COMPACTION_PERIOD, isSimulated? 3600 : 2592000 ); // 30d
 	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,               3600 ); // 1h
 	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                 -1 );
-	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 128 << 20 : 16 << 20 );  // 16MB
+	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, (isSimulated && !buggifySmallShards && !buggifySmallBandwidthSplit && !simulationMediumShards) ? 128 << 20 : 16 << 20 );  // 16MB
 	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE, isSimulated ? 0 : 1 << 30 ); // 1GB
 	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET,                  64 << 20 ); // 64MB
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
