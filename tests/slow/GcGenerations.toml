@@ -5,7 +5,6 @@ machineCount = 20
 minimumRegions = 2
 coordinators = 1
 remoteConfig = 'remote_double'
-storageEngineExcludeTypes = [5]
 
 [[knobs]]
 max_write_transaction_life_versions = 5000000

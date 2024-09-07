@@ -2,7 +2,6 @@
 extraDatabaseMode = 'Single'
 # required tenant mode is not supported for Disaster Recovery yet
 tenantModes = ['disabled', 'optional']
-storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'SharedDefaultBackupToFileThenDB'

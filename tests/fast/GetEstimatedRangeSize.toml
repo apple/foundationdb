@@ -1,7 +1,6 @@
 [configuration]
 allowDefaultTenant = false
 tenantModes = ['optional', 'required']
-storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'TenantCreation'

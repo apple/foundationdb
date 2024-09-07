@@ -3,7 +3,6 @@ testClass = 'MockDD'
 
 [[knobs]]
 enable_dd_physical_shard = false
-shard_encode_location_metadata = false
 dd_tenant_awareness_enabled = false
 storage_quota_enabled = false
 

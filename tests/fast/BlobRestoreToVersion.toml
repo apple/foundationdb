@@ -4,11 +4,9 @@ blobGranulesEnabled = true
 extraDatabaseMode = 'Single'
 allowDefaultTenant = false
 disableTss = true
-storageEngineExcludeTypes = [5]
 
 [[knobs]]
 bg_consistency_check_enabled = 0
-shard_encode_location_metadata = false
 bw_throttling_enabled = false
 blob_restore_skip_empty_ranges = false
 

@@ -1,7 +1,5 @@
 testClass = "Backup"
 
-[configuration]
-storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'BackupAndRestore'
