@@ -4,7 +4,6 @@ disableTss = true # There's no TSS in MGS this prevent the DD operate TSS mappin
 
 [[knobs]]
 max_added_sources_multiplier = 0 # set to 0 because it's impossible to make sure SS and mock SS will finish fetch keys at the same time.
-shard_encode_location_metadata = false
 
 [[test]]
 testTitle = 'IDDTxnProcessorRawStartMovement'

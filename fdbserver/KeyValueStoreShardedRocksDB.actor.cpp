@@ -577,6 +577,11 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 }
 
 rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
+	if (g_network->isSimulated()) {
+		return getCFOptions();
+	} else {
+		ASSERT(false); // FIXME: remove when SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE feature is well tuned
+	}
 	auto options = getCFOptions();
 	// never slowdown ingest.
 	options.level0_file_num_compaction_trigger = (1 << 30);
