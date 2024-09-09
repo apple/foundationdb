@@ -1990,7 +1990,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	state int retries = 0;
 	state DataMoveMetaData dataMove;
-	state bool complete = false;
 	state bool cancelDataMove = false;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
@@ -2009,6 +2008,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 		// This process can be split up into multiple transactions if getRange() doesn't return the entire
 		// target range.
 		loop {
+			state bool complete = false;
 			state std::vector<UID> completeSrc;
 			state std::vector<UID> destServers;
 			state std::unordered_set<UID> allServers;
