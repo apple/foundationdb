@@ -817,6 +817,7 @@ struct LogPushData : NonCopyable {
 
 	Optional<Tag> savedRandomRouterTag;
 	void storeRandomRouterTag() { savedRandomRouterTag = logSystem->getRandomRouterTag(); }
+	int getLogRouterTags() { return logSystem->getLogRouterTags(); }
 
 private:
 	Reference<ILogSystem> logSystem;
