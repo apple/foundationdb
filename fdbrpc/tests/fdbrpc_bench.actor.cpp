@@ -65,33 +65,32 @@ struct EchoRequest {
 	}
 };
 
+// A sliding window counter over last `size` seconds. Internally uses a vector
+// where each entry counts the number of hits each second.
 class StatCounter {
 public:
 	StatCounter(int size = 10) : vals(size) {}
 
+	// Returns the average number of hits per seconds over last `size` seconds.
 	int avg() {
-		int now_ts = this->now() / 1000;
+		int now_ts = this->now() / 1000; // Convert ms to second.
 		int sum = 0;
 		for (auto [ts, v] : vals) {
-			if (ts < now_ts - vals.size())
+			if (ts < now_ts - vals.size()) // timestamp older than last `size` seconds.
 				continue;
 			sum += v;
 		}
 		return sum / vals.size();
 	}
 
-	int64_t now() {
-		auto n = std::chrono::system_clock::now();
-		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(n.time_since_epoch());
-		return duration.count();
-	}
-
+	// Increaments the counter by one for current time.
 	void inc() {
 		int ts = this->now() / 1000;
 		int pos = ts % vals.size();
 
 		auto [old_ts, v] = vals[pos];
 		if (old_ts < ts) {
+			// Timestamp older than last `size` second, so we reset it back.
 			vals[pos] = { ts, 1 };
 		} else {
 			vals[pos] = { old_ts, v + 1 };
@@ -99,6 +98,12 @@ public:
 	}
 
 private:
+	int64_t now() {
+		auto n = std::chrono::system_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(n.time_since_epoch());
+		return duration.count();
+	}
+
 	std::vector<std::pair<int64_t, int>> vals;
 };
 
