@@ -1840,7 +1840,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			} else { // In simulation
 				ts = testers.get();
 			}
-			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GoTTesters")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GotTesters")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RetryTimes", retryTimes)
