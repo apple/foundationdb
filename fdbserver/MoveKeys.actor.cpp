@@ -2885,7 +2885,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 	state KeyRange range;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 	TraceEvent(sevDm, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
-	state bool complete = false;
 	state Error lastError;
 	state bool runPreCheck = true;
 
@@ -2902,7 +2901,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 			range = KeyRange();
 
 			try {
-				complete = false;
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3011,7 +3009,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				if (range.end == dataMove.ranges.front().end) {
 					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 					tr.clear(dataMoveKeyFor(dataMoveId));
-					complete = true;
 					TraceEvent(sevDm, "CleanUpDataMoveDeleteMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMove.toString());
 
@@ -3042,7 +3039,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					wait(auditLocationMetadataPostCheck(occ, range, "cleanUpDataMoveCore_postcheck", dataMoveId));
 				}
 
-				if (complete) {
+				if (range.end == dataMove.ranges.front().end) {
 					break;
 				}
 			} catch (Error& e) {
