@@ -18,12 +18,14 @@
  * limitations under the License.
  */
 
+#include <iostream>
+#include <boost/program_options.hpp>
+
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/TLSConfig.actor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowTransport.h"
-#include <iostream>
 
 namespace fdbrpc_bench {
 NetworkAddress serverAddress;
@@ -136,7 +138,7 @@ ACTOR Future<Void> echoServer() {
 	}
 }
 
-const int payload_size_bytes = 1024 * 1000;
+int payload_size_bytes = 1024 * 10;
 
 std::string randString(int size) {
 	const std::string charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -154,6 +156,7 @@ std::string randString(int size) {
 }
 
 ACTOR Future<Void> echoClient() {
+	std::cout << "Starting client. Payload size: " << payload_size_bytes << " bytes" << std::endl;
 	state EchoServerInterface server;
 	server.getInterface =
 	    RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_ECHO_SERVER));
@@ -181,30 +184,53 @@ ACTOR Future<Void> echoClient() {
 }
 
 std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
-	{ "echoServer", &echoServer },
-	{ "echoClient", &echoClient },
+	{ "server", &echoServer },
+	{ "client", &echoClient },
 };
 } // namespace fdbrpc_bench
 
 int main(int argc, char* argv[]) {
 	using namespace fdbrpc_bench;
+	namespace po = boost::program_options;
 
-	bool isServer = false;
+	po::options_description desc("fdbrpc_bench usage");
+	desc.add_options()
+		("help,h", "show help message")
+		("mode,m", po::value<std::string>(), "process mode [server/client]")
+		("payload_size,s", po::value<int>(), "size of payload sent by client (bytes)");
+
+	po::variables_map vm;
+	po::store(po::parse_command_line(argc, argv, desc), vm);
+	po::notify(vm);
+
+	// Check for help option
+	if (vm.count("help")) {
+		std::cout << desc << std::endl;
+		return 0;
+	}
+
+	auto errMsg = "invalid arguments provided.\n";
+	if (vm.count("mode") == 0) {
+		std::cerr << errMsg << desc << std::endl;
+		return -1;
+	}
+
+	auto mode = vm["mode"].as<std::string>();
+	if ((mode != "client" && mode != "server") ||
+		(mode == "server" && vm.count("payload_size") > 0)) {
+		std::cerr << errMsg << desc << std::endl;
+		return -1;
+	}
+
+	if (vm.count("payload_size") > 0) {
+		 payload_size_bytes = vm["payload_size"].as<int>();
+	}
+
+	bool isServer = (mode == "server");
 	std::string port;
 	std::vector<std::function<Future<Void>()>> toRun;
-
-	// parse arguments
-	for (int i = 1; i < argc; ++i) {
-		std::string arg(argv[i]);
-		if (arg == "echoServer")
-			isServer = true;
-		auto actor = actors.find(arg);
-		if (actor == actors.end()) {
-			std::cout << format("Error: actor %s does not exist\n", arg.c_str());
-			return 1;
-		}
-		toRun.push_back(actor->second);
-	}
+	auto actor = actors.find(mode);
+	toRun.push_back(actor->second);
 
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);

@@ -9,4 +9,4 @@ if(NOT WIN32)
 endif()
 
 add_flow_target(EXECUTABLE NAME fdbrpc_bench SRCS fdbrpc_bench.actor.cpp)
-target_link_libraries(fdbrpc_bench PUBLIC flow fdbrpc)
+target_link_libraries(fdbrpc_bench PUBLIC flow fdbrpc Boost::program_options)
