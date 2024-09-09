@@ -181,3 +181,5 @@ Under Windows, only Visual Studio with ClangCl is supported
 1. `cmake -G "Visual Studio 16 2019" -A x64 -T ClangCl <PATH_TO_FOUNDATIONDB_SOURCE>`
 1. `msbuild /p:Configuration=Release foundationdb.sln`
 1. To increase build performance, use `/p:UseMultiToolTask=true` and `/p:CL_MPCount=<NUMBER_OF_PARALLEL_JOBS>` 
+
+
