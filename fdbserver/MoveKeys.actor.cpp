@@ -1604,7 +1604,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		loop {
 			state Key begin = keys.begin;
 			state KeyRange currentKeys = keys;
-			state bool complete = false;
 
 			state Transaction tr(occ);
 
@@ -1837,7 +1836,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				if (currentKeys.end == keys.end) {
 					dataMove.setPhase(DataMoveMetaData::Running);
-					complete = true;
 					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", dataMoveId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
@@ -1872,7 +1870,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				}
 
 				dataMove = DataMoveMetaData();
-				if (complete) {
+				if (currentKeys.end == keys.end) {
 					break;
 				}
 			} catch (Error& e) {
@@ -2008,7 +2006,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 		// This process can be split up into multiple transactions if getRange() doesn't return the entire
 		// target range.
 		loop {
-			state bool complete = false;
 			state std::vector<UID> completeSrc;
 			state std::vector<UID> destServers;
 			state std::unordered_set<UID> allServers;
@@ -2240,7 +2237,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (range.end == dataMove.ranges.front().end) {
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
-						complete = true;
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", dataMoveId)
 						    .detail("DataMove", dataMove.toString());
 					} else {
@@ -2259,7 +2255,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						wait(auditLocationMetadataPostCheck(occ, range, "finishMoveShards_postcheck", dataMoveId));
 					}
 
-					if (complete) {
+					if (range.end == dataMove.ranges.front().end) {
 						break;
 					}
 				} else {
