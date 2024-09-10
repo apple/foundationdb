@@ -5,6 +5,8 @@ allowCreatingTenants = false
 
 [[knobs]]
 proxy_use_resolver_private_mutations = false
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
 
 [[test]]
 testTitle = 'RawTenantAccessClean'
