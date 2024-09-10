@@ -795,6 +795,23 @@ void CommitBatchContext::checkHotShards() {
 	return;
 }
 
+// Check whether the mutation intersects any legal backup ranges
+// If so, it will be clamped to the intersecting range(s) later
+inline bool shouldBackup(MutationRef const& m) {
+	if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
+		return true;
+	} else if (m.type != MutationRef::Type::ClearRange) {
+		return systemBackupMutationMask().rangeContaining(m.param1).value();
+	} else {
+		for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
+			if (r->value()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
@@ -803,6 +820,11 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			auto& m = (*pMutations)[mutationNum];
+			// disable version vector's effect if any mutation in the batch is backed up.
+			// TODO: make backup work with version vector.
+			if (pProxyCommitData->vecBackupKeys.size() > 1 && shouldBackup(m)) {
+				return std::set<Tag>();
+			}
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
@@ -1882,23 +1904,6 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 		self->toCommit.writeTypedMessage(*mutation);
 		return std::variant<MutationRef, VectorRef<MutationRef>>{ *mutation };
 	}
-}
-
-// Check whether the mutation intersects any legal backup ranges
-// If so, it will be clamped to the intersecting range(s) later
-inline bool shouldBackup(MutationRef const& m) {
-	if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
-		return true;
-	} else if (m.type != MutationRef::Type::ClearRange) {
-		return systemBackupMutationMask().rangeContaining(m.param1).value();
-	} else {
-		for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
-			if (r->value()) {
-				return true;
-			}
-		}
-	}
-	return false;
 }
 
 double pushToBackupMutations(CommitBatchContext* self,
