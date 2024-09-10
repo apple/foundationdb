@@ -1645,7 +1645,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		loop {
 			state Key begin = keys.begin;
 			state KeyRange currentKeys = keys;
-			state bool complete = false;
 
 			state Transaction tr(occ);
 
@@ -1893,7 +1892,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						dataMove.bulkLoadState = newBulkLoadState;
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
-					complete = true;
 					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString())
@@ -1930,7 +1928,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				}
 
 				dataMove = DataMoveMetaData();
-				if (complete) {
+				if (currentKeys.end == keys.end) {
 					break;
 				}
 			} catch (Error& e) {
@@ -2047,7 +2045,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	state int retries = 0;
 	state DataMoveMetaData dataMove;
-	state bool complete = false;
 	state bool cancelDataMove = false;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
@@ -2072,7 +2069,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 			state std::unordered_set<UID> allServers;
 			state KeyRange range;
 			state Transaction tr(occ);
-			complete = false;
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2337,7 +2333,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
-						complete = true;
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString());
 					} else if (!bulkLoadState.present()) {
@@ -2359,7 +2354,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						    occ, range, "finishMoveShards_postcheck", relocationIntervalId));
 					}
 
-					if (complete) {
+					if (range.end == dataMove.ranges.front().end) {
 						break;
 					}
 				} else {
@@ -2999,7 +2994,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 	state KeyRange range;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 	TraceEvent(SevInfo, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
-	state bool complete = false;
 	state Error lastError;
 	state bool runPreCheck = true;
 
@@ -3016,7 +3010,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 			range = KeyRange();
 
 			try {
-				complete = false;
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3126,7 +3119,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				if (range.end == dataMove.ranges.front().end) {
 					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 					tr.clear(dataMoveKeyFor(dataMoveId));
-					complete = true;
 					TraceEvent(sevDm, "CleanUpDataMoveDeleteMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMove.toString());
 
@@ -3157,7 +3149,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					wait(auditLocationMetadataPostCheck(occ, range, "cleanUpDataMoveCore_postcheck", dataMoveId));
 				}
 
-				if (complete) {
+				if (range.end == dataMove.ranges.front().end) {
 					break;
 				}
 			} catch (Error& e) {
