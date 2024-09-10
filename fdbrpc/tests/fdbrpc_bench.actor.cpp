@@ -194,10 +194,12 @@ int main(int argc, char* argv[]) {
 	namespace po = boost::program_options;
 
 	po::options_description desc("fdbrpc_bench usage");
+	// clang-format off
 	desc.add_options()
-		("help,h", "show help message")
+		("help,h","show help message")
 		("mode,m", po::value<std::string>(), "process mode [server/client]")
 		("payload_size,s", po::value<int>(), "size of payload sent by client (bytes)");
+	// clang-format on
 
 	po::variables_map vm;
 	po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -216,14 +218,13 @@ int main(int argc, char* argv[]) {
 	}
 
 	auto mode = vm["mode"].as<std::string>();
-	if ((mode != "client" && mode != "server") ||
-		(mode == "server" && vm.count("payload_size") > 0)) {
+	if ((mode != "client" && mode != "server") || (mode == "server" && vm.count("payload_size") > 0)) {
 		std::cerr << errMsg << desc << std::endl;
 		return -1;
 	}
 
 	if (vm.count("payload_size") > 0) {
-		 payload_size_bytes = vm["payload_size"].as<int>();
+		payload_size_bytes = vm["payload_size"].as<int>();
 	}
 
 	bool isServer = (mode == "server");
