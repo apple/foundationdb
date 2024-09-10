@@ -17,6 +17,7 @@
 #include <boost/unordered_set.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <list>
 #include <deque>
 

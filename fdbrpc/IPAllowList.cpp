@@ -24,8 +24,9 @@
 #include "flow/Error.h"
 #include "fdbrpc/IPAllowList.h"
 
-#include <fmt/printf.h>
 #include <fmt/format.h>
+#include <fmt/printf.h>
+#include <fmt/ranges.h>
 #include <bitset>
 
 namespace {

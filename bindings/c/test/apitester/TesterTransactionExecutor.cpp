@@ -33,6 +33,7 @@
 #include <chrono>
 #include <thread>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <filesystem>
 
 namespace FdbApiTester {
