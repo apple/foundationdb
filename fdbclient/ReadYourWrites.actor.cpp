@@ -2417,6 +2417,7 @@ void ReadYourWritesTransaction::setOption(FDBTransactionOptions::Option option, 
 }
 
 void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option option, Optional<StringRef> value) {
+	TraceEvent(SevDebug, "TransactionSetOption").detail("Option", option).detail("Value", value);
 	switch (option) {
 	case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
 		validateOptionValueNotPresent(value);
@@ -2454,11 +2455,13 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 
 	case FDBTransactionOptions::TIMEOUT:
 		options.timeoutInSeconds = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
+		TraceEvent(SevDebug, "TransactionTimeout").detail("TimeoutInSeconds", options.timeoutInSeconds);
 		resetTimeout();
 		break;
 
 	case FDBTransactionOptions::RETRY_LIMIT:
 		options.maxRetries = (int)extractIntOption(value, -1, std::numeric_limits<int>::max());
+		TraceEvent(SevDebug, "TransactionRetryLimit").detail("MaxRetries", options.maxRetries);
 		break;
 
 	case FDBTransactionOptions::DEBUG_RETRY_LOGGING:

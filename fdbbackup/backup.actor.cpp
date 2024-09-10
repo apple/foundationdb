@@ -4103,10 +4103,12 @@ int main(int argc, char* argv[]) {
 				// where the fdbbackup command hangs infinitely. 60 seconds should be more than
 				// enough for all cases to finish and 5 retries should also be good enough for
 				// most cases.
+				int64_t timeout = 60000;
 				db->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
-				              Optional<StringRef>(StringRef((const uint8_t*)60000, 8)));
+				              Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
+				int64_t retryLimit = 5;
 				db->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
-				              Optional<StringRef>(StringRef((const uint8_t*)5, 8)));
+				              Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
 			}
 
 			return result.present();
@@ -4127,10 +4129,12 @@ int main(int argc, char* argv[]) {
 				// where the fdbbackup command hangs infinitely. 60 seconds should be more than
 				// enough for all cases to finish and 5 retries should also be good enough for
 				// most cases.
+				int64_t timeout = 60000;
 				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
-				                    Optional<StringRef>(StringRef((const uint8_t*)60000, 8)));
+				                    Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
+				int64_t retryLimit = 5;
 				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
-				                    Optional<StringRef>(StringRef((const uint8_t*)5, 8)));
+				                    Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
 			}
 
 			return result.present();
