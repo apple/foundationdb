@@ -858,9 +858,10 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 		}
 	}
 
-	// SOMEDAY: add knob to specify number of random remote logs
-	toCommit.storeRandomRouterTag();
-	transactionTags.insert(toCommit.savedRandomRouterTag.get());
+	if (toCommit.getLogRouterTags()) {
+		toCommit.storeRandomRouterTag();
+		transactionTags.insert(toCommit.savedRandomRouterTag.get());
+	}
 
 	return transactionTags;
 }
