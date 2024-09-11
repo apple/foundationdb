@@ -594,6 +594,13 @@ void decodeDataMoveId(const UID& id, bool& assigned, bool& emptyRange, DataMoveT
 	emptyRange = id.second() == emptyShardId;
 	if (assigned && !emptyRange && id != anonymousShardId) {
 		dataMoveType = static_cast<DataMoveType>(0xFF & id.second());
+		if (dataMoveType < DataMoveType::LOGICAL || dataMoveType >= DataMoveType::NUMBER_OF_TYPES) {
+			TraceEvent(SevError, "DecodeDataMoveIdInvalid")
+			    .detail("DataMoveID", id.toString())
+			    .detail("DataMoveType", dataMoveType)
+			    .detail("Assigned", assigned)
+			    .detail("EmptyRange", emptyRange);
+		}
 	}
 }
 
