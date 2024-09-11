@@ -2087,12 +2087,11 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 }
 
 void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
-                   std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
-                   std::vector<std::vector<uint16_t>>& tLogLocIds,
+                   std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
+                   std::vector<uint16_t>& tLogLocIds,
                    uint16_t& maxTLogLocId) {
 	// Initialization.
 	tLogLocIds.clear();
-	tLogLocIds.resize(logGroupResults.size());
 	maxTLogLocId = 0;
 
 	// Map the interfaces of all (local) tLogs to their corresponding locations in LogSets.
@@ -2114,13 +2113,9 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 	maxTLogLocId = location;
 
 	// Find the locations of tLogs in "logGroupResults".
-	uint8_t logGroupId = 0;
-	for (auto& logGroupResult : logGroupResults) {
-		for (auto& tLogResult : std::get<1>(logGroupResult)) {
-			ASSERT(interfLocMap.find(tLogResult.logId) != interfLocMap.end());
-			tLogLocIds[logGroupId].push_back(interfLocMap[tLogResult.logId]);
-		}
-		logGroupId++;
+	for (auto& tLogResult : std::get<1>(logGroupResults)) {
+		ASSERT(interfLocMap.find(tLogResult.logId) != interfLocMap.end());
+		tLogLocIds.push_back(interfLocMap[tLogResult.logId]);
 	}
 }
 
@@ -2136,92 +2131,92 @@ void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
 Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
-                                 std::vector<std::tuple<int, std::vector<TLogLockResult>>>& logGroupResults,
-                                 Version minDVEnd,
-                                 Version minKCVEnd) {
-	std::vector<std::vector<uint16_t>> tLogLocIds;
+                                 std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
+                                 Version minDV,
+                                 Version minKCV) {
+	std::vector<uint16_t> tLogLocIds;
 	uint16_t maxTLogLocId; // maximum possible id, not maximum of id's of available log servers
 	getTLogLocIds(logServers, logGroupResults, tLogLocIds, maxTLogLocId);
 	uint16_t bsSize = maxTLogLocId + 1; // bitset size, used below
 
-	// NOTE: We think the unicast recovery version is always greater than or equal to
-	// "min(DV)" (= "minDVEnd"). To be conservative we use "min(KCV)" (= "minKCVEnd")
-	// as the default (starting) recovery version and later verify that the computed
-	// recovery version is greater than or equal to "minDVEnd".
-	// @todo modify code to use "minDVEnd" as the default (starting) recovery version
-	Version minEnd = minKCVEnd;
-	std::vector<Version> RVs(maxTLogLocId + 1, minEnd); // recovery versions of various tLogs
-
-	uint8_t tLogGroupIdx = 0;
-	Version minLogGroup = std::numeric_limits<Version>::max();
-	for (auto& logGroupResult : logGroupResults) {
-		uint16_t tLogIdx = 0;
-		boost::dynamic_bitset<> availableTLogs(bsSize);
-		// version -> tLogs (that are avaiable) that have received the version
-		std::unordered_map<Version, boost::dynamic_bitset<>> versionAvailableTLogs;
-		// version -> all tLogs that the version was sent to (by the commit proxy)
-		std::map<Version, boost::dynamic_bitset<>> versionAllTLogs;
-		// version -> prevVersion (that was given out by the sequencer) map
-		std::map<Version, Version> prevVersionMap;
-		int replicationFactor = std::get<0>(logGroupResult);
-		for (auto& tLogResult : std::get<1>(logGroupResult)) {
-			uint16_t tLogLocId = tLogLocIds[tLogGroupIdx][tLogIdx];
-			availableTLogs.set(tLogLocId);
-			bool logGroupCandidate = false;
-			for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
-				Version k = unknownCommittedVersion.version;
-				if (k > minEnd) {
-					if (versionAvailableTLogs[k].empty()) {
-						versionAvailableTLogs[k].resize(bsSize);
-					}
-					versionAvailableTLogs[k].set(tLogLocId);
-					prevVersionMap[k] = unknownCommittedVersion.prev;
-					if (versionAllTLogs[k].empty()) {
-						versionAllTLogs[k].resize(bsSize);
-					}
-					populateBitset(versionAllTLogs[k], unknownCommittedVersion.tLogLocIds);
-					logGroupCandidate = true;
-				}
-			}
-			if (!logGroupCandidate) {
-				return minEnd;
-			}
-			tLogIdx++;
+	// Summarize the information sent by various tLogs.
+	// A bitset of available tLogs
+	boost::dynamic_bitset<> availableTLogs(bsSize);
+	// version -> tLogs (that are avaiable) that have received the version
+	std::unordered_map<Version, boost::dynamic_bitset<>> versionAvailableTLogs;
+	// version -> all tLogs that the version was sent to (by the commit proxy)
+	std::map<Version, boost::dynamic_bitset<>> versionAllTLogs;
+	// version -> prevVersion (that was given out by the sequencer) map
+	std::map<Version, Version> prevVersionMap;
+	uint16_t tLogIdx = 0;
+	int replicationFactor = std::get<0>(logGroupResults);
+	for (auto& tLogResult : std::get<1>(logGroupResults)) {
+		if (tLogResult.unknownCommittedVersions.empty()) {
+			return minKCV;
 		}
-		Version minTLogs = minEnd;
-		Version prevVersion = minEnd;
-		for (auto const& [version, tLogs] : versionAllTLogs) {
-			if (!(prevVersion == minEnd || prevVersion == prevVersionMap[version])) {
-				break;
-			}
-			// This version is not recoverable if there is a log server (LS) such that:
-			// - the commit proxy sent this version to LS (i.e., LS is present in "versionAllTLogs[version]")
-			// - LS is available (i.e., LS is present in "availableTLogs")
-			// - LS didn't receive this version (i.e., LS is not present in "versionAvailableTLogs[version]")
-			if (((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).any()) {
-				break;
-			}
-			// If the commit proxy sent this version to "N" log servers then at least
-			// (N - replicationFactor + 1) log servers must be available.
-			if (!(versionAvailableTLogs[version].size() >= tLogs.size() - replicationFactor + 1)) {
-				break;
-			}
-			// Update RV.
-			minTLogs = version;
-			// Update recovery version vector.
-			for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
-				if (versionAvailableTLogs[version][id]) {
-					RVs[id] = version;
+		uint16_t tLogLocId = tLogLocIds[tLogIdx];
+		availableTLogs.set(tLogLocId);
+		for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
+			Version k = unknownCommittedVersion.version;
+			if (k > minKCV) {
+				if (versionAvailableTLogs[k].empty()) {
+					versionAvailableTLogs[k].resize(bsSize);
 				}
+				versionAvailableTLogs[k].set(tLogLocId);
+				prevVersionMap[k] = unknownCommittedVersion.prev;
+				if (versionAllTLogs[k].empty()) {
+					versionAllTLogs[k].resize(bsSize);
+				}
+				populateBitset(versionAllTLogs[k], unknownCommittedVersion.tLogLocIds);
 			}
-			// Update prevVersion.
-			prevVersion = version;
 		}
-		minLogGroup = std::min(minLogGroup, minTLogs);
-		tLogGroupIdx++;
+		tLogIdx++;
 	}
-	ASSERT_WE_THINK(minLogGroup >= minDVEnd && minLogGroup != std::numeric_limits<Version>::max());
-	return minLogGroup;
+
+	// Compute recovery version.
+	// @note we think that the unicast recovery version should always greater than or
+	// equal to "min(DV)" (= "minDV"). To be conservative we use "min(KCV)" (= "minKCV")
+	// as the default (starting) recovery version and later verify that the computed
+	// recovery version is greater than or equal to "minDV".
+	// @todo modify code to use "minDV" as the default (starting) recovery version
+	// @todo to be investigated: maybe we should use max(KCV) as the starting recovery
+	// version (this is because "known committed version" can advance even after a log
+	// server is locked when unicast is enabled and so all log servers may not preserve
+	// all committed versions, from min(KCV) till the correct recovery version, in
+	// "unknownCommittedVersions" causing the recovery algorithm to not find the correct
+	// recovery version)?
+	Version RV = minKCV; // recovery version
+	std::vector<Version> RVs(maxTLogLocId + 1, minKCV); // recovery versions of various tLogs
+	Version prevVersion = minKCV;
+	for (auto const& [version, tLogs] : versionAllTLogs) {
+		if (!(prevVersion == minKCV || prevVersion == prevVersionMap[version])) {
+			break;
+		}
+		// This version is not recoverable if there is a log server (LS) such that:
+		// - the commit proxy sent this version to LS (i.e., LS is present in "versionAllTLogs[version]")
+		// - LS is available (i.e., LS is present in "availableTLogs")
+		// - LS didn't receive this version (i.e., LS is not present in "versionAvailableTLogs[version]")
+		if (((tLogs & availableTLogs) & ~versionAvailableTLogs[version]).any()) {
+			break;
+		}
+		// If the commit proxy sent this version to "N" log servers then at least
+		// (N - replicationFactor + 1) log servers must be available.
+		if (!(versionAvailableTLogs[version].size() >= tLogs.size() - replicationFactor + 1)) {
+			break;
+		}
+		// Update RV.
+		RV = version;
+		// Update recovery version vector.
+		for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
+			if (versionAvailableTLogs[version][id]) {
+				RVs[id] = version;
+			}
+		}
+		// Update prevVersion.
+		prevVersion = version;
+	}
+	ASSERT_WE_THINK(RV >= minDV && RV != std::numeric_limits<Version>::max());
+	return RV;
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem,
@@ -2485,7 +2480,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	state Version knownCommittedVersion = 0;
 	loop {
 		Version minEnd = std::numeric_limits<Version>::max();
-		Version minKCVEnd = std::numeric_limits<Version>::max();
+		Version minKCV = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
 		state std::vector<Future<Void>> changes;
 		state std::vector<std::tuple<int, std::vector<TLogLockResult>>> logGroupResults;
@@ -2500,7 +2495,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor, std::get<2>(versions.get()));
 				maxEnd = std::max(maxEnd, std::get<1>(versions.get()));
 				minEnd = std::min(minEnd, std::get<1>(versions.get()));
-				minKCVEnd = std::min(minKCVEnd, std::get<0>(versions.get()));
+				minKCV = std::min(minKCV, std::get<0>(versions.get()));
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+					Version version = getRecoverVersionUnicast(logServers, logGroupResults.back(), minEnd, minKCV);
+					maxEnd = std::max(maxEnd, version);
+					minEnd = std::min(minEnd, version);
+				}
 			}
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 		}
@@ -2531,10 +2531,17 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
 
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				logSystem->recoverAt = getRecoverVersionUnicast(logServers, logGroupResults, minEnd, minKCVEnd);
-				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
 				// When a new log system is created, inform the surviving tLogs of the RV.
 				// SOMEDAY: Assert surviving tLogs use the RV from the latest log system.
+				// @todo issues:
+				// - we are not adding entries of a LogSet to "logGroupResults" above if
+				// "getDurableVersion()" doesn't return a recovery version for that LogSet.
+				// Is it fine to ignore the log servers (if any) in that LogSet and if so,
+				// how would they learn about the recovery version?
+				// - we don't get here if a restart happens and the resulting recovery
+				// version doesn't exceed the previously computed recovery version. Don't
+				// we need to send the (previously computed) recovery version to those
+				// log servers that caused the restart?
 				for (auto logGroupResult : logGroupResults) {
 					state std::vector<TLogLockResult> tLogResults = std::get<1>(logGroupResult);
 					for (auto& tLogResult : tLogResults) {
