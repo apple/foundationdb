@@ -1789,7 +1789,7 @@ void radixTreeStorageEngineConfig(SimulationConfig* simCfg) {
 void redwoodStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using redwood storage engine");
 	// The experimental suffix is still supported so test it randomly
-	simCfg->set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
+	simCfg->set_config("ssd-redwood-1");
 }
 
 void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {

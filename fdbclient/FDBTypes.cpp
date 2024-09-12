@@ -241,7 +241,6 @@ KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
 		                                              { "ssd", SSD_BTREE_V2 },
 		                                              { "redwood", SSD_REDWOOD_V1 },
 		                                              { "ssd-redwood-1", SSD_REDWOOD_V1 },
-		                                              { "ssd-redwood-1-experimental", SSD_REDWOOD_V1 },
 		                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
 		                                              { "ssd-sharded-rocksdb", SSD_SHARDED_ROCKSDB },
 		                                              { "memory", MEMORY },
