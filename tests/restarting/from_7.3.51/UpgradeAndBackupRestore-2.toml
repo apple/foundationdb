@@ -1,0 +1,61 @@
+[[test]]
+testTitle = 'SecondCycleTest'
+simBackupAgents = 'BackupToFile'
+clearAfterTest=false
+runConsistencyCheck=false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'AfterRestart'
+    
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 90.0
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0
+    
+[[test]]
+testTitle= 'RestoreBackup'
+simBackupAgents = 'BackupToFile'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName = 'RestoreBackup'
+    tag = 'default'
+
+[[test]]
+testTitle = 'CheckCycles'
+checkOnly=true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount=30000
+    keyPrefix = 'AfterRestart'
+    expectedRate=0
+     
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    keyPrefix= 'BeforeRestart'
+    expectedRate = 0

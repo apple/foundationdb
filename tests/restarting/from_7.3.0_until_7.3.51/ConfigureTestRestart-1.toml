@@ -1,0 +1,31 @@
+[configuration]
+# For ShardedRocksDB, an very old 7.3 binary is not compatible to the new binary
+storageEngineExcludeTypes = [5]
+
+[[knobs]]
+# For ShardEncodeLocationMetadata, an very old 7.3 binary is not compatible to the new binary
+shard_encode_location_metadata = false
+
+[[test]]
+testTitle='CloggedConfigureDatabaseTest'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName='ConfigureDatabase'
+    testDuration=30.0
+    allowDescriptorChange=false
+
+    [[test.workload]]
+    testName='RandomClogging'
+    testDuration=30.0
+
+    [[test.workload]]
+    testName='RandomClogging'
+    testDuration=30.0
+    scale=0.1
+    clogginess=2.0
+
+    [[test.workload]]
+    testName='SaveAndKill'
+    restartInfoLocation='simfdb/restartInfo.ini'
+    testDuration=30.0

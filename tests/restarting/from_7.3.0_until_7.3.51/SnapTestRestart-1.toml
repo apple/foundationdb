@@ -1,0 +1,64 @@
+[configuration]
+# For ShardedRocksDB, an very old 7.3 binary is not compatible to the new binary
+storageEngineExcludeTypes = [4, 5]
+logAntiQuorum=0
+
+[[knobs]]
+# For ShardEncodeLocationMetadata, an very old 7.3 binary is not compatible to the new binary
+shard_encode_location_metadata = false
+
+[[test]]
+# write 1000 Keys ending with even numbers
+testTitle="SnapTestPre"
+clearAfterTest=false
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=0
+
+[[test]]
+# Take snap and do read/write
+testTitle="SnapTestTakeSnap"
+clearAfterTest=false
+
+        [[test.workload]]
+        testName="ReadWrite"
+        testDuration=10.0
+        transactionsPerSecond=10000
+        writesPerTransactionA=0
+        readsPerTransactionA=10
+        writesPerTransactionB=10
+        readsPerTransactionB=1
+        alpha=0.5
+        nodeCount=100000
+        valueBytes=16
+        discardEdgeMeasurements=false
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=10.0
+        testID=1
+
+[[test]]
+# write 1000 Keys ending with odd numbers
+testTitle="SnapTestPost"
+clearAfterTest=false
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=25.0
+        testID=2
+
+[[test]]
+# save and shutdown
+testTitle="SnapTestShutdown"
+
+        [[test.workload]]
+        testName="SaveAndKill"
+        restartInfoLocation="simfdb/restartInfo.ini"
+        testDuration=10.0
+        isRestoring=1
