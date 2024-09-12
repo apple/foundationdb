@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <fmt/core.h>
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
@@ -42,28 +44,28 @@ ACTOR Future<Void> getBulkLoadStateByRange(Database cx,
 		int64_t unfinishedCount = 0;
 		for (const auto& bulkLoadState : res) {
 			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-				printf("[Complete]: %s\n", bulkLoadState.toString().c_str());
+				fmt::println("[Complete]: {}", bulkLoadState.toString());
 				++finishCount;
 			} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
-				printf("[Running]: %s\n", bulkLoadState.toString().c_str());
+				fmt::println("[Running]: {}", bulkLoadState.toString());
 				++unfinishedCount;
 			} else if (bulkLoadState.phase == BulkLoadPhase::Triggered) {
-				printf("[Triggered]: %s\n", bulkLoadState.toString().c_str());
+				fmt::println("[Triggered]: {}", bulkLoadState.toString());
 				++unfinishedCount;
 			} else if (bulkLoadState.phase == BulkLoadPhase::Submitted) {
-				printf("[Submitted] %s\n", bulkLoadState.toString().c_str());
+				fmt::println("[Submitted] {}", bulkLoadState.toString());
 				++unfinishedCount;
 			} else if (bulkLoadState.phase == BulkLoadPhase::Acknowledged) {
-				printf("[Acknowledge] %s\n", bulkLoadState.toString().c_str());
+				fmt::println("[Acknowledge] {}", bulkLoadState.toString());
 				++finishCount;
 			} else {
 				UNREACHABLE();
 			}
 		}
-		printf("Finished task count %ld of total %ld tasks\n", finishCount, finishCount + unfinishedCount);
+		fmt::println("Finished task count {} of total {} tasks", finishCount, finishCount + unfinishedCount);
 	} catch (Error& e) {
 		if (e.code() == error_code_timed_out) {
-			printf("timed out\n");
+			fmt::println("timed out");
 		}
 	}
 	return Void();
