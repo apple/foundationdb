@@ -291,6 +291,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				                                (int)SimulationStorageEngine::ROCKSDB,
 				                                (int)SimulationStorageEngine::SHARDED_ROCKSDB };
 		}
+		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			self->storageEngineExcludeTypes.push_back((int)SimulationStorageEngine::SHARDED_ROCKSDB);
+		}
 		if (self->clientId == 0) {
 			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
 			wait(waitForAll(self->clients));
