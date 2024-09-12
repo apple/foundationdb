@@ -1,8 +1,9 @@
 [configuration]
-storageEngineExcludeTypes=[3,5]
+# For ShardedRocksDB, an very old 7.3 binary is not compatible to the new binary
+storageEngineExcludeTypes = [3, 5]
 
 [[knobs]]
-# For this feature, an very old 7.3 binary is not compatible to the new binary
+# For ShardEncodeLocationMetadata, an very old 7.3 binary is not compatible to the new binary
 shard_encode_location_metadata = false
 
 [[test]]

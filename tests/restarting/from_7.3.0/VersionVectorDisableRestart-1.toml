@@ -1,8 +1,12 @@
+[configuration]
+# For ShardedRocksDB, an very old 7.3 binary is not compatible to the new binary
+storageEngineExcludeTypes = [5]
+
 [[knobs]]
 enable_version_vector = true
 enable_version_vector_tlog_unicast = true
 proxy_use_resolver_private_mutations = true
-# For this feature, an very old 7.3 binary is not compatible to the new binary
+# For ShardEncodeLocationMetadata, an very old 7.3 binary is not compatible to the new binary
 shard_encode_location_metadata = false
 
 [[test]]
