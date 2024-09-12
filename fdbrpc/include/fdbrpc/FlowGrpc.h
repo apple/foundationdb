@@ -37,9 +37,17 @@ public:
 
 	Future<Void> run();
 	void shutdown();
-
 	void registerService(std::shared_ptr<grpc::Service> service);
 
+	static GrpcServer* initInstance(const NetworkAddress& addr) {
+		GrpcServer* server = new GrpcServer(addr);
+		g_network->setGlobal(INetwork::enGrpcServer, (flowGlobalType)server);
+		return server;
+	}
+
+	static GrpcServer* instance() {
+		return static_cast<GrpcServer*>((void*)g_network->global(INetwork::enGrpcServer));
+	}
 private:
 	NetworkAddress address_;
 	std::unique_ptr<grpc::Server> server_;

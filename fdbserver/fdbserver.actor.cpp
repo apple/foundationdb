@@ -54,6 +54,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -2414,7 +2415,8 @@ int main(int argc, char* argv[]) {
 				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
-
+				auto grpcServer = GrpcServer::initInstance(NetworkAddress::parse(opts.grpcAddressStrs[0]));
+				actors.push_back(grpcServer->run());
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}
