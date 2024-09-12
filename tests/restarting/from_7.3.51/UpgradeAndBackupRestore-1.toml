@@ -1,5 +1,5 @@
 [configuration]
-storageEngineExcludeTypes = [3, 5]
+storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'SubmitBackup'
