@@ -5,6 +5,10 @@ allowDefaultTenant = false
 encryptModes = ['disabled']
 storageEngineExcludeTypes = [4,5]
 
+[[knobs]]
+# For this feature, an very old 7.3 binary is not compatible to the new binary
+shard_encode_location_metadata = false
+
 [[test]]
 testTitle = "DrUpgrade"
 clearAfterTest = false

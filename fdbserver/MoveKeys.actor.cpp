@@ -3252,7 +3252,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	//   key (keyServersKeyServersKey)
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		const UID shardId =
-		    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True, DataMoveType::LOGICAL);
+		    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::False, DataMoveType::LOGICAL);
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 

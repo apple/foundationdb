@@ -378,17 +378,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
     restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.txt
-    restarting/from_7.3.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.toml
+    restarting/from_7.3.0/SnapCycleRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.txt
-    restarting/from_7.3.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.toml
+    restarting/from_7.3.0/SnapTestAttrition-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.3.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.toml
+    restarting/from_7.3.0/SnapTestSimpleRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.txt
-    restarting/from_7.3.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.toml
+    restarting/from_7.3.0/SnapTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.33_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.33_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)

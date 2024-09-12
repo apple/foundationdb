@@ -345,7 +345,9 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		std::vector<UID> destTeam = self->getRandomTeam();
 		std::sort(destTeam.begin(), destTeam.end());
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			const UID dataMoveId =
+			    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::False, DataMoveType::LOGICAL);
+			return MoveKeysParams(dataMoveId,
 			                      std::vector<KeyRange>{ keys },
 			                      destTeam,
 			                      destTeam,
