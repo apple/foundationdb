@@ -288,18 +288,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
-    restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.txt
-    restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.txt
-    restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1.txt
-    restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_6.3.13_until_7.3.0/ClientTransactionProfilingCorrectness-1.txt
     restarting/from_6.3.13_until_7.3.0/ClientTransactionProfilingCorrectness-2.txt)
   add_fdb_test(
