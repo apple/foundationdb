@@ -2518,32 +2518,36 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
 
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				// When a new log system is created, inform the surviving tLogs of the RV.
-				// SOMEDAY: Assert surviving tLogs use the RV from the latest log system.
-				// @todo issues:
-				// - we are not adding entries of a LogSet to "logGroupResults" above if
-				// "getDurableVersion()" doesn't return a recovery version for that LogSet.
-				// Is it fine to ignore the log servers (if any) in that LogSet and if so,
-				// how would they learn about the recovery version?
-				// - we don't get here if a restart happens and the resulting recovery
-				// version doesn't exceed the previously computed recovery version. Don't
-				// we need to send the (previously computed) recovery version to those
-				// log servers that caused the restart?
-				for (auto logGroupResult : logGroupResults) {
-					state std::vector<TLogLockResult> tLogResults = std::get<1>(logGroupResult);
-					for (auto& tLogResult : tLogResults) {
+			}
+			outLogSystem->set(logSystem);
+		}
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lastEnd.present()) {
+			// When a new log system is created, inform the surviving tLogs of the RV.
+			// @todo issues:
+			// - we are not adding entries of a LogSet to "logGroupResults" above if
+			// "getDurableVersion()" doesn't return a recovery version for that LogSet.
+			// Is it fine to ignore the log servers (if any) in that LogSet and if so,
+			// how would they learn about the recovery version?
+			// - we don't get here if a restart happens and the resulting recovery
+			// version doesn't exceed the previously computed recovery version. Don't
+			// we need to send the (previously computed) recovery version to those
+			// log servers that caused the restart?
+			for (LogLockInfo logLockInfo : lockResults) {
+
+				state std::vector<Future<TLogLockResult>> replies = logLockInfo.replies;
+				for (auto tLogResult : replies) {
+					if (tLogResult.isValid() && tLogResult.isReady()) {
+						TraceEvent("SendClusterRecoveryVersion").detail("X",tLogResult.get().id);
 						wait(transformErrors(
-						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.id]
-						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
-						                         setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
-						                         SERVER_KNOBS->TLOG_TIMEOUT,
-						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-						    cluster_recovery_failed()));
+							throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
+												.setClusterRecoveryVersion.getReplyUnlessFailedFor(
+													setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
+													SERVER_KNOBS->TLOG_TIMEOUT,
+													SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+							cluster_recovery_failed()));
 					}
 				}
 			}
-
-			outLogSystem->set(logSystem);
 		}
 
 		wait(waitForAny(changes));
