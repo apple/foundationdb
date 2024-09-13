@@ -322,6 +322,16 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
 	}
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+	if (SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE > 0) {
+		options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
+	}
+	options.target_file_size_multiplier = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
+	options.max_write_buffer_number = SERVER_KNOBS->ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
+	options.min_write_buffer_number_to_merge = SERVER_KNOBS->ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE;
+	options.level0_file_num_compaction_trigger = SERVER_KNOBS->ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
+	options.level0_slowdown_writes_trigger = SERVER_KNOBS->ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
+	options.level0_stop_writes_trigger = SERVER_KNOBS->ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 
 	// Compact sstables when there's too much deleted stuff.
 	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
@@ -1145,7 +1155,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
 		                          100 * 1000, // refill_period_us
-		                          10, // fairness
+		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS, // fairness
 		                          rocksdb::RateLimiter::Mode::kAllIo,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
 		                    : nullptr) {

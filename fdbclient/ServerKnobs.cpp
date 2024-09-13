@@ -421,6 +421,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT,        200 );
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,                0 );
+	init( ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS,                    10 ); // RocksDB default 10
 	// If true, enables dynamic adjustment of ROCKSDB_WRITE_RATE_LIMITER_BYTES according to the recent demand of background IO.
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
@@ -462,6 +463,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,             20 );
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
+	init( ROCKSDB_WRITE_BUFFER_SIZE, isSimulated ? 256 << 10 : 64 << 20 ); // 64 MB
+	init( ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                         6 ); // RocksDB default.
+	init( ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE,                2 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               2 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,                 20 ); // RocksDB default.
+	init( ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,                     36 ); // RocksDB default.
+	init( ROCKSDB_TARGET_FILE_SIZE_BASE,                           0 ); // If 0, pick RocksDB default.
+	init( ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                     1 ); // RocksDB default.
 	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
 	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             200 ); // Keeps 2GB log per storage server.
 	// Temporary knob to enable trace events which prints details about all the backup keys update(write/clear) operations.
