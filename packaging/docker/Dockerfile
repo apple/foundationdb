@@ -67,6 +67,7 @@ WORKDIR /tmp
 ARG FDB_VERSION=6.3.22
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
 ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
+ARG FDB_EXTERNAL_CLIENT_DIRECTORY=/usr/lib/fdb/multiversion
 
 RUN mkdir -p /var/fdb/{logs,tmp,lib} && \
     mkdir -p /usr/lib/fdb/multiversion && \
@@ -96,9 +97,17 @@ RUN for file in fdbdr fdbrestore backup_agent dr_agent fastrestore_tool; do \
         ln -s /usr/bin/fdbbackup /usr/bin/$file; \
     done
 
-# Install additional FoundationDB Client Libraries
+# Install additional FoundationDB Client Libraries so we can talk to multiple
+# versions of the fdb ('multiversion'). First install the locally built libfdb_c.
+# Then add 'released' versions being careful not to overwrite the local install.
 RUN for version in $FDB_LIBRARY_VERSIONS; do \
-    curl --fail -Ls ${FDB_WEBSITE}/${version}/libfdb_c.x86_64.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
+        curl --fail -Ls ${FDB_WEBSITE}/${version}/libfdb_c.x86_64.so -o "${FDB_EXTERNAL_CLIENT_DIRECTORY}"/libfdb_c_${version%.*}.so; \
+    done
+RUN for version in 7.1.60 7.3.43; do \
+        f="${FDB_EXTERNAL_CLIENT_DIRECTORY}/libfdb_c_${version%.*}.so"; \
+        if [ ! -f "${f%.*}.so" ]; then \
+           curl --fail -Ls https://github.com/apple/foundationdb/releases/download/${version}/libfdb_c.x86_64.so -o "${f}"; \
+        fi \
     done
 
 # Install additional FoundationDB Client Libraries (for sidecar)
@@ -202,7 +211,7 @@ RUN mkdir -p /var/log/fdb-trace-logs && \
 
 ADD YCSB /YCSB
 WORKDIR /YCSB
-ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/var/dynamic-conf/lib/multiversion/
+ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY="${FDB_EXTERNAL_CLIENT_DIRECTORY}"
 ENV FDB_NETWORK_OPTION_TRACE_ENABLE=/var/log/fdb-trace-logs
 ENV LD_LIBRARY_PATH=/var/dynamic-conf/lib/
 ENV BUCKET=""
