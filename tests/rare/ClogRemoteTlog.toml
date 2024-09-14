@@ -1,0 +1,32 @@
+[configuration]
+processesPerMachine = 1
+machineCount = 20
+generateFearless = true
+minimumRegions = 2
+
+[[knobs]]
+enable_worker_health_monitor = true
+cc_enable_worker_health_monitor = true
+worker_health_monitor_interval = 10
+cc_worker_health_checking_interval = 10
+cc_min_degradation_interval = 10
+cc_health_trigger_recovery = true
+peer_latency_degradation_threshold = 1
+
+[[test]]
+testTitle = "ClogRemoteTLog"
+
+[[test.workload]]
+testName = 'Cycle'
+nodeCount = 30
+transactionsPerSecond = 250.0
+testDuration = 120.0
+expectedRate = 0
+
+[[test.workload]]
+testName = 'ClogRemoteTLog'
+testDuration = 120.0
+lagMeasurementFrequencySec = 5
+clogInitDelaySec = 15
+clogDurationSec = 60
+lagThresholdSec = 5
