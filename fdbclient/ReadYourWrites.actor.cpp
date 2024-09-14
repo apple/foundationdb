@@ -2201,7 +2201,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 			// singleKeyRange, but share begin and end's memory
 			range = KeyRangeRef(key.substr(0, key.size() - 4), key.substr(0, key.size() - 3));
 		} else {
-			range = getVersionstampKeyRange(result.arena(), k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
+			range = getVersionstampKeyRange(result.arena(), k, tr.getCachedReadVersion(), getMaxReadKey());
 		}
 		writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
@@ -2263,7 +2263,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	if (operationType == MutationRef::SetVersionstampedKey) {
 		CODE_PROBE(options.readYourWritesDisabled, "SetVersionstampedKey without ryw enabled");
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
-		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
+		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion(), getMaxReadKey());
 		versionStampKeys.push_back(arena, k);
 		addWriteConflict = AddConflictRange::False;
 		if (!options.readYourWritesDisabled) {
@@ -2273,7 +2273,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 		// k is the unversionstamped key provided by the user.  If we've filled in a minimum bound
 		// for the versionstamp, we need to make sure that's reflected when we insert it into the
 		// WriteMap below.
-		transformVersionstampKey(k, tr.getCachedReadVersion().orDefault(0), 0);
+		transformVersionstampKey(k, tr.getCachedReadVersion().map([](Version v) { return v + 1; }).orDefault(0), 0);
 	}
 
 	if (operationType == MutationRef::SetVersionstampedValue) {
