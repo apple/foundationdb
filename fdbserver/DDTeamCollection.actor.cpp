@@ -25,6 +25,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
@@ -814,6 +815,8 @@ public:
 				    .detail("AddedTeams", 0)
 				    .detail("TeamsToBuild", teamsToBuild)
 				    .detail("CurrentServerTeams", self->teams.size())
+				    .detail("Servers", self->server_info.size())
+				    .detail("HealthyServers", serverCount)
 				    .detail("DesiredTeams", desiredTeams)
 				    .detail("MaxTeams", maxTeams)
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
@@ -1896,6 +1899,16 @@ public:
 			// tracker) and remove bad team (cancel the team tracker).
 			wait(self->badTeamRemover);
 
+			if (SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC > 0 &&
+			    self->teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+				TraceEvent(SevWarn, "MachineTeamRemoverDelayedForLowSpacePivot", self->distributorId)
+				    .detail("IsPrimary", self->primary)
+				    .detail("CurrentSpacePivot", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("TargetSpacePivot", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+				wait(delay(SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC));
+				continue;
+			}
+
 			state int healthyMachineCount = self->calculateHealthyMachineCount();
 			// Check if all machines are healthy, if not, we wait for 1 second and loop back.
 			// Eventually, all machines will become healthy.
@@ -2023,6 +2036,16 @@ public:
 			// Wait for the badTeamRemover() to avoid the potential race between
 			// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 			wait(self->badTeamRemover);
+
+			if (SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC > 0 &&
+			    self->teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+				TraceEvent(SevWarn, "ServerTeamRemoverDelayedForLowSpacePivot", self->distributorId)
+				    .detail("IsPrimary", self->primary)
+				    .detail("CurrentSpacePivot", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("TargetSpacePivot", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+				wait(delay(SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC));
+				continue;
+			}
 
 			// From this point, all server teams should be healthy, because we wait above
 			// until processingUnhealthy is done, and all machines are healthy
