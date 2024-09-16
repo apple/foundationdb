@@ -1926,7 +1926,9 @@ public:
 			    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? self->getMachineTeamWithMostMachineTeams()
 			                                                    : self->getMachineTeamWithLeastProcessTeams();
 
-			if (totalMTCount > desiredMachineTeams && foundMTInfo.first.isValid()) {
+			if (totalMTCount >
+			        desiredMachineTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD) &&
+			    foundMTInfo.first.isValid()) {
 				Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
 				int minNumProcessTeams = foundMTInfo.second;
 				ASSERT(mt.isValid());
@@ -2031,7 +2033,7 @@ public:
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
 			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
 
-			if (totalSTCount > desiredServerTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_TEAM_PERCENTAGE_THRESHOLD) &&
+			if (totalSTCount > desiredServerTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD) &&
 			    foundSTInfo.first.isValid()) {
 				ASSERT(foundSTInfo.first.isValid());
 				Reference<TCTeamInfo> st = foundSTInfo.first;
