@@ -5,7 +5,6 @@ machineCount = 20
 commitProxyCount = 4
 config = 'triple'
 desiredTLogCount = 6
-storageEngineExcludeTypes = [5]
 
 [[knobs]]
 enable_worker_health_monitor = true

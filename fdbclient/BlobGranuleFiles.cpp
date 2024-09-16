@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -372,7 +372,7 @@ struct IndexBlockRef {
 			// Compressing indexBlock will need offset recalculation (circular dependency). IndexBlock size is bounded
 			// by number of chunks and sizeof(KeyPrefix), 'not' compressing IndexBlock shouldn't cause significant file
 			// size bloat.
-			CODE_PROBE(true, "encrypting index block");
+			CODE_PROBE(true, "encrypting index block", probe::decoration::rare);
 			ASSERT(cipherKeysCtx.present());
 			encrypt(cipherKeysCtx.get(), arena);
 		} else {
@@ -513,7 +513,7 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (cipherKeysCtx.present()) {
-			CODE_PROBE(true, "encrypting granule chunk");
+			CODE_PROBE(true, "encrypting granule chunk", probe::decoration::rare);
 			IndexBlobGranuleFileChunkRef::encrypt(cipherKeysCtx.get(), chunkRef, arena);
 		}
 
@@ -743,8 +743,8 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 		    .detail("Compressed", compressFilter.present());
 	}
 
-	CODE_PROBE(compressFilter.present(), "serializing compressed snapshot file");
-	CODE_PROBE(cipherKeysCtx.present(), "serializing encrypted snapshot file");
+	CODE_PROBE(compressFilter.present(), "serializing compressed snapshot file", probe::decoration::rare);
+	CODE_PROBE(cipherKeysCtx.present(), "serializing encrypted snapshot file", probe::decoration::rare);
 	Standalone<IndexedBlobGranuleFile> file;
 
 	file.init(SNAPSHOT_FILE_TYPE, cipherKeysCtx);
@@ -903,7 +903,7 @@ void updateMutationBoundary(Standalone<DeltaBoundaryRef>& boundary, const ValueA
 			// duplicate same set even if it's the same as the last one, so beginVersion reads still get updates
 			boundary.values.push_back(boundary.arena(), update);
 		} else {
-			CODE_PROBE(true, "multiple boundary updates at same version (set)");
+			CODE_PROBE(true, "multiple boundary updates at same version (set)", probe::decoration::rare);
 			// preserve inter-mutation order by replacing this one
 			boundary.values.back() = update;
 		}
@@ -914,12 +914,12 @@ void updateMutationBoundary(Standalone<DeltaBoundaryRef>& boundary, const ValueA
 			// with beginVersion
 			boundary.values.push_back(boundary.arena(), update);
 		} else if (!boundary.values.empty() && boundary.values.back().version == update.version) {
-			CODE_PROBE(true, "multiple boundary updates at same version (clear)");
+			CODE_PROBE(true, "multiple boundary updates at same version (clear)", probe::decoration::rare);
 			if (boundary.values.back().isSet()) {
 				// if the last 2 updates were clear @ v1 and set @ v2, and we now have a clear at v2, just pop off the
 				// set and leave the previous clear. Otherwise, just set the last set to a clear
 				if (boundary.values.size() >= 2 && boundary.values[boundary.values.size() - 2].isClear()) {
-					CODE_PROBE(true, "clear then set/clear at same version optimization");
+					CODE_PROBE(true, "clear then set/clear at same version optimization", probe::decoration::rare);
 					boundary.values.pop_back();
 				} else {
 					boundary.values.back() = update;
@@ -1008,8 +1008,8 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
 		    .detail("Compressed", compressFilter.present());
 	}
 
-	CODE_PROBE(compressFilter.present(), "serializing compressed delta file");
-	CODE_PROBE(cipherKeysCtx.present(), "serializing encrypted delta file");
+	CODE_PROBE(compressFilter.present(), "serializing compressed delta file", probe::decoration::rare);
+	CODE_PROBE(cipherKeysCtx.present(), "serializing encrypted delta file", probe::decoration::rare);
 	Standalone<IndexedBlobGranuleFile> file;
 
 	file.init(DELTA_FILE_TYPE, cipherKeysCtx);

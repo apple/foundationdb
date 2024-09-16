@@ -70,6 +70,7 @@ class TestPicker:
         self.restart_test: Pattern = re.compile(r".*-\d+\.(txt|toml)")
         self.follow_test: Pattern = re.compile(r".*-[2-9]\d*\.(txt|toml)")
         self.old_binaries: OrderedDict[Version, Path] = binaries
+        self.rare_priority: int = int(os.getenv("RARE_PRIORITY", 10))
 
         for subdir in self.test_dir.iterdir():
             if subdir.is_dir() and subdir.name in config.test_dirs:
@@ -195,6 +196,8 @@ class TestPicker:
                 test_class = test_name
             if priority is None:
                 priority = 1.0
+            if is_rare(path) and priority <= 1.0:
+                priority = self.rare_priority
             if (
                 self.include_tests_regex.search(test_class) is None
                 or self.exclude_tests_regex.search(test_class) is not None
@@ -325,6 +328,9 @@ def is_negative(test_file: Path):
 def is_no_sim(test_file: Path):
     return test_file.parts[-2] == "noSim"
 
+
+def is_rare(test_file: Path):
+	return test_file.parts[-2] == "rare"
 
 class ResourceMonitor(threading.Thread):
     def __init__(self):

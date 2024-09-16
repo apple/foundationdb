@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,63 +19,87 @@
  */
 
 #ifndef _WIN32
+
 #include <algorithm>
+#include <array>
 #include <cstring>
-#include <cstdlib>
 #include <ctime>
-#include <fmt/format.h>
-#include <limits>
-#include <unistd.h>
+#include <iostream>
 #include <string_view>
-#include <signal.h>
-#include <sys/wait.h>
 #include <thread>
 #include <type_traits>
+
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <fmt/core.h>
+
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowTransport.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/MkCert.h"
 #include "flow/ScopeExit.h"
 #include "flow/TLSConfig.actor.h"
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/FlowTransport.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-std::FILE* outp = stdout;
+using namespace std::literals::string_view_literals;
 
-enum ChainLength : int {
-	NO_TLS = std::numeric_limits<int>::min(),
+enum Role : uint8_t { MAIN, CLIENT, SERVER, UNDETERMINED, LAST };
+
+constexpr std::array<std::string_view, Role::LAST> ROLE_STRING{ "MAIN"sv, "CLIENT"sv, "SERVER"sv, "UNDETERMINED"sv };
+
+Role role = Role::MAIN;
+
+template <>
+struct fmt::formatter<Role> : fmt::formatter<std::string> {
+	auto format(Role role, fmt::format_context& ctx) const {
+		return fmt::format_to(ctx.out(), "{:^10}", ROLE_STRING[static_cast<int>(role)]);
+	}
 };
 
 template <class... Args>
 void logRaw(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	auto buf = fmt::memory_buffer{};
-	fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
-	fmt::print(outp, "{}", std::string_view(buf.data(), buf.size()));
+	std::cout << fmt::format(fmt_str, std::forward<Args>(args)...);
+	std::cout.flush();
 }
 
 template <class... Args>
-void logWithPrefix(const char* prefix, const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	auto buf = fmt::memory_buffer{};
-	fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
-	fmt::print(outp, "{}{}\n", prefix, std::string_view(buf.data(), buf.size()));
+void log(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	// NOTE: The fmt::formatter<Role> can do the padding, but not this fmt::format expression
+	std::cout << fmt::format("[{}] ", role);
+	logRaw(fmt_str, std::forward<Args>(args)...);
+	std::cout << std::endl;
 }
 
-template <class... Args>
-void logc(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	logWithPrefix("[CLIENT] ", fmt_str, std::forward<Args>(args)...);
-}
+enum ChainLength : int { NO_TLS = -1 };
 
-template <class... Args>
-void logs(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	logWithPrefix("[SERVER] ", fmt_str, std::forward<Args>(args)...);
-}
+template <>
+struct fmt::formatter<ChainLength> : fmt::formatter<std::string> {
+	auto format(ChainLength value, fmt::format_context& ctx) const {
+		if (value == NO_TLS)
+			return fmt::format_to(ctx.out(), "NO_TLS");
+		else
+			return fmt::format_to(ctx.out(), "{}", static_cast<std::underlying_type_t<ChainLength>>(value));
+	}
+};
 
-template <class... Args>
-void logm(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-	logWithPrefix("[ MAIN ] ", fmt_str, std::forward<Args>(args)...);
-}
+template <>
+struct fmt::formatter<std::vector<std::pair<ChainLength, ChainLength>>> : fmt::formatter<std::string> {
+	auto format(const std::vector<std::pair<ChainLength, ChainLength>>& entries, fmt::format_context& ctx) const {
+		fmt::format_to(ctx.out(), "[");
+		bool first = true;
+		for (const auto& entry : entries) {
+			fmt::format_to(ctx.out(), "{}{{ {}, {} }}", (first ? "" : ", "), entry.first, entry.second);
+			first = false;
+		}
+		return fmt::format_to(ctx.out(), "]");
+	}
+};
 
-std::string drainPipe(int pipeFd) {
+std::string drainPipe(const int pipeFd) {
 	int readRc = 0;
 	std::string ret;
 	char buf[PIPE_BUF];
@@ -83,7 +107,7 @@ std::string drainPipe(int pipeFd) {
 		ret.append(buf, readRc);
 	}
 	if (readRc != 0) {
-		logm("Unexpected error draining pipe: {}", strerror(errno));
+		log("Unexpected error draining pipe: {}", strerror(errno));
 		throw std::runtime_error("pipe read error");
 	}
 	return ret;
@@ -96,7 +120,7 @@ struct TLSCreds {
 	std::string caBytes;
 };
 
-TLSCreds makeCreds(ChainLength chainLen, mkcert::ESide side) {
+TLSCreds makeCreds(const ChainLength chainLen, const mkcert::ESide side) {
 	if (chainLen == 0 || chainLen == NO_TLS) {
 		return TLSCreds{ chainLen == NO_TLS, "", "", "" };
 	}
@@ -120,57 +144,16 @@ TLSCreds makeCreds(ChainLength chainLen, mkcert::ESide side) {
 	return ret;
 }
 
-enum class Result : int {
-	ERROR = 0,
-	TRUSTED,
-	UNTRUSTED,
-	TIMEOUT,
-};
+enum class Result : int { ERROR = 0, TRUSTED, UNTRUSTED, TIMEOUT, LAST };
 
+constexpr std::array<std::string_view, static_cast<size_t>(Result::LAST)> RESULT_STRING{ "ERROR",
+	                                                                                     "TRUSTED",
+	                                                                                     "UNTRUSTED",
+	                                                                                     "TIMEOUT" };
 template <>
-struct fmt::formatter<Result> {
-	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
-
-	template <class FormatContext>
-	auto format(const Result& r, FormatContext& ctx) -> decltype(ctx.out()) {
-		if (r == Result::TRUSTED)
-			return fmt::format_to(ctx.out(), "TRUSTED");
-		else if (r == Result::UNTRUSTED)
-			return fmt::format_to(ctx.out(), "UNTRUSTED");
-		else if (r == Result::TIMEOUT)
-			return fmt::format_to(ctx.out(), "TIMEOUT");
-		else
-			return fmt::format_to(ctx.out(), "ERROR");
-	}
-};
-
-template <>
-struct fmt::formatter<ChainLength> {
-	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
-
-	template <class FormatContext>
-	auto format(ChainLength value, FormatContext& ctx) -> decltype(ctx.out()) {
-		if (value == NO_TLS)
-			return fmt::format_to(ctx.out(), "NO_TLS");
-		else
-			return fmt::format_to(ctx.out(), "{}", static_cast<std::underlying_type_t<ChainLength>>(value));
-	}
-};
-
-template <>
-struct fmt::formatter<std::vector<std::pair<ChainLength, ChainLength>>> {
-	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
-
-	template <class FormatContext>
-	auto format(const std::vector<std::pair<ChainLength, ChainLength>>& entries, FormatContext& ctx)
-	    -> decltype(ctx.out()) {
-		fmt::format_to(ctx.out(), "[");
-		bool first = true;
-		for (const auto& entry : entries) {
-			fmt::format_to(ctx.out(), "{}{{ {}, {} }}", (first ? "" : ", "), entry.first, entry.second);
-			first = false;
-		}
-		return fmt::format_to(ctx.out(), "]");
+struct fmt::formatter<Result> : fmt::formatter<std::string> {
+	auto format(const Result& r, fmt::format_context& ctx) const {
+		return fmt::format_to(ctx.out(), "{}", RESULT_STRING[static_cast<int>(r)]);
 	}
 };
 
@@ -224,22 +207,22 @@ struct SessionProbeReceiver final : NetworkMessageReceiver {
 
 void runServer(const Endpoint& endpoint, int addrPipe, int completionPipe) {
 	auto realAddr = FlowTransport::transport().getLocalAddresses().address;
-	logs("Listening at {}", realAddr.toString());
-	logs("Endpoint token is {}", endpoint.token.toString());
+	log("Listening at {}", realAddr.toString());
+	log("Endpoint token is {}", endpoint.token.toString());
 	static_assert(std::is_trivially_destructible_v<NetworkAddress>,
 	              "NetworkAddress cannot be directly put on wire; need proper (de-)serialization");
 	// below writes/reads would block, but this is good enough for a test.
 	if (sizeof(realAddr) != ::write(addrPipe, &realAddr, sizeof(realAddr))) {
-		logs("Failed to write server addr to pipe: {}", strerror(errno));
+		log("Failed to write server addr to pipe: {}", strerror(errno));
 		return;
 	}
 	if (sizeof(endpoint.token) != ::write(addrPipe, &endpoint.token, sizeof(endpoint.token))) {
-		logs("Failed to write server endpoint to pipe: {}", strerror(errno));
+		log("Failed to write server endpoint to pipe: {}", strerror(errno));
 		return;
 	}
 	auto done = false;
 	if (sizeof(done) != ::read(completionPipe, &done, sizeof(done))) {
-		logs("Failed to read completion flag from pipe: {}", strerror(errno));
+		log("Failed to read completion flag from pipe: {}", strerror(errno));
 		return;
 	}
 	return;
@@ -248,19 +231,21 @@ void runServer(const Endpoint& endpoint, int addrPipe, int completionPipe) {
 ACTOR Future<Void> waitAndPrintResponse(Future<SessionInfo> response, Result* rc) {
 	try {
 		SessionInfo info = wait(response);
-		logc("Probe response: trusted={} peerAddress={}", info.isPeerTrusted, info.peerAddress.toString());
+		log("Probe response: trusted={} peerAddress={}", info.isPeerTrusted, info.peerAddress.toString());
 		*rc = info.isPeerTrusted ? Result::TRUSTED : Result::UNTRUSTED;
 	} catch (Error& err) {
 		if (err.code() != error_code_operation_cancelled) {
-			logc("Unexpected error: {}", err.what());
+			log("Unexpected error: {}", err.what());
 			*rc = Result::ERROR;
 		} else {
-			logc("Timed out");
+			log("Timed out");
 			*rc = Result::TIMEOUT;
 		}
 	}
 	return Void();
 }
+
+// int runAsServer(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {}
 
 template <bool IsServer>
 int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
@@ -295,7 +280,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto dest = Endpoint();
 		auto& serverAddr = dest.addresses.address;
 		if (sizeof(serverAddr) != ::read(addrPipe, &serverAddr, sizeof(serverAddr))) {
-			logc("Failed to read server addr from pipe: {}", strerror(errno));
+			log("Failed to read server addr from pipe: {}", strerror(errno));
 			return 1;
 		}
 		if (noTls)
@@ -304,14 +289,14 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 			serverAddr.flags |= NetworkAddress::FLAG_TLS;
 		auto& token = dest.token;
 		if (sizeof(token) != ::read(addrPipe, &token, sizeof(token))) {
-			logc("Failed to read server endpoint token from pipe: {}", strerror(errno));
+			log("Failed to read server endpoint token from pipe: {}", strerror(errno));
 			return 2;
 		}
-		logc("Server address is {}{}", serverAddr.toString(), noTls ? " (TLS suffix removed)" : "");
-		logc("Server endpoint token is {}", token.toString());
+		log("Server address is {}{}", serverAddr.toString(), noTls ? " (TLS suffix removed)" : "");
+		log("Server endpoint token is {}", token.toString());
 		auto sessionProbeReq = SessionProbeRequest{};
 		transport.sendUnreliable(SerializeSource(sessionProbeReq), dest, true /*openConnection*/);
-		logc("Request is sent");
+		log("Request is sent");
 		auto rc = 0;
 		auto result = Result::ERROR;
 		{
@@ -322,15 +307,15 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		}
 		auto done = true;
 		if (sizeof(done) != ::write(completionPipe, &done, sizeof(done))) {
-			logc("Failed to signal server to terminate: {}", strerror(errno));
+			log("Failed to signal server to terminate: {}", strerror(errno));
 			rc = 4;
 		}
 		if (rc == 0) {
 			if (expect != result) {
-				logc("Test failed: expected {}, got {}", expect, result);
+				log("Test failed: expected {}, got {}", expect, result);
 				rc = 5;
 			} else {
-				logc("Response OK: got {} as expected", result);
+				log("Response OK: got {} as expected", result);
 			}
 		}
 		return rc;
@@ -355,28 +340,61 @@ Result getExpectedResult(ChainLength serverChainLen, ChainLength clientChainLen)
 	return expect;
 }
 
+std::pair<bool, std::string> waitPidStatusInterpreter(const char* procName, const int status) {
+	std::string prefix = fmt::format("{} subprocess ", procName);
+	std::string message;
+	if (WIFEXITED(status)) {
+		const auto exitStatus = WEXITSTATUS(status);
+		if (exitStatus == 0) {
+			return { true, fmt::format("{} waitpid() OK", prefix) };
+		}
+		message = fmt::format("{} exited with status {}", prefix, exitStatus);
+	} else if (WIFSIGNALED(status)) {
+		const auto signal = WTERMSIG(status);
+		message = fmt::format("{} killed by signal {} - {}", prefix, signal, strsignal(signal));
+#ifdef WCOREDUMP
+		const auto coreDumped = WCOREDUMP(status);
+		if (coreDumped)
+			message.append(std::string_view(" (core dumped)"));
+#endif // WCOREDUMP
+	} else if (WIFSTOPPED(status)) {
+		const auto signal = WSTOPSIG(status);
+		message = fmt::format("{} stopped by signal {} - {}", prefix, signal, strsignal(signal));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wparentheses"
+	} else if (WIFCONTINUED(status)) {
+#pragma clang diagnostic pop
+		message = fmt::format("{} continued by signal SIGCONT", prefix);
+	}
+
+	if (message.empty()) {
+		message = fmt::format("{} Unrecognized status {} (Check man 2 waitpid for more details)", prefix, status);
+	}
+
+	return { false, message };
+}
+
 bool waitPid(pid_t subProcPid, const char* procName) {
 	auto status = int{};
 	auto pid = ::waitpid(subProcPid, &status, 0);
+
 	if (pid < 0) {
-		logm("{} subprocess waitpid() failed with {}", procName, strerror(errno));
+		log("{} subprocess waitpid() failed with {}", procName, strerror(errno));
+
 		return false;
 	} else {
-		if (status != 0) {
-			logm("{} subprocess had error: rc={}", procName, status);
-			return false;
-		} else {
-			logm("{} subprocess waitpid() OK", procName);
-			return true;
-		}
+		auto [ok, message] = waitPidStatusInterpreter(procName, status);
+		log("{}", message);
+
+		return ok;
 	}
 }
 
 int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
-	logm("==== BEGIN TESTCASE ====");
+	log("==== BEGIN TESTCASE ====");
 	auto const expect = getExpectedResult(serverChainLen, clientChainLen);
 	using namespace std::literals::string_literals;
-	logm("Cert chain length: server={} client={}", serverChainLen, clientChainLen);
+	log("Cert chain length: server={} client={}", serverChainLen, clientChainLen);
 	auto arena = Arena();
 	auto serverCreds = makeCreds(serverChainLen, mkcert::ESide::Server);
 	auto clientCreds = makeCreds(clientChainLen, mkcert::ESide::Client);
@@ -386,16 +404,17 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 	auto serverPid = pid_t{};
 	int addrPipe[2], completionPipe[2], serverStdoutPipe[2], clientStdoutPipe[2];
 	if (::pipe(addrPipe) || ::pipe(completionPipe) || ::pipe(serverStdoutPipe) || ::pipe(clientStdoutPipe)) {
-		logm("Pipe open failed: {}", strerror(errno));
+		log("Pipe open failed: {}", strerror(errno));
 		return 1;
 	}
 	auto ok = true;
 	{
 		serverPid = fork();
 		if (serverPid == -1) {
-			logm("fork() for server subprocess failed: {}", strerror(errno));
+			log("fork() for server subprocess failed: {}", strerror(errno));
 			return 1;
 		} else if (serverPid == 0) {
+			role = Role::SERVER;
 			// server subprocess
 			::close(addrPipe[0]); // close address-in pipe (server writes its own address for client)
 			::close(
@@ -408,7 +427,7 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 				::close(completionPipe[0]);
 			});
 			if (-1 == ::dup2(serverStdoutPipe[1], STDOUT_FILENO)) {
-				logs("Failed to redirect server stdout to pipe: {}", strerror(errno));
+				log("Failed to redirect server stdout to pipe: {}", strerror(errno));
 				::close(serverStdoutPipe[1]);
 				return 1;
 			}
@@ -420,9 +439,10 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 		});
 		clientPid = fork();
 		if (clientPid == -1) {
-			logm("fork() for client subprocess failed: {}", strerror(errno));
+			log("fork() for client subprocess failed: {}", strerror(errno));
 			return 1;
 		} else if (clientPid == 0) {
+			role = Role::CLIENT;
 			::close(addrPipe[1]);
 			::close(completionPipe[0]);
 			::close(serverStdoutPipe[0]);
@@ -433,7 +453,7 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 				::close(completionPipe[1]);
 			});
 			if (-1 == ::dup2(clientStdoutPipe[1], STDOUT_FILENO)) {
-				logs("Failed to redirect client stdout to pipe: {}", strerror(errno));
+				log("Failed to redirect client stdout to pipe: {}", strerror(errno));
 				::close(clientStdoutPipe[1]);
 				return 1;
 			}
@@ -456,14 +476,14 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 		::close(clientStdoutPipe[0]);
 	});
 	std::string const clientStdout = drainPipe(clientStdoutPipe[0]);
-	logm("/// Begin Client STDOUT ///");
+	log("/// Begin Client STDOUT ///");
 	logRaw(fmt::runtime(clientStdout));
-	logm("/// End Client STDOUT ///");
+	log("/// End Client STDOUT ///");
 	std::string const serverStdout = drainPipe(serverStdoutPipe[0]);
-	logm("/// Begin Server STDOUT ///");
+	log("/// Begin Server STDOUT ///");
 	logRaw(fmt::runtime(serverStdout));
-	logm("/// End Server STDOUT ///");
-	logm(fmt::runtime(ok ? "OK" : "FAILED"));
+	log("/// End Server STDOUT ///");
+	log(fmt::runtime(ok ? "OK" : "FAILED"));
 	return !ok;
 }
 
@@ -472,7 +492,7 @@ int main(int argc, char** argv) {
 	if (argc > 1)
 		seed = std::stoul(argv[1]);
 	std::srand(seed);
-	logm("Seed: {}", seed);
+	log("Seed: {}", seed);
 	auto categoryToValue = [](int category) -> ChainLength {
 		if (category == 2 || category == -2) {
 			return static_cast<ChainLength>(category + std::rand() % 3);
@@ -495,16 +515,20 @@ int main(int argc, char** argv) {
 			failed.push_back({ serverChainLen, clientChainLen });
 	}
 	if (!failed.empty()) {
-		logm("Test Failed: {}/{} cases: {}", failed.size(), inputs.size(), failed);
+		log("Test Failed: {}/{} cases: {}", failed.size(), inputs.size(), failed);
 		return 1;
 	} else {
-		logm("Test OK: {}/{} cases passed", inputs.size(), inputs.size());
+		log("Test OK: {}/{} cases passed", inputs.size(), inputs.size());
 		return 0;
 	}
 }
 #else // _WIN32
 
+#include <iostream>
+
 int main() {
-	return 0;
+	std::cerr << "TLS test is not supported in Windows" << std::endl;
+	return -1;
 }
+
 #endif // _WIN32

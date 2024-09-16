@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1274,9 +1274,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> logRouter(TLogInterface interf,
-                             InitializeLogRouterRequest req,
-                             Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> logRouter(TLogInterface interf,
+                       InitializeLogRouterRequest req,
+                       Reference<AsyncVar<ServerDBInfo> const> db);
 Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

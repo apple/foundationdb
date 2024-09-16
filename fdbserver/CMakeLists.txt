@@ -51,7 +51,6 @@ if (WITH_SWIFT)
       "${CMAKE_SOURCE_DIR}/fdbrpc/include"
       "${CMAKE_BINARY_DIR}/fdbrpc/include"
       "${CMAKE_SOURCE_DIR}/metacluster/include"
-      "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
       "${CMAKE_SOURCE_DIR}/contrib/md5/include"
       "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
       "${CMAKE_SOURCE_DIR}/contrib/sqlite"

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -167,6 +167,27 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
                                      AuditType type,
                                      UID auditId,
                                      double timeoutSeconds);
+
+// Set bulk load mode
+ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
+
+// Get valid bulk load task state within the input range
+ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(Database cx,
+                                                                          KeyRange rangeToRead,
+                                                                          size_t limit,
+                                                                          Optional<BulkLoadPhase> phase);
+
+// Submit a bulk load task
+ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask);
+
+// Acknowledge a bulk load task if it has been completed
+ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId);
+
+// Get bulk load task for the input range and taskId
+ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
+                                            KeyRange range,
+                                            UID taskId,
+                                            std::vector<BulkLoadPhase> phases);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

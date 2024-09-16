@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2267,6 +2267,12 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 	}
 
 	loop {
+		bool ddExist = self->db.serverInfo->get().distributor.present();
+		TraceEvent(SevInfo, "CCMonitorDataDistributor", self->id)
+		    .detail("Recruiting", self->recruitDistributor.get())
+		    .detail("Existing", ddExist)
+		    .detail("ExistingDD", ddExist ? self->db.serverInfo->get().distributor.get().id().toString() : "");
+
 		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,

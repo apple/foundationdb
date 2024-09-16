@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,10 @@ struct OldLogData {
 			tLogs[j] = logSet;
 		}
 	}
+};
+
+struct IdToInterf : ReferenceCounted<IdToInterf> {
+	std::map<UID, TLogInterface> lockInterf;
 };
 
 struct LogLockInfo {
@@ -149,6 +153,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	UID getDebugID() const final;
 
+	LogSystemType getLogSystemType() const final;
+
 	void addPseudoLocality(int8_t locality);
 
 	Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const final;
@@ -199,10 +205,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> push(Version prevVersion,
-	                     Version version,
-	                     Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion,
+	Future<Version> push(const ILogSystem::PushVersionSet& versionSet,
 	                     LogPushData& data,
 	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
@@ -389,8 +392,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> tlogs,
 	    Reference<AsyncVar<Version>> recoveredVersion);
 
-	ACTOR static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
-
+	ACTOR static Future<TLogLockResult> lockTLog(
+	    UID myID,
+	    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
+	    Optional<Reference<IdToInterf>> lockInterf = Optional<Reference<IdToInterf>>());
 	template <class T>
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
 };

@@ -2,8 +2,6 @@
 allowDefaultTenant = false
 tenantModes = ['optional', 'required']
 blobGranulesEnabled = true
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
 audit_logging_enabled = false

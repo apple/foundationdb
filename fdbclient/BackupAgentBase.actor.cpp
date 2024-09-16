@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -402,7 +402,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					    .detail("TenantId", domainId);
 					if (e.code() == error_code_encrypt_keys_fetch_failed ||
 					    e.code() == error_code_encrypt_key_not_found) {
-						CODE_PROBE(true, "mutation log restore encrypt keys not found");
+						CODE_PROBE(true, "mutation log restore encrypt keys not found", probe::decoration::rare);
 						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 						continue;
 					} else {
@@ -847,8 +847,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					mutationSize = 0;
 				}
 
-				state int i;
-				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
+				for (int i = 0; i < curReq.transaction.mutations.size(); i++) {
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
 					req.transaction.encryptedMutations.push_back_deep(req.arena,
 					                                                  curReq.transaction.encryptedMutations[i]);
@@ -1016,8 +1015,11 @@ ACTOR Future<Void> applyMutations(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")
-		    .error(e);
+		Severity sev =
+		    (e.code() == error_code_restore_missing_data || e.code() == error_code_transaction_throttled_hot_shard)
+		        ? SevWarnAlways
+		        : SevError;
+		TraceEvent(sev, "ApplyMutationsError").error(e);
 		throw;
 	}
 }

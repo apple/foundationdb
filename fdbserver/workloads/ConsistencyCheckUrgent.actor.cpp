@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -283,7 +283,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					}
 					wait(delay(5.0));
 					retryCount++;
-					if (retryCount > 50) {
+					if (retryCount > 10) {
+						// SS could be removed from the cluster
 						throw timed_out();
 					}
 				}
@@ -324,6 +325,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 							valueAvailableToCheck = false;
 							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
 							e.detail("ResultPresent", rangeResult.present());
+							e.detail("StorageServer", storageServerInterfaces[j].uniqueID);
 							if (rangeResult.present()) {
 								e.detail("ErrorPresent", rangeResult.get().error.present());
 								if (rangeResult.get().error.present()) {
@@ -331,6 +333,10 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 								}
 							} else {
 								e.detail("ResultNotPresentWithError", rangeResult.getError().what());
+								if (g_network->isSimulated() &&
+								    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->failed) {
+									e.detail("MachineFailed", "True");
+								}
 							}
 							break;
 						}

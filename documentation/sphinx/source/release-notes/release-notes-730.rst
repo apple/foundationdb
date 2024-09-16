@@ -2,6 +2,39 @@
 Release Notes
 #############
 
+7.3.49
+======
+* Same as 7.3.48 release with AVX enabled.
+
+7.3.48
+======
+* Added various fdb-kubernetes-monitor improvements. `(PR #11456) <https://github.com/apple/foundationdb/pull/11456>`_, `(PR #11462) <https://github.com/apple/foundationdb/pull/11462>`_, and `(PR #11488) <https://github.com/apple/foundationdb/pull/11488>`_
+* Added more debug information for the fdbcli's checkall command. `(PR #11477) <https://github.com/apple/foundationdb/pull/11477>`_
+* Improved distributed consistency checker and updated the documentation. `(PR #11496) <https://github.com/apple/foundationdb/pull/11496>`_
+* Fixed a known committed version computation when version vector unicast is enabled. `(PR #11520) <https://github.com/apple/foundationdb/pull/11520>`_
+* Added PeerAddress to all PeerAddr/Peer TraceEvents. `(PR #11521) <https://github.com/apple/foundationdb/pull/11521>`_
+* Added a dynamic knob CC_PAUSE_HEALTH_MONITOR to disable gray failure recoveries. `(PR #11526) <https://github.com/apple/foundationdb/pull/11526>`_
+* Changed the default base Docker image to RockyLinux9. `(PR #11549) <https://github.com/apple/foundationdb/pull/11549>`_
+* Fixed a storage server crash when there are conflicting physical shard moves. `(PR #11485) <https://github.com/apple/foundationdb/pull/11485>`_
+* Fixed a rare cluster controller crash when serving status requests. `(PR #11580) <https://github.com/apple/foundationdb/pull/11580>`_
+
+7.3.47
+======
+* Same as 7.3.46 release with AVX enabled.
+
+7.3.46
+======
+* Added exponential backoff when restarting fdbserver processes in fdb-kubernetes-monitor. `(PR #11453) <https://github.com/apple/foundationdb/pull/11453>`_
+
+7.3.45
+======
+* Same as 7.3.44 release with AVX enabled.
+
+7.3.44
+======
+* Fixed negative free disk space in RkUpdate metrics. `(PR #11413) <https://github.com/apple/foundationdb/pull/11413>`_
+* Corrected the path where the fdb-kubernetes-monitor copies the binary into when running in sidecar mode. `(PR #11439) <https://github.com/apple/foundationdb/pull/11439>`_
+
 7.3.43
 ======
 * Same as 7.3.42 release with AVX enabled.

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -936,9 +936,10 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
-				conn->has_trusted_peer = verifyOk;
-			});
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
+			                   self->ssl_sock,
+			                   self->peer_address,
+			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
 
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
@@ -1019,9 +1020,10 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
-				conn->has_trusted_peer = verifyOk;
-			});
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy,
+			                   self->ssl_sock,
+			                   self->peer_address,
+			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
 
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {

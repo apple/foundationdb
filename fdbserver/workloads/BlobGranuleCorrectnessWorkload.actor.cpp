@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -773,10 +773,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			threadData->validateGranuleBoundary(beginVersionRange.begin, beginVersionRange.end, lastBeginKey);
 			lastBeginKey = beginVersionRange.begin;
 		}
-		CODE_PROBE(beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0");
-		CODE_PROBE(beginNotCollapsed > 0, "BGCorrectness got un-collapsed request with beginVersion > 0");
+		CODE_PROBE(
+		    beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0", probe::decoration::rare);
+		CODE_PROBE(beginNotCollapsed > 0,
+		           "BGCorrectness got un-collapsed request with beginVersion > 0",
+		           probe::decoration::rare);
 		CODE_PROBE(beginCollapsed > 0 && beginNotCollapsed > 0,
-		           "BGCorrectness got both collapsed and uncollapsed in the same request!");
+		           "BGCorrectness got both collapsed and uncollapsed in the same request!",
+		           probe::decoration::rare);
 
 		while (checkIt != threadData->keyData.end() && checkIt->first < endKeyExclusive) {
 			uint32_t key = checkIt->first;
@@ -1279,7 +1283,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		ASSERT(result);
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
-			CODE_PROBE(true, "BGCorrectness clearing database and awaiting merge");
+			CODE_PROBE(true, "BGCorrectness clearing database and awaiting merge", probe::decoration::rare);
 			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
 		}
 

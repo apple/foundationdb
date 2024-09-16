@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,7 +121,7 @@ EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* key, const
 }
 
 StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
-	CODE_PROBE(true, "Encrypting data with StreamCipher");
+	CODE_PROBE(true, "Encrypting data with StreamCipher", probe::decoration::rare);
 	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
 	int bytes{ 0 };
 	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);

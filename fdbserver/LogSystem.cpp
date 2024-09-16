@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -299,7 +299,7 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	if (!usePreviousLocations) {
 		prev_tags.clear();
 		if (logSystem->hasRemoteLogs()) {
-			prev_tags.push_back(logSystem->getRandomRouterTag());
+			prev_tags.push_back(chooseRouterTag());
 		}
 		for (auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);

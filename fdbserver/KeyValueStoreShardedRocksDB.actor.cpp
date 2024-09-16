@@ -565,7 +565,15 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	options.level0_stop_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 
 	if (rocksdb_block_cache == nullptr && SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		rocksdb_block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE);
+		rocksdb_block_cache =
+		    rocksdb::NewLRUCache(SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,
+		                         -1, /* num_shard_bits, default value:-1*/
+		                         false, /* strict_capacity_limit, default value:false */
+		                         SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO /* high_pri_pool_ratio */);
+		bbOpts.cache_index_and_filter_blocks = SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.pin_l0_filter_and_index_blocks_in_cache = SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.cache_index_and_filter_blocks_with_high_priority =
+		    SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	}
 	bbOpts.block_cache = rocksdb_block_cache;
 
@@ -577,6 +585,11 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 }
 
 rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
+	if (g_network->isSimulated()) {
+		return getCFOptions();
+	} else {
+		ASSERT(false); // FIXME: remove when SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE feature is well tuned
+	}
 	auto options = getCFOptions();
 	// never slowdown ingest.
 	options.level0_file_num_compaction_trigger = (1 << 30);
@@ -3177,6 +3190,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
 					    .detail("Reason", "RestoreFilesRangesMismatch")
 					    .detail("Ranges", describe(a.ranges))
+					    .detail("FetchedRanges", describe(fetchedRanges))
+					    .detail("IntendedRanges", describe(intendedRanges))
 					    .setMaxFieldLength(1000)
 					    .detail("FetchedFiles", describe(rkvs));
 					a.done.sendError(failed_to_restore_checkpoint());

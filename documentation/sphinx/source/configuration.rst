@@ -218,6 +218,7 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` 
     # initial-restart-delay = 0
     # restart-backoff = 60.0
     # restart-delay-reset-interval = 60
+    # envvars = FOO=BAR BAZ=FOO
     # delete-envvars =
     # kill-on-configuration-change = true
     # disable-lifecycle-logging = false
@@ -225,7 +226,8 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` 
 Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
 
 * ``cluster-file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
-* ``delete-envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
+* ``envvars``: A space separated list of environment variables to be added to child processes' environment variables. Every environment variable in the list must be of the form ``A=B`` where ``A`` and ``B`` are key and value names respectively.
+* ``delete-envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children. This takes precedence over envvars field.
 * ``kill-on-configuration-change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
 * ``disable-lifecycle-logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 

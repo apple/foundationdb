@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -484,6 +484,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	int extraMachineCountDC = 0;
+	int extraStorageMachineCountPerDC = 0;
 
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
@@ -568,6 +569,7 @@ public:
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
@@ -1694,6 +1696,18 @@ void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
 }
 
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
+	// Enable encryption siginificantly reduces chance that a storage engine other than redwood got selected
+	// We want storage servers are selected by simulation tests with roughly equal chance
+	// If encryptMode is not specified explicitly, with high probability, we disable encryption
+	if (testConfig.encryptModes.empty() &&
+	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
+		EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
+		TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
+		CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
+		set_config("encryption_at_rest_mode=" + encryptionMode.toString());
+		return;
+	}
+
 	std::vector<bool> available;
 	std::vector<double> probability;
 	if (!testConfig.encryptModes.empty()) {
@@ -1743,9 +1757,14 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		r -= probability[mode];
 	}
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation");
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE, "Enabled cluster-aware encryption in simulation");
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE, "Enabled domain-aware encryption in simulation");
+	CODE_PROBE(
+	    encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation", probe::decoration::rare);
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE,
+	           "Enabled cluster-aware encryption in simulation",
+	           probe::decoration::rare);
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE,
+	           "Enabled domain-aware encryption in simulation",
+	           probe::decoration::rare);
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
 }
 
@@ -1770,7 +1789,7 @@ void radixTreeStorageEngineConfig(SimulationConfig* simCfg) {
 void redwoodStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using redwood storage engine");
 	// The experimental suffix is still supported so test it randomly
-	simCfg->set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
+	simCfg->set_config("ssd-redwood-1");
 }
 
 void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
@@ -1838,14 +1857,37 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 			ASSERT(false);
 		}
 	} else {
-		constexpr auto NUM_RETRIES = 1000;
-		for (auto _ = 0; _ < NUM_RETRIES; ++_) {
-			result = deterministicRandom()->randomChoice(SIMULATION_STORAGE_ENGINE);
-			if (!testConfig.excludedStorageEngineType(result)) {
-				reason = "RandomlyChosen"_sr;
-				break;
+		std::unordered_set<SimulationStorageEngine> storageEngineAvailable;
+		for (const auto& storageEngine : SIMULATION_STORAGE_ENGINE) {
+			storageEngineAvailable.insert(storageEngine);
+		}
+		for (const auto& storageEngineExcluded : testConfig.storageEngineExcludeTypes) {
+			storageEngineAvailable.erase(storageEngineExcluded);
+		}
+		ASSERT(storageEngineAvailable.size() > 0);
+		std::vector<SimulationStorageEngine> storageEngineCandidates;
+		for (const auto& storageEngine : storageEngineAvailable) {
+			if (storageEngine == SimulationStorageEngine::MEMORY) {
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that Memory is selected
+				}
+			} else if (storageEngine == SimulationStorageEngine::SSD) {
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that SQLite is selected
+				}
+			} else if (storageEngine == SimulationStorageEngine::ROCKSDB) {
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that RocksDB is selected
+				}
+			} else {
+				storageEngineCandidates.push_back(storageEngine);
 			}
 		}
+		reason = "RandomlyChosen"_sr;
+		result = deterministicRandom()->randomChoice(storageEngineCandidates);
 		if (result == SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE) {
 			UNREACHABLE();
 		}
@@ -2189,7 +2231,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			                             5, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
 		}
 	}
-	machine_count += datacenters * testConfig.extraMachineCountDC;
+	machine_count += datacenters * (testConfig.extraMachineCountDC + testConfig.extraStorageMachineCountPerDC);
 }
 
 // Sets the coordinator count based on the testConfig. May be overwritten later
@@ -2600,8 +2642,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
 			fmt::print("sim http machines = {0}\n", simHTTPMachines);
 		}
+		int extraStorageMachineCount = testConfig.extraStorageMachineCountPerDC;
 
-		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
+		int totalMachines =
+		    machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines + extraStorageMachineCount;
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -2637,7 +2681,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			int processCount = processesPerMachine;
 			ProcessMode processMode = requiresExtraDBMachines ? BackupAgentOnly : FDBDAndBackupAgent;
 			if (machine >= machines) {
-				if (storageCacheMachines > 0 && dc == 0) {
+				if (extraStorageMachineCount > 0) {
+					processClass = ProcessClass(ProcessClass::ClassType::StorageClass,
+					                            ProcessClass::CommandLineSource); // Storage
+					extraStorageMachineCount--;
+					possible_ss++;
+				} else if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
 					storageCacheMachines--;
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
@@ -2724,6 +2773,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
 			gradualMigrationPossible = false;
 		}
+
+		TraceEvent("SimulatedClusterAssignMachineToDC")
+		    .detail("DC", dc)
+		    .detail("PossibleSS", possible_ss)
+		    .detail("Machines", machines)
+		    .detail("DcCoordinators", dcCoordinators);
 	}
 
 	g_simulator->desiredCoordinators = coordinatorCount;
@@ -2831,11 +2886,12 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	    // NOTE: PhysicalShardMove is required to have SHARDED_ROCKSDB storage engine working.
+	    // NOTE: PhysicalShardMove and BulkLoading are required to have SHARDED_ROCKSDB storage engine working.
 	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
 	    // override will not take effect until the test starts. Here, we do an additional check
 	    // for this special simulation test.
-	    std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos) {
+	    (std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos &&
+	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos)) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 

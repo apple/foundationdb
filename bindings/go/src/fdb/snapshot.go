@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,12 @@ func (s Snapshot) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r 
 
 	r, e = f(s)
 	return
+}
+
+// Cancel cancels the underlying transaction of the snapshot.
+// See Transaction.Cancel() for more information.
+func (s Snapshot) Cancel() {
+	s.transaction.cancel()
 }
 
 // Snapshot returns the receiver and allows Snapshot to satisfy the

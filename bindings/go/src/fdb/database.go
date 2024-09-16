@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,15 +89,6 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 // automatically creating and committing a transaction with appropriate retry
 // behavior.
 func (d Database) CreateTransaction() (Transaction, error) {
-	tr, err := d.createTransaction(true)
-	if err != nil {
-		return Transaction{}, err
-	}
-
-	return tr, nil
-}
-
-func (d Database) createTransaction(setFinalizer bool) (Transaction, error) {
 	var outt *C.FDBTransaction
 
 	if err := C.fdb_database_create_transaction(d.ptr, &outt); err != 0 {
@@ -105,9 +96,10 @@ func (d Database) createTransaction(setFinalizer bool) (Transaction, error) {
 	}
 
 	t := &transaction{outt, d}
-	if setFinalizer {
-		runtime.SetFinalizer(t, (*transaction).destroy)
-	}
+	// transactions cannot be destroyed explicitly if any future is still potentially used
+	// thus the GC is used to figure out when all Go wrapper objects for futures have gone out of scope,
+	// making the transaction ready to be garbage-collected.
+	runtime.SetFinalizer(t, (*transaction).destroy)
 
 	return Transaction{t}, nil
 }
@@ -119,13 +111,16 @@ func (d Database) createTransaction(setFinalizer bool) (Transaction, error) {
 // process address is the form of IP:Port pair.
 func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
 	t := &futureInt64{
-		future: newFuture(C.fdb_database_reboot_worker(
-			d.ptr,
-			byteSliceToPtr([]byte(address)),
-			C.int(len(address)),
-			C.fdb_bool_t(boolToInt(checkFile)),
-			C.int(suspendDuration),
-		),
+		future: newFutureWithDb(
+			d.database,
+			nil,
+			C.fdb_database_reboot_worker(
+				d.ptr,
+				byteSliceToPtr([]byte(address)),
+				C.int(len(address)),
+				C.fdb_bool_t(boolToInt(checkFile)),
+				C.int(suspendDuration),
+			),
 		),
 	}
 
@@ -229,19 +224,19 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
 func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
-	tr, e := d.createTransaction(false)
-	// Any error here is non-retryable
+	tr, e := d.CreateTransaction()
 	if e != nil {
+		// Any error here is non-retryable
 		return nil, e
 	}
-	defer tr.transaction.destroy()
 
 	wrapped := func() (ret interface{}, e error) {
 		defer panicToError(&e)
 
 		ret, e = f(tr)
 
-		// read-only transactions are not committed and destroyed automatically on exit
+		// read-only transactions are not committed and will be destroyed automatically via GC,
+		// once all the futures go out of scope
 
 		return
 	}

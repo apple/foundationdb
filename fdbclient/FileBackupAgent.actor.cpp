@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1206,7 +1206,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
 			wait(decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>(), tenantCache));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
-			CODE_PROBE(true, "decoding encrypted block");
+			CODE_PROBE(true, "decoding encrypted block", probe::decoration::rare);
 			// read header size
 			state uint32_t headerLen = reader.consume<uint32_t>();
 			// read the encryption header
@@ -1241,11 +1241,11 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_encrypt_key_not_found) {
 			ASSERT(!isReservedEncryptDomain(blockDomainId));
 			TraceEvent(SevWarnAlways, "SnapshotRestoreEncryptKeyFetchFailed").detail("TenantId", blockDomainId);
-			CODE_PROBE(true, "Snapshot restore encrypt keys not found");
+			CODE_PROBE(true, "Snapshot restore encrypt keys not found", probe::decoration::rare);
 		} else if (e.code() == error_code_tenant_not_found) {
 			ASSERT(!isReservedEncryptDomain(blockDomainId));
 			TraceEvent(SevWarnAlways, "EncryptedSnapshotRestoreTenantNotFound").detail("TenantId", blockDomainId);
-			CODE_PROBE(true, "Encrypted Snapshot restore tenant not found");
+			CODE_PROBE(true, "Encrypted Snapshot restore tenant not found", probe::decoration::rare);
 		}
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
@@ -1928,7 +1928,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				TraceEvent(SevDebug, "EncryptionMode").detail("EncryptMode", encryptMode.toString());
 				// Initialize range file writer and write begin key
 				if (encryptMode.mode != EncryptionAtRestMode::DISABLED) {
-					CODE_PROBE(true, "using encrypted snapshot file writer");
+					CODE_PROBE(true, "using encrypted snapshot file writer", probe::decoration::rare);
 					rangeFile = std::make_unique<EncryptedRangeFileWriter>(
 					    cx, &arena, encryptMode, tenantCache, outFile, blockSize);
 				} else {

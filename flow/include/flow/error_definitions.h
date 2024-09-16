@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -154,6 +154,8 @@ ERROR( audit_storage_task_outdated, 1234, "Audit task is scheduled by an outdate
 ERROR( transaction_throttled_hot_shard, 1235, "Transaction throttled due to hot shard" )
 ERROR( storage_replica_comparison_error, 1236, "Storage replicas not consistent" )
 ERROR( unreachable_storage_replica, 1237, "Storage replica cannot be reached" )
+ERROR( bulkload_task_failed, 1238, "Bulk loading task failed")
+ERROR( bulkload_task_outdated, 1239, "Bulk loading task outdated" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -340,6 +342,7 @@ ERROR( backup_auth_unreadable, 2318, "Cannot read or parse one or more sources o
 ERROR( backup_does_not_exist, 2319, "Backup does not exist")
 ERROR( backup_not_filterable_with_key_ranges, 2320, "Backup before 6.3 cannot be filtered with key ranges")
 ERROR( backup_not_overlapped_with_keys_filter, 2321, "Backup key ranges doesn't overlap with key ranges filter")
+ERROR( bucket_not_in_url, 2322, "bucket is not in the URL for backup" )
 ERROR( restore_invalid_version, 2361, "Invalid restore version")
 ERROR( restore_corrupted_data, 2362, "Corrupted backup data")
 ERROR( restore_missing_data, 2363, "Missing backup data")

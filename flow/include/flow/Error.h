@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -126,20 +126,20 @@ extern bool isAssertDisabled(int line);
 // #define ASSERT( condition ) ((void)0)
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
-		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
+		if (!((condition) || isAssertDisabled(__LINE__))) [[unlikely]] {                                               \
 			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
 	} while (false)
 #define ASSERT_ABORT(condition)                                                                                        \
 	do {                                                                                                               \
-		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
+		if (!((condition) || isAssertDisabled(__LINE__))) [[unlikely]] {                                               \
 			internal_error_impl(#condition, __FILE__, __LINE__);                                                       \
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
 #define UNSTOPPABLE_ASSERT(condition)                                                                                  \
 	do {                                                                                                               \
-		if (!(condition)) {                                                                                            \
+		if (!(condition)) [[unlikely]] {                                                                               \
 			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
 	} while (false)

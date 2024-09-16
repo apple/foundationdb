@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -255,8 +255,7 @@ struct Traceable<BooleanParamSub, std::enable_if_t<std::is_base_of_v<BooleanPara
 // Adapter to redirect fmt::formatter calls to Traceable for a supported type
 template <typename T>
 struct FormatUsingTraceable : fmt::formatter<std::string> {
-	template <typename FormatContext>
-	auto format(const T& val, FormatContext& ctx) {
+	auto format(const T& val, fmt::format_context& ctx) const {
 		return fmt::formatter<std::string>::format(Traceable<T>::toString(val), ctx);
 	}
 };

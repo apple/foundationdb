@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -874,9 +874,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	}
 
 	state std::vector<OldTLogConf>::const_iterator oldTLogIter;
-	for (oldTLogIter = db->get().logSystemConfig.oldTLogs.begin();
-	     oldTLogIter != db->get().logSystemConfig.oldTLogs.end();
-	     ++oldTLogIter) {
+	state std::vector<OldTLogConf> oldTLogs = db->get().logSystemConfig.oldTLogs;
+	for (oldTLogIter = oldTLogs.begin(); oldTLogIter != oldTLogs.end(); ++oldTLogIter) {
 		for (auto& tLogSet : oldTLogIter->tLogs) {
 			for (auto& it : tLogSet.tLogs) {
 				if (it.present()) {

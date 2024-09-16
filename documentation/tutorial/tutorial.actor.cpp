@@ -4,7 +4,7 @@
 *
 * This source file is part of the FoundationDB open source project
 *
-* Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+* Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -342,9 +342,8 @@ ACTOR Future<Void> kvStoreServer() {
 
 ACTOR Future<SimpleKeyValueStoreInterface> connect() {
 	std::cout << format("%llu: Connect...\n", uint64_t(g_network->now()));
-	SimpleKeyValueStoreInterface c;
-	c.connect = RequestStream<GetKVInterface>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_SIMPLE_KV_SERVER));
-	SimpleKeyValueStoreInterface result = wait(c.connect.getReply(GetKVInterface()));
+	auto reqStream = RequestStream<GetKVInterface>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_SIMPLE_KV_SERVER));
+	SimpleKeyValueStoreInterface result = wait(reqStream.getReply(GetKVInterface()));
 	std::cout << format("%llu: done..\n", uint64_t(g_network->now()));
 	return result;
 }

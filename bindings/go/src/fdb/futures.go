@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,11 +71,25 @@ type Future interface {
 }
 
 type future struct {
+	// db is used to hint Go's GC about the dependency on the parent database object.
+	// This prevents the database to be garbage-collected before future is out of scope.
+	db *database
+	// t is used to hint Go's GC about the dependency on the parent transaction object.
+	// This prevents the transaction to be garbage-collected before future is out of scope.
+	t   *transaction
 	ptr *C.FDBFuture
 }
 
-func newFuture(ptr *C.FDBFuture) *future {
-	f := &future{ptr}
+func newFuture(t *transaction, ptr *C.FDBFuture) *future {
+	return newFutureWithDb(nil, t, ptr)
+}
+
+func newFutureWithDb(db *database, t *transaction, ptr *C.FDBFuture) *future {
+	f := &future{
+		db:  db,
+		t:   t,
+		ptr: ptr,
+	}
 	runtime.SetFinalizer(f, func(f *future) { C.fdb_future_destroy(f.ptr) })
 	return f
 }

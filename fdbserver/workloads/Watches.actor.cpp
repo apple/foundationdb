@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
+#include "flow/CodeProbe.h"
+#include "flow/Coroutines.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -47,7 +49,22 @@ struct WatchesWorkload : TestWorkload {
 		tempRand.randomShuffle(nodeOrder);
 	}
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override {
+		// return _setup(cx, this);
+		std::vector<Future<Void>> setupActors;
+		for (int i = 0; i < nodes; i++)
+			if (i % clientCount == clientId)
+				setupActors.push_back(
+				    watcherInit(cx, keyForIndex(nodeOrder[i]), keyForIndex(nodeOrder[i + 1]), extraPerNode));
+
+		co_await waitForAll(setupActors);
+
+		for (int i = 0; i < nodes; i++)
+			if (i % clientCount == clientId)
+				clients.push_back(watcher(cx, keyForIndex(nodeOrder[i]), keyForIndex(nodeOrder[i + 1]), extraPerNode));
+
+		co_return;
+	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
@@ -82,47 +99,22 @@ struct WatchesWorkload : TestWorkload {
 		return result;
 	}
 
-	ACTOR Future<Void> _setup(Database cx, WatchesWorkload* self) {
-		std::vector<Future<Void>> setupActors;
-		for (int i = 0; i < self->nodes; i++)
-			if (i % self->clientCount == self->clientId)
-				setupActors.push_back(self->watcherInit(cx,
-				                                        self->keyForIndex(self->nodeOrder[i]),
-				                                        self->keyForIndex(self->nodeOrder[i + 1]),
-				                                        self->extraPerNode));
-
-		wait(waitForAll(setupActors));
-
-		for (int i = 0; i < self->nodes; i++)
-			if (i % self->clientCount == self->clientId)
-				self->clients.push_back(self->watcher(cx,
-				                                      self->keyForIndex(self->nodeOrder[i]),
-				                                      self->keyForIndex(self->nodeOrder[i + 1]),
-				                                      self->extraPerNode));
-
-		return Void();
-	}
-
-	ACTOR static Future<Void> watcherInit(Database cx, Key watchKey, Key setKey, int extraNodes) {
-		state Transaction tr(cx);
-		state int extraLoc = 0;
+	Future<Void> watcherInit(Database cx, Key watchKey, Key setKey, int extraNodes) {
+		int extraLoc = 0;
 		while (extraLoc < extraNodes) {
-			try {
+			co_await cx.run([&](Transaction* tr) -> Future<Void> {
 				for (int i = 0; i < 1000 && extraLoc + i < extraNodes; i++) {
 					Key extraKey = KeyRef(watchKey.toString() + format("%d", extraLoc + i));
 					Value extraValue = ValueRef(std::string(100, '.'));
-					tr.set(extraKey, extraValue);
-					//TraceEvent("WatcherInitialSetupExtra").detail("Key", printable(extraKey)).detail("Value", printable(extraValue));
+					tr->set(extraKey, extraValue);
+					// TraceEvent("WatcherInitialSetupExtra").detail("Key", extraKey).detail("Value", extraValue);
 				}
-				wait(tr.commit());
+				co_await tr->commit();
 				extraLoc += 1000;
-				//TraceEvent("WatcherInitialSetup").detail("Watch", printable(watchKey)).detail("Ver", tr.getCommittedVersion());
-			} catch (Error& e) {
-				//TraceEvent("WatcherInitialSetupError").error(e).detail("ExtraLoc", extraLoc);
-				wait(tr.onError(e));
-			}
+				CODE_PROBE(true, "Watches workload initial setup");
+				// TraceEvent("WatcherInitialSetup").detail("Watch", watchKey).detail("Ver", tr->getCommittedVersion());
+			});
 		}
-		return Void();
 	}
 
 	ACTOR static Future<Void> watcher(Database cx, Key watchKey, Key setKey, int extraNodes) {
@@ -177,87 +169,76 @@ struct WatchesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> watchesWorker(Database cx, WatchesWorkload* self) {
-		state Key startKey = self->keyForIndex(self->nodeOrder[0]);
-		state Key endKey = self->keyForIndex(self->nodeOrder[self->nodes]);
-		state Optional<Value> expectedValue;
-		state Optional<Value> startValue;
-		state double startTime = now();
-		state double chainStartTime;
+	Future<Void> watchesWorker(Database cx, WatchesWorkload* self) {
+		Key startKey = self->keyForIndex(self->nodeOrder[0]);
+		Key endKey = self->keyForIndex(self->nodeOrder[self->nodes]);
+		Optional<Value> expectedValue;
+		Optional<Value> startValue;
+		double startTime = now();
+		double chainStartTime;
 		loop {
-			state Transaction tr(cx);
-			state bool isValue = deterministicRandom()->random01() > 0.5;
-			state Value assignedValue = Value(deterministicRandom()->randomUniqueID().toString());
-			state bool firstAttempt = true;
-			loop {
-				try {
-					wait(success(tr.getReadVersion()));
-					Optional<Value> _startValue = wait(tr.get(startKey));
-					if (firstAttempt) {
-						startValue = _startValue;
-						firstAttempt = false;
-					}
-					expectedValue = Optional<Value>();
-					if (startValue.present()) {
-						if (isValue)
-							expectedValue = assignedValue;
-					} else
-						expectedValue = assignedValue;
-
-					if (expectedValue.present())
-						tr.set(startKey, expectedValue.get());
-					else
-						tr.clear(startKey);
-
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+			bool isValue = deterministicRandom()->random01() > 0.5;
+			Value assignedValue = Value(deterministicRandom()->randomUniqueID().toString());
+			bool firstAttempt = true;
+			co_await cx.run([&](Transaction* tr) -> Future<Void> {
+				co_await tr->getReadVersion();
+				Optional<Value> _startValue = co_await tr->get(startKey);
+				if (firstAttempt) {
+					startValue = _startValue;
+					firstAttempt = false;
 				}
-			}
+				expectedValue = Optional<Value>();
+				if (startValue.present()) {
+					if (isValue)
+						expectedValue = assignedValue;
+				} else
+					expectedValue = assignedValue;
+
+				if (expectedValue.present())
+					tr->set(startKey, expectedValue.get());
+				else
+					tr->clear(startKey);
+
+				co_await tr->commit();
+				CODE_PROBE(expectedValue.present(), "watches workload set a key");
+				CODE_PROBE(!expectedValue.present(), "watches workload clear a key");
+				co_return;
+			});
 
 			chainStartTime = now();
 			firstAttempt = true;
-			loop {
-				state Transaction tr2(cx);
-				state bool finished = false;
-				loop {
-					try {
-						state Optional<Value> endValue = wait(tr2.get(endKey));
-						if (endValue == expectedValue) {
-							finished = true;
-							break;
-						}
-						if (!firstAttempt || endValue != startValue) {
-							TraceEvent(SevError, "WatcherError")
-							    .detail("FirstAttempt", firstAttempt)
-							    .detail("StartValue", printable(startValue))
-							    .detail("EndValue", printable(endValue))
-							    .detail("ExpectedValue", printable(expectedValue))
-							    .detail("EndVersion", tr2.getReadVersion().get());
-						}
-						state Future<Void> watchFuture = tr2.watch(makeReference<Watch>(endKey, startValue));
-						wait(tr2.commit());
-						wait(watchFuture);
-						firstAttempt = false;
-						break;
-					} catch (Error& e) {
-						wait(tr2.onError(e));
+			bool finished = false;
+			while (!finished) {
+				co_await cx.run([&](Transaction* tr2) -> Future<Void> {
+					Optional<Value> endValue = co_await tr2->get(endKey);
+					if (endValue == expectedValue) {
+						finished = true;
+						co_return;
 					}
-				}
-				if (finished)
-					break;
+					if (!firstAttempt || endValue != startValue) {
+						TraceEvent(SevError, "WatcherError")
+						    .detail("FirstAttempt", firstAttempt)
+						    .detail("StartValue", printable(startValue))
+						    .detail("EndValue", printable(endValue))
+						    .detail("ExpectedValue", printable(expectedValue))
+						    .detail("EndVersion", tr2->getReadVersion().get());
+					}
+					Future<Void> watchFuture = tr2->watch(makeReference<Watch>(endKey, startValue));
+					co_await tr2->commit();
+					co_await watchFuture;
+					CODE_PROBE(true, "watcher workload watch fired");
+					firstAttempt = false;
+				});
 			}
 			self->cycleLatencies.addSample(now() - chainStartTime);
 			++self->cycles;
 
 			if (g_network->isSimulated())
-				wait(delay(deterministicRandom()->random01() < 0.5 ? 0 : deterministicRandom()->random01() * 60));
+				co_await delay(deterministicRandom()->random01() < 0.5 ? 0 : deterministicRandom()->random01() * 60);
 
 			if (now() - startTime > self->testDuration)
 				break;
 		}
-		return Void();
 	}
 };
 

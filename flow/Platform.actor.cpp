@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3052,7 +3052,7 @@ size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
 	return bytesRead;
 }
 
-std::string readFileBytes(std::string const& filename, int maxSize) {
+std::string readFileBytes(std::string const& filename, size_t maxSize) {
 	if (!fileExists(filename)) {
 		TraceEvent("ReadFileBytes_FileNotFound").detail("Filename", filename);
 		throw file_not_found();
@@ -3060,7 +3060,10 @@ std::string readFileBytes(std::string const& filename, int maxSize) {
 
 	size_t size = fileSize(filename);
 	if (size > maxSize) {
-		TraceEvent("ReadFileBytes_FileTooLarge").detail("Filename", filename);
+		TraceEvent("ReadFileBytes_FileTooLarge")
+		    .detail("FileSize", size)
+		    .detail("InputMaxSize", maxSize)
+		    .detail("Filename", filename);
 		throw file_too_large();
 	}
 

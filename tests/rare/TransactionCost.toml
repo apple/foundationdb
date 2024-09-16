@@ -1,5 +1,6 @@
-[configuration]
-storageEngineExcludeTypes=[5]
+# High priority number decreases the chance to run this test.
+# Priority 1.0 is the default in TestHarness2
+testPriority = '20'
 
 [[test]]
 testTitle = 'TransactionCostTest'

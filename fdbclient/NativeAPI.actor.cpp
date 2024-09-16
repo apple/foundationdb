@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2119,6 +2119,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 	if (defaultFor >= 0) {
 		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
 		       FDBTransactionOptions::optionInfo.end());
+		TraceEvent(SevDebug, "DatabaseContextSetPersistentOption").detail("Option", option).detail("Value", value);
 		transactionDefaults.addOption((FDBTransactionOptions::Option)defaultFor, value.castTo<Standalone<StringRef>>());
 	} else {
 		switch (option) {

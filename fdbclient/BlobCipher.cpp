@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -441,7 +441,7 @@ void BlobCipherKey::initKey(const EncryptCipherDomainId& domainId,
 		TraceEvent(SevWarnAlways, "MaxBaseCipherKeyLimit")
 		    .detail("MaxAllowed", MAX_BASE_CIPHER_LEN)
 		    .detail("BaseCipherLen", baseCiphLen);
-		CODE_PROBE(true, "Encryption max base cipher len violation");
+		CODE_PROBE(true, "Encryption max base cipher len violation", probe::decoration::rare);
 		throw encrypt_max_base_cipher_len();
 	}
 
@@ -1241,7 +1241,7 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 		*encryptTime = timer_monotonic() - startTime;
 	}
 
-	CODE_PROBE(true, "BlobCipher data encryption");
+	CODE_PROBE(true, "BlobCipher data encryption", probe::decoration::rare);
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 	           "Encryption authentication disabled");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
@@ -1287,7 +1287,7 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		*encryptTime = timer_monotonic() - startTime;
 	}
 
-	CODE_PROBE(true, "encryptInplace: BlobCipher data encryption");
+	CODE_PROBE(true, "encryptInplace: BlobCipher data encryption", probe::decoration::rare);
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 	           "encryptInplace: Encryption authentication disabled");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
@@ -1411,7 +1411,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeaderFlagsV1(const uint32_t hea
 		    .detail("ExpectedCipherMode", EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR)
 		    .detail("EncryptHeaderAuthTokenMode", flags.authTokenMode);
 
-		CODE_PROBE(true, "ConfigurableEncryption: Encryption header metadata mismatch");
+		CODE_PROBE(true, "ConfigurableEncryption: Encryption header metadata mismatch", probe::decoration::rare);
 
 		throw encrypt_header_metadata_mismatch();
 	}
@@ -1559,7 +1559,7 @@ void DecryptBlobCipherAes256Ctr::verifyEncryptHeaderMetadata(const BlobCipherEnc
 		    .detail("ExpectedCipherMode", EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR)
 		    .detail("EncryptHeaderAuthTokenMode", header.flags.authTokenMode);
 
-		CODE_PROBE(true, "Encryption header metadata mismatch");
+		CODE_PROBE(true, "Encryption header metadata mismatch", probe::decoration::rare);
 
 		throw encrypt_header_metadata_mismatch();
 	}

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -88,6 +88,8 @@ struct MoveKeysParams {
 	const DDEnabledState* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
 
+	Optional<BulkLoadState> bulkLoadState;
+
 	MoveKeysParams() {}
 
 	MoveKeysParams(UID dataMoveId,
@@ -101,13 +103,14 @@ struct MoveKeysParams {
 	               bool hasRemote,
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
-	               CancelConflictingDataMoves cancelConflictingDataMoves)
+	               CancelConflictingDataMoves cancelConflictingDataMoves,
+	               Optional<BulkLoadState> bulkLoadState)
 	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
 	    lock(lock), dataMovementComplete(dataMovementComplete),
 	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
-	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadState(bulkLoadState) {}
 
 	MoveKeysParams(UID dataMoveId,
 	               const std::vector<KeyRange>& ranges,
@@ -120,13 +123,14 @@ struct MoveKeysParams {
 	               bool hasRemote,
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
-	               CancelConflictingDataMoves cancelConflictingDataMoves)
+	               CancelConflictingDataMoves cancelConflictingDataMoves,
+	               Optional<BulkLoadState> bulkLoadState)
 	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
 	    healthyDestinations(healthyDestinations), lock(lock), dataMovementComplete(dataMovementComplete),
 	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
-	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadState(bulkLoadState) {}
 };
 
 // read the lock value in system keyspace but do not change anything
@@ -203,6 +207,11 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
                                       KeyRangeRef keys,
                                       UID bmId,
                                       UID reqId = UID());
+
+Future<Void> checkMoveKeysLock(Transaction* tr,
+                               MoveKeysLock const& lock,
+                               const DDEnabledState* ddEnabledState,
+                               bool isWrite = true);
 
 #include "flow/unactorcompiler.h"
 #endif

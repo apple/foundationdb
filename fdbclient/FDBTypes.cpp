@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -241,7 +241,6 @@ KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
 		                                              { "ssd", SSD_BTREE_V2 },
 		                                              { "redwood", SSD_REDWOOD_V1 },
 		                                              { "ssd-redwood-1", SSD_REDWOOD_V1 },
-		                                              { "ssd-redwood-1-experimental", SSD_REDWOOD_V1 },
 		                                              { "ssd-rocksdb-v1", SSD_ROCKSDB_V1 },
 		                                              { "ssd-sharded-rocksdb", SSD_SHARDED_ROCKSDB },
 		                                              { "memory", MEMORY },

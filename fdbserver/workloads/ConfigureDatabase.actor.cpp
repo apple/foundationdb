@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fdbserver/SimulatedCluster.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -284,7 +285,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
 		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
 			TraceEvent("ConfigureDatabase_EncryptionEnabled");
-			self->storageEngineExcludeTypes = { 0, 1, 2, 4, 5 };
+			self->storageEngineExcludeTypes = { (int)SimulationStorageEngine::SSD,
+				                                (int)SimulationStorageEngine::MEMORY,
+				                                (int)SimulationStorageEngine::RADIX_TREE,
+				                                (int)SimulationStorageEngine::ROCKSDB,
+				                                (int)SimulationStorageEngine::SHARDED_ROCKSDB };
+		}
+		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			self->storageEngineExcludeTypes.push_back((int)SimulationStorageEngine::SHARDED_ROCKSDB);
 		}
 		if (self->clientId == 0) {
 			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
@@ -423,7 +431,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 5) {
 				int storeType = 0;
 				while (true) {
-					storeType = deterministicRandom()->randomInt(0, 4);
+					storeType = deterministicRandom()->randomInt(0, 6);
 					if (std::count(self->storageEngineExcludeTypes.begin(),
 					               self->storageEngineExcludeTypes.end(),
 					               storeType) == 0) {
@@ -444,8 +452,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					storeTypeStr = "memory-radixtree";
 					break;
 				case 3:
-					// Experimental suffix is still supported so test it
-					storeTypeStr = BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental";
+					storeTypeStr = "ssd-redwood-1";
+					break;
+				case 4:
+					storeTypeStr = "ssd-rocksdb-v1";
+					break;
+				case 5:
+					storeTypeStr = "ssd-sharded-rocksdb";
 					break;
 				default:
 					ASSERT(false);

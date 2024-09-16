@@ -3,7 +3,7 @@
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+# Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
 endif()
 
 set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+set(AUTO_DISCOVER_UNIT_TESTS OFF CACHE BOOL "Automatically discover unit-tests")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   if (OPEN_FOR_IDE)
@@ -164,6 +165,7 @@ configure_file(fdb.cluster.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdb.cluster)
 ################################################################################
 # testing
 ################################################################################
+include(CTest)
 enable_testing()
 
 ################################################################################
@@ -188,6 +190,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 include(CompileBoost)
+include(GetFmt)
 include(GetMsgpack)
 add_subdirectory(contrib)
 add_subdirectory(flow)
@@ -215,7 +218,9 @@ if(WITH_PYTHON AND WITH_C_BINDING)
 endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
-  add_dependencies(html CopyJavadoc)
+  if(BUILD_JAVA_BINDING)
+    add_dependencies(html CopyJavadoc)
+  endif()
 endif()
 
 if(WIN32)
@@ -254,5 +259,3 @@ endif()
 print_components()
 
 message(STATUS "CPACK_COMPONENTS_ALL ${CPACK_COMPONENTS_ALL}")
-
-

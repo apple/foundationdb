@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -343,14 +343,14 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 
 // Read a file into memory
 // This requires the file to be seekable
-std::string readFileBytes(std::string const& filename, int maxSize);
+std::string readFileBytes(std::string const& filename, size_t maxSize);
 
 // Read a file into memory supplied by the caller
 // If 'len' is greater than file size, then read the filesize bytes.
-size_t readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
+size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len);
 
 // Write data buffer into file
-void writeFileBytes(std::string const& filename, const char* data, size_t count);
+void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count);
 
 // Write text into file
 void writeFile(std::string const& filename, std::string const& content);

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1178,6 +1178,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 
 		TraceEvent(SevDebug, "PeerHealthMonitor")
+		    .suppressFor(5.0)
 		    .detail("Peer", address)
 		    .detail("PeerAddress", address)
 		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
@@ -2857,7 +2858,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (ekpInterf->get().present()) {
 					recruited = ekpInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a encryptKeyProxy server.");
+					CODE_PROBE(true, "Recruited while already a encryptKeyProxy server.", probe::decoration::rare);
 				} else {
 					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);

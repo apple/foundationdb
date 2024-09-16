@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ public:
 	FutureStream<GetMetricsListRequest> getShardMetricsList;
 	FutureStream<Promise<int64_t>> averageShardBytes;
 	FutureStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+	FutureStream<BulkLoadShardRequest> triggerShardBulkLoading;
 
 	virtual double getAverageShardBytes() = 0;
 	virtual ~IDDShardTracker() = default;
@@ -43,10 +44,12 @@ struct DataDistributionTrackerInitParams {
 	PromiseStream<RelocateShard> const& output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
 	Optional<Reference<TenantCache>> ddTenantCache;
+	int32_t usableRegions = -1;
 };
 
 // track the status of shards
@@ -65,6 +68,7 @@ public:
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
+	int32_t usableRegions = -1;
 
 	// CapacityTracker
 	PromiseStream<RelocateShard> output;
@@ -72,6 +76,10 @@ public:
 
 	// PhysicalShard Tracker
 	Reference<PhysicalShardCollection> physicalShardCollection;
+
+	// BulkLoadTask Tracker
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	bool bulkLoadEnabled = false;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
@@ -123,7 +131,8 @@ public:
 	                        FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
 	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
 	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes,
-	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance);
+	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance,
+	                        FutureStream<BulkLoadShardRequest> const& triggerShardBulkLoading);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -483,7 +483,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChangedOrStateTxn || req.txnStateTransactions.size()) {
+				if (shardChangedOrStateTxn || req.txnStateTransactions.size() || !req.writtenTags.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}

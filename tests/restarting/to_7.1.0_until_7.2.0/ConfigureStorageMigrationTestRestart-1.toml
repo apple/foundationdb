@@ -2,14 +2,12 @@
 extraMachineCountDC = 2
 maxTLogVersion=6
 disableHostname=true
-storageEngineExcludeTypes=[3, 4, 5]
+storageEngineExcludeTypes=[3]
 tenantModes=['disabled']
 encryptModes=['disabled']
 simHTTPServerEnabled=false
 
 [[knobs]]
-# This can be removed once the lower bound of this downgrade test is a version that understands the new protocol
-shard_encode_location_metadata = false
 # Mutation checksum and accumulative checksum is not compatible with release-7.1.x
 enable_mutation_checksum = false
 enable_accumulative_checksum = false

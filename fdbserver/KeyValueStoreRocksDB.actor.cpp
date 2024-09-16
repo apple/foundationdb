@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -260,9 +260,6 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	//    checks will be performed with ttl being first.
 	options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSDB_WAL_TTL_SECONDS;
 	options.WAL_size_limit_MB = SERVER_KNOBS->ROCKSDB_WAL_SIZE_LIMIT_MB;
-	if (g_network->isSimulated()) { // Used to fix external timeout in simulation
-		options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
-	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::StatsLevel(SERVER_KNOBS->ROCKSDB_STATS_LEVEL));
@@ -556,6 +553,15 @@ public:
 
 	// Called on every read operation.
 	ReadIterator getIterator(KeyRange keyRange) {
+		// Reusing iterator in simulation can cause slow down
+		// We avoid to always reuse iterator in simulation to speed up the simulation
+		if (g_network->isSimulated() &&
+		    deterministicRandom()->random01() > SERVER_KNOBS->ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM) {
+			index++;
+			ReadIterator iter(cf, index, db, sharedState, keyRange);
+			return iter;
+		}
+
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {

@@ -1,6 +1,5 @@
 [configuration]
 minimumRegions = 2
-storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'KillRegionCycle'

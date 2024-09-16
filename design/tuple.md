@@ -2,9 +2,9 @@
 
 This document is intended to be the system of record for the allocation of typecodes in the Tuple layer. The source code isn’t good enough because a typecode might be added to one language (or by a customer) before another.
 
-Status: Standard means that all of our language bindings implement this typecode
-Status: Reserved means that this typecode is not yet used in our standard language bindings, but may be in use by third party bindings or specific applications
-Status: Deprecated means that a previous layer used this type, but issues with that type code have led us to mark this type code as not to be used.
+Status: Standard means that all of our language bindings implement this typecode.  
+Status: Reserved means that this typecode is not yet used in our standard language bindings, but may be in use by third party bindings or specific applications.  
+Status: Deprecated means that a previous layer used this type, but issues with that type code have led us to mark this type code as not to be used.  
 
 
 ### **Null Value**
@@ -18,7 +18,7 @@ Status: Standard
 Typecode: `0x01`
 Length: Variable (terminated by` [\x00]![\xff]`)  
 Encoding: `b'\x01' + value.replace(b'\x00', b'\x00\xFF') + b'\x00'`  
-Test case: `pack(“foo\x00bar”) == b'\x01foo\x00\xffbar\x00'`  
+Test case: `pack("foo\x00bar") == b'\x01foo\x00\xffbar\x00'`  
 Status: Standard
 
 In other words, byte strings are null terminated with null values occurring in the string escaped in an order-preserving way.
@@ -44,9 +44,9 @@ This encoding was used by a few layers. However, it had ordering problems when o
 ### **Nested Tuple**
 
 Typecodes: `0x05`
-Length: Variable (terminated by `[\x00]![\xff]` at beginning of nested element)  
+Length: Variable (terminated by `[\x00]![\xff]` at the end of nested element)  
 Encoding: `b'\x05' + ''.join(map(lambda x: b'\x00\xff' if x is None else pack(x), value)) + b'\x00'`  
-Test case: `pack( (“foo\x00bar”, None, ()) ) == b'\x05\x01foo\x00\xffbar\x00\x00\xff\x05\x00\x00'`  
+Test case: `pack( ((b"foo\x00bar", None, ()),) ) == b'\x05\x01foo\x00\xffbar\x00\x00\xff\x05\x00\x00'`  
 Status: Standard
 
 The list ends with a 0x00 byte. Nulls within the tuple are encoded as `\x00\xff`. There is no other null escaping. In particular, 0x00 bytes that are within the nested types can be left as-is as they are passed over when decoding the interior types. To show how this fixes the bug in the previous version of nested tuples, the empty tuple is now encoded as `\x05\x00` while the tuple containing only null is encoded as `\x05\x00\xff\x00`, so the first tuple will sort first.
@@ -61,11 +61,19 @@ These typecodes are reserved for encoding integers larger than 8 bytes. Presumab
 
 ### **Integer**
 
-Typecodes: `0x0c` - `0x1c`
+Typecodes: `0x0c` - `0x1c`  
 &nbsp;`0x0c` is an 8 byte negative number  
+...  
+&nbsp;`0x10` is an 4 byte negative number  
+...  
+&nbsp;`0x12` is an 2 byte negative number  
 &nbsp;`0x13` is a 1 byte negative number  
 &nbsp;`0x14` is a zero  
 &nbsp;`0x15` is a 1 byte positive number  
+&nbsp;`0x16` is a 2 byte positive number  
+...  
+&nbsp;`0x18` is a 4 byte positive number  
+...  
 &nbsp;`0x1c` is an 8 byte positive number  
 Length: Depends on typecode (0-8 bytes)  
 Encoding: positive numbers are big endian  
@@ -79,7 +87,7 @@ There is some variation in the ability of language bindings to encode and decode
 
 Typecodes: `0x1d`, `0x1e`
 Encoding: Not defined yet  
-Status: Reserved; 0x1d used in Python and Java
+Status: Reserved; `0x1d` used in Python and Java
 
 These typecodes are reserved for encoding integers larger than 8 bytes. Presumably the type code would be followed by some encoding of the length, followed by the big endian one’s complement number. Reserving two typecodes for each of positive and negative numbers is probably overkill, but until there’s a design in place we might as well not use them. In the Python and Java implementations, `0x1d` stores positive numbers which are expressed with between 9 and 255 bytes. The first byte following the type code (`0x1d`) is a single byte expressing the number of bytes in the integer, followed by that number of bytes representing the number in big endian order.
 
