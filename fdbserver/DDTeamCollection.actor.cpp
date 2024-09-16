@@ -25,6 +25,8 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/Knobs.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
@@ -5080,13 +5082,48 @@ Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 	}
 }
 
+bool DDTeamCollection::isAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const {
+	// This checking takes effects only if CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM is set
+	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
+	const int targetTeamNumPerServer =
+	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	for (const auto& machine : machineTeam.getMachines()) {
+		bool existSSBelowTarget = false;
+		for (const auto& server : machine->serversOnMachine) {
+			if (server->getTeams().size() < targetTeamNumPerServer) {
+				existSSBelowTarget = true;
+				break;
+			}
+		}
+		if (!existSSBelowTarget) {
+			// In case where each of the servers of the machine has serverTeams is no less than targetTeamNumPerServer
+			// We do not want to add more serverTeams to this machine
+			// For targetTeamNumPerServer, see the comment of notEnoughTeamsForAServer()
+			TraceEvent e(SevWarnAlways, "MachineTeamIsNotAvailableToAddMoreServerTeam");
+			for (int i = 0; i < machine->serversOnMachine.size(); i++) {
+				e.detail("Server" + std::to_string(i), machine->serversOnMachine[i]->getId());
+				e.detail("TeamCountOnServer" + std::to_string(i), machine->serversOnMachine[i]->getTeams().size());
+				e.detail("HealthyServer" + std::to_string(i),
+				         !(server_status.get(machine->serversOnMachine[i]->getId()).isUnhealthy()));
+			}
+			return false;
+		}
+	}
+	return true;
+}
+
 Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(TCServerInfo const& chosenServer) const {
 	if (!chosenServer.machine->machineTeams.empty()) {
 		std::vector<Reference<TCMachineTeamInfo>> healthyMachineTeamsForChosenServer;
 		for (auto& mt : chosenServer.machine->machineTeams) {
-			if (isMachineTeamHealthy(*mt)) {
-				healthyMachineTeamsForChosenServer.push_back(mt);
+			if (!isMachineTeamHealthy(*mt)) {
+				continue;
 			}
+			if (SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM &&
+			    !isAvailableToBuildMoreServerTeam(*mt)) {
+				continue;
+			}
+			healthyMachineTeamsForChosenServer.push_back(mt);
 		}
 		if (!healthyMachineTeamsForChosenServer.empty()) {
 			return deterministicRandom()->randomChoice(healthyMachineTeamsForChosenServer);
@@ -5396,6 +5433,9 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// Step 2: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 			std::vector<UID> serverTeam;
 			int chosenServerCount = 0;
+			const int targetTeamNumPerServer =
+			    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+			Optional<Reference<TCMachineInfo>> unavailableMachine;
 			for (auto& machine : chosenMachineTeam->getMachines()) {
 				UID serverID;
 				if (machine == chosenServer->machine) {
@@ -5404,13 +5444,22 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 					serverID = chosenServer->getId();
 					++chosenServerCount;
 				} else {
-					std::vector<Reference<TCServerInfo>> healthyProcesses;
+					std::vector<Reference<TCServerInfo>> candidateProcesses;
 					for (auto it : machine->serversOnMachine) {
-						if (!server_status.get(it->getId()).isUnhealthy()) {
-							healthyProcesses.push_back(it);
+						if (server_status.get(it->getId()).isUnhealthy()) {
+							continue;
 						}
+						// When CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM is set,
+						// we build team on a server which does not have teams more than the target count.
+						// For targetTeamNumPerServer, see the comment of notEnoughTeamsForAServer()
+						if (SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM &&
+						    it->getTeams().size() >= targetTeamNumPerServer) {
+							continue;
+						}
+						candidateProcesses.push_back(it);
 					}
-					serverID = deterministicRandom()->randomChoice(healthyProcesses)->getId();
+					ASSERT_WE_THINK(candidateProcesses.size() > 0);
+					serverID = deterministicRandom()->randomChoice(candidateProcesses)->getId();
 				}
 				serverTeam.push_back(serverID);
 			}

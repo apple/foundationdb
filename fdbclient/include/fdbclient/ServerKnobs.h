@@ -337,6 +337,8 @@ public:
 	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
 	                                                               // light-traffic shards out of the overloading server
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
+	bool CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM; // Enable to build team on servers which do not
+	                                                                 // have teams exceeding the target count
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
