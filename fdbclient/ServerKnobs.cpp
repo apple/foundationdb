@@ -368,8 +368,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TR_FLAG_DISABLE_SERVER_TEAM_REMOVER,                 false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_SERVER_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
 	init( TR_REMOVE_SERVER_TEAM_DELAY,                          60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_DELAY =  deterministicRandom()->random01() * 60.0;
 	init( TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,                     5.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_EXTRA_DELAY =  deterministicRandom()->random01() * 10.0;
-	init( TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD,          0 ); if (randomize && BUGGIFY) TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD = deterministicRandom()->random01() * 0.1;
-	init( TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD,         0.1 ); if (randomize && BUGGIFY) TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD = deterministicRandom()->random01() * 0.5;
+	init( TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD,          0 ); if( isSimulated ) TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD = deterministicRandom()->random01();
+	init( TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD,         0.1 ); if( isSimulated ) TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD = deterministicRandom()->random01();
 
 	init( DD_REMOVE_STORE_ENGINE_DELAY,                         60.0 ); if( randomize && BUGGIFY ) DD_REMOVE_STORE_ENGINE_DELAY =  deterministicRandom()->random01() * 60.0;
 
