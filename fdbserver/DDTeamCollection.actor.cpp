@@ -1926,6 +1926,15 @@ public:
 			    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS ? self->getMachineTeamWithMostMachineTeams()
 			                                                    : self->getMachineTeamWithLeastProcessTeams();
 
+			if (totalMTCount > desiredMachineTeams) {
+				TraceEvent(SevInfo, "MachineTeamCountOverDesired", self->distributorId)
+				    .suppressFor(60.0)
+				    .detail("IsPrimary", self->primary)
+				    .detail("TotalMachineTeamCount", totalMTCount)
+				    .detail("DesiredCount", desiredMachineTeams)
+				    .detail("HealthyMachineCount", healthyMachineCount);
+			}
+
 			if (totalMTCount >
 			        desiredMachineTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD) &&
 			    foundMTInfo.first.isValid()) {
@@ -2032,6 +2041,15 @@ public:
 			int totalSTCount = self->teams.size();
 			// Pick the server team whose members are on the most number of server teams, and mark it undesired
 			std::pair<Reference<TCTeamInfo>, int> foundSTInfo = self->getServerTeamWithMostProcessTeams();
+
+			if (totalSTCount > desiredServerTeams) {
+				TraceEvent(SevInfo, "ServerTeamCountOverDesired", self->distributorId)
+				    .suppressFor(60.0)
+				    .detail("IsPrimary", self->primary)
+				    .detail("TotalMachineTeamCount", totalSTCount)
+				    .detail("ServerCount", self->server_info.size())
+				    .detail("DesiredCount", desiredServerTeams);
+			}
 
 			if (totalSTCount > desiredServerTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD) &&
 			    foundSTInfo.first.isValid()) {
