@@ -476,15 +476,10 @@ struct TLogOptions {
 TLogFn tLogFnForOptions(TLogOptions options) {
 	switch (options.version) {
 	case TLogVersion::V2:
-		if (options.spillType == TLogSpillType::REFERENCE)
-			ASSERT(false);
-		return oldTLog_6_0::tLog;
 	case TLogVersion::V3:
 	case TLogVersion::V4:
-		if (options.spillType == TLogSpillType::VALUE)
-			return oldTLog_6_0::tLog;
-		else
-			return oldTLog_6_2::tLog;
+		ASSERT(false); // V2 to V4 are no longer supported
+
 	case TLogVersion::V5:
 	case TLogVersion::V6:
 	case TLogVersion::V7:
