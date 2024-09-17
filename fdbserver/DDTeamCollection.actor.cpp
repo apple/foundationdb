@@ -1228,8 +1228,7 @@ public:
 		state bool hasWrongDC = !self->isCorrectDC(*server);
 		state bool hasInvalidLocality =
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
-		state int targetTeamNumPerServer =
-		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
+		state int targetTeamNumPerServer = self->getTargetTeamNumPerServer();
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
@@ -5082,12 +5081,18 @@ Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 	}
 }
 
+int DDTeamCollection::getTargetTeamNumPerServer() const {
+	// The numTeamsPerServerFactor is calculated as
+	// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
+	// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
+	// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
+	return (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+}
+
 bool DDTeamCollection::isServerAvailableToBuildMoreServerTeam(const TCServerInfo& server) const {
 	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
-	const int targetTeamNumPerServer =
-	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 	// server is available if serverTeams is less than the targetTeamNumPerServer and the server is healthy
-	return server.getTeams().size() < targetTeamNumPerServer && !server_status.get(server.getId()).isUnhealthy();
+	return server.getTeams().size() < getTargetTeamNumPerServer() && !server_status.get(server.getId()).isUnhealthy();
 }
 
 bool DDTeamCollection::isMachineAvailableToBuildMoreServerTeam(const TCMachineInfo& machine) const {
@@ -5253,8 +5258,7 @@ std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWit
 std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWithMostMachineTeams() const {
 	Reference<TCMachineTeamInfo> retMT;
 	int maxNumMachineTeams = 0;
-	int targetMachineTeamNumPerMachine =
-	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int targetMachineTeamNumPerMachine = getTargetTeamNumPerServer();
 
 	for (auto& mt : machineTeams) {
 		// The representative team number for the machine team mt is
@@ -5276,7 +5280,7 @@ std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWit
 std::pair<Reference<TCTeamInfo>, int> DDTeamCollection::getServerTeamWithMostProcessTeams() const {
 	Reference<TCTeamInfo> retST;
 	int maxNumProcessTeams = 0;
-	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int targetTeamNumPerServer = getTargetTeamNumPerServer();
 
 	for (auto& t : teams) {
 		// The minimum number of teams of a server in a team is the representative team number for the team t
@@ -5311,10 +5315,9 @@ int DDTeamCollection::getHealthyMachineTeamCount() const {
 bool DDTeamCollection::notEnoughMachineTeamsForAMachine() const {
 	// If we want to remove the machine team with most machine teams, we use the same logic as
 	// notEnoughTeamsForAServer
-	int targetMachineTeamNumPerMachine =
-	    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
-	        ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2
-	        : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
+	int targetMachineTeamNumPerMachine = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
+	                                         ? getTargetTeamNumPerServer()
+	                                         : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 	for (auto& [_, machine] : machine_info) {
 		// If SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS is false,
 		// The desired machine team number is not the same with the desired server team number
@@ -5332,11 +5335,7 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
 	// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
 	// We want to ensure every server has targetTeamNumPerServer teams.
-	// The numTeamsPerServerFactor is calculated as
-	// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
-	// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
-	// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int targetTeamNumPerServer = getTargetTeamNumPerServer();
 	ASSERT_GT(targetTeamNumPerServer, 0);
 	for (auto& [serverID, server] : server_info) {
 		if (server->getTeams().size() < targetTeamNumPerServer && !server_status.get(serverID).isUnhealthy()) {

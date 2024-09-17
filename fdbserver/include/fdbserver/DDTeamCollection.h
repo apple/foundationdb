@@ -403,6 +403,9 @@ protected:
 	// Check if it is true
 	bool isOnSameMachineTeam(TCTeamInfo const& team) const;
 
+	// Return the targetTeamNumPerServer. For the calculation, see comments of the implementation
+	int getTargetTeamNumPerServer() const;
+
 	int calculateHealthyServerCount() const;
 
 	int calculateHealthyMachineCount() const;
