@@ -325,7 +325,7 @@ protected:
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
-	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
+	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer, bool considerContext) const;
 
 	// Returns a server team from given "servers", empty team if not found.
 	// When "wantHealthy" is true, only return if the team is healthy.

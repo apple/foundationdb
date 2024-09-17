@@ -5090,13 +5090,13 @@ int DDTeamCollection::getTargetTeamNumPerServer() const {
 }
 
 bool DDTeamCollection::isServerAvailableToBuildMoreServerTeam(const TCServerInfo& server) const {
-	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
+	ASSERT(SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM > 0);
 	// server is available if serverTeams is less than the targetTeamNumPerServer and the server is healthy
 	return server.getTeams().size() < getTargetTeamNumPerServer() && !server_status.get(server.getId()).isUnhealthy();
 }
 
 bool DDTeamCollection::isMachineAvailableToBuildMoreServerTeam(const TCMachineInfo& machine) const {
-	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
+	ASSERT(SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM > 0);
 	for (const auto& server : machine.serversOnMachine) {
 		if (isServerAvailableToBuildMoreServerTeam(*server)) {
 			return true; // Machine is available if any server is available
@@ -5106,8 +5106,8 @@ bool DDTeamCollection::isMachineAvailableToBuildMoreServerTeam(const TCMachineIn
 }
 
 bool DDTeamCollection::isMachineTeamAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const {
-	// This checking takes effects only if CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM is set
-	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
+	// This checking takes effects only if BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM is set > 0
+	ASSERT(SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM > 0);
 	for (const auto& machine : machineTeam.getMachines()) {
 		if (!isMachineAvailableToBuildMoreServerTeam(*machine)) {
 			return false; // Machine team is unavailable if any machine is not available
@@ -5116,15 +5116,15 @@ bool DDTeamCollection::isMachineTeamAvailableToBuildMoreServerTeam(const TCMachi
 	return true;
 }
 
-Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(TCServerInfo const& chosenServer) const {
+Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(TCServerInfo const& chosenServer,
+                                                                        bool considerContext) const {
 	if (!chosenServer.machine->machineTeams.empty()) {
 		std::vector<Reference<TCMachineTeamInfo>> healthyMachineTeamsForChosenServer;
 		for (auto& mt : chosenServer.machine->machineTeams) {
 			if (!isMachineTeamHealthy(*mt)) {
 				continue;
 			}
-			if (SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM &&
-			    !isMachineTeamAvailableToBuildMoreServerTeam(*mt)) {
+			if (considerContext && !isMachineTeamAvailableToBuildMoreServerTeam(*mt)) {
 				continue;
 			}
 			healthyMachineTeamsForChosenServer.push_back(mt);
@@ -5405,6 +5405,8 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 		bool earlyQuitBuild = false;
+		int considerContextBudget = SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM;
+		// When the knob is on, the first considerContextBudget attempts check if server's teams exceed targetTeamServer
 		for (int i = 0; i < maxAttempts && i < 100; ++i) {
 			// Step 1: Choose 1 least used server and then choose 1 least used machine team from the server
 			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
@@ -5417,13 +5419,21 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// instead of choosing the least used machine team.
 			// The correlation happens, for example, when we add two new machines, we may always choose the machine
 			// team with these two new machines because they are typically less used.
-			Reference<TCMachineTeamInfo> chosenMachineTeam = findOneRandomMachineTeam(*chosenServer);
+			Reference<TCMachineTeamInfo> chosenMachineTeam =
+			    findOneRandomMachineTeam(*chosenServer, considerContextBudget > 0);
 
 			if (!chosenMachineTeam.isValid()) {
 				// We may face the situation that temporarily we have no healthy machine.
 				TraceEvent(SevWarn, "MachineTeamNotFound")
 				    .detail("Primary", primary)
 				    .detail("MachineTeams", machineTeams.size());
+				if (considerContextBudget > 0) {
+					// If we are not able to get any machine team With considerContextBudget,
+					// we disable considerContextBudget and increase maxAttempts (as if we did not
+					// considerContextBudget) and we retry
+					considerContextBudget = 0;
+					maxAttempts++;
+				}
 				continue; // try randomly to find another least used server
 			}
 
@@ -5445,12 +5455,12 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 						if (server_status.get(it->getId()).isUnhealthy()) {
 							continue;
 						}
-						// When CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM is set,
-						// we build team on a server which does not have teams more than the target count.
-						// For targetTeamNumPerServer, see the comment of notEnoughTeamsForAServer()
-						if (SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM &&
-						    !isServerAvailableToBuildMoreServerTeam(*it)) {
-							continue;
+						if (considerContextBudget > 0) {
+							// When BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM is set > 0,
+							// we build team on a server which does not have teams more than the target count.
+							if (!isServerAvailableToBuildMoreServerTeam(*it)) {
+								continue;
+							}
 						}
 						candidateProcesses.push_back(it);
 					}
@@ -5467,6 +5477,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			int overlap = overlappingMembers(serverTeam);
 			if (overlap == serverTeam.size()) {
 				maxAttempts += 1;
+				considerContextBudget--;
 				continue;
 			}
 
