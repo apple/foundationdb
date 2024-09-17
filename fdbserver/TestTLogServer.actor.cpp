@@ -97,7 +97,7 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	                                std::to_string(pTLogTestContext->epoch) + ".";
 	state std::string diskQueueFilename = tLogOptions.dataFolder + "/" + diskQueueBasename;
 	pTLogContext->persistentQueue =
-	    openDiskQueue(diskQueueFilename, tLogOptions.diskQueueExtension, pTLogContext->tLogID, DiskQueueVersion::V1);
+	    openDiskQueue(diskQueueFilename, tLogOptions.diskQueueExtension, pTLogContext->tLogID, DiskQueueVersion::V2);
 
 	state std::string kvStoreFilename = tLogOptions.dataFolder + "/" + tLogOptions.kvStoreFilename + "." +
 	                                    pTLogContext->tLogID.toString() + "." +

@@ -465,8 +465,10 @@ struct TLogOptions {
 	}
 
 	DiskQueueVersion getDiskQueueVersion() const {
-		if (version < TLogVersion::V3)
+		if (version < TLogVersion::V3) {
+			ASSERT(false); // no longer supported
 			return DiskQueueVersion::V0;
+		}
 		if (version < TLogVersion::V7)
 			return DiskQueueVersion::V1;
 		return DiskQueueVersion::V2;
