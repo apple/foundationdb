@@ -389,9 +389,15 @@ protected:
 	// Return the healthy server with the least number of correct-size server teams
 	Reference<TCServerInfo> findOneLeastUsedServer() const;
 
-	// Return true if each machine of the input machineTeam has at least one server that has server team size is smaller
-	// than the target server teams, i,e, still has room to add more serverTeam
-	bool isAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const;
+	// Return ture if the input server has server team size smaller than the target server teams
+	bool isServerAvailableToBuildMoreServerTeam(const TCServerInfo& server) const;
+
+	// Return true if any server on the input machine has server team size smaller than the target server teams
+	bool isMachineAvailableToBuildMoreServerTeam(const TCMachineInfo& machine) const;
+
+	// Return true if each machine of the input machineTeam has at least one server that has server team size is
+	// smaller than the target server teams, i,e, still has room to add more serverTeam
+	bool isMachineTeamAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const;
 
 	// A server team should always come from servers on a machine team
 	// Check if it is true

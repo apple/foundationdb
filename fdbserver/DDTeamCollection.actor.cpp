@@ -5082,31 +5082,30 @@ Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 	}
 }
 
-bool DDTeamCollection::isAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const {
-	// This checking takes effects only if CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM is set
+bool DDTeamCollection::isServerAvailableToBuildMoreServerTeam(const TCServerInfo& server) const {
 	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
 	const int targetTeamNumPerServer =
 	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
-	for (const auto& machine : machineTeam.getMachines()) {
-		bool existSSBelowTarget = false;
-		for (const auto& server : machine->serversOnMachine) {
-			if (server->getTeams().size() < targetTeamNumPerServer) {
-				existSSBelowTarget = true;
-				break;
-			}
+	// server is available if serverTeams is less than the targetTeamNumPerServer and the server is healthy
+	return server.getTeams().size() < targetTeamNumPerServer && !server_status.get(server.getId()).isUnhealthy();
+}
+
+bool DDTeamCollection::isMachineAvailableToBuildMoreServerTeam(const TCMachineInfo& machine) const {
+	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
+	for (const auto& server : machine.serversOnMachine) {
+		if (isServerAvailableToBuildMoreServerTeam(*server)) {
+			return true; // Machine is available if any server is available
 		}
-		if (!existSSBelowTarget) {
-			// In case where each of the servers of the machine has serverTeams is no less than targetTeamNumPerServer
-			// We do not want to add more serverTeams to this machine
-			// For targetTeamNumPerServer, see the comment of notEnoughTeamsForAServer()
-			TraceEvent e(SevWarnAlways, "MachineTeamIsNotAvailableToAddMoreServerTeam");
-			for (int i = 0; i < machine->serversOnMachine.size(); i++) {
-				e.detail("Server" + std::to_string(i), machine->serversOnMachine[i]->getId());
-				e.detail("TeamCountOnServer" + std::to_string(i), machine->serversOnMachine[i]->getTeams().size());
-				e.detail("HealthyServer" + std::to_string(i),
-				         !(server_status.get(machine->serversOnMachine[i]->getId()).isUnhealthy()));
-			}
-			return false;
+	}
+	return false;
+}
+
+bool DDTeamCollection::isMachineTeamAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const {
+	// This checking takes effects only if CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM is set
+	ASSERT(SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM);
+	for (const auto& machine : machineTeam.getMachines()) {
+		if (!isMachineAvailableToBuildMoreServerTeam(*machine)) {
+			return false; // Machine team is unavailable if any machine is not available
 		}
 	}
 	return true;
@@ -5120,7 +5119,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(TCServer
 				continue;
 			}
 			if (SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM &&
-			    !isAvailableToBuildMoreServerTeam(*mt)) {
+			    !isMachineTeamAvailableToBuildMoreServerTeam(*mt)) {
 				continue;
 			}
 			healthyMachineTeamsForChosenServer.push_back(mt);
@@ -5433,8 +5432,6 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// Step 2: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 			std::vector<UID> serverTeam;
 			int chosenServerCount = 0;
-			const int targetTeamNumPerServer =
-			    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 			Optional<Reference<TCMachineInfo>> unavailableMachine;
 			for (auto& machine : chosenMachineTeam->getMachines()) {
 				UID serverID;
@@ -5453,7 +5450,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 						// we build team on a server which does not have teams more than the target count.
 						// For targetTeamNumPerServer, see the comment of notEnoughTeamsForAServer()
 						if (SERVER_KNOBS->CHECK_SERVER_TEAM_WHEN_SELECT_MACHINE_TO_BUILD_SERVER_TEAM &&
-						    it->getTeams().size() >= targetTeamNumPerServer) {
+						    !isServerAvailableToBuildMoreServerTeam(*it)) {
 							continue;
 						}
 						candidateProcesses.push_back(it);
