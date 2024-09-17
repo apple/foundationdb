@@ -338,7 +338,7 @@ public:
 	                                                               // light-traffic shards out of the overloading server
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
 	int BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM; // Enable to check if server context when building teams in the
-	                                                 // first considerContextBudget attempts
+	                                                 // first specified attempts
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
