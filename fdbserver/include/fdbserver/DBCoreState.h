@@ -117,20 +117,9 @@ struct OldTLogCoreData {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if (ar.protocolVersion().hasTagLocality()) {
-			serializer(ar, tLogs, logRouterTags, epochEnd);
-		} else if (ar.isDeserializing) {
-			ASSERT(false);
-			tLogs.push_back(CoreTLogSet());
-			serializer(ar,
-			           tLogs[0].tLogs,
-			           tLogs[0].tLogWriteAntiQuorum,
-			           tLogs[0].tLogReplicationFactor,
-			           tLogs[0].tLogPolicy,
-			           epochEnd,
-			           tLogs[0].tLogLocalities);
-			tLogs[0].tLogVersion = TLogVersion::V2;
-		}
+		ASSERT_WE_THINK(ar.protocolVersion().hasTagLocality());
+		serializer(ar, tLogs, logRouterTags, epochEnd);
+
 		if (ar.protocolVersion().hasPseudoLocalities()) {
 			serializer(ar, pseudoLocalities);
 		}
@@ -191,49 +180,19 @@ struct DBCoreState {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ASSERT(ar.protocolVersion().hasMultiGenerationTLog());
-		if (ar.protocolVersion().hasTagLocality()) {
-			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
-			if (ar.protocolVersion().hasPseudoLocalities()) {
-				serializer(ar, pseudoLocalities);
-			}
-			if (ar.protocolVersion().hasShardedTxsTags()) {
-				serializer(ar, txsTags);
-			}
-			if (ar.protocolVersion().hasSWVersionTracking()) {
-				serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
-			}
-			if (ar.protocolVersion().hasEncryptionAtRest()) {
-				serializer(ar, encryptionAtRestMode);
-			}
-		} else if (ar.isDeserializing) {
-			ASSERT(false);
-			tLogs.push_back(CoreTLogSet());
-			serializer(ar,
-			           tLogs[0].tLogs,
-			           tLogs[0].tLogWriteAntiQuorum,
-			           recoveryCount,
-			           tLogs[0].tLogReplicationFactor,
-			           logSystemType);
-			tLogs[0].tLogVersion = TLogVersion::V2;
-
-			uint64_t tLocalitySize = (uint64_t)tLogs[0].tLogLocalities.size();
-			serializer(ar, oldTLogData, tLogs[0].tLogPolicy, tLocalitySize);
-			if (ar.isDeserializing) {
-				tLogs[0].tLogLocalities.reserve(tLocalitySize);
-				for (size_t i = 0; i < tLocalitySize; i++) {
-					LocalityData locality;
-					serializer(ar, locality);
-					tLogs[0].tLogLocalities.push_back(locality);
-				}
-
-				if (oldTLogData.size()) {
-					tLogs[0].startVersion = oldTLogData[0].epochEnd;
-					for (int i = 0; i < oldTLogData.size() - 1; i++) {
-						oldTLogData[i].tLogs[0].startVersion = oldTLogData[i + 1].epochEnd;
-					}
-				}
-			}
+		ASSERT_WE_THINK(ar.protocolVersion().hasTagLocality());
+		serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
+		if (ar.protocolVersion().hasPseudoLocalities()) {
+			serializer(ar, pseudoLocalities);
+		}
+		if (ar.protocolVersion().hasShardedTxsTags()) {
+			serializer(ar, txsTags);
+		}
+		if (ar.protocolVersion().hasSWVersionTracking()) {
+			serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
+		}
+		if (ar.protocolVersion().hasEncryptionAtRest()) {
+			serializer(ar, encryptionAtRestMode);
 		}
 	}
 };
