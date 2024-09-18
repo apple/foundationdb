@@ -432,7 +432,7 @@ public:
 			if (req.storageQueueAware) {
 				storageQueueThreshold = calculateTeamStorageQueueThreshold(self->teams);
 			}
-			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
+			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST || req.wantTrueBestIfMoveout) {
 				ASSERT(!bestOption.present());
 				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
 					bestOption = getBestTeam(self,
@@ -554,11 +554,14 @@ public:
 				// self->traceAllInfo(true);
 			}
 
-			if (req.storageQueueAware && !bestOption.present()) {
+			if (!bestOption.present() && (req.storageQueueAware || req.wantTrueBestIfMoveout)) {
+				// re-run getTeam without storageQueueAware and wantTrueBestIfMoveout
 				req.storageQueueAware = false;
-				TraceEvent(SevWarn, "StorageQueueAwareGetTeamFailed", self->distributorId)
-				    .detail("Reason", "bestOption not present");
-				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
+				req.wantTrueBestIfMoveout = false;
+				TraceEvent(SevWarn, "GetTeamRetry", self->distributorId)
+				    .detail("OldStorageQueueAware", req.storageQueueAware)
+				    .detail("OldWantTrueBestIfMoveout", req.wantTrueBestIfMoveout);
+				wait(getTeam(self, req));
 			} else {
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
