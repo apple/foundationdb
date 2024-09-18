@@ -554,16 +554,14 @@ public:
 				// self->traceAllInfo(true);
 			}
 
-			if (req.storageQueueAware && !bestOption.present()) {
+			if (!bestOption.present() && (req.storageQueueAware || req.wantTrueBestIfMoveout)) {
+				// re-run getTeam without storageQueueAware and wantTrueBestIfMoveout
 				req.storageQueueAware = false;
-				TraceEvent(SevWarn, "StorageQueueAwareGetTeamFailed", self->distributorId)
-				    .detail("Reason", "bestOption not present");
-				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
-			} else if (req.wantTrueBestIfMoveout && !bestOption.present()) {
 				req.wantTrueBestIfMoveout = false;
-				TraceEvent(SevWarn, "WantTrueBestIfMoveoutFailed", self->distributorId)
-				    .detail("Reason", "bestOption not present");
-				wait(getTeam(self, req)); // re-run getTeam without wantTrueBestIfMoveout
+				TraceEvent(SevWarn, "GetTeamRetry", self->distributorId)
+				    .detail("OldStorageQueueAware", req.storageQueueAware)
+				    .detail("OldWantTrueBestIfMoveout", req.wantTrueBestIfMoveout);
+				wait(getTeam(self, req));
 			} else {
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
