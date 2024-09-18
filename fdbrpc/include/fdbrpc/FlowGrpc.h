@@ -48,6 +48,7 @@ public:
 	static GrpcServer* instance() {
 		return static_cast<GrpcServer*>((void*)g_network->global(INetwork::enGrpcServer));
 	}
+
 private:
 	NetworkAddress address_;
 	std::unique_ptr<grpc::Server> server_;
@@ -102,6 +103,10 @@ public:
 		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
 
 		boost::asio::post(*pool_, [this, promise, rpc, request]() {
+			if (promise->getFutureReferenceCount() == 0) {
+				return;
+			}
+
 			grpc::ClientContext context;
 			ResponseType response;
 			auto status = (stub_.get()->*rpc)(&context, request, &response);
