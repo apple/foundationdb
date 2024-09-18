@@ -27,7 +27,6 @@
 #include "flow/ActorCollection.h"
 #include "flow/Deque.h"
 #include "flow/FastRef.h"
-#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
@@ -1283,11 +1282,14 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
-bool getWantTryTrueBest(const RelocateData& rd) {
-	if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+// With probability, set wantTryTrueBest true for teamUnhealthy data moves and teamRedundant data moves only.
+// This flag takes effect in getTeam. When the flag is set true, DD always getBestTeam for teamRedundant data moves and
+// do getBestTeam for a teamRedundant data move if the data move decides to move data out of a SS.
+bool getWantTryTrueBest(int priority) {
+	if (priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 		return deterministicRandom()->random01() <
 		       SERVER_KNOBS->PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
-	} else if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
+	} else if (priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 		return deterministicRandom()->random01() <
 		       SERVER_KNOBS->PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
 	} else {
@@ -1319,7 +1321,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
-	state WantTryTrueBest wantTryTrueBest(getWantTryTrueBest(rd));
+	state WantTryTrueBest wantTryTrueBest(getWantTryTrueBest(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
