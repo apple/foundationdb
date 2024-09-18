@@ -88,6 +88,7 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back(decodeServerTagValue(kv.value));
 			if (srcTag.back().locality == tagLocalityUpgraded) {
+				ASSERT(false);
 				foundOldLocality = true;
 				break;
 			}
@@ -95,6 +96,7 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back(decodeServerTagValue(kv.value));
 			if (destTag.back().locality == tagLocalityUpgraded) {
+				ASSERT(false);
 				foundOldLocality = true;
 				break;
 			}
@@ -832,6 +834,7 @@ Tag decodeServerTagValue(ValueRef const& value) {
 	Tag s;
 	BinaryReader reader(value, IncludeVersion());
 	if (!reader.protocolVersion().hasTagLocality()) {
+		ASSERT(false);
 		int16_t id;
 		reader >> id;
 		if (id == invalidTagOld) {

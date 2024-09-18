@@ -120,6 +120,7 @@ struct OldTLogCoreData {
 		if (ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, epochEnd);
 		} else if (ar.isDeserializing) {
+			ASSERT(false);
 			tLogs.push_back(CoreTLogSet());
 			serializer(ar,
 			           tLogs[0].tLogs,
@@ -206,6 +207,7 @@ struct DBCoreState {
 				serializer(ar, encryptionAtRestMode);
 			}
 		} else if (ar.isDeserializing) {
+			ASSERT(false);
 			tLogs.push_back(CoreTLogSet());
 			serializer(ar,
 			           tLogs[0].tLogs,

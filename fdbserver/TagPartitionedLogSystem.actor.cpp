@@ -683,14 +683,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 	Version lastBegin = 0;
 	bool foundSpecial = false;
 	for (auto& log : tLogs) {
-		if (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded) {
+		if (log->locality == tagLocalitySpecial) {
 			foundSpecial = true;
 		}
 		if (log->isLocal && log->logServers.size() &&
-		    (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded ||
-		     log->locality == tag.locality || tag == txsTag || tag.locality == tagLocalityTxs ||
-		     tag.locality == tagLocalityLogRouter ||
-		     ((tag.locality == tagLocalityUpgraded || tag == cacheTag) && log->locality != tagLocalitySatellite))) {
+		    (log->locality == tagLocalitySpecial || log->locality == tag.locality || tag == txsTag ||
+		     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
+		     (tag == cacheTag && log->locality != tagLocalitySatellite))) {
 			lastBegin = std::max(lastBegin, log->startVersion);
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
@@ -744,15 +743,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 			Version thisBegin = begin;
 			bool thisSpecial = false;
 			for (auto& log : oldLogData[i].tLogs) {
-				if (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded) {
+				if (log->locality == tagLocalitySpecial) {
 					thisSpecial = true;
 				}
 				if (log->isLocal && log->logServers.size() &&
-				    (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded ||
-				     log->locality == tag.locality || tag == txsTag || tag.locality == tagLocalityTxs ||
-				     tag.locality == tagLocalityLogRouter ||
-				     ((tag.locality == tagLocalityUpgraded || tag == cacheTag) &&
-				      log->locality != tagLocalitySatellite))) {
+				    (log->locality == tagLocalitySpecial || log->locality == tag.locality || tag == txsTag ||
+				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
+				     (tag == cacheTag && log->locality != tagLocalitySatellite))) {
 					thisBegin = std::max(thisBegin, log->startVersion);
 					localOldSets.push_back(log);
 					if (log->locality != tagLocalitySatellite) {
@@ -969,10 +966,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
                                                                       Version end,
                                                                       bool useMergePeekCursors,
                                                                       int8_t peekLocality) {
-	if (tag.locality >= 0 || tag.locality == tagLocalityUpgraded || tag.locality == tagLocalitySpecial) {
+	if (tag.locality >= 0 || tag.locality == tagLocalitySpecial) {
 		peekLocality = tag.locality;
 	}
-	ASSERT(peekLocality >= 0 || peekLocality == tagLocalityUpgraded || tag.locality == tagLocalitySpecial);
+	ASSERT(peekLocality >= 0 || tag.locality == tagLocalitySpecial);
 
 	int bestSet = -1;
 	bool foundSpecial = false;
@@ -981,11 +978,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 		if (tLogs[t]->logServers.size() && tLogs[t]->locality != tagLocalitySatellite) {
 			logCount++;
 		}
-		if (tLogs[t]->logServers.size() &&
-		    (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded ||
-		     tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded ||
-		     peekLocality == tagLocalitySpecial)) {
-			if (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded) {
+		if (tLogs[t]->logServers.size() && (tLogs[t]->locality == tagLocalitySpecial ||
+		                                    tLogs[t]->locality == peekLocality || peekLocality == tagLocalitySpecial)) {
+			if (tLogs[t]->locality == tagLocalitySpecial) {
 				foundSpecial = true;
 			}
 			bestSet = t;
@@ -1089,11 +1084,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 				}
 				if (oldLogData[i].tLogs[t]->logServers.size() &&
 				    (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial ||
-				     oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded ||
-				     oldLogData[i].tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded ||
-				     peekLocality == tagLocalitySpecial)) {
-					if (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial ||
-					    oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded) {
+				     oldLogData[i].tLogs[t]->locality == peekLocality || peekLocality == tagLocalitySpecial)) {
+					if (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial) {
 						nextFoundSpecial = true;
 					}
 					if (foundSpecial && !oldLogData[i].tLogs[t]->isLocal) {
@@ -1523,7 +1515,7 @@ void TagPartitionedLogSystem::pop(Version upTo, Tag tag, Version durableKnownCom
 		return;
 	}
 	for (auto& t : tLogs) {
-		if (t->locality == tagLocalitySpecial || t->locality == tag.locality || tag.locality == tagLocalityUpgraded ||
+		if (t->locality == tagLocalitySpecial || t->locality == tag.locality ||
 		    (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
 			for (auto& log : t->logServers) {
 				Version prev = outstandingPops[std::make_pair(log->get().id(), tag)].first;
@@ -2394,7 +2386,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	std::set<int8_t> lockedLocalities;
 	bool foundSpecial = false;
 	for (int i = 0; i < logServers.size(); i++) {
-		if (logServers[i]->locality == tagLocalitySpecial || logServers[i]->locality == tagLocalityUpgraded) {
+		if (logServers[i]->locality == tagLocalitySpecial) {
 			foundSpecial = true;
 		}
 		lockedLocalities.insert(logServers[i]->locality);
@@ -2411,7 +2403,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			break;
 		}
 		for (auto& log : old.tLogs) {
-			if (log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded) {
+			if (log->locality == tagLocalitySpecial) {
 				foundSpecial = true;
 				break;
 			}
