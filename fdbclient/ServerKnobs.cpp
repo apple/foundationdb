@@ -177,6 +177,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT,    true );
 	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,                     1 );
+	
+	init( PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST, 0.0 ); if (isSimulated) PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST = deterministicRandom()->random01();
+	init( PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST, 0.0 ); if (isSimulated) PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST = deterministicRandom()->random01();
 
 	// Data distribution
 	init( AVAILABLE_SPACE_PIVOT_RATIO,                         0.5 );

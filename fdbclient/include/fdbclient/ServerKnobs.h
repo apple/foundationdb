@@ -201,6 +201,11 @@ public:
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT;
 	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 
+	// Probability that a team redundant data move set TrueBest when get destination team
+	double PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+	// Probability that a team unhealthy data move set TrueBest when get destination team
+	double PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+
 	// Data distribution
 	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
 	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
