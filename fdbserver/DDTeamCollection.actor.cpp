@@ -25,6 +25,8 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/Knobs.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
@@ -1229,8 +1231,7 @@ public:
 		state bool hasWrongDC = !self->isCorrectDC(*server);
 		state bool hasInvalidLocality =
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
-		state int targetTeamNumPerServer =
-		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
+		state int targetTeamNumPerServer = self->getTargetTeamNumPerServer();
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
@@ -5083,13 +5084,53 @@ Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 	}
 }
 
-Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(TCServerInfo const& chosenServer) const {
+int DDTeamCollection::getTargetTeamNumPerServer() const {
+	// The numTeamsPerServerFactor is calculated as
+	// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
+	// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
+	// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
+	return (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+}
+
+bool DDTeamCollection::isServerAvailableToBuildMoreServerTeam(const TCServerInfo& server) const {
+	ASSERT(SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM > 0);
+	// server is available if serverTeams is less than the targetTeamNumPerServer and the server is healthy
+	return server.getTeams().size() < getTargetTeamNumPerServer() && !server_status.get(server.getId()).isUnhealthy();
+}
+
+bool DDTeamCollection::isMachineAvailableToBuildMoreServerTeam(const TCMachineInfo& machine) const {
+	ASSERT(SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM > 0);
+	for (const auto& server : machine.serversOnMachine) {
+		if (isServerAvailableToBuildMoreServerTeam(*server)) {
+			return true; // Machine is available if any server is available
+		}
+	}
+	return false;
+}
+
+bool DDTeamCollection::isMachineTeamAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const {
+	// This checking takes effects only if BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM is set > 0
+	ASSERT(SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM > 0);
+	for (const auto& machine : machineTeam.getMachines()) {
+		if (!isMachineAvailableToBuildMoreServerTeam(*machine)) {
+			return false; // Machine team is unavailable if any machine is not available
+		}
+	}
+	return true;
+}
+
+Reference<TCMachineTeamInfo> DDTeamCollection::findOneRandomMachineTeam(TCServerInfo const& chosenServer,
+                                                                        bool considerContext) const {
 	if (!chosenServer.machine->machineTeams.empty()) {
 		std::vector<Reference<TCMachineTeamInfo>> healthyMachineTeamsForChosenServer;
 		for (auto& mt : chosenServer.machine->machineTeams) {
-			if (isMachineTeamHealthy(*mt)) {
-				healthyMachineTeamsForChosenServer.push_back(mt);
+			if (!isMachineTeamHealthy(*mt)) {
+				continue;
 			}
+			if (considerContext && !isMachineTeamAvailableToBuildMoreServerTeam(*mt)) {
+				continue;
+			}
+			healthyMachineTeamsForChosenServer.push_back(mt);
 		}
 		if (!healthyMachineTeamsForChosenServer.empty()) {
 			return deterministicRandom()->randomChoice(healthyMachineTeamsForChosenServer);
@@ -5220,8 +5261,7 @@ std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWit
 std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWithMostMachineTeams() const {
 	Reference<TCMachineTeamInfo> retMT;
 	int maxNumMachineTeams = 0;
-	int targetMachineTeamNumPerMachine =
-	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int targetMachineTeamNumPerMachine = getTargetTeamNumPerServer();
 
 	for (auto& mt : machineTeams) {
 		// The representative team number for the machine team mt is
@@ -5243,7 +5283,7 @@ std::pair<Reference<TCMachineTeamInfo>, int> DDTeamCollection::getMachineTeamWit
 std::pair<Reference<TCTeamInfo>, int> DDTeamCollection::getServerTeamWithMostProcessTeams() const {
 	Reference<TCTeamInfo> retST;
 	int maxNumProcessTeams = 0;
-	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int targetTeamNumPerServer = getTargetTeamNumPerServer();
 
 	for (auto& t : teams) {
 		// The minimum number of teams of a server in a team is the representative team number for the team t
@@ -5278,10 +5318,9 @@ int DDTeamCollection::getHealthyMachineTeamCount() const {
 bool DDTeamCollection::notEnoughMachineTeamsForAMachine() const {
 	// If we want to remove the machine team with most machine teams, we use the same logic as
 	// notEnoughTeamsForAServer
-	int targetMachineTeamNumPerMachine =
-	    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
-	        ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2
-	        : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
+	int targetMachineTeamNumPerMachine = SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
+	                                         ? getTargetTeamNumPerServer()
+	                                         : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
 	for (auto& [_, machine] : machine_info) {
 		// If SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS is false,
 		// The desired machine team number is not the same with the desired server team number
@@ -5299,11 +5338,7 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	// We build more teams than we finally want so that we can use serverTeamRemover() actor to remove the teams
 	// whose member belong to too many teams. This allows us to get a more balanced number of teams per server.
 	// We want to ensure every server has targetTeamNumPerServer teams.
-	// The numTeamsPerServerFactor is calculated as
-	// (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER + ideal_num_of_teams_per_server) / 2
-	// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
-	// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
-	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	int targetTeamNumPerServer = getTargetTeamNumPerServer();
 	ASSERT_GT(targetTeamNumPerServer, 0);
 	for (auto& [serverID, server] : server_info) {
 		if (server->getTeams().size() < targetTeamNumPerServer && !server_status.get(serverID).isUnhealthy()) {
@@ -5373,6 +5408,8 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 		bool earlyQuitBuild = false;
+		int considerContextBudget = SERVER_KNOBS->BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM;
+		// When the knob is on, the first considerContextBudget attempts check if server's teams exceed targetTeamServer
 		for (int i = 0; i < maxAttempts && i < 100; ++i) {
 			// Step 1: Choose 1 least used server and then choose 1 least used machine team from the server
 			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
@@ -5385,13 +5422,21 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// instead of choosing the least used machine team.
 			// The correlation happens, for example, when we add two new machines, we may always choose the machine
 			// team with these two new machines because they are typically less used.
-			Reference<TCMachineTeamInfo> chosenMachineTeam = findOneRandomMachineTeam(*chosenServer);
+			Reference<TCMachineTeamInfo> chosenMachineTeam =
+			    findOneRandomMachineTeam(*chosenServer, considerContextBudget > 0);
 
 			if (!chosenMachineTeam.isValid()) {
 				// We may face the situation that temporarily we have no healthy machine.
 				TraceEvent(SevWarn, "MachineTeamNotFound")
 				    .detail("Primary", primary)
 				    .detail("MachineTeams", machineTeams.size());
+				if (considerContextBudget > 0) {
+					// If we are not able to get any machine team With considerContextBudget,
+					// we disable considerContextBudget and increase maxAttempts (as if we did not
+					// considerContextBudget) and we retry
+					considerContextBudget = 0;
+					maxAttempts++;
+				}
 				continue; // try randomly to find another least used server
 			}
 
@@ -5399,6 +5444,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// Step 2: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 			std::vector<UID> serverTeam;
 			int chosenServerCount = 0;
+			Optional<Reference<TCMachineInfo>> unavailableMachine;
 			for (auto& machine : chosenMachineTeam->getMachines()) {
 				UID serverID;
 				if (machine == chosenServer->machine) {
@@ -5407,13 +5453,22 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 					serverID = chosenServer->getId();
 					++chosenServerCount;
 				} else {
-					std::vector<Reference<TCServerInfo>> healthyProcesses;
+					std::vector<Reference<TCServerInfo>> candidateProcesses;
 					for (auto it : machine->serversOnMachine) {
-						if (!server_status.get(it->getId()).isUnhealthy()) {
-							healthyProcesses.push_back(it);
+						if (server_status.get(it->getId()).isUnhealthy()) {
+							continue;
 						}
+						if (considerContextBudget > 0) {
+							// When BUDGET_CHECK_SERVER_CONTEXT_WHEN_BUILD_TEAM is set > 0,
+							// we build team on a server which does not have teams more than the target count.
+							if (!isServerAvailableToBuildMoreServerTeam(*it)) {
+								continue;
+							}
+						}
+						candidateProcesses.push_back(it);
 					}
-					serverID = deterministicRandom()->randomChoice(healthyProcesses)->getId();
+					ASSERT_WE_THINK(candidateProcesses.size() > 0);
+					serverID = deterministicRandom()->randomChoice(candidateProcesses)->getId();
 				}
 				serverTeam.push_back(serverID);
 			}
@@ -5425,6 +5480,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			int overlap = overlappingMembers(serverTeam);
 			if (overlap == serverTeam.size()) {
 				maxAttempts += 1;
+				considerContextBudget--;
 				continue;
 			}
 

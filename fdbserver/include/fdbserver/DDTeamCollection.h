@@ -325,7 +325,7 @@ protected:
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
-	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
+	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer, bool considerContext) const;
 
 	// Returns a server team from given "servers", empty team if not found.
 	// When "wantHealthy" is true, only return if the team is healthy.
@@ -389,9 +389,22 @@ protected:
 	// Return the healthy server with the least number of correct-size server teams
 	Reference<TCServerInfo> findOneLeastUsedServer() const;
 
+	// Return ture if the input server has server team size smaller than the target server teams
+	bool isServerAvailableToBuildMoreServerTeam(const TCServerInfo& server) const;
+
+	// Return true if any server on the input machine has server team size smaller than the target server teams
+	bool isMachineAvailableToBuildMoreServerTeam(const TCMachineInfo& machine) const;
+
+	// Return true if each machine of the input machineTeam has at least one server that has server team size is
+	// smaller than the target server teams, i,e, still has room to add more serverTeam
+	bool isMachineTeamAvailableToBuildMoreServerTeam(const TCMachineTeamInfo& machineTeam) const;
+
 	// A server team should always come from servers on a machine team
 	// Check if it is true
 	bool isOnSameMachineTeam(TCTeamInfo const& team) const;
+
+	// Return the targetTeamNumPerServer. For the calculation, see comments of the implementation
+	int getTargetTeamNumPerServer() const;
 
 	int calculateHealthyServerCount() const;
 
