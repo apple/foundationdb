@@ -58,7 +58,7 @@ struct CoreTLogSet {
 	TLogVersion tLogVersion;
 
 	CoreTLogSet()
-	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded),
+	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid),
 	    startVersion(invalidVersion) {}
 	explicit CoreTLogSet(const LogSet& logset);
 

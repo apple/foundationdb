@@ -952,12 +952,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
 	for (auto tag : tags) {
 		cursors.push_back(peek(dbgid, begin, end, tag, parallelGetMore));
 	}
-	return makeReference<ILogSystem::BufferedCursor>(cursors,
-	                                                 begin,
-	                                                 end.present() ? end.get() + 1 : getPeekEnd(),
-	                                                 true,
-	                                                 tLogs[0]->locality == tagLocalityUpgraded,
-	                                                 false);
+	return makeReference<ILogSystem::BufferedCursor>(
+	    cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, false /* not upgraded locality */, false);
 }
 
 Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,

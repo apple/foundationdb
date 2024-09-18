@@ -82,33 +82,17 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
-	bool foundOldLocality = false;
 	for (const KeyValueRef& kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back(decodeServerTagValue(kv.value));
-			if (srcTag.back().locality == tagLocalityUpgraded) {
-				ASSERT(false);
-				foundOldLocality = true;
-				break;
-			}
 		}
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back(decodeServerTagValue(kv.value));
-			if (destTag.back().locality == tagLocalityUpgraded) {
-				ASSERT(false);
-				foundOldLocality = true;
-				break;
-			}
 		}
 	}
 
-	if (foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
-		ASSERT_WE_THINK(foundOldLocality);
-		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue()));
-		wr << src << dest;
-		return wr.toValue();
-	}
+	ASSERT_WE_THINK(src.size() == srcTag.size() && dest.size() == destTag.size());
 
 	return keyServersValue(srcTag, destTag);
 }
@@ -833,22 +817,8 @@ Version decodeServerTagHistoryKey(KeyRef const& key) {
 Tag decodeServerTagValue(ValueRef const& value) {
 	Tag s;
 	BinaryReader reader(value, IncludeVersion());
-	if (!reader.protocolVersion().hasTagLocality()) {
-		ASSERT(false);
-		int16_t id;
-		reader >> id;
-		if (id == invalidTagOld) {
-			s = invalidTag;
-		} else if (id == txsTagOld) {
-			s = txsTag;
-		} else {
-			ASSERT(id >= 0);
-			s.id = id;
-			s.locality = tagLocalityUpgraded;
-		}
-	} else {
-		reader >> s;
-	}
+	ASSERT_WE_THINK(reader.protocolVersion().hasTagLocality());
+	reader >> s;
 	return s;
 }
 

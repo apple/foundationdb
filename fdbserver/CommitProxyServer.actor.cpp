@@ -3243,13 +3243,11 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 					}
 					rep.newTag = Tag(locality, tagId);
 				}
-			} else if (rep.tag.locality != tagLocalityUpgraded) {
+			} else {
+				ASSERT_WE_THINK(rep.tag.locality != tagLocalityUpgraded);
 				TraceEvent(SevWarnAlways, "SSRejoinedWithUnknownLocality")
 				    .detail("Tag", rep.tag.toString())
 				    .detail("DcId", req.dcId);
-			} else {
-				// TODO: remove this
-				ASSERT(false); // tagLocalityUpgraded is no longer used after removing old tlog format
 			}
 			rep.encryptMode = commitData->encryptMode;
 			req.reply.send(rep);
