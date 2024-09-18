@@ -1282,10 +1282,10 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
-// With probability, set wantTryTrueBest true for teamUnhealthy data moves and teamRedundant data moves only.
+// With probability, set wantTrueBestIfMoveout true for teamUnhealthy data moves and teamRedundant data moves only.
 // This flag takes effect in getTeam. When the flag is set true, DD always getBestTeam for teamRedundant data moves and
 // do getBestTeam for a teamRedundant data move if the data move decides to move data out of a SS.
-bool getWantTryTrueBest(int priority) {
+bool getWantTrueBestIfMoveout(int priority) {
 	if (priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 		return deterministicRandom()->random01() <
 		       SERVER_KNOBS->PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
@@ -1321,7 +1321,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
-	state WantTryTrueBest wantTryTrueBest(getWantTryTrueBest(rd.priority));
+	state WantTrueBestIfMoveout wantTrueBestIfMoveout(getWantTrueBestIfMoveout(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
@@ -1335,7 +1335,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
-		    .detail("WantTryTrueBest", wantTryTrueBest)
+		    .detail("WantTrueBestIfMoveout", wantTrueBestIfMoveout)
 		    .detail("SuppressedEventCount", self->suppressIntervals);
 
 		if (relocateShardInterval.severity != SevDebug) {
@@ -1460,6 +1460,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
 						req.storageQueueAware = SERVER_KNOBS->ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION;
+						req.wantTrueBestIfMoveout = wantTrueBestIfMoveout;
 
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
@@ -1612,7 +1613,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					destOverloadedCount++;
 					TraceEvent(destOverloadedCount > 50 ? SevInfo : SevDebug, "DestSSBusy", distributorId)
 					    .suppressFor(1.0)
-					    .detail("WantTryTrueBest", wantTryTrueBest)
+					    .detail("WantTrueBestIfMoveout", wantTrueBestIfMoveout)
 					    .detail("IsRestore", rd.isRestore())
 					    .detail("Priority", rd.priority)
 					    .detail("StuckCount", stuckCount)
@@ -1632,7 +1633,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					stuckCount++;
 					TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
 					    .suppressFor(1.0)
-					    .detail("WantTryTrueBest", wantTryTrueBest)
+					    .detail("WantTrueBestIfMoveout", wantTrueBestIfMoveout)
 					    .detail("IsRestore", rd.isRestore())
 					    .detail("Priority", rd.priority)
 					    .detail("StuckCount", stuckCount)
@@ -1765,7 +1766,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("Priority", rd.priority)
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
-				    .detail("WantTryTrueBest", wantTryTrueBest)
+				    .detail("WantTrueBestIfMoveout", wantTrueBestIfMoveout)
 				    .detail("IsRestore", rd.isRestore())
 				    .detail("StorageMetrics", metrics.toString())
 				    .detail("SourceServers", describe(rd.src))
@@ -1775,7 +1776,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
 				    .detail("Priority", rd.priority)
-				    .detail("WantTryTrueBest", wantTryTrueBest)
+				    .detail("WantTrueBestIfMoveout", wantTrueBestIfMoveout)
 				    .detail("IsRestore", rd.isRestore())
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
