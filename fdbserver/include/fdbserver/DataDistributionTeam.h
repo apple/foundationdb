@@ -21,7 +21,6 @@
 #pragma once
 
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/BooleanParam.h"
 
 struct GetTeamRequest;
 namespace data_distribution {

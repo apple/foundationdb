@@ -1333,7 +1333,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
-		    .detail("WantTrueBest", wantTrueBest)
+		    .detail("WantTryTrueBest", wantTryTrueBest)
 		    .detail("SuppressedEventCount", self->suppressIntervals);
 
 		if (relocateShardInterval.severity != SevDebug) {
@@ -1610,7 +1610,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					destOverloadedCount++;
 					TraceEvent(destOverloadedCount > 50 ? SevInfo : SevDebug, "DestSSBusy", distributorId)
 					    .suppressFor(1.0)
-					    .detail("WantTrueBest", wantTrueBest)
+					    .detail("WantTryTrueBest", wantTryTrueBest)
 					    .detail("IsRestore", rd.isRestore())
 					    .detail("Priority", rd.priority)
 					    .detail("StuckCount", stuckCount)
@@ -1630,7 +1630,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					stuckCount++;
 					TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
 					    .suppressFor(1.0)
-					    .detail("WantTrueBest", wantTrueBest)
+					    .detail("WantTryTrueBest", wantTryTrueBest)
 					    .detail("IsRestore", rd.isRestore())
 					    .detail("Priority", rd.priority)
 					    .detail("StuckCount", stuckCount)
@@ -1763,7 +1763,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("Priority", rd.priority)
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
-				    .detail("WantTrueBest", wantTrueBest)
+				    .detail("WantTryTrueBest", wantTryTrueBest)
 				    .detail("IsRestore", rd.isRestore())
 				    .detail("StorageMetrics", metrics.toString())
 				    .detail("SourceServers", describe(rd.src))
@@ -1773,7 +1773,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
 				    .detail("Priority", rd.priority)
-				    .detail("WantTrueBest", wantTrueBest)
+				    .detail("WantTryTrueBest", wantTryTrueBest)
 				    .detail("IsRestore", rd.isRestore())
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
