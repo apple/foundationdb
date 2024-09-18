@@ -1935,8 +1935,7 @@ public:
 				    .detail("HealthyMachineCount", healthyMachineCount);
 			}
 
-			if (totalMTCount >
-			        desiredMachineTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_MACHINE_TEAM_PERCENTAGE_THRESHOLD) &&
+			if (totalMTCount > desiredMachineTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_MACHINE_TEAM_RATIO_THRESHOLD) &&
 			    foundMTInfo.first.isValid()) {
 				Reference<TCMachineTeamInfo> mt = foundMTInfo.first;
 				int minNumProcessTeams = foundMTInfo.second;
@@ -2051,7 +2050,7 @@ public:
 				    .detail("DesiredCount", desiredServerTeams);
 			}
 
-			if (totalSTCount > desiredServerTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_SERVER_TEAM_PERCENTAGE_THRESHOLD) &&
+			if (totalSTCount > desiredServerTeams * (1 + SERVER_KNOBS->TR_REDUNDANT_SERVER_TEAM_RATIO_THRESHOLD) &&
 			    foundSTInfo.first.isValid()) {
 				ASSERT(foundSTInfo.first.isValid());
 				Reference<TCTeamInfo> st = foundSTInfo.first;
