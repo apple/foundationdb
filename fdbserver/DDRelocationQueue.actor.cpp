@@ -27,6 +27,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Deque.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
@@ -1282,6 +1283,18 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
+bool getWantTryTrueBest(const RelocateData& rd) {
+	if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+		return deterministicRandom()->random01() <
+		       SERVER_KNOBS->PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+	} else if (rd.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
+		return deterministicRandom()->random01() <
+		       SERVER_KNOBS->PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+	} else {
+		return false;
+	}
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1306,6 +1319,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
+	state WantTryTrueBest wantTryTrueBest(getWantTryTrueBest(rd));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
@@ -1319,6 +1333,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
+		    .detail("WantTrueBest", wantTrueBest)
 		    .detail("SuppressedEventCount", self->suppressIntervals);
 
 		if (relocateShardInterval.severity != SevDebug) {
@@ -1451,8 +1466,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
 							        physicalShardIDCandidate, metrics, debugID);
 							if (!remoteTeamWithPhysicalShard.second) {
-								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting new
-								// dst physical shard.
+								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting
+								// new dst physical shard.
 								self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
 								foundTeams = false;
 								break;
@@ -1465,8 +1480,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							}
 						}
 
-						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
-						// server that hosts the relocateData. This is possible, for example, in a fearless
+						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have
+						// any server that hosts the relocateData. This is possible, for example, in a fearless
 						// configuration when the remote DC is just brought up.
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
@@ -1503,11 +1518,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						if (enableShardMove) {
 							if (tciIndex == 1 && !forceToUseNewPhysicalShard) {
 								// critical to the correctness of team selection by PhysicalShardCollection
-								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
-								// team Thus, tryGetAvailableRemoteTeamWith() may select an almost full remote team In
-								// this case, we must re-select a remote team We set foundTeams = false to avoid
-								// finishing team selection Then, forceToUseNewPhysicalShard is set, which enforce to
-								// use getTeam to select a remote team
+								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a
+								// primary team Thus, tryGetAvailableRemoteTeamWith() may select an almost full
+								// remote team In this case, we must re-select a remote team We set foundTeams =
+								// false to avoid finishing team selection Then, forceToUseNewPhysicalShard is set,
+								// which enforce to use getTeam to select a remote team
 								bool minAvailableSpaceRatio = bestTeam.first.get()->getMinAvailableSpaceRatio(true);
 								if (minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
 									self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull]++;
@@ -1516,11 +1531,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								}
 
 								// critical to the correctness of team selection by PhysicalShardCollection
-								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
-								// team Thus, tryGetAvailableRemoteTeamWith() may select an unhealthy remote team In
-								// this case, we must re-select a remote team We set foundTeams = false to avoid
-								// finishing team selection Then, forceToUseNewPhysicalShard is set, which enforce to
-								// use getTeam to select a remote team
+								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a
+								// primary team Thus, tryGetAvailableRemoteTeamWith() may select an unhealthy remote
+								// team In this case, we must re-select a remote team We set foundTeams = false to
+								// avoid finishing team selection Then, forceToUseNewPhysicalShard is set, which
+								// enforce to use getTeam to select a remote team
 								if (!bestTeam.first.get()->isHealthy()) {
 									self->retryFindDstReasonCount
 									    [DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy]++;
@@ -1530,11 +1545,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							}
 
 							bestTeams.emplace_back(bestTeam.first.get(), true);
-							// Always set bestTeams[i].second = true to disable optimization in data move between DCs
-							// for the correctness of PhysicalShardCollection
-							// Currently, enabling the optimization will break the invariant of PhysicalShardCollection
-							// Invariant: once a physical shard is created with a specific set of SSes, this SS set will
-							// never get changed.
+							// Always set bestTeams[i].second = true to disable optimization in data move between
+							// DCs for the correctness of PhysicalShardCollection Currently, enabling the
+							// optimization will break the invariant of PhysicalShardCollection Invariant: once a
+							// physical shard is created with a specific set of SSes, this SS set will never get
+							// changed.
 
 							if (tciIndex == 0) {
 								ASSERT(foundTeams);
@@ -1554,9 +1569,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 										self->retryFindDstReasonCount
 										    [DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
 										if (wantTrueBest) {
-											// Next retry will likely get the same team, and we know that we can't reuse
-											// any existing physical shard in this team. So force to create new physical
-											// shard.
+											// Next retry will likely get the same team, and we know that we can't
+											// reuse any existing physical shard in this team. So force to create
+											// new physical shard.
 											forceToUseNewPhysicalShard = true;
 										}
 										foundTeams = false;
@@ -1595,6 +1610,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					destOverloadedCount++;
 					TraceEvent(destOverloadedCount > 50 ? SevInfo : SevDebug, "DestSSBusy", distributorId)
 					    .suppressFor(1.0)
+					    .detail("WantTrueBest", wantTrueBest)
+					    .detail("IsRestore", rd.isRestore())
+					    .detail("Priority", rd.priority)
 					    .detail("StuckCount", stuckCount)
 					    .detail("DestOverloadedCount", destOverloadedCount)
 					    .detail("TeamCollectionId", tciIndex)
@@ -1612,6 +1630,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					stuckCount++;
 					TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
 					    .suppressFor(1.0)
+					    .detail("WantTrueBest", wantTrueBest)
+					    .detail("IsRestore", rd.isRestore())
+					    .detail("Priority", rd.priority)
 					    .detail("StuckCount", stuckCount)
 					    .detail("DestOverloadedCount", destOverloadedCount)
 					    .detail("TeamCollectionId", tciIndex)
@@ -1690,10 +1711,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				if (allHealthy && anyWithSource && !bestTeams[i].second) {
 					// When all servers in bestTeams[i] do not hold the shard (!bestTeams[i].second), it indicates
 					// the bestTeams[i] is in a new DC where data has not been replicated to.
-					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data movement
-					// across DC, we randomly choose a server in bestTeams[i] as the shard's destination, and
-					// move the shard to the randomly chosen server (in the remote DC), which will later
-					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
+					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data
+					// movement across DC, we randomly choose a server in bestTeams[i] as the shard's destination,
+					// and move the shard to the randomly chosen server (in the remote DC), which will later
+					// propogate its data to the servers in the same team. This saves data movement bandwidth across
+					// DC
 					int idx = deterministicRandom()->randomInt(0, serverIds.size());
 					destIds.push_back(serverIds[idx]);
 					healthyIds.push_back(serverIds[idx]);
@@ -1741,6 +1763,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("Priority", rd.priority)
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
+				    .detail("WantTrueBest", wantTrueBest)
+				    .detail("IsRestore", rd.isRestore())
 				    .detail("StorageMetrics", metrics.toString())
 				    .detail("SourceServers", describe(rd.src))
 				    .detail("DestinationTeam", describe(destIds))
@@ -1749,6 +1773,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
 				    .detail("Priority", rd.priority)
+				    .detail("WantTrueBest", wantTrueBest)
+				    .detail("IsRestore", rd.isRestore())
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
 				    .detail("SourceServers", describe(rd.src))
@@ -1938,8 +1964,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							auto serverIds = bestTeams[i].first->getServerIDs();
 							selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 						}
-						// The update of PhysicalShardToTeams, PhysicalShardInstances, keyRangePhysicalShardIDMap should
-						// be atomic
+						// The update of PhysicalShardToTeams, PhysicalShardInstances, keyRangePhysicalShardIDMap
+						// should be atomic
 						self->physicalShardCollection->updatePhysicalShardCollection(
 						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
 					}
@@ -2012,8 +2038,8 @@ inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& 
 	return cpu;
 }
 
-// Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read load
-// than destTeam
+// Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read
+// load than destTeam
 ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
                                      DataMovementReason moveReason,
                                      Reference<IDataDistributionTeam> sourceTeam,
@@ -2556,8 +2582,8 @@ struct DDQueueImpl {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we
-			                                             // are killed by the master dying
+			if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time
+			                                             // we are killed by the master dying
 			    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled &&
 			    e.code() != error_code_data_move_dest_team_not_found)
 				TraceEvent(SevError, "DataDistributionQueueError", self->distributorId).error(e);
