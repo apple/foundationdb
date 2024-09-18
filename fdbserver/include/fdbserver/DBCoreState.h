@@ -82,12 +82,8 @@ struct CoreTLogSet {
 		           isLocal,
 		           locality,
 		           startVersion,
-		           satelliteTagLocations);
-		if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
-			tLogVersion = TLogVersion::V2;
-		} else {
-			serializer(ar, tLogVersion);
-		}
+		           satelliteTagLocations,
+		           tLogVersion);
 	}
 };
 
@@ -117,20 +113,18 @@ struct OldTLogCoreData {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ASSERT_WE_THINK(ar.protocolVersion().hasTagLocality());
-		serializer(ar, tLogs, logRouterTags, epochEnd);
-
-		if (ar.protocolVersion().hasPseudoLocalities()) {
-			serializer(ar, pseudoLocalities);
-		}
-		if (ar.protocolVersion().hasShardedTxsTags()) {
-			serializer(ar, txsTags);
-		}
-		if (ar.protocolVersion().hasBackupWorker()) {
-			serializer(ar, epoch, epochBegin);
-		}
+		ASSERT_WE_THINK(ar.protocolVersion().hasBackupWorker());
+		serializer(ar,
+		           tLogs,
+		           logRouterTags,
+		           epochEnd,
+		           pseudoLocalities, // since 6.1
+		           txsTags, // since 6.1
+		           epoch, // since 6.3
+		           epochBegin // since 6.3
+		);
 		if (ar.protocolVersion().hasGcTxnGenerations()) {
-			serializer(ar, recoverAt);
+			serializer(ar, recoverAt); // since 7.3
 		}
 	}
 };
@@ -180,19 +174,21 @@ struct DBCoreState {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ASSERT_WE_THINK(ar.protocolVersion().hasTagLocality());
-		serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);
-		if (ar.protocolVersion().hasPseudoLocalities()) {
-			serializer(ar, pseudoLocalities);
-		}
-		if (ar.protocolVersion().hasShardedTxsTags()) {
-			serializer(ar, txsTags);
-		}
+		ASSERT_WE_THINK(ar.protocolVersion().hasShardedTxsTags()); // 6.1
+		serializer(ar,
+		           tLogs,
+		           logRouterTags,
+		           oldTLogData,
+		           recoveryCount,
+		           logSystemType,
+		           pseudoLocalities, // since 6.1
+		           txsTags); // since 6.1
+
 		if (ar.protocolVersion().hasSWVersionTracking()) {
-			serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
+			serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion); // 7.2
 		}
 		if (ar.protocolVersion().hasEncryptionAtRest()) {
-			serializer(ar, encryptionAtRestMode);
+			serializer(ar, encryptionAtRestMode); // 7.2
 		}
 	}
 };
