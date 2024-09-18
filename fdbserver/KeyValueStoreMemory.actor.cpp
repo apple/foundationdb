@@ -1080,8 +1080,8 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	    .detail("MemoryLimit", memoryLimit)
 	    .detail("StoreType", storeType);
 
-	// SOMEDAY: update to use DiskQueueVersion::V2 with xxhash3 checksum for FDB >= 7.2
-	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V1);
+	// Use DiskQueueVersion::V2 with xxhash3 checksum
+	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V2);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		return new KeyValueStoreMemory<radix_tree>(
 		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType, false, false, false, false);

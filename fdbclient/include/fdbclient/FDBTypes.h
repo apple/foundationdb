@@ -1033,10 +1033,10 @@ struct TLogVersion {
 		V5 = 5, // 6.3
 		V6 = 6, // 7.0
 		V7 = 7, // 7.2
-		MIN_SUPPORTED = V2,
+		MIN_SUPPORTED = V5,
 		MAX_SUPPORTED = V7,
 		MIN_RECRUITABLE = V6,
-		DEFAULT = V6,
+		DEFAULT = V7,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -1744,7 +1744,7 @@ struct ReadOptions {
 	            ReadType type = ReadType::NORMAL,
 	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
-	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version) {}
 
 	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 

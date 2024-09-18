@@ -1,5 +1,5 @@
 [configuration]
-maxTLogVersion = 6
+maxTLogVersion = 7
 disableTss = true
 disableHostname = true
 
