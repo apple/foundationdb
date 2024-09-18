@@ -953,7 +953,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
 		cursors.push_back(peek(dbgid, begin, end, tag, parallelGetMore));
 	}
 	return makeReference<ILogSystem::BufferedCursor>(
-	    cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, false /* not upgraded locality */, false);
+	    cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, false);
 }
 
 Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
@@ -1190,7 +1190,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 			cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
 		}
 
-		return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, false, canDiscardPopped);
+		return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, canDiscardPopped);
 	}
 
 	try {
@@ -1205,7 +1205,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 				cursors.push_back(peekLocal(dbgid, txsTag, begin, end, true, peekLocality));
 			}
 
-			return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, false, canDiscardPopped);
+			return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, canDiscardPopped);
 		}
 
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
@@ -1225,9 +1225,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 			allCursors.push_back(peekAll(dbgid, localEnd, end, txsTag, true));
 		}
 
-		cursors[1] =
-		    makeReference<ILogSystem::BufferedCursor>(localCursors, begin, localEnd, false, false, canDiscardPopped);
-		cursors[0] = makeReference<ILogSystem::BufferedCursor>(allCursors, localEnd, end, false, false, false);
+		cursors[1] = makeReference<ILogSystem::BufferedCursor>(localCursors, begin, localEnd, false, canDiscardPopped);
+		cursors[0] = makeReference<ILogSystem::BufferedCursor>(allCursors, localEnd, end, false, false);
 		epochEnds.emplace_back(localEnd);
 
 		return makeReference<ILogSystem::MultiCursor>(cursors, epochEnds);
@@ -1243,7 +1242,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 				cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
 			}
 
-			return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, false, canDiscardPopped);
+			return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, canDiscardPopped);
 		}
 		throw;
 	}

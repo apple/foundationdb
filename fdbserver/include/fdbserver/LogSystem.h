@@ -453,16 +453,10 @@ struct ILogSystem {
 		int targetQueueSize;
 		UID randomID;
 
-		// FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support
-		// that upgrade.
-		bool collectTags;
-		void combineMessages();
-
 		BufferedCursor(std::vector<Reference<IPeekCursor>> cursors,
 		               Version begin,
 		               Version end,
 		               bool withTags,
-		               bool collectTags,
 		               bool canDiscardPopped);
 		BufferedCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 		               Tag tag,
