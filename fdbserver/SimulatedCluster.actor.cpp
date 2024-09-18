@@ -2757,15 +2757,26 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
 	// in the build.
 	if (!rocksDBEnabled) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 		testConfig.storageEngineExcludeTypes.push_back(5);
+	}
+
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	    // NOTE: PhysicalShardMove and BulkLoading are required to have SHARDED_ROCKSDB storage engine working.
+	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
+	    // override will not take effect until the test starts. Here, we do an additional check
+	    // for this special simulation test.
+	    (std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos &&
+	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos)) {
+		testConfig.storageEngineExcludeTypes.push_back(5);
+	} else {
+		// Only use sqlite, rocksdb, shardeded rocksdb when location metadata is enabled.
+		testConfig.storageEngineExcludeTypes.push_back(1);
+		testConfig.storageEngineExcludeTypes.push_back(2);
+		testConfig.storageEngineExcludeTypes.push_back(3);
 	}
 
 	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
