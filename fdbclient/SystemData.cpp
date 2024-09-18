@@ -943,10 +943,7 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
 	BinaryReader reader(value, IncludeVersion());
 
-	if (!reader.protocolVersion().hasStorageInterfaceReadiness()) {
-		reader >> s;
-		return s;
-	}
+	ASSERT_WE_THINK(reader.protocolVersion().hasStorageInterfaceReadiness());
 
 	return decodeServerListValueFB(value);
 }

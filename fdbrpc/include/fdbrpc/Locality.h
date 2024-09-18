@@ -351,36 +351,21 @@ public:
 		if constexpr (is_fb_function<Ar>) {
 			serializer(ar, _data);
 		} else {
-			if (ar.protocolVersion().hasLocality()) {
-				Standalone<StringRef> key;
-				Optional<Standalone<StringRef>> value;
-				uint64_t mapSize = (uint64_t)_data.size();
-				serializer(ar, mapSize);
-				if (ar.isDeserializing) {
-					for (size_t i = 0; i < mapSize; i++) {
-						serializer(ar, key, value);
-						_data[key] = value;
-					}
-				} else {
-					for (auto it = _data.begin(); it != _data.end(); it++) {
-						key = it->first;
-						value = it->second;
-						serializer(ar, key, value);
-					}
+			ASSERT_WE_THINK(ar.protocolVersion().hasLocality());
+			Standalone<StringRef> key;
+			Optional<Standalone<StringRef>> value;
+			uint64_t mapSize = (uint64_t)_data.size();
+			serializer(ar, mapSize);
+			if (ar.isDeserializing) {
+				for (size_t i = 0; i < mapSize; i++) {
+					serializer(ar, key, value);
+					_data[key] = value;
 				}
 			} else {
-				ASSERT(ar.isDeserializing);
-				UID zoneId, dcId, processId;
-				serializer(ar, zoneId, dcId);
-				set(keyZoneId, Standalone<StringRef>(zoneId.toString()));
-				set(keyDcId, Standalone<StringRef>(dcId.toString()));
-
-				if (ar.protocolVersion().hasProcessID()) {
-					serializer(ar, processId);
-					set(keyProcessId, Standalone<StringRef>(processId.toString()));
-				} else {
-					int _machineClass = ProcessClass::UnsetClass;
-					serializer(ar, _machineClass);
+				for (auto it = _data.begin(); it != _data.end(); it++) {
+					key = it->first;
+					value = it->second;
+					serializer(ar, key, value);
 				}
 			}
 		}

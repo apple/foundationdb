@@ -481,14 +481,10 @@ struct ConnectPacket {
 		}
 
 		serializer(ar, protocolVersion, canonicalRemotePort, connectionId, canonicalRemoteIp4);
-		if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
-			flags = 0;
-		} else {
-			// We can send everything in serialized packet, since the current version of ConnectPacket
-			// is backward compatible with CONNECT_PACKET_V0.
-			serializer(ar, flags);
-			ar.serializeBytes(&canonicalRemoteIp6, sizeof(canonicalRemoteIp6));
-		}
+		// We can send everything in serialized packet, since the current version of ConnectPacket
+		// is backward compatible with CONNECT_PACKET_V0.
+		serializer(ar, flags);
+		ar.serializeBytes(&canonicalRemoteIp6, sizeof(canonicalRemoteIp6));
 	}
 };
 
