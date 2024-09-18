@@ -21,6 +21,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FileTransfer.h"
+#include "flow/flow.h"
 #include "FlowGrpcTests.h"
 
 // So that tests are not optimized out. :/
@@ -69,6 +70,59 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 		    ASSERT_EQ(response.message(), "Echo: Ping!");
 			count += 1;
 		}
+	} catch (Error& e) {
+		if (e.code() == error_code_end_of_stream) {
+			ASSERT_EQ(count, 10); // Should send 10 reponses.
+			co_return;
+		}
+		ASSERT(false);
+	}
+	co_return;
+}
+
+TEST_CASE("/fdbrpc/grpc/future_destroy") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50500"));
+	GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> _ = server.run();
+
+	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		{
+			auto w = client.call(&TestEchoService::Stub::Echo, request);
+			// Out-of-scope
+		}
+	} catch (Error& e) {
+		ASSERT(false);
+	}
+	co_await delay(1); // So that lifetime of client stays.
+	co_return;
+}
+
+
+TEST_CASE("/fdbrpc/grpc/stream_destroy") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
+	GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> _ = server.run();
+
+	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	int count = 0;
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		{
+			auto stream = client.call(&TestEchoService::Stub::EchoRecv10, request);
+			auto response = co_await stream;
+			ASSERT_EQ(response.message(), "Echo: Ping!");
+		}
+		//TODO: Test if server cancels.
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {
 			ASSERT_EQ(count, 10); // Should send 10 reponses.

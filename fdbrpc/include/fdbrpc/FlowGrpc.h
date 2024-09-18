@@ -87,6 +87,9 @@ public:
 		boost::asio::post(*pool_, [this, promise, rpc, request, response]() {
 			grpc::ClientContext context;
 			auto status = (stub_.get()->*rpc)(&context, request, response);
+			if (promise->getFutureReferenceCount() == 0) {
+				return;
+			}
 			promise->send(status);
 		});
 
@@ -102,9 +105,15 @@ public:
 			grpc::ClientContext context;
 			ResponseType response;
 			auto status = (stub_.get()->*rpc)(&context, request, &response);
+
+			if (promise->getFutureReferenceCount() == 0) {
+				return;
+			}
+
 			if (status.ok()) {
 				promise->send(response);
 			} else {
+				std::cout << "Error: " << status.error_message() << std::endl;
 				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});
@@ -122,6 +131,12 @@ public:
 			ResponseType response;
 			auto reader = (stub_.get()->*rpc)(&context, request);
 			while (reader->Read(&response)) {
+				if (promise->getFutureReferenceCount() == 0) {
+					std::cout << "Stream cancelled.\n";
+					context.TryCancel();
+					return;
+				}
+
 				promise->send(response);
 			}
 
@@ -129,6 +144,7 @@ public:
 			if (status.ok()) {
 				promise->sendError(end_of_stream());
 			} else {
+				std::cout << "Error: " << status.error_message() << std::endl;
 				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});

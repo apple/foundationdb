@@ -49,6 +49,10 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 
 	Status EchoRecv10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
 		for (int ii = 0; ii < 10; ii++) {
+			if (context->IsCancelled()) {
+				std::cout << "Request Cancelled.\n";
+				return Status::CANCELLED;
+			}
 			EchoResponse reply;
 			reply.set_message("Echo: " + request->message());
 			writer->Write(reply);
