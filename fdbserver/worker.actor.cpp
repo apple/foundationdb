@@ -465,8 +465,10 @@ struct TLogOptions {
 	}
 
 	DiskQueueVersion getDiskQueueVersion() const {
-		if (version < TLogVersion::V3)
+		if (version < TLogVersion::V3) {
+			ASSERT(false); // no longer supported
 			return DiskQueueVersion::V0;
+		}
 		if (version < TLogVersion::V7)
 			return DiskQueueVersion::V1;
 		return DiskQueueVersion::V2;
@@ -476,15 +478,10 @@ struct TLogOptions {
 TLogFn tLogFnForOptions(TLogOptions options) {
 	switch (options.version) {
 	case TLogVersion::V2:
-		if (options.spillType == TLogSpillType::REFERENCE)
-			ASSERT(false);
-		return oldTLog_6_0::tLog;
 	case TLogVersion::V3:
 	case TLogVersion::V4:
-		if (options.spillType == TLogSpillType::VALUE)
-			return oldTLog_6_0::tLog;
-		else
-			return oldTLog_6_2::tLog;
+		ASSERT(false); // V2 to V4 are no longer supported
+
 	case TLogVersion::V5:
 	case TLogVersion::V6:
 	case TLogVersion::V7:

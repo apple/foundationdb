@@ -31,6 +31,7 @@
 #include <string>
 #include <sstream>
 #include <random>
+#include <unordered_map>
 #include <unordered_set>
 
 #ifdef __linux__
