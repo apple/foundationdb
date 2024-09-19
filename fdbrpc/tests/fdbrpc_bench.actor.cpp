@@ -26,6 +26,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowTransport.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace fdbrpc_bench {
 NetworkAddress serverAddress;
