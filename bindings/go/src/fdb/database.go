@@ -219,7 +219,8 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 //
 // The transaction is retried if the error is or wraps a retryable Error.
 // The error is unwrapped.
-// Read transactions are never committed and destroyed before returning to caller.
+// Read transactions are never committed and destroyed automatically via GC,
+// once all their futures go out of scope.
 //
 // Do not return Future objects from the function provided to ReadTransact. The
 // Transaction created by ReadTransact may be finalized at any point after
