@@ -270,6 +270,7 @@ struct ShardMetrics {
 struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
+	Future<Void> trackUsableRegion;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 

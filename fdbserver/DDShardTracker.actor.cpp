@@ -210,6 +210,29 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 	return { bounds, readHotShard };
 }
 
+ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyRange keys) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0);
+	wait(yieldedFuture(self()->readyToStart.getFuture()));
+	double expectedCompletionSeconds = self()->shards->size() * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
+	double delayTime = deterministicRandom()->random01() * expectedCompletionSeconds;
+	wait(delayJittered(delayTime));
+	auto [destTeams, srcTeams] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
+	if (destTeams.size() < self()->usableRegions) {
+		TraceEvent(SevWarn, "ShardUsableRegionMismatch", self()->distributorId)
+		    .suppressFor(5.0)
+		    .detail("DestTeamSize", destTeams.size())
+		    .detail("SrcTeamSize", srcTeams.size())
+		    .detail("DestServers", describe(destTeams))
+		    .detail("SrcServers", describe(srcTeams))
+		    .detail("UsableRegion", self()->usableRegions)
+		    .detail("Shard", keys);
+		RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
+		self()->output.send(rs);
+	}
+	return Void();
+}
+
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
                                      KeyRange keys,
                                      Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics,
@@ -1252,6 +1275,10 @@ void restartShardTrackers(DataDistributionTracker* self,
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		data.trackBytes =
 		    trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, whenDDInit);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0 &&
+		    self->usableRegions != -1) {
+			data.trackUsableRegion = shardUsableRegions(DataDistributionTracker::SafeAccessor(self), ranges[i]);
+		}
 		self->shards->insert(ranges[i], data);
 	}
 }
@@ -1510,7 +1537,7 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
     anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
-    ddTenantCache(params.ddTenantCache) {}
+    ddTenantCache(params.ddTenantCache), usableRegions(params.usableRegions) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
