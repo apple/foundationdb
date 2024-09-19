@@ -3209,7 +3209,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 			rep.newLocality = false;
 			if (localityKey.present()) {
 				int8_t locality = decodeTagLocalityListValue(localityKey.get());
-				if (rep.tag.locality != tagLocalityUpgraded && locality != rep.tag.locality) {
+				if (locality != rep.tag.locality) {
 					TraceEvent(SevWarnAlways, "SSRejoinedWithChangedLocality")
 					    .detail("Tag", rep.tag.toString())
 					    .detail("DcId", req.dcId)
@@ -3243,18 +3243,11 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 					}
 					rep.newTag = Tag(locality, tagId);
 				}
-			} else if (rep.tag.locality != tagLocalityUpgraded) {
+			} else {
+				ASSERT_WE_THINK(rep.tag.locality != tagLocalityUpgraded);
 				TraceEvent(SevWarnAlways, "SSRejoinedWithUnknownLocality")
 				    .detail("Tag", rep.tag.toString())
 				    .detail("DcId", req.dcId);
-			} else {
-				rep.newLocality = true;
-				int8_t maxTagLocality = -1;
-				auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
-				for (auto& kv : localityKeys) {
-					maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue(kv.value));
-				}
-				rep.newTag = Tag(maxTagLocality + 1, 0);
 			}
 			rep.encryptMode = commitData->encryptMode;
 			req.reply.send(rep);

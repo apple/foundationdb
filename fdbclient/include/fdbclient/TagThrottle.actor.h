@@ -165,14 +165,8 @@ struct TagThrottleValue {
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if (ar.protocolVersion().hasTagThrottleValueReason()) {
-			serializer(ar, tpsRate, expirationTime, initialDuration, reason);
-		} else if (ar.protocolVersion().hasTagThrottleValue()) {
-			serializer(ar, tpsRate, expirationTime, initialDuration);
-			if (ar.isDeserializing) {
-				reason = TagThrottledReason::UNSET;
-			}
-		}
+		ASSERT_WE_THINK(ar.protocolVersion().hasTagThrottleValueReason());
+		serializer(ar, tpsRate, expirationTime, initialDuration, reason);
 	}
 };
 

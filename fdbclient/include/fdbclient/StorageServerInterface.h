@@ -147,85 +147,53 @@ public:
 		// To change this serialization, ProtocolVersion::ServerListValue must be updated, and downgrades need to be
 		// considered
 
-		if (ar.protocolVersion().hasSmallEndpoints()) {
-			if (ar.protocolVersion().hasTSS()) {
-				if (ar.protocolVersion().hasStorageInterfaceReadiness()) {
-					serializer(ar, uniqueID, locality, getValue, tssPairID, acceptingRequests);
-				} else {
-					serializer(ar, uniqueID, locality, getValue, tssPairID);
-				}
-			} else {
-				serializer(ar, uniqueID, locality, getValue);
-			}
-			if (Ar::isDeserializing) {
-				getKey = PublicRequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
-				getKeyValues =
-				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
-				getShardState =
-				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
-				waitMetrics =
-				    PublicRequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
-				splitMetrics = RequestStream<struct SplitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(5));
-				getStorageMetrics =
-				    RequestStream<struct GetStorageMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(6));
-				waitFailure = RequestStream<ReplyPromise<Void>>(getValue.getEndpoint().getAdjustedEndpoint(7));
-				getQueuingMetrics =
-				    RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(8));
-				getKeyValueStoreType =
-				    RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint().getAdjustedEndpoint(9));
-				watchValue =
-				    PublicRequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
-				getReadHotRanges =
-				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
-				getRangeSplitPoints =
-				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				getKeyValuesStream = PublicRequestStream<struct GetKeyValuesStreamRequest>(
-				    getValue.getEndpoint().getAdjustedEndpoint(13));
-				getMappedKeyValues = PublicRequestStream<struct GetMappedKeyValuesRequest>(
-				    getValue.getEndpoint().getAdjustedEndpoint(14));
-				changeFeedStream =
-				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
-				changeFeedPop =
-				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
-				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
-				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
-				fetchCheckpoint =
-				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
-				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
-				    getValue.getEndpoint().getAdjustedEndpoint(21));
-				updateCommitCostRequest =
-				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
-				auditStorage =
-				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
-				getHotShards =
-				    RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
-				getCheckSum =
-				    RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
-			}
-		} else {
-			ASSERT(Ar::isDeserializing);
-			if constexpr (is_fb_function<Ar>) {
-				ASSERT(false);
-			}
-			serializer(ar,
-			           uniqueID,
-			           locality,
-			           getValue,
-			           getKey,
-			           getKeyValues,
-			           getShardState,
-			           waitMetrics,
-			           splitMetrics,
-			           getStorageMetrics,
-			           waitFailure,
-			           getQueuingMetrics,
-			           getKeyValueStoreType);
-			if (ar.protocolVersion().hasWatches()) {
-				serializer(ar, watchValue);
-			}
+		ASSERT_WE_THINK(ar.protocolVersion().hasSmallEndpoints()); // 6.3
+		ASSERT_WE_THINK(ar.protocolVersion().hasTSS()); // 7.0
+		ASSERT_WE_THINK(ar.protocolVersion().hasStorageInterfaceReadiness()); // 7.1
+
+		serializer(ar, uniqueID, locality, getValue, tssPairID, acceptingRequests);
+
+		if (Ar::isDeserializing) {
+			getKey = PublicRequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
+			getKeyValues =
+			    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
+			getShardState = RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
+			waitMetrics = PublicRequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
+			splitMetrics = RequestStream<struct SplitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(5));
+			getStorageMetrics =
+			    RequestStream<struct GetStorageMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(6));
+			waitFailure = RequestStream<ReplyPromise<Void>>(getValue.getEndpoint().getAdjustedEndpoint(7));
+			getQueuingMetrics =
+			    RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(8));
+			getKeyValueStoreType =
+			    RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint().getAdjustedEndpoint(9));
+			watchValue = PublicRequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
+			getReadHotRanges =
+			    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
+			getRangeSplitPoints =
+			    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
+			getKeyValuesStream =
+			    PublicRequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+			getMappedKeyValues =
+			    PublicRequestStream<struct GetMappedKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+			changeFeedStream =
+			    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+			overlappingChangeFeeds =
+			    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+			changeFeedPop = RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+			changeFeedVersionUpdate =
+			    RequestStream<struct ChangeFeedVersionUpdateRequest>(getValue.getEndpoint().getAdjustedEndpoint(18));
+			checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+			fetchCheckpoint =
+			    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+			fetchCheckpointKeyValues =
+			    RequestStream<struct FetchCheckpointKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(21));
+			updateCommitCostRequest =
+			    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
+			auditStorage = RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
+			getHotShards = RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
+			getCheckSum =
+			    RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }

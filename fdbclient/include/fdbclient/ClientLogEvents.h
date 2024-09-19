@@ -50,13 +50,8 @@ struct Event {
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		if (ar.protocolVersion().hasTenants()) {
-			return serializer(ar, type, startTs, dcId, tenant);
-		} else if (ar.protocolVersion().version() >= (uint64_t)0x0FDB00B063010001LL) {
-			return serializer(ar, type, startTs, dcId);
-		} else {
-			return serializer(ar, type, startTs);
-		}
+		ASSERT_WE_THINK(ar.protocolVersion().hasTenants());
+		return serializer(ar, type, startTs, dcId, tenant);
 	}
 
 	EventType type{ EventType::UNSET };
