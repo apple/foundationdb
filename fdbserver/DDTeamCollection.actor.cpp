@@ -25,6 +25,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
@@ -432,7 +433,7 @@ public:
 			if (req.storageQueueAware) {
 				storageQueueThreshold = calculateTeamStorageQueueThreshold(self->teams);
 			}
-			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
+			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST || req.wantTrueBestIfMoveout) {
 				ASSERT(!bestOption.present());
 				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
 					bestOption = getBestTeam(self,
@@ -554,11 +555,14 @@ public:
 				// self->traceAllInfo(true);
 			}
 
-			if (req.storageQueueAware && !bestOption.present()) {
+			if (!bestOption.present() && (req.storageQueueAware || req.wantTrueBestIfMoveout)) {
+				// re-run getTeam without storageQueueAware and wantTrueBestIfMoveout
 				req.storageQueueAware = false;
-				TraceEvent(SevWarn, "StorageQueueAwareGetTeamFailed", self->distributorId)
-				    .detail("Reason", "bestOption not present");
-				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
+				req.wantTrueBestIfMoveout = false;
+				TraceEvent(SevWarn, "GetTeamRetry", self->distributorId)
+				    .detail("OldStorageQueueAware", req.storageQueueAware)
+				    .detail("OldWantTrueBestIfMoveout", req.wantTrueBestIfMoveout);
+				wait(getTeam(self, req));
 			} else {
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
@@ -814,6 +818,8 @@ public:
 				    .detail("AddedTeams", 0)
 				    .detail("TeamsToBuild", teamsToBuild)
 				    .detail("CurrentServerTeams", self->teams.size())
+				    .detail("Servers", self->server_info.size())
+				    .detail("HealthyServers", serverCount)
 				    .detail("DesiredTeams", desiredTeams)
 				    .detail("MaxTeams", maxTeams)
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
@@ -1896,6 +1902,16 @@ public:
 			// tracker) and remove bad team (cancel the team tracker).
 			wait(self->badTeamRemover);
 
+			if (SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC > 0 &&
+			    self->teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+				TraceEvent(SevWarn, "MachineTeamRemoverDelayedForLowSpacePivot", self->distributorId)
+				    .detail("IsPrimary", self->primary)
+				    .detail("CurrentSpacePivot", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("TargetSpacePivot", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+				wait(delay(SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC));
+				continue;
+			}
+
 			state int healthyMachineCount = self->calculateHealthyMachineCount();
 			// Check if all machines are healthy, if not, we wait for 1 second and loop back.
 			// Eventually, all machines will become healthy.
@@ -2033,6 +2049,16 @@ public:
 			// Wait for the badTeamRemover() to avoid the potential race between
 			// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 			wait(self->badTeamRemover);
+
+			if (SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC > 0 &&
+			    self->teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+				TraceEvent(SevWarn, "ServerTeamRemoverDelayedForLowSpacePivot", self->distributorId)
+				    .detail("IsPrimary", self->primary)
+				    .detail("CurrentSpacePivot", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("TargetSpacePivot", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+				wait(delay(SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC));
+				continue;
+			}
 
 			// From this point, all server teams should be healthy, because we wait above
 			// until processingUnhealthy is done, and all machines are healthy
