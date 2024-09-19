@@ -344,6 +344,11 @@ public:
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
 
 	// TeamRemover to remove redundant teams
+	double TR_LOW_SPACE_PIVOT_DELAY_SEC; // teamRedundant data moves can make the min SS available % smaller in
+	                                     // particular when the majority of SSes have low available %. So, when the
+	                                     // pivot is below the target, teamRemover wait for the specified time to check
+	                                     // the pivot again. teamRemover triggers teamRedundant data moves only when the
+	                                     // pivot is above the target.
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
 	bool TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS; // guard to select which machineTeamRemover logic to use
