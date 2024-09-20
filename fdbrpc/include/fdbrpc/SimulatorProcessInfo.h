@@ -29,7 +29,9 @@
 #include "flow/IUDPSocket.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/ChaosMetrics.h"
+#include "flow/Histogram.h"
 
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorMachineInfo.h"
 #include "fdbrpc/SimulatorKillType.h"
 
