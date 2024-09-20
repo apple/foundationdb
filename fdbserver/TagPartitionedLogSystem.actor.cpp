@@ -2086,8 +2086,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 	return Void();
 }
 
-void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
-                   std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
+void getTLogLocIds(const std::vector<Reference<LogSet>>& tLogs,
+                   const std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
                    std::vector<uint16_t>& tLogLocIds,
                    uint16_t& maxTLogLocId) {
 	// Initialization.
@@ -2119,7 +2119,7 @@ void getTLogLocIds(std::vector<Reference<LogSet>>& tLogs,
 	}
 }
 
-void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
+void populateBitset(boost::dynamic_bitset<>& bs, const std::vector<uint16_t>& ids) {
 	for (auto& id : ids) {
 		ASSERT(id < bs.size());
 		bs.set(id);
@@ -2131,7 +2131,7 @@ void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t>& ids) {
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
 Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
-                                 std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
+                                 const std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
                                  Version minDV,
                                  Version minKCV) {
 	std::vector<uint16_t> tLogLocIds;
