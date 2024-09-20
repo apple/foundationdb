@@ -2130,7 +2130,7 @@ void populateBitset(boost::dynamic_bitset<>& bs, const std::vector<uint16_t>& id
 // This function finds the highest recoverable version for each tLog group over all log groups.
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
-Version getRecoverVersionUnicast(std::vector<Reference<LogSet>>& logServers,
+Version getRecoverVersionUnicast(const std::vector<Reference<LogSet>>& logServers,
                                  const std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
                                  Version minDV,
                                  Version minKCV) {
