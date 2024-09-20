@@ -24,6 +24,7 @@
 #include <array>
 #include <variant>
 
+#include "flow/ObjectSerializerTraits.h"
 #include "flow/Optional.h"
 
 struct IPAddress {
