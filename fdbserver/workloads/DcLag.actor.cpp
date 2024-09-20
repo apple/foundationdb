@@ -117,7 +117,7 @@ struct DcLagWorkload : TestWorkload {
 		cloggedPairs.clear();
 	}
 
-	ACTOR static Future<Optional<double>> fetchDatacenterLag(DcLagWorkload* self, Database cx) {
+	ACTOR static Future<Optional<double>> fetchDatacenterLag(Database cx) {
 		StatusObject result = wait(StatusClient::statusFetcher(cx));
 		StatusObjectReader statusObj(result);
 		StatusObjectReader statusObjCluster;
@@ -167,7 +167,7 @@ struct DcLagWorkload : TestWorkload {
 		loop choose {
 			when(wait(delay(5.0))) {
 				// Fetch DC lag every 5s
-				status = fetchDatacenterLag(self, cx);
+				status = fetchDatacenterLag(cx);
 			}
 			when(Optional<double> lag = wait(status)) {
 				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME - 10.0) {
