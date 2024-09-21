@@ -2594,7 +2594,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		state Optional<std::set<Tag>> writtenTags;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 			writtenTags = self->writtenTags;
-			// ASSERT(writtenTags.get().size() > 0);
 		}
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,

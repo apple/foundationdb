@@ -401,6 +401,7 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 			newState.oldTLogData.emplace_back(oldData);
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
+			    .detail("RecoverAt", newState.oldTLogData.back().recoverAt)
 			    .detail("TotalTags", newState.oldTLogData.back().logRouterTags)
 			    .detail("BeginVersion", newState.oldTLogData.back().epochBegin)
 			    .detail("EndVersion", newState.oldTLogData.back().epochEnd);
@@ -2537,14 +2538,14 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				state std::vector<Future<TLogLockResult>> replies = logLockInfo.replies;
 				for (auto tLogResult : replies) {
 					if (tLogResult.isValid() && tLogResult.isReady()) {
-						TraceEvent("SendClusterRecoveryVersion").detail("X",tLogResult.get().id);
+						TraceEvent("SendClusterRecoveryVersion").detail("DestInterf", tLogResult.get().id);
 						wait(transformErrors(
-							throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
-												.setClusterRecoveryVersion.getReplyUnlessFailedFor(
-													setClusterRecoveryVersionRequest(logSystem->recoverAt.get()),
-													SERVER_KNOBS->TLOG_TIMEOUT,
-													SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-							cluster_recovery_failed()));
+						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
+						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
+						                         setClusterRecoveryVersionRequest(outLogSystem->get()->getEnd()),
+						                         SERVER_KNOBS->TLOG_TIMEOUT,
+						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+						    cluster_recovery_failed()));
 					}
 				}
 			}
