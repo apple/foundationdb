@@ -49,10 +49,8 @@ ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/dr_agent
 
 (cd $INSTDIR ; tar -czf $TEMPDIR/SOURCES/install-files.tar.gz *)
 
-m4 -DFDBVERSION=$VERSION -DFDBRELEASE=$RELEASE.el6 -DRHEL6 packaging/rpm/foundationdb.spec.in > $TEMPDIR/SPECS/foundationdb.el6.spec
 m4 -DFDBVERSION=$VERSION -DFDBRELEASE=$RELEASE.el7 packaging/rpm/foundationdb.spec.in > $TEMPDIR/SPECS/foundationdb.el7.spec
 
-fakeroot rpmbuild --quiet --define "%_topdir $TEMPDIR" -bb $TEMPDIR/SPECS/foundationdb.el6.spec
 fakeroot rpmbuild --quiet --define "%_topdir $TEMPDIR" -bb $TEMPDIR/SPECS/foundationdb.el7.spec
 
 cp $TEMPDIR/RPMS/x86_64/*.rpm packages

@@ -39,12 +39,6 @@
 .. |package-deb-server| replace::
     foundationdb-server\_\ |release|\ -1\_amd64.deb
 
-.. |package-rpm6-clients| replace::
-    foundationdb-clients-|release|\ -1.el6.x86_64.rpm
-
-.. |package-rpm6-server| replace::
-    foundationdb-server-|release|\ -1.el6.x86_64.rpm
-
 .. |package-rpm-clients| replace::
     foundationdb-clients-|release|\ -1.el7.x86_64.rpm
 
