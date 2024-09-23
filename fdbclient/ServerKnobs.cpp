@@ -364,6 +364,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_MAXIMUM_LARGE_TEAM_CLEANUP,                       10000 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAM_CLEANUP = 10;
 	init( DD_LARGE_TEAM_DELAY,                                  60.0 );
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
+	init (DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM,      false ); if (isSimulated) DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM = true;
 
 	// TeamRemover
 	init( TR_LOW_SPACE_PIVOT_DELAY_SEC,                            0 ); if (isSimulated) TR_LOW_SPACE_PIVOT_DELAY_SEC = deterministicRandom()->randomInt(0, 3);

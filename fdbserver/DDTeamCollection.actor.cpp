@@ -4424,7 +4424,8 @@ bool DDTeamCollection::isValidLocality(Reference<IReplicationPolicy> storagePoli
 void DDTeamCollection::evaluateTeamQuality() const {
 	int teamCount = teams.size(), serverCount = allServers.size();
 	double teamsPerServer = (double)teamCount * configuration.storageTeamSize / serverCount;
-
+	const int targetTeamNumPerServer =
+	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 	ASSERT_EQ(serverCount, server_info.size());
 
 	int minTeams = std::numeric_limits<int>::max();
@@ -4440,6 +4441,16 @@ void DDTeamCollection::evaluateTeamQuality() const {
 			varTeams += (stc - teamsPerServer) * (stc - teamsPerServer);
 			// Use zoneId as server's machine id
 			machineTeams[info->getLastKnownInterface().locality.zoneId()] += stc;
+			// Check invariant: if latest buildTeam succeeds, then each server must have at least
+			// targetTeamNumPerServer serverTeams
+			// lastBuildTeamsFailed is set only when (1) machine count is less than configured team size;
+			// (2) Not find any server team candidates when creating server team; (3) failed to add machine team
+			if (SERVER_KNOBS->DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM && !lastBuildTeamsFailed &&
+			    stc < targetTeamNumPerServer) {
+				TraceEvent(SevError, "NewAddServerNotMatchTargetSTCount", distributorId)
+				    .detail("CurrentServerTeams", stc)
+				    .detail("TargetServerTeams", targetTeamNumPerServer);
+			}
 		}
 	}
 	varTeams /= teamsPerServer * teamsPerServer;

@@ -344,6 +344,8 @@ public:
 	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
 	                                                               // light-traffic shards out of the overloading server
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
+	bool DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM; // Enable to validate server team count per server after build
+	                                                     // team
 
 	// TeamRemover to remove redundant teams
 	double TR_LOW_SPACE_PIVOT_DELAY_SEC; // teamRedundant data moves can make the min SS available % smaller in
