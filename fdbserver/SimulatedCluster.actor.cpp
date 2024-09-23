@@ -1933,11 +1933,18 @@ void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
 			// FIXME: log replicas must be more than storage replicas because otherwise better master exists will not
 			// recognize it needs to change dcs
 			int replication_factor = deterministicRandom()->randomInt(storage_servers, generateFearless ? 4 : 5);
-			int anti_quorum = deterministicRandom()->randomInt(
-			    0,
-			    (replication_factor / 2) +
-			        1); // The anti quorum cannot be more than half of the replication factor, or the
-			            // log system will continue to accept commits when a recovery is impossible
+			// Version vector is an experimental feature that does not support logWriteAntiQuorum
+			// feature. Disable logWriteAntiQuorum (when version vector is enabled) in simulation
+			// tests for now.
+			// @todo extend version vector to support logWriteAntiQuorum feature.
+			int anti_quorum =
+			    SERVER_KNOBS->ENABLE_VERSION_VECTOR
+			        ? 0
+			        : (deterministicRandom()->randomInt(
+			              0,
+			              (replication_factor / 2) +
+			                  1)); // The anti quorum cannot be more than half of the replication factor, or the
+			                       // log system will continue to accept commits when a recovery is impossible
 			// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 			set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 			                  "replica_datacenters:=1 min_replica_datacenters:=1",
