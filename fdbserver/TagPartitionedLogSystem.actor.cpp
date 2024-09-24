@@ -2465,6 +2465,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	}
 
 	state Optional<Version> lastEnd;
+	state Optional<Version> lastRecoverAt;
 	state Version knownCommittedVersion = 0;
 	loop {
 		Version minEnd = std::numeric_limits<Version>::max();
@@ -2500,6 +2501,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 			logSystem->recoverAt = minEnd;
 			lastEnd = minEnd;
+			lastRecoverAt = logSystem->recoverAt;
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
@@ -2517,9 +2519,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->remoteLogsWrittenToCoreState = true;
 			logSystem->stopped = true;
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
-
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			}
 			outLogSystem->set(logSystem);
 		}
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lastEnd.present()) {
@@ -2539,13 +2538,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				for (auto tLogResult : replies) {
 					if (tLogResult.isValid() && tLogResult.isReady()) {
 						TraceEvent("SendClusterRecoveryVersion").detail("DestInterf", tLogResult.get().id);
-						wait(transformErrors(
-						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
-						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
-						                         setClusterRecoveryVersionRequest(outLogSystem->get()->getEnd()),
-						                         SERVER_KNOBS->TLOG_TIMEOUT,
-						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-						    cluster_recovery_failed()));
+						wait(transformErrors(throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
+						                                      .setClusterRecoveryVersion.getReplyUnlessFailedFor(
+						                                          setClusterRecoveryVersionRequest(lastRecoverAt.get()),
+						                                          SERVER_KNOBS->TLOG_TIMEOUT,
+						                                          SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+						                     cluster_recovery_failed()));
 					}
 				}
 			}

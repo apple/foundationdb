@@ -1827,10 +1827,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		    .detail("RecoveredAt", logData->recoveredAt);
 
 		if (!logData->clusterRecoveryVersion.get().present()) {
-			wait(logData->clusterRecoveryVersion.onChange());
+			wait(timeoutError(logData->clusterRecoveryVersion.onChange(), 100.0));
 		}
+		// Obtain the first unreadable version number of the recovered log.
 		clusterRecoveryVersion = logData->clusterRecoveryVersion.get().get() + 1;
-		TraceEvent("TLogPeekMessagesClusterRecoveryVersion", self->dbgid)
+		DebugLogTraceEvent("TLogPeekMessagesClusterRecoveryVersion", self->dbgid)
 		    .detail("LogId", logData->logId)
 		    .detail("LogEpoch", logData->epoch())
 		    .detail("CRV", clusterRecoveryVersion.get());
