@@ -839,7 +839,8 @@ public:
 			// If there are too few machines to even build teams or there are too few represented datacenters, can't
 			// build any team.
 			self->lastBuildTeamsFailed = true;
-			TraceEvent(SevWarnAlways, "BuildTeamsNotEnoughUniqueMachines", self->distributorId)
+			TraceEvent(SevWarnAlways, "BuildTeamsLastBuildTeamsFailed", self->distributorId)
+			    .detail("Reason", "Do not have enough unique machines")
 			    .detail("Primary", self->primary)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("Replication", self->configuration.storageTeamSize);
@@ -5074,9 +5075,9 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// When too many teams exist in simulation, traceAllInfo will buffer too many trace logs before
 			// trace has a chance to flush its buffer, which causes assertion failure.
 			traceAllInfo(!g_network->isSimulated());
-			TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
+			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
 			    .detail("Primary", primary)
-			    .detail("Reason", "Unable to make desired machine Teams")
+			    .detail("Reason", "Unable to make desired machineTeams")
 			    .detail("Hint", "Check TraceAllInfo event");
 			lastBuildTeamsFailed = true;
 			break;
@@ -5486,6 +5487,11 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		if (bestServerTeam.size() != configuration.storageTeamSize) {
 			// Not find any team and will unlikely find a team
 			lastBuildTeamsFailed = true;
+			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
+			    .detail("Reason", "Unable to find any valid serverTeam")
+			    .detail("Primary", primary)
+			    .detail("BestServerTeam", describe(bestServerTeam))
+			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize);
 			break;
 		}
 
