@@ -140,6 +140,45 @@ int getWriteStallState(const rocksdb::WriteStallCondition& condition) {
 	return 3;
 }
 
+// RocksDB's reason string contains spaces and will break trace events.
+// Reference https://sourcegraph.com/github.com/facebook/rocksdb/-/blob/db/flush_job.cc?L52
+const char* getFlushReasonString(FlushReason flush_reason) {
+	switch (flush_reason) {
+	case FlushReason::kOthers:
+		return "ReasonOthers";
+	case FlushReason::kGetLiveFiles:
+		return "ReasonGetLiveFiles";
+	case FlushReason::kShutDown:
+		return "ReasonShutdown";
+	case FlushReason::kExternalFileIngestion:
+		return "ReasonExternalFileIngestion";
+	case FlushReason::kManualCompaction:
+		return "ReasonManualCompaction";
+	case FlushReason::kWriteBufferManager:
+		return "ReasonWriteBufferManager";
+	case FlushReason::kWriteBufferFull:
+		return "ReasonWriteBufferFull";
+	case FlushReason::kTest:
+		return "ReasonTest";
+	case FlushReason::kDeleteFiles:
+		return "ReasonDeleteFiles";
+	case FlushReason::kAutoCompaction:
+		return "ReasonAutoCompaction";
+	case FlushReason::kManualFlush:
+		return "ReasonManualFlush";
+	case FlushReason::kErrorRecovery:
+		return "ReasonErrorRecovery";
+	case FlushReason::kErrorRecoveryRetryFlush:
+		return "ReasonErrorRecoveryRetryFlush";
+	case FlushReason::kWalFull:
+		return "ReasonWALFull";
+	case FlushReason::kCatchUpAfterErrorRecovery:
+		return "ReasonCatchUpAfterErrorRecovery";
+	default:
+		return "ReasonInvalid";
+	}
+}
+
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
 	RocksDBEventListener(UID id)
@@ -193,7 +232,7 @@ public:
 			e.detail("DurationSeconds", now() - lastResetTime);
 			e.detail("FlushCountTotal", flushCount);
 			for (int i = 0; i < ROCKSDB_NUM_FLUSH_REASONS; ++i) {
-				e.detail(rocksdb::GetFlushReasonString((rocksdb::FlushReason)i), flushReasons[i]);
+				e.detail(getFlushReasonString((rocksdb::FlushReason)i), flushReasons[i]);
 			}
 		}
 		if (compactionCount > 0) {
