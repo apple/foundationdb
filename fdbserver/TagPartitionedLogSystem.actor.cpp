@@ -1161,9 +1161,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 	Version end = getEnd();
 	if (!tLogs.size()) {
 		TraceEvent("TLogPeekTxsNoLogs", dbgid).log();
-		// TODO:
 		return makeReference<ILogSystem::ServerPeekCursor>(
-		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), txsTag, begin, end, false, false);
+		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, end, false, false);
 	}
 	TraceEvent("TLogPeekTxs", dbgid)
 	    .detail("Begin", begin)
