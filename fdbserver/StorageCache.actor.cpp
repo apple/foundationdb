@@ -1402,6 +1402,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 					// TODO: NEELAM: what's this for?
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
+						ASSERT(false);
 						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
 					}
 

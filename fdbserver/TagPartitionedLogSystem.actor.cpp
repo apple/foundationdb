@@ -682,6 +682,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 	std::vector<Reference<LogSet>> localSets;
 	Version lastBegin = 0;
 	bool foundSpecial = false;
+	ASSERT(tag != txsTag);
 	for (auto& log : tLogs) {
 		if (log->locality == tagLocalitySpecial) {
 			foundSpecial = true;
@@ -966,6 +967,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 		peekLocality = tag.locality;
 	}
 	ASSERT(peekLocality >= 0 || tag.locality == tagLocalitySpecial);
+	ASSERT(tag != txsTag);
 
 	int bestSet = -1;
 	bool foundSpecial = false;
@@ -1162,6 +1164,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
 	Version end = getEnd();
 	if (!tLogs.size()) {
 		TraceEvent("TLogPeekTxsNoLogs", dbgid).log();
+		// TODO:
 		return makeReference<ILogSystem::ServerPeekCursor>(
 		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), txsTag, begin, end, false, false);
 	}
@@ -1494,6 +1497,7 @@ void TagPartitionedLogSystem::popLogRouter(Version upTo,
 
 void TagPartitionedLogSystem::popTxs(Version upTo, int8_t popLocality) {
 	if (getTLogVersion() < TLogVersion::V4) {
+		ASSERT(false);
 		pop(upTo, txsTag, 0, popLocality);
 	} else {
 		for (int i = 0; i < txsTags; i++) {
@@ -1593,8 +1597,7 @@ ACTOR Future<Version> TagPartitionedLogSystem::getPoppedTxs(TagPartitionedLogSys
 		poppedFutures.push_back(std::vector<Future<Version>>());
 		for (auto& it : self->tLogs) {
 			for (auto& log : it->logServers) {
-				poppedFutures.back().push_back(TagPartitionedLogSystem::getPoppedFromTLog(
-				    log, self->tLogs[0]->tLogVersion < TLogVersion::V4 ? txsTag : Tag(tagLocalityTxs, 0)));
+				poppedFutures.back().push_back(TagPartitionedLogSystem::getPoppedFromTLog(log, Tag(tagLocalityTxs, 0)));
 			}
 		}
 		poppedReady.push_back(waitForAny(poppedFutures.back()));
@@ -1605,8 +1608,8 @@ ACTOR Future<Version> TagPartitionedLogSystem::getPoppedTxs(TagPartitionedLogSys
 			poppedFutures.push_back(std::vector<Future<Version>>());
 			for (auto& it : old.tLogs) {
 				for (auto& log : it->logServers) {
-					poppedFutures.back().push_back(TagPartitionedLogSystem::getPoppedFromTLog(
-					    log, old.tLogs[0]->tLogVersion < TLogVersion::V4 ? txsTag : Tag(tagLocalityTxs, 0)));
+					poppedFutures.back().push_back(
+					    TagPartitionedLogSystem::getPoppedFromTLog(log, Tag(tagLocalityTxs, 0)));
 				}
 			}
 			poppedReady.push_back(waitForAny(poppedFutures.back()));

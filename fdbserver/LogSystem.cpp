@@ -179,6 +179,9 @@ void LogSet::checkSatelliteTagLocations() {
 }
 
 int LogSet::bestLocationFor(Tag tag) {
+	if (tag == txsTag) {
+		ASSERT(false);
+	}
 	if (locality == tagLocalitySatellite) {
 		return satelliteTagLocations[tag == txsTag ? 0 : tag.id + 1][0];
 	}
@@ -219,6 +222,7 @@ bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
 void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, int locationOffset, bool allLocations) {
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
+			ASSERT(t != txsTag);
 			if (t == txsTag || t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
 				for (int loc : satelliteTagLocations[t == txsTag ? 0 : t.id + 1]) {
 					locations.push_back(locationOffset + loc);
@@ -285,6 +289,7 @@ void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
 		next_message_tags.push_back(logSystem->getRandomTxsTag());
 	} else {
+		ASSERT(false);
 		next_message_tags.push_back(txsTag);
 	}
 }

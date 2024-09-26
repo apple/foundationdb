@@ -8749,6 +8749,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
+						ASSERT(false);
 						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
 						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
@@ -8808,6 +8809,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// FIXME: remove when we no longer support upgrades from 5.X
 		if (!data->cx->enableLocalityLoadBalance) {
+			ASSERT(false);
+
 			data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
 			TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 		}
