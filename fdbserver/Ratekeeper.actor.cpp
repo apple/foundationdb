@@ -797,8 +797,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
 		                                (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * ss.getSmoothTotalSpace()));
 
-		worstFreeSpaceStorageServer =
-		    std::min(worstFreeSpaceStorageServer, (int64_t)ss.getSmoothFreeSpace() - minFreeSpace);
+		worstFreeSpaceStorageServer = std::min(worstFreeSpaceStorageServer,
+		                                       std::max((int64_t)ss.getSmoothFreeSpace() - minFreeSpace, (int64_t)0));
 
 		int64_t springBytes = std::max<int64_t>(
 		    1, std::min<int64_t>(limits->storageSpringBytes, (ss.getSmoothFreeSpace() - minFreeSpace) * 0.2));
@@ -1180,7 +1180,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
 		                                (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.getSmoothTotalSpace()));
 
-		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.getSmoothFreeSpace() - minFreeSpace);
+		worstFreeSpaceTLog =
+		    std::min(worstFreeSpaceTLog, std::max((int64_t)tl.getSmoothFreeSpace() - minFreeSpace, (int64_t)0));
 
 		int64_t springBytes = std::max<int64_t>(
 		    1, std::min<int64_t>(limits->logSpringBytes, (tl.getSmoothFreeSpace() - minFreeSpace) * 0.2));

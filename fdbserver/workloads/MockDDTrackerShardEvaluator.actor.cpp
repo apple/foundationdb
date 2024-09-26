@@ -30,7 +30,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
-	PromiseStream<ServerTeamInfo> triggerStorageQueueRebalance;
+	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 
 	KeyRangeMap<ShardTrackedData> shards;
 
@@ -166,7 +166,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
-		                                       .ddTenantCache = {} });
+		                                       .ddTenantCache = {},
+		                                       .usableRegions = -1 });
 		actors.add(DataDistributionTracker::run(shardTracker,
 		                                        initData,
 		                                        getShardMetrics.getFuture(),

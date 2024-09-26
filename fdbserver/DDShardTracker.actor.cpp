@@ -127,6 +127,12 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 		size = std::max(size, static_cast<int64_t>(SERVER_KNOBS->MAX_LARGE_SHARD_BYTES));
 	}
 
+	TraceEvent("MaxShardSize")
+	    .suppressFor(60.0)
+	    .detail("Bytes", size)
+	    .detail("EstimatedDbSize", dbSizeEstimate)
+	    .detail("SqrtBytes", SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES)
+	    .detail("AllowLargeShard", SERVER_KNOBS->ALLOW_LARGE_SHARD);
 	return size;
 }
 
@@ -202,6 +208,29 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 		bounds.permittedError.opsReadPerKSecond = currentReadOps * 0.25;
 	}
 	return { bounds, readHotShard };
+}
+
+ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyRange keys) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0);
+	wait(yieldedFuture(self()->readyToStart.getFuture()));
+	double expectedCompletionSeconds = self()->shards->size() * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
+	double delayTime = deterministicRandom()->random01() * expectedCompletionSeconds;
+	wait(delayJittered(delayTime));
+	auto [newTeam, previousTeam] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
+	if (newTeam.size() < self()->usableRegions) {
+		TraceEvent(SevWarn, "ShardUsableRegionMismatch", self()->distributorId)
+		    .suppressFor(5.0)
+		    .detail("NewTeamSize", newTeam.size())
+		    .detail("PreviousTeamSize", previousTeam.size())
+		    .detail("NewServers", describe(newTeam))
+		    .detail("PreviousServers", describe(previousTeam))
+		    .detail("UsableRegion", self()->usableRegions)
+		    .detail("Shard", keys);
+		RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
+		self()->output.send(rs);
+	}
+	return Void();
 }
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
@@ -930,9 +959,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	const UID actionId = deterministicRandom()->randomUniqueID();
 	const Severity stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
 	int64_t maxShardSize = self->maxShardSize->get().get();
-	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
-		maxShardSize = SERVER_KNOBS->MAX_LARGE_SHARD_BYTES;
-	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
 	auto nextIter = self->shards->rangeContaining(keys.begin);
@@ -1122,10 +1148,6 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
 
-	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
-		shardBounds.max.bytes = SERVER_KNOBS->MAX_LARGE_SHARD_BYTES;
-	}
-
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
@@ -1253,6 +1275,10 @@ void restartShardTrackers(DataDistributionTracker* self,
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		data.trackBytes =
 		    trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, whenDDInit);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE > 0 &&
+		    self->usableRegions != -1) {
+			data.trackUsableRegion = shardUsableRegions(DataDistributionTracker::SafeAccessor(self), ranges[i]);
+		}
 		self->shards->insert(ranges[i], data);
 	}
 }
@@ -1467,13 +1493,51 @@ ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetri
 	return Void();
 }
 
+void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorageQueueRequest req) {
+	TraceEvent e("TriggerDataMoveStorageQueueRebalance", self->distributorId);
+	e.detail("Server", req.serverId);
+	e.detail("Teams", req.teams.size());
+	int64_t maxShardWriteTraffic = 0;
+	KeyRange shardToMove;
+	ShardsAffectedByTeamFailure::Team selectedTeam;
+	for (const auto& team : req.teams) {
+		for (auto const& shard : self->shardsAffectedByTeamFailure->getShardsFor(team)) {
+			for (auto it : self->shards->intersectingRanges(shard)) {
+				if (it->value().stats->get().present()) {
+					int64_t shardWriteTraffic = it->value().stats->get().get().metrics.bytesWrittenPerKSecond;
+					if (shardWriteTraffic > maxShardWriteTraffic &&
+					    (SERVER_KNOBS->DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD ||
+					     shardWriteTraffic > SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN)) {
+						shardToMove = it->range();
+						maxShardWriteTraffic = shardWriteTraffic;
+					}
+				}
+			}
+		}
+	}
+	if (!shardToMove.empty()) {
+		e.detail("TeamSelected", selectedTeam.servers);
+		e.detail("ShardSelected", shardToMove);
+		e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
+		RelocateShard rs(shardToMove, DataMovementReason::REBALANCE_STORAGE_QUEUE, RelocateReason::REBALANCE_WRITE);
+		self->output.send(rs);
+		TraceEvent("SendRelocateToDDQueue", self->distributorId)
+		    .detail("ServerPrimary", req.primary)
+		    .detail("ServerTeam", selectedTeam.servers)
+		    .detail("KeyBegin", rs.keys.begin)
+		    .detail("KeyEnd", rs.keys.end)
+		    .detail("Priority", rs.priority);
+	}
+	return;
+}
+
 DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitParams const& params)
   : IDDShardTracker(), db(params.db), distributorId(params.distributorId), shards(params.shards), actors(false),
     systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
     anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
-    ddTenantCache(params.ddTenantCache) {}
+    ddTenantCache(params.ddTenantCache), usableRegions(params.usableRegions) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
@@ -1521,45 +1585,8 @@ struct DataDistributionTrackerImpl {
 				when(GetMetricsListRequest req = waitNext(self->getShardMetricsList)) {
 					self->actors.add(fetchShardMetricsList(self, req));
 				}
-				when(ServerTeamInfo req = waitNext(self->triggerStorageQueueRebalance)) {
-					TraceEvent e("TriggerDataMoveStorageQueueRebalance", self->distributorId);
-					e.detail("Server", req.serverId);
-					e.detail("Teams", req.teams.size());
-					int64_t maxShardWriteTraffic = 0;
-					KeyRange shardToMove;
-					ShardsAffectedByTeamFailure::Team selectedTeam;
-					for (const auto& team : req.teams) {
-						for (auto const& shard : self->shardsAffectedByTeamFailure->getShardsFor(team)) {
-							for (auto it : self->shards->intersectingRanges(shard)) {
-								if (it->value().stats->get().present()) {
-									int64_t shardWriteTraffic =
-									    it->value().stats->get().get().metrics.bytesWrittenPerKSecond;
-									if (shardWriteTraffic > maxShardWriteTraffic &&
-									    (SERVER_KNOBS->DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD ||
-									     shardWriteTraffic >
-									         SERVER_KNOBS->REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN)) {
-										shardToMove = it->range();
-										maxShardWriteTraffic = shardWriteTraffic;
-									}
-								}
-							}
-						}
-					}
-					if (!shardToMove.empty()) {
-						e.detail("TeamSelected", selectedTeam.servers);
-						e.detail("ShardSelected", shardToMove);
-						e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
-						RelocateShard rs(shardToMove,
-						                 SERVER_KNOBS->PRIORITY_REBALANCE_STORAGE_QUEUE,
-						                 RelocateReason::REBALANCE_WRITE);
-						self->output.send(rs);
-						TraceEvent("SendRelocateToDDQueue", self->distributorId)
-						    .detail("ServerPrimary", req.primary)
-						    .detail("ServerTeam", selectedTeam.servers)
-						    .detail("KeyBegin", rs.keys.begin)
-						    .detail("KeyEnd", rs.keys.end)
-						    .detail("Priority", rs.priority);
-					}
+				when(RebalanceStorageQueueRequest req = waitNext(self->triggerStorageQueueRebalance)) {
+					triggerStorageQueueRebalance(self, req);
 				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
@@ -1576,13 +1603,14 @@ struct DataDistributionTrackerImpl {
 	}
 };
 
-Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> self,
-                                          const Reference<InitialDataDistribution>& initData,
-                                          const FutureStream<GetMetricsRequest>& getShardMetrics,
-                                          const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
-                                          const FutureStream<GetMetricsListRequest>& getShardMetricsList,
-                                          const FutureStream<Promise<int64_t>>& getAverageShardBytes,
-                                          const FutureStream<ServerTeamInfo>& triggerStorageQueueRebalance) {
+Future<Void> DataDistributionTracker::run(
+    Reference<DataDistributionTracker> self,
+    const Reference<InitialDataDistribution>& initData,
+    const FutureStream<GetMetricsRequest>& getShardMetrics,
+    const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
+    const FutureStream<GetMetricsListRequest>& getShardMetricsList,
+    const FutureStream<Promise<int64_t>>& getAverageShardBytes,
+    const FutureStream<RebalanceStorageQueueRequest>& triggerStorageQueueRebalance) {
 	self->getShardMetrics = getShardMetrics;
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;

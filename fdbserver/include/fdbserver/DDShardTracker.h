@@ -30,7 +30,7 @@ public:
 	FutureStream<GetTopKMetricsRequest> getTopKMetrics;
 	FutureStream<GetMetricsListRequest> getShardMetricsList;
 	FutureStream<Promise<int64_t>> averageShardBytes;
-	FutureStream<ServerTeamInfo> triggerStorageQueueRebalance;
+	FutureStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 
 	virtual double getAverageShardBytes() = 0;
 	virtual ~IDDShardTracker() = default;
@@ -47,6 +47,7 @@ struct DataDistributionTrackerInitParams {
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
 	Optional<Reference<TenantCache>> ddTenantCache;
+	int32_t usableRegions = -1;
 };
 
 // track the status of shards
@@ -65,6 +66,7 @@ public:
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
+	int32_t usableRegions = -1;
 
 	// CapacityTracker
 	PromiseStream<RelocateShard> output;
@@ -123,7 +125,7 @@ public:
 	                        FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
 	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
 	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes,
-	                        FutureStream<ServerTeamInfo> const& triggerStorageQueueRebalance);
+	                        FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };

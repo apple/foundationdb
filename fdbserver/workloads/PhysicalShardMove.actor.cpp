@@ -134,8 +134,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// Move range [TestKeyD, TestKeyF) to sh0;
 		includes.insert(teamA.begin(), teamA.end());
 		currentRange = KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr);
-		state std::vector<UID> teamE = wait(self->moveShard(
-		    self, cx, UID(sh0, deterministicRandom()->randomUInt64()), currentRange, teamSize, includes, excludes));
+		state std::vector<UID> teamE =
+		    wait(self->moveShard(self,
+		                         cx,
+		                         newDataMoveId(sh0, AssignEmptyRange::False, DataMoveType::PHYSICAL),
+		                         currentRange,
+		                         teamSize,
+		                         includes,
+		                         excludes));
 		TraceEvent(SevDebug, "TestMovedRange3").detail("Range", currentRange).detail("Team", describe(teamE));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamE.begin()));
 
@@ -160,8 +166,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		currentRange = KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr);
 		includes.insert(teamA.begin(), teamA.end());
-		state std::vector<UID> teamB = wait(self->moveShard(
-		    self, cx, UID(sh1, deterministicRandom()->randomUInt64()), currentRange, teamSize, includes, excludes));
+		state std::vector<UID> teamB =
+		    wait(self->moveShard(self,
+		                         cx,
+		                         newDataMoveId(sh1, AssignEmptyRange::False, DataMoveType::PHYSICAL),
+		                         currentRange,
+		                         teamSize,
+		                         includes,
+		                         excludes));
 		TraceEvent(SevDebug, "TestMovedRange4").detail("Range", currentRange).detail("Team", describe(teamB));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamB.begin()));
 

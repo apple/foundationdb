@@ -933,7 +933,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			ASSERT(self->configuration.storageTeamSize > 0);
 
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
-			state PromiseStream<ServerTeamInfo> triggerStorageQueueRebalance;
+			state PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
@@ -983,7 +983,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
 			                                       .shards = &shards,
 			                                       .trackerCancelled = &trackerCancelled,
-			                                       .ddTenantCache = self->ddTenantCache });
+			                                       .ddTenantCache = self->ddTenantCache,
+			                                       .usableRegions = self->configuration.usableRegions });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(shardTracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
@@ -1182,7 +1183,8 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 		TraceEvent("SnapDataDistributor_ReqError")
 		    .errorUnsuppressed(reply.getError())
 		    .detail("ConvertedErrorType", e.what())
-		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+		    .detail("Peer", stream.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress());
 		throw e;
 	}
 	return Void();
@@ -1197,6 +1199,7 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 			TraceEvent("SnapDataDistributor_ReqError")
 			    .errorUnsuppressed(reply.getError())
 			    .detail("Peer", stream.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress())
 			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
 			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
@@ -1447,7 +1450,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		// Consequently, we ignore it in simulation tests
 		auto const coordFaultTolerance = std::min<int>(
 		    std::max<int>(0, (coordSnapReqs.size() - 1) / 2),
-		    g_simulator->isSimulated() ? coordSnapReqs.size() : SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
+		    g_network->isSimulated() ? coordSnapReqs.size() : SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
 		wait(waitForMost(coordSnapReqs, coordFaultTolerance, snap_coord_failed()));
 
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")

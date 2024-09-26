@@ -147,6 +147,7 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+	options.memtable_max_range_deletions = SERVER_KNOBS->ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	if (SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE > 0) {
 		options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
 	}
@@ -203,7 +204,14 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		bbOpts.block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+		bbOpts.block_cache =
+		    rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE,
+		                         -1, /* num_shard_bits, default value:-1*/
+		                         false, /* strict_capacity_limit, default value:false */
+		                         SERVER_KNOBS->ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO /* high_pri_pool_ratio */);
+		bbOpts.cache_index_and_filter_blocks = SERVER_KNOBS->ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.pin_l0_filter_and_index_blocks_in_cache = SERVER_KNOBS->ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.cache_index_and_filter_blocks_with_high_priority = SERVER_KNOBS->ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
@@ -223,7 +231,10 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 
 rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	rocksdb::DBOptions options;
+	options.use_direct_reads = SERVER_KNOBS->ROCKSDB_USE_DIRECT_READS;
+	options.use_direct_io_for_flush_and_compaction = SERVER_KNOBS->ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
 	options.avoid_unnecessary_blocking_io = true;
+	options.max_open_files = SERVER_KNOBS->ROCKSDB_MAX_OPEN_FILES;
 	options.create_if_missing = true;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
@@ -249,9 +260,6 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	//    checks will be performed with ttl being first.
 	options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSDB_WAL_TTL_SECONDS;
 	options.WAL_size_limit_MB = SERVER_KNOBS->ROCKSDB_WAL_SIZE_LIMIT_MB;
-	if (g_network->isSimulated()) { // Used to fix external timeout in simulation
-		options.max_manifest_file_size = SERVER_KNOBS->ROCKSDB_MAX_MANIFEST_FILE_SIZE;
-	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::StatsLevel(SERVER_KNOBS->ROCKSDB_STATS_LEVEL));
@@ -545,6 +553,15 @@ public:
 
 	// Called on every read operation.
 	ReadIterator getIterator(KeyRange keyRange) {
+		// Reusing iterator in simulation can cause slow down
+		// We avoid to always reuse iterator in simulation to speed up the simulation
+		if (g_network->isSimulated() &&
+		    deterministicRandom()->random01() > SERVER_KNOBS->ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM) {
+			index++;
+			ReadIterator iter(cf, index, db, sharedState, keyRange);
+			return iter;
+		}
+
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
@@ -961,6 +978,14 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "BytesWritten", rocksdb::BYTES_WRITTEN, 0 },
 		{ "BlockCacheMisses", rocksdb::BLOCK_CACHE_MISS, 0 },
 		{ "BlockCacheHits", rocksdb::BLOCK_CACHE_HIT, 0 },
+		{ "BlockCacheIndexMisses", rocksdb::BLOCK_CACHE_INDEX_MISS, 0 },
+		{ "BlockCacheIndexHits", rocksdb::BLOCK_CACHE_INDEX_HIT, 0 },
+		{ "BlockCacheFilterMisses", rocksdb::BLOCK_CACHE_FILTER_MISS, 0 },
+		{ "BlockCacheFilterHits", rocksdb::BLOCK_CACHE_FILTER_HIT, 0 },
+		{ "BlockCacheDataMisses", rocksdb::BLOCK_CACHE_DATA_MISS, 0 },
+		{ "BlockCacheDataHits", rocksdb::BLOCK_CACHE_DATA_HIT, 0 },
+		{ "BlockCacheBytesRead", rocksdb::BLOCK_CACHE_BYTES_READ, 0 },
+		{ "BlockCacheBytesWrite", rocksdb::BLOCK_CACHE_BYTES_WRITE, 0 },
 		{ "BloomFilterUseful", rocksdb::BLOOM_FILTER_USEFUL, 0 },
 		{ "BloomFilterFullPositive", rocksdb::BLOOM_FILTER_FULL_POSITIVE, 0 },
 		{ "BloomFilterTruePositive", rocksdb::BLOOM_FILTER_FULL_TRUE_POSITIVE, 0 },
@@ -1059,12 +1084,15 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "NumTimesReadIteratorsReused", 0 },
 	};
 
+	state std::string rocksdbMetricsTrackingKey = id.toString() + "/RocksDBMetrics";
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
 		if (sharedState->isClosing()) {
 			break;
 		}
 		TraceEvent e("RocksDBMetrics", id);
+		e.trackLatest(rocksdbMetricsTrackingKey);
+
 		uint64_t stat;
 		for (auto& [name, ticker, cum] : tickerStats) {
 			stat = statistics->getTickerCount(ticker);

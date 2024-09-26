@@ -4,6 +4,12 @@ This package provides a launcher program for running FoundationDB in Kubernetes.
 
 ## Testing
 
+### Unit tests
+
+You can run the unit tests by running `go test ./...` from this directory.
+
+### Manual testing
+
 To test this, run the following commands from the root of the FoundationDB
 repository:
 
@@ -54,7 +60,7 @@ docker build -t foundationdb/foundationdb-kubernetes:7.1.11-local --target fdb-k
 ```
 
 Depending on the local Kubernetes setup you use you might have to push the newly build image to a local registry.
-Now you should change to the directoy that contains the [fdb-kubernetes-operator](https://github.com/FoundationDB/fdb-kubernetes-operator) repository.
+Now you should change to the directory that contains the [fdb-kubernetes-operator](https://github.com/FoundationDB/fdb-kubernetes-operator) repository.
 In the top directory run:
 
 ```bash

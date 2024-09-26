@@ -935,7 +935,8 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<IClusterConnectionRecord> ccr,
                                     Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
-                                    LocalityData locality) {
+                                    LocalityData locality,
+                                    Optional<std::string> expectedWorkLoad) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
@@ -943,7 +944,8 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	// At any time, we only allow at most 1 consistency checker workload on a server
 	state std::pair<int64_t, Future<Void>> consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>());
 
-	TraceEvent("StartingTesterServerCore", interf.id()).log();
+	TraceEvent("StartingTesterServerCore", interf.id())
+	    .detail("ExpectedWorkload", expectedWorkLoad.present() ? expectedWorkLoad.get() : "[Unset]");
 	loop choose {
 		when(wait(workerFatalError)) {}
 		when(wait(consistencyCheckerUrgentTester.second.isValid() ? consistencyCheckerUrgentTester.second : Never())) {
@@ -953,7 +955,14 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 			consistencyCheckerUrgentTester = std::make_pair(0, Future<Void>()); // reset
 		}
 		when(WorkloadRequest work = waitNext(interf.recruitments.getFuture())) {
-			if (work.title == "ConsistencyCheckUrgent") {
+			if (expectedWorkLoad.present() && expectedWorkLoad.get() != work.title) {
+				TraceEvent(SevError, "StartingTesterServerCoreUnexpectedWorkload", interf.id())
+				    .detail("ClientId", work.clientId)
+				    .detail("ClientCount", work.clientCount)
+				    .detail("ExpectedWorkLoad", expectedWorkLoad.get())
+				    .detail("WorkLoad", work.title);
+				// Drop the workload
+			} else if (work.title == "ConsistencyCheckUrgent") {
 				// The workload is a consistency checker urgent workload
 				if (work.sharedRandomNumber == consistencyCheckerUrgentTester.first) {
 					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterDuplicatedRequest", interf.id())
@@ -1567,7 +1576,7 @@ ACTOR Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optiona
 			}
 			when(wait(cc->onChange())) {}
 			when(wait(testerTimeout)) {
-				TraceEvent(SevError, "TesterRecruitmentTimeout").log();
+				TraceEvent(SevWarnAlways, "TesterRecruitmentTimeout");
 				throw timed_out();
 			}
 		}
@@ -1765,6 +1774,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 	state std::vector<TesterInterface> ts; // used to store testers interface
 	state std::vector<KeyRange> rangesToCheck; // get from globalProgressMap
 	state std::vector<KeyRange> shardsToCheck; // get from keyServer metadata
+	state Optional<double> whenFailedToGetTesterStart;
 
 	// Initialize globalProgressMap
 	Optional<std::vector<KeyRange>> rangesToCheck_ = loadRangesToCheckFromKnob();
@@ -1781,7 +1791,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		globalProgressMap.insert(allKeys, false);
 	}
 
-	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(0, 10000000);
+	state int64_t consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	state int retryTimes = 0;
 	state int round = 0;
 
@@ -1811,14 +1821,26 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			// Step 2: Get testers
 			ts.clear();
 			if (!testers.present()) { // In real clusters
-				wait(store(ts, getTesters(cc, minTestersExpected)));
+				try {
+					wait(store(ts, getTesters(cc, minTestersExpected)));
+					whenFailedToGetTesterStart.reset();
+				} catch (Error& e) {
+					if (e.code() == error_code_timed_out) {
+						if (!whenFailedToGetTesterStart.present()) {
+							whenFailedToGetTesterStart = now();
+						} else if (now() - whenFailedToGetTesterStart.get() > 3600 * 24) { // 1 day
+							TraceEvent(SevError, "TesterRecruitmentTimeout");
+						}
+					}
+					throw e;
+				}
 				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					throw operation_failed(); // Introduce random failure
 				}
 			} else { // In simulation
 				ts = testers.get();
 			}
-			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GoTTesters")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GotTesters")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RetryTimes", retryTimes)
@@ -1877,13 +1899,28 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 		wait(delay(10.0)); // Backoff 10 seconds for the next round
 
 		// Decide and enforce the consistencyCheckerId for the next round
-		consistencyCheckerId = deterministicRandom()->randomInt64(0, 10000000);
+		consistencyCheckerId = deterministicRandom()->randomInt64(1, 10000000);
 	}
 }
 
+ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc,
+                                                     Database cx,
+                                                     Optional<std::vector<TesterInterface>> testers,
+                                                     int minTestersExpected,
+                                                     bool repeatRun) {
+	loop {
+		wait(runConsistencyCheckerUrgentCore(cc, cx, testers, minTestersExpected));
+		if (!repeatRun) {
+			break;
+		}
+		wait(delay(CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME));
+	}
+	return Void();
+}
+
 Future<Void> checkConsistencyUrgentSim(Database cx, std::vector<TesterInterface> testers) {
-	return runConsistencyCheckerUrgentCore(
-	    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(), cx, testers, 1);
+	return runConsistencyCheckerUrgentHolder(
+	    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(), cx, testers, 1, /*repeatRun=*/false);
 }
 
 ACTOR Future<bool> runTest(Database cx,
@@ -2956,9 +2993,10 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 		state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
 		cx = openDBOnServer(dbInfo);
-		tests = reportErrors(
-		    runConsistencyCheckerUrgentCore(cc, cx, Optional<std::vector<TesterInterface>>(), minTestersExpected),
-		    "runConsistencyCheckerUrgentCore");
+		tests =
+		    reportErrors(runConsistencyCheckerUrgentHolder(
+		                     cc, cx, Optional<std::vector<TesterInterface>>(), minTestersExpected, /*repeatRun=*/true),
+		                 "runConsistencyCheckerUrgentHolder");
 	} else if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);

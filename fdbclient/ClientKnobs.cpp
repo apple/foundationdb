@@ -267,6 +267,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
+	init( CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME,         600 );
 	init( CONSISTENCY_CHECK_URGENT_BATCH_SHARD_COUNT,       10 ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_URGENT_BATCH_SHARD_COUNT = 2;
 	init( CONSISTENCY_CHECK_URGENT_RETRY_DEPTH_MAX,         10 ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_URGENT_RETRY_DEPTH_MAX = 1;
 	init( CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_0,           "" ); if( randomize && BUGGIFY ) CONSISTENCY_CHECK_URGENT_RANGE_BEGIN_0 = "";
@@ -335,6 +336,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );
 
 	init( ENABLE_MUTATION_CHECKSUM,                 false ); // if ( randomize && BUGGIFY )  ENABLE_MUTATION_CHECKSUM = true; Enable this after deserialiser is ported to 7.3.
+	init( ENABLE_ACCUMULATIVE_CHECKSUM,             false ); // if ( randomize && BUGGIFY )  ENABLE_ACCUMULATIVE_CHECKSUM = true; Enable this after deserialiser is ported to 7.3.
 	// clang-format on
 }
 

@@ -555,9 +555,13 @@ struct StorageServerDisk {
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
 
-	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
+	Future<Void> addRange(KeyRangeRef range, std::string id) {
+		return storage->addRange(range, id, !SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE);
+	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	void markRangeAsActive(KeyRangeRef range) { storage->markRangeAsActive(range); }
 
 	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
 		return storage->replaceRange(range, data);
@@ -3188,7 +3192,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (data->version.get() < req.begin) {
@@ -3235,7 +3240,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FetchVersion", feedInfo->fetchVersion)
 		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
 		    .detail("DurableValidationVersion", durableValidationVersion)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -3663,7 +3669,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("PopVersion", reply.popVersion)
 		    .detail("Count", reply.mutations.size())
 		    .detail("GotAll", gotAll)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
@@ -3745,7 +3752,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
@@ -3787,7 +3795,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
 			    .detail("Version", req.begin - 1)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		loop {
@@ -3804,7 +3813,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
 					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 				removeUID = true;
 			}
@@ -3826,7 +3836,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
 					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
 				}
 			}
 			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
@@ -5963,7 +5974,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
 
-	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+	for (; (offset < sz) && (*remainingLimitBytes > 0); offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
@@ -8548,6 +8559,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
 		shard->fetchComplete.send(Void());
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE) {
+			data->storage.markRangeAsActive(keys);
+		}
 		const double duration = now() - startTime;
 		TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
 		    .detail("TotalBytes", totalBytes)
@@ -9996,9 +10010,28 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("PhysicalShard", currentShard->toStorageServerShard().toString());
 		}
 		if (!currentShard.isValid()) {
-			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
+			if (currentRange != keys) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "RangeDifferent")
+				    .detail("CurrentRange", currentRange)
+				    .detail("ModifiedRange", keys)
+				    .detail("Assigned", nowAssigned)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version);
+				throw internal_error();
+			}
 		} else if (currentShard->notAssigned()) {
-			ASSERT(nowAssigned); // Adding a new range to the server.
+			if (!nowAssigned) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "UnassignEmptyRange")
+				    .detail("Assigned", nowAssigned)
+				    .detail("ModifiedRange", keys)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version)
+				    .detail("ConflictingShard", currentShard->shardId)
+				    .detail("DesiredShardId", currentShard->desiredShardId);
+				throw internal_error();
+			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
@@ -10017,7 +10050,17 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
 		} else if (currentShard->adding) {
-			ASSERT(!nowAssigned);
+			if (nowAssigned) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "UpdateAddingShard")
+				    .detail("Assigned", nowAssigned)
+				    .detail("ModifiedRange", keys)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version)
+				    .detail("ConflictingShard", currentShard->shardId)
+				    .detail("DesiredShardId", currentShard->desiredShardId);
+				throw internal_error();
+			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
@@ -10027,7 +10070,17 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
 		} else if (currentShard->moveInShard) {
-			ASSERT(!nowAssigned);
+			if (nowAssigned) {
+				TraceEvent(SevError, "PhysicalShardStateError")
+				    .detail("SubError", "UpdateMoveInShard")
+				    .detail("Assigned", nowAssigned)
+				    .detail("ModifiedRange", keys)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("Version", version)
+				    .detail("ConflictingShard", currentShard->shardId)
+				    .detail("DesiredShardId", currentShard->desiredShardId);
+				throw internal_error();
+			}
 			currentShard->moveInShard->cancel();
 			updatedMoveInShards.emplace(currentShard->moveInShard->id(), currentShard->moveInShard);
 			StorageServerShard newShard = currentShard->toStorageServerShard();
@@ -10066,6 +10119,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer);
 			newEmptyRanges.push_back(range);
 			updatedShards.emplace_back(range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite);
+			if (data->physicalShards.find(desiredId) == data->physicalShards.end()) {
+				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+			}
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(data->newestAvailableVersion[range.begin] ==
@@ -10129,15 +10185,14 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				} else {
 					ASSERT(shard->adding != nullptr || shard->moveInShard != nullptr);
 					if (shard->desiredShardId != desiredId) {
-						TraceEvent(SevError, "CSKConflictingMoveInShards", data->thisServerID)
+						TraceEvent(SevWarnAlways, "CSKConflictingMoveInShards", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
 						    .detailf("TargetShard", "%016llx", desiredId)
 						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
 						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
-						// TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
-						ASSERT(false);
+						throw data_move_conflict();
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
@@ -10721,6 +10776,8 @@ private:
 			    .detail("KeyCount", keyCount)
 			    .detail("ValSize", valSize)
 			    .detail("Seed", seed);
+		} else if (isAccumulativeChecksumMutation(m)) {
+			// skip
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}
@@ -11007,7 +11064,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					cloneReader >> msg;
 					ASSERT(data->encryptionMode.present());
 					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-					       isBackupLogMutation(msg));
+					       isBackupLogMutation(msg) || isAccumulativeChecksumMutation(msg));
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							msg.updateEncryptCipherDetails(cipherDetails);
@@ -11166,7 +11223,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 				ASSERT(data->encryptionMode.present());
 				ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-				       isBackupLogMutation(msg));
+				       isBackupLogMutation(msg) || isAccumulativeChecksumMutation(msg));
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
@@ -11894,7 +11951,23 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		recentCommitStats.back().whenCommit = now();
 		try {
-			wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
+			loop {
+				choose {
+					when(wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"))) {
+						break;
+					}
+					when(wait(delay(60.0))) {
+						TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
+						    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)
+						    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft);
+
+						if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+						    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
+							data->storage.logRecentRocksDBBackgroundWorkStats(data->thisServerID, "CommitTooLong");
+						}
+					}
+				}
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_io_timeout) {
 				if (SERVER_KNOBS->LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT) {

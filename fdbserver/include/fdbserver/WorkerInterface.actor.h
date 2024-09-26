@@ -737,11 +737,19 @@ struct InitializeCommitProxyRequest {
 	bool firstProxy;
 	ReplyPromise<CommitProxyInterface> reply;
 	EncryptionAtRestMode encryptMode;
+	uint16_t commitProxyIndex;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply, encryptMode);
+		serializer(ar,
+		           master,
+		           masterLifetime,
+		           recoveryCount,
+		           recoveryTransactionVersion,
+		           firstProxy,
+		           reply,
+		           encryptMode,
+		           commitProxyIndex);
 	}
 };
 
@@ -1189,7 +1197,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        ConfigDBType configDBType);
+                        ConfigDBType configDBType,
+                        bool consistencyCheckUrgentMode);
 
 ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,

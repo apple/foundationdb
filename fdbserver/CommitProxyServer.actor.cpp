@@ -40,6 +40,7 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
@@ -550,6 +551,10 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			backupMutation.param2 = val.substr(
 			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
 			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+				backupMutation.setAccumulativeChecksumIndex(
+				    getCommitProxyAccumulativeChecksumIndex(self->commitProxyIndex));
+			}
 
 			// Write the last part of the mutation to the serialization, if the buffer is not defined
 			if (!partBuffer) {
@@ -1026,6 +1031,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		for (int r = 0; r < self->pProxyCommitData->resolvers.size(); r++) {
 			TraceEvent(SevWarnAlways, "ResetResolverNetwork", self->pProxyCommitData->dbgid)
 			    .detail("PeerAddr", self->pProxyCommitData->resolvers[r].address())
+			    .detail("PeerAddress", self->pProxyCommitData->resolvers[r].address())
 			    .detail("CurrentBatch", self->localBatchNumber)
 			    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
 			FlowTransport::transport().resetConnection(self->pProxyCommitData->resolvers[r].address());
@@ -1053,9 +1059,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTransactionBatchReply>& resolution) {
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			ASSERT_EQ(resolution[0].tpcvMap.size(), resolution[r].tpcvMap.size());
-		}
 		for (int s = 0; s < resolution[r].stateMutations.size(); s++) {
 			ASSERT(resolution[r].stateMutations[s].size() == resolution[0].stateMutations[s].size());
 		}
@@ -1901,6 +1904,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			}
 
 			state MutationRef m = (*pMutations)[mutationNum];
+			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+				m.setAccumulativeChecksumIndex(
+				    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
+			}
 			state Optional<MutationRef> encryptedMutation =
 			    encryptedMutations->size() > 0 ? (*encryptedMutations)[mutationNum] : Optional<MutationRef>();
 			state Arena arena;
@@ -2117,37 +2124,46 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeStart));
 	}
 
-	buildIdempotencyIdMutations(self->trs,
-	                            self->idempotencyKVBuilder,
-	                            self->commitVersion,
-	                            self->committed,
-	                            ConflictBatch::TransactionCommitted,
-	                            self->locked,
-	                            [&](const KeyValue& kv) {
-		                            MutationRef idempotencyIdSet;
-		                            idempotencyIdSet.type = MutationRef::Type::SetValue;
-		                            idempotencyIdSet.param1 = kv.key;
-		                            idempotencyIdSet.param2 = kv.value;
-		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
-		                            self->toCommit.addTags(tags);
-		                            if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-			                            CODE_PROBE(true, "encrypting idempotency mutation");
-			                            EncryptCipherDomainId domainId =
-			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
-			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
-			                            ASSERT(encryptedMutation.isEncrypted());
-			                            self->toCommit.writeTypedMessage(encryptedMutation);
-		                            } else {
-			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
-		                            }
-	                            });
+	buildIdempotencyIdMutations(
+	    self->trs,
+	    self->idempotencyKVBuilder,
+	    self->commitVersion,
+	    self->committed,
+	    ConflictBatch::TransactionCommitted,
+	    self->locked,
+	    [&](const KeyValue& kv) {
+		    MutationRef idempotencyIdSet;
+		    idempotencyIdSet.type = MutationRef::Type::SetValue;
+		    idempotencyIdSet.param1 = kv.key;
+		    idempotencyIdSet.param2 = kv.value;
+		    if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			    idempotencyIdSet.setAccumulativeChecksumIndex(
+			        getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
+		    }
+		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		    self->toCommit.addTags(tags);
+		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+			    CODE_PROBE(true, "encrypting idempotency mutation");
+			    EncryptCipherDomainId domainId =
+			        getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
+			    MutationRef encryptedMutation =
+			        idempotencyIdSet.encrypt(self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
+			    ASSERT(encryptedMutation.isEncrypted());
+			    self->toCommit.writeTypedMessage(encryptedMutation);
+		    } else {
+			    self->toCommit.writeTypedMessage(idempotencyIdSet);
+		    }
+	    });
 	state int i = 0;
 	for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
 		auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
 		self->toCommit.addTags(tags);
 		// We already have an arena with an appropriate lifetime handy
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
+		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
+			pProxyCommitData->idempotencyClears[i].setAccumulativeChecksumIndex(
+			    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));
+		}
 		WriteMutationRefVar var = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
 		ASSERT(std::holds_alternative<MutationRef>(var));
@@ -2212,6 +2228,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	bool firstMessage = true;
 	for (auto m : self->msg.messages) {
 		if (firstMessage) {
+			ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR ||
+			       pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size());
 			self->toCommit.addTxsTag();
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
@@ -2302,7 +2320,10 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	try {
 		choose {
 			when(Version ver = wait(self->loggingComplete)) {
-				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+					pProxyCommitData->minKnownCommittedVersion =
+					    std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+				}
 			}
 			when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1))) {}
 		}
@@ -2390,6 +2411,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		pProxyCommitData->locked = self->lockedAfter;
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			ASSERT(self->loggingComplete.isReady());
+			pProxyCommitData->minKnownCommittedVersion =
+			    std::max(pProxyCommitData->minKnownCommittedVersion, self->loggingComplete.get());
+		}
 	}
 
 	if (self->forceRecovery) {
@@ -3604,7 +3630,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          bool firstProxy,
                                          std::string whitelistBinPaths,
                                          EncryptionAtRestMode encryptMode,
-                                         bool provisional) {
+                                         bool provisional,
+                                         uint16_t commitProxyIndex) {
 	state ProxyCommitData commitData(proxy.id(),
 	                                 master,
 	                                 proxy.getConsistentReadVersion,
@@ -3613,7 +3640,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                 db,
 	                                 firstProxy,
 	                                 encryptMode,
-	                                 provisional);
+	                                 provisional,
+	                                 commitProxyIndex);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
 	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
@@ -3822,10 +3850,12 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                req.firstProxy,
 		                                                whitelistBinPaths,
 		                                                req.encryptMode,
-		                                                proxy.provisional);
+		                                                proxy.provisional,
+		                                                req.commitProxyIndex);
 		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
+		Severity sev = e.code() == error_code_failed_to_progress ? SevWarnAlways : SevInfo;
+		TraceEvent(sev, "CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&

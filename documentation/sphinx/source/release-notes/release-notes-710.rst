@@ -2,6 +2,44 @@
 Release Notes
 #############
 
+7.1.61
+======
+* Same as 7.1.60 release with AVX enabled.
+
+7.1.60
+======
+* Released with AVX disabled.
+* Fixed a DR corruption bug due to a race condition. `(PR #11245) <https://github.com/apple/foundationdb/pull/11245>`_
+* Added Go tenanting support for 7.1. `(PR #11278) <https://github.com/apple/foundationdb/pull/11278>`_
+* Increased visibility of gray failure actions. `(PR #11314) <https://github.com/apple/foundationdb/pull/11314>`_
+* Increase visibility of CommitProxyTerminated events for failed_to_progress errors. `(PR #11316) <https://github.com/apple/foundationdb/pull/11316>`_
+* Fixed an infinite retry of GRV request bug. `(PR #11352) <https://github.com/apple/foundationdb/pull/11352>`_
+* Improved distributed consistency checker to continuously run by default and visibility of recruitment errors. `(PR #11351) <https://github.com/apple/foundationdb/pull/11351>`_
+* Fixed an assertion failure of cluster controller when waiting for recovery. `(PR #11398) <https://github.com/apple/foundationdb/pull/11398>`_
+
+7.1.59
+======
+* Same as 7.1.59 release with AVX enabled.
+
+7.1.58
+======
+* Released with AVX disabled.
+* Fixed a bug in consistency checker urgent mode. `(PR #11230) <https://github.com/apple/foundationdb/pull/11230>`_
+
+7.1.57
+======
+* Same as 7.1.56 release with AVX enabled.
+
+7.1.56
+======
+* Released with AVX disabled.
+* Added a knob DD_REMOVE_MAINTENANCE_ON_FAILURE to remove the maintenance mode if a failure outside of the maintenance zone happens. `(PR #11207) <https://github.com/apple/foundationdb/pull/11207>`_
+* Fixed start failure of single-threaded consistency checker. `(PR #11205) <https://github.com/apple/foundationdb/pull/11205>`_
+* Fixed false alarms of Sev40 TestFailure in consistency checker urgent mode. `(PR #11203) <https://github.com/apple/foundationdb/pull/11203>`_
+* Added a knob ABORT_ON_FAILURE to generate core dumps for failures. `(PR #11191) <https://github.com/apple/foundationdb/pull/11191>`_
+* Upgraded to RocksDB 8.10.0. `(PR #11176) <https://github.com/apple/foundationdb/pull/11176>`_
+* Fixed find toml in release-7.1 to avoid macos pr failures. `(PR #11190) <https://github.com/apple/foundationdb/pull/11190>`_
+
 7.1.55
 ======
 * Same as 7.1.54 release with AVX enabled.

@@ -270,6 +270,7 @@ struct ShardMetrics {
 struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
+	Future<Void> trackUsableRegion;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
@@ -466,13 +467,15 @@ private:
 	double lastTransitionStartTime;
 };
 
-struct ServerTeamInfo {
+struct RebalanceStorageQueueRequest {
 	UID serverId;
 	std::vector<ShardsAffectedByTeamFailure::Team> teams;
 	bool primary;
 
-	ServerTeamInfo() {}
-	ServerTeamInfo(UID serverId, const std::vector<ShardsAffectedByTeamFailure::Team>& teams, bool primary)
+	RebalanceStorageQueueRequest() {}
+	RebalanceStorageQueueRequest(UID serverId,
+	                             const std::vector<ShardsAffectedByTeamFailure::Team>& teams,
+	                             bool primary)
 	  : serverId(serverId), teams(teams), primary(primary) {}
 };
 

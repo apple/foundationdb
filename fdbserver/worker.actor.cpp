@@ -1171,6 +1171,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 		TraceEvent(SevDebug, "PeerHealthMonitor")
 		    .detail("Peer", address)
+		    .detail("PeerAddress", address)
 		    .detail("Force", enablePrimaryTxnSystemHealthCheck->get())
 		    .detail("Elapsed", now() - lastLoggedTime)
 		    .detail("Disconnected", disconnectedPeer)
@@ -1201,6 +1202,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 			if (disconnectedPeer || degradedPeer) {
 				TraceEvent("HealthMonitorDetectDegradedPeer")
 				    .detail("Peer", address)
+				    .detail("PeerAddress", address)
 				    .detail("Elapsed", now() - lastLoggedTime)
 				    .detail("Disconnected", disconnectedPeer)
 				    .detail("MinLatency", peer->pingLatencies.min())
@@ -1229,6 +1231,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 			if (disconnectedPeer || degradedPeer) {
 				TraceEvent("HealthMonitorDetectDegradedPeer")
 				    .detail("Peer", address)
+				    .detail("PeerAddress", address)
 				    .detail("Satellite", true)
 				    .detail("Elapsed", now() - lastLoggedTime)
 				    .detail("Disconnected", disconnectedPeer)
@@ -1252,6 +1255,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				TraceEvent("HealthMonitorDetectDegradedPeer")
 				    .detail("WorkerLocation", workerLocation)
 				    .detail("Peer", address)
+				    .detail("PeerAddress", address)
 				    .detail("RemoteLogRouter", true)
 				    .detail("Elapsed", now() - lastLoggedTime)
 				    .detail("Disconnected", true)
@@ -1272,6 +1276,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				TraceEvent("HealthMonitorDetectDegradedPeer")
 				    .detail("WorkerLocation", workerLocation)
 				    .detail("Peer", address)
+				    .detail("PeerAddress", address)
 				    .detail("ExtensiveConnectivityCheck", true)
 				    .detail("Elapsed", now() - lastLoggedTime)
 				    .detail("Disconnected", true)
@@ -1291,7 +1296,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		} else if (degradedPeer) {
 			req.degradedPeers.push_back(address);
 		} else if (isDegradedPeer(lastReq, address)) {
-			TraceEvent("HealthMonitorDetectRecoveredPeer").detail("Peer", address);
+			TraceEvent("HealthMonitorDetectRecoveredPeer").detail("Peer", address).detail("PeerAddress", address);
 			req.recoveredPeers.push_back(address);
 		}
 	}
@@ -1315,7 +1320,10 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 			    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) ||
 			    (checkRemoteLogRouterConnectivity && (workerLocation == Primary || workerLocation == Satellite) &&
 			     addressIsRemoteLogRouter(address, dbInfo))) {
-				TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
+				TraceEvent("HealthMonitorDetectRecentClosedPeer")
+				    .suppressFor(30)
+				    .detail("Peer", address)
+				    .detail("PeerAddress", address);
 				req.disconnectedPeers.push_back(address);
 			}
 		}
@@ -2067,7 +2075,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 ConfigBroadcastInterface configBroadcastInterface,
                                 Reference<ConfigNode> configNode,
                                 Reference<LocalConfiguration> localConfig,
-                                Reference<AsyncVar<Optional<UID>>> clusterId) {
+                                Reference<AsyncVar<Optional<UID>>> clusterId,
+                                bool consistencyCheckUrgentMode) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -2166,7 +2175,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	errorForwarders.add(loadedPonger(interf.debugPing.getFuture()));
 	errorForwarders.add(waitFailureServer(interf.waitFailure.getFuture()));
 	errorForwarders.add(monitorTraceLogIssues(issues));
-	errorForwarders.add(testerServerCore(interf.testerInterface, connRecord, dbInfo, locality));
+	errorForwarders.add(
+	    testerServerCore(interf.testerInterface,
+	                     connRecord,
+	                     dbInfo,
+	                     locality,
+	                     consistencyCheckUrgentMode ? "ConsistencyCheckUrgent" : Optional<std::string>()));
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
 	filesClosed.add(stopping.getFuture());
@@ -4042,7 +4056,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::string whitelistBinPaths,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
-                        ConfigDBType configDBType) {
+                        ConfigDBType configDBType,
+                        bool consistencyCheckUrgentMode) {
 	state std::vector<Future<Void>> actors;
 	state Reference<ConfigNode> configNode;
 	state Reference<LocalConfiguration> localConfig;
@@ -4138,7 +4153,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 configBroadcastInterface,
 		                                                 configNode,
 		                                                 localConfig,
-		                                                 clusterId),
+		                                                 clusterId,
+		                                                 consistencyCheckUrgentMode),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));

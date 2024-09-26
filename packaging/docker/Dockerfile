@@ -16,37 +16,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM centos:7.9.2009 as base
+FROM docker.io/rockylinux/rockylinux:9.4-minimal AS base
 
-RUN yum install -y \
-    epel-release-7-11 \
-    centos-release-scl-2-3.el7.centos && \
-    yum install -y \
-    bind-utils-9.11.4-26.P2.el7_9.7 \
-    binutils-2.27-44.base.el7_9.1 \
-    curl-7.29.0-59.el7_9.1 \
-    gdb-7.6.1-120.el7 \
-    hostname-3.13-3.el7_7.1 \
-    jq-1.6-2.el7  \
-    less-458-9.el7 \
-    libubsan-7.3.1-5.16.el7 \
-    lsof-4.87-6.el7 \
-    net-tools-2.0-0.25.20131004git.el7 \
-    nmap-ncat-6.40-19.el7 \
-    perf-3.10.0-1160.45.1.el7 \
-    perl-5.16.3-299.el7_9 \
-    procps-ng-3.3.10-28.el7 \
-    strace-4.24-6.el7 \
-    sysstat-10.1.5-19.el7 \
-    tar-1.26-35.el7 \
-    tcpdump-4.9.2-4.el7_7.1 \
-    telnet-0.17-66.el7 \
-    traceroute-2.0.22-2.el7 \
-    unzip-6.0-22.el7_9 \
-    openssl-1.0.2k-24.el7_9.x86_64 \
-    vim-enhanced-7.4.629-8.el7_9 && \
-    yum clean all && \
-    rm -rf /var/cache/yum
+RUN microdnf install -y \
+    bind-utils \
+    binutils \
+    curl \
+    gdb \
+    hostname \
+    jq \
+    less \
+    libubsan \
+    lsof \
+    net-tools \
+    nmap-ncat \
+    perf \
+    perl \
+    procps-ng \
+    strace \
+    sysstat \
+    tar \
+    tcpdump \
+    telnet \
+    traceroute \
+    unzip \
+    openssl \
+    vim-enhanced && \
+    microdnf clean all
 
 WORKDIR /tmp
 
@@ -59,13 +55,13 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM golang:1.17.11-bullseye AS go-build
+FROM golang:1.22.5-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
 
-FROM base as foundationdb-base
+FROM base AS foundationdb-base
 
 WORKDIR /tmp
 ARG FDB_VERSION=6.3.22
@@ -116,7 +112,7 @@ RUN curl -Ls $FDB_WEBSITE/$FDB_VERSION/libfdb_c.x86_64.so -o /usr/lib/libfdb_c.s
 RUN rm -rf /tmp/*
 WORKDIR /
 
-FROM foundationdb-base as fdb-kubernetes-monitor
+FROM foundationdb-base AS fdb-kubernetes-monitor
 
 # Install the kubernetes monitor binary
 COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
@@ -127,14 +123,20 @@ WORKDIR /var/fdb
 VOLUME /var/fdb/data
 ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 
-FROM foundationdb-base as foundationdb-kubernetes-sidecar
+FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 
-RUN yum -y install \
-    rh-python38-2.0-4.el7 \
-    yum clean all && \
-    rm -rf /var/cache/yum && \
-    source /opt/rh/rh-python38/enable && \
-    pip3 install watchdog==0.9.0
+# We use python3.9 here as the tests with 3.12 resulted in the following error:
+# error:0A000126:SSL routines::unexpected eof while reading. This could be an issue
+# with the installed openssl version. Since the sidecar support will be deprecated in the
+# future it's fine to use python 3.9 here.
+# EOL for python 3.9 is 2025-10: https://devguide.python.org/versions/
+RUN microdnf -y install \
+    python3.9 \
+    python3.9-pip && \
+    microdnf clean all && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.9 20 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 20 && \
+    python3 -m pip install watchdog==4.0.1
 
 WORKDIR /
 ADD entrypoint.bash sidecar.py /
@@ -145,7 +147,7 @@ VOLUME /var/output-files
 ENV LISTEN_PORT 8080
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.bash"]
 
-FROM foundationdb-base as foundationdb
+FROM foundationdb-base AS foundationdb
 
 WORKDIR /tmp
 RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
@@ -170,11 +172,11 @@ ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
-FROM base as ycsb
+FROM foundationdb-base AS ycsb
 
-RUN yum -y install \
-    java-11-openjdk-11.0.13.0.8-1.el7_9 && \
-    yum clean all && \
+RUN microdnf -y install \
+    java-11-openjdk java-11-openjdk-devel && \
+    microdnf clean all && \
     rm -rf /var/cache/yum
 
 WORKDIR /tmp
@@ -192,9 +194,11 @@ RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-e
 
 # TODO: Log4J complains that it's eating the HTracer logs.  Even without it, we get per-operation
 # time series graphs of throughput, median, 90, 99, 99.9 and 99.99 (in usec).
-ADD run_ycsb.sh /usr/local/bin/run_ycsb.sh
+ADD run_ycsb.sh run_ycsb_standalone.sh /usr/local/bin
 RUN mkdir -p /var/log/fdb-trace-logs && \
-    chmod +x /usr/local/bin/run_ycsb.sh
+    chmod +x /usr/local/bin/run_ycsb.sh && \
+    chmod +x /usr/local/bin/run_ycsb_standalone.sh
+
 
 ADD YCSB /YCSB
 WORKDIR /YCSB
@@ -202,4 +206,4 @@ ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/var/dynamic-conf/lib/multivers
 ENV FDB_NETWORK_OPTION_TRACE_ENABLE=/var/log/fdb-trace-logs
 ENV LD_LIBRARY_PATH=/var/dynamic-conf/lib/
 ENV BUCKET=""
-CMD ["run_ycsb.sh"]
+ENTRYPOINT ["run_ycsb.sh"]

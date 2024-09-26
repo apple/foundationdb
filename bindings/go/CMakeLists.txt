@@ -19,6 +19,7 @@ set(SRCS
   src/fdb/tuple/tuple_test.go
   src/fdb/database.go
   src/fdb/directory/directorySubspace.go
+  src/fdb/tenant.go
   src/fdb/fdb_test.go
   src/fdb/snapshot.go)
 
@@ -100,8 +101,6 @@ function(build_go_package)
   endif()
   add_custom_command(OUTPUT ${outfile}
     COMMAND ${CMAKE_COMMAND} -E env ${go_env}
-            ${GO_EXECUTABLE} get -d ${GO_IMPORT_PATH}/${BGP_PATH} &&
-            ${CMAKE_COMMAND} -E env ${go_env}
             ${GO_EXECUTABLE} install ${GO_IMPORT_PATH}/${BGP_PATH}
     DEPENDS ${fdb_options_file}
     COMMENT "Building ${BGP_NAME}")

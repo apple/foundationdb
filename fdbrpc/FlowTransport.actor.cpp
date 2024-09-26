@@ -365,7 +365,10 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			lastAddress = *it;
 			auto peer = self->getPeer(lastAddress);
 			if (!peer) {
-				TraceEvent(SevWarnAlways, "MissingNetworkAddress").suppressFor(10.0).detail("PeerAddr", lastAddress);
+				TraceEvent(SevWarnAlways, "MissingNetworkAddress")
+				    .suppressFor(10.0)
+				    .detail("PeerAddr", lastAddress)
+				    .detail("PeerAddress", lastAddress);
 			}
 			if (peer->lastLoggedTime <= 0.0) {
 				peer->lastLoggedTime = peer->lastConnectTime;
@@ -376,6 +379,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				TraceEvent("PingLatency")
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
+				    .detail("PeerAddress", lastAddress)
 				    .detail("MinLatency", peer->pingLatencies.min())
 				    .detail("MaxLatency", peer->pingLatencies.max())
 				    .detail("MeanLatency", peer->pingLatencies.mean())
@@ -649,6 +653,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
                                     Future<Void> reader = Void()) {
 	TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 	    .detail("PeerAddr", self->destination)
+	    .detail("PeerAddress", self->destination)
 	    .detail("ConnSet", (bool)conn);
 	ASSERT_WE_THINK(FlowTransport::transport().getLocalAddress() != self->destination);
 
@@ -691,6 +696,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID())
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
+				    .detail("PeerAddress", self->destination)
 				    .detail("PeerReferences", self->peerReferences)
 				    .detail("FailureStatus",
 				            IFailureMonitor::failureMonitor().getState(self->destination).isAvailable() ? "OK"
@@ -722,7 +728,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 							TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
 							    .suppressFor(1.0)
-							    .detail("PeerAddr", self->destination);
+							    .detail("PeerAddr", self->destination)
+							    .detail("PeerAddress", self->destination);
 							self->prependConnectPacket();
 							reader = connectionReader(self->transport, conn, self, Promise<Reference<Peer>>());
 						}
@@ -737,7 +744,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					}
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
-					    .detail("PeerAddr", self->destination);
+					    .detail("PeerAddr", self->destination)
+					    .detail("PeerAddress", self->destination);
 
 					throw;
 				}
@@ -756,7 +764,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				     self->resetConnection.onTrigger());
 				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID())
 				    .suppressFor(1.0)
-				    .detail("PeerAddr", self->destination);
+				    .detail("PeerAddr", self->destination)
+				    .detail("PeerAddress", self->destination);
 				throw connection_failed();
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
@@ -782,7 +791,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
 					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
-					    .detail("PeerAddr", self->destination);
+					    .detail("PeerAddr", self->destination)
+					    .detail("PeerAddress", self->destination);
 					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT / 2.0;
 				}
 			} else {
@@ -811,13 +821,15 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID())
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
-				    .detail("PeerAddr", self->destination);
+				    .detail("PeerAddr", self->destination)
+				    .detail("PeerAddress", self->destination);
 			} else {
 				TraceEvent(
 				    ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID())
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
-				    .detail("PeerAddr", self->destination);
+				    .detail("PeerAddr", self->destination)
+				    .detail("PeerAddress", self->destination);
 
 				// Since the connection has closed, we need to check the protocol version the next time we connect
 				self->compatible = true;
@@ -832,7 +844,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				} else if (now() - it.first > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT) {
 					TraceEvent(SevWarnAlways, "TooManyConnectionsClosed", conn ? conn->getDebugID() : UID())
 					    .suppressFor(5.0)
-					    .detail("PeerAddr", self->destination);
+					    .detail("PeerAddr", self->destination)
+					    .detail("PeerAddress", self->destination);
 					self->transport->degraded->set(true);
 				}
 				it.second = now();
@@ -877,7 +890,11 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 			if (self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty() &&
 			    self->outstandingReplies == 0) {
-				TraceEvent("PeerDestroy").errorUnsuppressed(e).suppressFor(1.0).detail("PeerAddr", self->destination);
+				TraceEvent("PeerDestroy")
+				    .errorUnsuppressed(e)
+				    .suppressFor(1.0)
+				    .detail("PeerAddr", self->destination)
+				    .detail("PeerAddress", self->destination);
 				self->connect.cancel();
 				self->transport->peers.erase(self->destination);
 				self->transport->orderedAddresses.erase(self->destination);
@@ -1063,7 +1080,8 @@ ACTOR static void deliver(TransportData* self,
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())
-			    .detail("Peer", destination.getPrimaryAddress());
+			    .detail("Peer", destination.getPrimaryAddress())
+			    .detail("PeerAddress", destination.getPrimaryAddress());
 			if (!FlowTransport::isClient()) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
@@ -1360,6 +1378,10 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 									            pkt.canonicalRemotePort
 									                ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 									                : conn->getPeerAddress())
+									    .detail("PeerAddress",
+									            pkt.canonicalRemotePort
+									                ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
+									                : conn->getPeerAddress())
 									    .detail("ConnectionId", connectionId);
 									transport->lastIncompatibleMessage = now();
 								}
@@ -1385,6 +1407,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 							    .suppressFor(1.0)
 							    .detail("Peer", conn->getPeerAddress())
+							    .detail("PeerAddress", conn->getPeerAddress())
 							    .detail("ConnectionId", connectionId);
 						}
 
@@ -1400,7 +1423,9 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing")
 							    .suppressFor(1.0)
-							    .detail("PeerAddr", NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort));
+							    .detail("PeerAddr", NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort))
+							    .detail("PeerAddress",
+							            NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort));
 							peer->compatible = compatible;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;

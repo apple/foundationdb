@@ -21,12 +21,14 @@ package main
 
 import (
 	"bufio"
-	"fmt"
+	"context"
 	"io"
 	"os"
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
@@ -37,26 +39,19 @@ import (
 )
 
 var (
-	inputDir                string
-	fdbserverPath           string
-	versionFilePath         string
-	sharedBinaryDir         string
-	monitorConfFile         string
-	logPath                 string
-	executionModeString     string
-	outputDir               string
-	copyFiles               []string
-	copyBinaries            []string
-	binaryOutputDirectory   string
-	copyLibraries           []string
-	copyPrimaryLibrary      string
-	requiredCopyFiles       []string
-	mainContainerVersion    string
-	currentContainerVersion string
-	additionalEnvFile       string
-	processCount            int
-	enablePprof             bool
-	listenAddress           string
+	fdbserverPath        string
+	versionFilePath      string
+	sharedBinaryDir      string
+	monitorConfFile      string
+	logPath              string
+	executionModeString  string
+	outputDir            string
+	mainContainerVersion string
+	additionalEnvFile    string
+	listenAddress        string
+	processCount         int
+	enablePprof          bool
+	enableNodeWatch      bool
 )
 
 type executionMode string
@@ -86,14 +81,46 @@ func initLogger(logPath string) *zap.Logger {
 	return zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(logWriter), zapcore.InfoLevel))
 }
 
+func convertEnvironmentVariableNameToFlagName(s string) string {
+	return strings.ReplaceAll(strings.ToLower(s), "_", "-")
+}
+
+// parseFlagsAndSetEnvDefaults will parse the provided flags. The following order will be taken:
+// 1. If the flag is provided, take this value
+// 2. If an environment variable with the same name as the flag (just upper case and an underscore instead of a hyphen).
+// 3. Use the default value.
+func parseFlagsAndSetEnvDefaults() error {
+	for _, env := range os.Environ() {
+		envSplit := strings.SplitN(env, "=", 2)
+		envName := envSplit[0]
+		envValue := envSplit[1]
+		flag := pflag.CommandLine.Lookup(convertEnvironmentVariableNameToFlagName(envName))
+		// If no flag with that name is present or the flag is already specified with another value than the default one
+		// ignore the value from the env variable.
+		if flag == nil || flag.Changed {
+			continue
+		}
+
+		if err := flag.Value.Set(envValue); err != nil {
+			return err
+		}
+	}
+	pflag.Parse()
+
+	return nil
+}
+
 func main() {
+	var filesToCopy, copyBinaries, copyLibraries, requiredCopyFiles []string
+	var inputDir, copyPrimaryLibrary, binaryOutputDirectory, certPath, keyPath string
+
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
 	pflag.StringVar(&fdbserverPath, "fdbserver-path", "/usr/bin/fdbserver", "Path to the fdbserver binary")
 	pflag.StringVar(&inputDir, "input-dir", ".", "Directory containing input files")
 	pflag.StringVar(&monitorConfFile, "input-monitor-conf", "config.json", "Name of the file in the input directory that contains the monitor configuration")
 	pflag.StringVar(&logPath, "log-path", "", "Name of a file to send logs to. Logs will be sent to stdout in addition the file you pass in this argument. If this is blank, logs will only by sent to stdout")
 	pflag.StringVar(&outputDir, "output-dir", ".", "Directory to copy files into")
-	pflag.StringArrayVar(&copyFiles, "copy-file", nil, "A list of files to copy")
+	pflag.StringArrayVar(&filesToCopy, "copy-file", nil, "A list of files to copy")
 	pflag.StringArrayVar(&copyBinaries, "copy-binary", nil, "A list of binaries to copy from /usr/bin")
 	pflag.StringVar(&versionFilePath, "version-file", "/var/fdb/version", "Path to a file containing the current FDB version")
 	pflag.StringVar(&sharedBinaryDir, "shared-binary-dir", "/var/fdb/shared-binaries/bin", "A directory containing binaries that are copied from a sidecar process")
@@ -106,23 +133,27 @@ func main() {
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
 	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
 	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
-	pflag.Parse()
+	pflag.BoolVar(&enableNodeWatch, "enable-node-watch", false, "Enables the fdb-kubernetes-monitor to watch the node resource where the current Pod is running. This can be used to read node labels")
+	pflag.StringVar(&certPath, "certificate-path", "", "The path of a PEM cert for the prometheus/pprof HTTP server")
+	pflag.StringVar(&keyPath, "certificate-key-path", "", "The path of a PEM key for the prometheus/pprof HTTP server")
+	err := parseFlagsAndSetEnvDefaults()
+	if err != nil {
+		panic(err)
+	}
 
 	logger := zapr.NewLogger(initLogger(logPath))
-
-	copyDetails, requiredCopies, err := getCopyDetails()
+	versionBytes, err := os.ReadFile(versionFilePath)
+	if err != nil {
+		panic(err)
+	}
+	currentContainerVersion := strings.TrimSpace(string(versionBytes))
+	mode := executionMode(executionModeString)
+	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, filesToCopy, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
 	if err != nil {
 		logger.Error(err, "Error getting list of files to copy")
 		os.Exit(1)
 	}
 
-	versionBytes, err := os.ReadFile(versionFilePath)
-	if err != nil {
-		panic(err)
-	}
-	currentContainerVersion = strings.TrimSpace(string(versionBytes))
-
-	mode := executionMode(executionModeString)
 	switch mode {
 	case executionModeLauncher:
 		customEnvironment, err := loadAdditionalEnvironment(logger)
@@ -130,16 +161,27 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof)
+		promConfig := httpConfig{
+			listenAddr: listenAddress,
+			certPath:   certPath,
+			keyPath:    keyPath,
+		}
+
+		parsedVersion, err := api.ParseFdbVersion(currentContainerVersion)
+		if err != nil {
+			logger.Error(err, "Error parsing container version", "currentContainerVersion", currentContainerVersion)
+			os.Exit(1)
+		}
+		startMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, parsedVersion, enableNodeWatch)
 	case executionModeInit:
-		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
+		err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
 			logger.Error(err, "Error copying files")
 			os.Exit(1)
 		}
 	case executionModeSidecar:
 		if mainContainerVersion != currentContainerVersion {
-			err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
+			err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
 			if err != nil {
 				logger.Error(err, "Error copying files")
 				os.Exit(1)
@@ -154,48 +196,21 @@ func main() {
 	}
 }
 
-func getCopyDetails() (map[string]string, map[string]bool, error) {
-	copyDetails := make(map[string]string, len(copyFiles)+len(copyBinaries))
-
-	for _, filePath := range copyFiles {
-		copyDetails[path.Join(inputDir, filePath)] = ""
-	}
-	if copyBinaries != nil {
-		if binaryOutputDirectory == "" {
-			binaryOutputDirectory = currentContainerVersion
-		}
-		for _, copyBinary := range copyBinaries {
-			copyDetails[fmt.Sprintf("/usr/bin/%s", copyBinary)] = path.Join("bin", binaryOutputDirectory, copyBinary)
-		}
-	}
-	for _, library := range copyLibraries {
-		copyDetails[fmt.Sprintf("/usr/lib/fdb/multiversion/libfdb_c_%s.so", library)] = path.Join("lib", "multiversion", fmt.Sprintf("libfdb_c_%s.so", library))
-	}
-	if copyPrimaryLibrary != "" {
-		copyDetails[fmt.Sprintf("/usr/lib/fdb/multiversion/libfdb_c_%s.so", copyPrimaryLibrary)] = path.Join("lib", "libfdb_c.so")
-	}
-	requiredCopyMap := make(map[string]bool, len(requiredCopyFiles))
-	for _, filePath := range requiredCopyFiles {
-		fullFilePath := path.Join(inputDir, filePath)
-		_, present := copyDetails[fullFilePath]
-		if !present {
-			return nil, nil, fmt.Errorf("File %s is required, but is not in the --copy-file list", filePath)
-		}
-		requiredCopyMap[fullFilePath] = true
-	}
-
-	return copyDetails, requiredCopyMap, nil
-}
-
 func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 	var customEnvironment = make(map[string]string)
-	environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
 	if additionalEnvFile != "" {
+		environmentPattern := regexp.MustCompile(`export ([A-Za-z0-9_]+)=([^\n]*)`)
+
 		file, err := os.Open(additionalEnvFile)
 		if err != nil {
 			return nil, err
 		}
-		defer file.Close()
+		defer func() {
+			err := file.Close()
+			if err != nil {
+				logger.Error(err, "error when closing file")
+			}
+		}()
 
 		envScanner := bufio.NewScanner(file)
 		for envScanner.Scan() {

@@ -131,6 +131,7 @@ public:
 	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	double MERGE_RELOCATION_PARALLELISM_PER_TEAM;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -192,6 +193,11 @@ public:
 	// it are default to be 'anonymous' for compatibility.
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
+	// Probability that a team redundant data move set TrueBest when get destination team
+	double PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+	// Probability that a team unhealthy data move set TrueBest when get destination team
+	double PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+
 	// Data distribution
 	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given a array that's descend
 	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
@@ -240,6 +246,8 @@ public:
 	// shard metrics will update immediately
 	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
 	bool ENABLE_WRITE_BASED_SHARD_SPLIT; // Experimental. Enable to enforce shard split when write traffic is high
+	int DD_SHARD_USABLE_REGION_CHECK_RATE; // Assuming all shards need to repair, the (rough) number of shards moving
+	                                       // for usable region per second. Set 0 to disable shard usable region check
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
@@ -335,8 +343,16 @@ public:
 	int64_t REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN;
 	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
 	                                                               // light-traffic shards out of the overloading server
+	double DD_WAIT_TSS_DATA_MOVE_DELAY;
+	bool DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM; // Enable to validate server team count per server after build
+	                                                     // team
 
 	// TeamRemover to remove redundant teams
+	double TR_LOW_SPACE_PIVOT_DELAY_SEC; // teamRedundant data moves can make the min SS available % smaller in
+	                                     // particular when the majority of SSes have low available %. So, when the
+	                                     // pivot is below the target, teamRemover wait for the specified time to check
+	                                     // the pivot again. teamRemover triggers teamRedundant data moves only when the
+	                                     // pivot is above the target.
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
 	bool TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS; // guard to select which machineTeamRemover logic to use
@@ -345,6 +361,8 @@ public:
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
 	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
 	                                          // ensure it runs after machineTeamRemover
+	double TR_REDUNDANT_TEAM_PERCENTAGE_THRESHOLD; // serverTeamRemover will only remove teams if existing team number
+	                                               // is p% more than the desired team number.
 
 	// Remove wrong storage engines
 	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
@@ -437,6 +455,8 @@ public:
 	bool ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
 	int ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
+	double ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
+	bool ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	double ROCKSDB_METRICS_DELAY;
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
@@ -452,6 +472,7 @@ public:
 	// Set to 0 to disable histograms.
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
+	double ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM; // Probability that RocksDB reuses iterator in simulation
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
 	bool SHARDED_ROCKSDB_REUSE_ITERATORS;
 	bool ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS;
@@ -511,6 +532,8 @@ public:
 	int ROCKSDB_WAL_RECOVERY_MODE;
 	int ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	bool ROCKSDB_USE_DIRECT_READS;
+	bool ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
 	int ROCKSDB_MAX_OPEN_FILES;
 	bool ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS;
 	int ROCKSDB_CF_RANGE_DELETION_LIMIT;
@@ -530,6 +553,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	int SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
 	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
@@ -546,12 +570,19 @@ public:
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
+	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
+	bool SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	int64_t SHARDED_ROCKSDB_RATE_LIMITER_MODE;
 	int SHARDED_ROCKSDB_BACKGROUND_PARALLELISM;
 	int SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
 	int SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
 	int SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
 	int SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
+	bool SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE;
+	int SHARDED_ROCKSDB_MAX_OPEN_FILES;
+	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
+	int SHARDED_ROCKSDB_PREFIX_LEN;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -578,6 +609,8 @@ public:
 	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
 	int BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE;
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
+
+	bool WRITE_CLIENT_LATENCY_TRACEEVENT;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -692,6 +725,7 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
+	bool CC_PAUSE_HEALTH_MONITOR;
 	bool CC_ENABLE_WORKER_HEALTH_MONITOR;
 	double CC_WORKER_HEALTH_CHECKING_INTERVAL; // The interval of refreshing the degraded server list.
 	double CC_DEGRADED_LINK_EXPIRATION_INTERVAL; // The time period from the last degradation report after which a
@@ -1063,6 +1097,9 @@ public:
 
 	// Test harness
 	double WORKER_POLL_DELAY;
+	int PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM;
+	int PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM;
+	int PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM;
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
@@ -1190,6 +1227,7 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	double ENCRYPTION_LOGGING_INTERVAL;
+	double DISABLED_ENCRYPTION_PROBABILITY_SIM; // Probability that encryption is forced to be disabled in simulation
 
 	// Compression
 	bool ENABLE_BLOB_GRANULE_COMPRESSION;
