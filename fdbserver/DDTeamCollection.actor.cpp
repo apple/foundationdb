@@ -839,7 +839,8 @@ public:
 			// If there are too few machines to even build teams or there are too few represented datacenters, can't
 			// build any team.
 			self->lastBuildTeamsFailed = true;
-			TraceEvent(SevWarnAlways, "BuildTeamsNotEnoughUniqueMachines", self->distributorId)
+			TraceEvent(SevWarnAlways, "BuildTeamsLastBuildTeamsFailed", self->distributorId)
+			    .detail("Reason", "Do not have enough unique machines")
 			    .detail("Primary", self->primary)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("Replication", self->configuration.storageTeamSize);
@@ -4424,7 +4425,8 @@ bool DDTeamCollection::isValidLocality(Reference<IReplicationPolicy> storagePoli
 void DDTeamCollection::evaluateTeamQuality() const {
 	int teamCount = teams.size(), serverCount = allServers.size();
 	double teamsPerServer = (double)teamCount * configuration.storageTeamSize / serverCount;
-
+	const int targetTeamNumPerServer =
+	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 	ASSERT_EQ(serverCount, server_info.size());
 
 	int minTeams = std::numeric_limits<int>::max();
@@ -4440,6 +4442,16 @@ void DDTeamCollection::evaluateTeamQuality() const {
 			varTeams += (stc - teamsPerServer) * (stc - teamsPerServer);
 			// Use zoneId as server's machine id
 			machineTeams[info->getLastKnownInterface().locality.zoneId()] += stc;
+			// Check invariant: if latest buildTeam succeeds, then each server must have at least
+			// targetTeamNumPerServer serverTeams
+			// lastBuildTeamsFailed is set only when (1) machine count is less than configured team size;
+			// (2) Not find any server team candidates when creating server team; (3) failed to add machine team
+			if (SERVER_KNOBS->DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM && !lastBuildTeamsFailed &&
+			    stc < targetTeamNumPerServer) {
+				TraceEvent(SevError, "NewAddServerNotMatchTargetSTCount", distributorId)
+				    .detail("CurrentServerTeams", stc)
+				    .detail("TargetServerTeams", targetTeamNumPerServer);
+			}
 		}
 	}
 	varTeams /= teamsPerServer * teamsPerServer;
@@ -5063,9 +5075,9 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// When too many teams exist in simulation, traceAllInfo will buffer too many trace logs before
 			// trace has a chance to flush its buffer, which causes assertion failure.
 			traceAllInfo(!g_network->isSimulated());
-			TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
+			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
 			    .detail("Primary", primary)
-			    .detail("Reason", "Unable to make desired machine Teams")
+			    .detail("Reason", "Unable to make desired machineTeams")
 			    .detail("Hint", "Check TraceAllInfo event");
 			lastBuildTeamsFailed = true;
 			break;
@@ -5475,6 +5487,11 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		if (bestServerTeam.size() != configuration.storageTeamSize) {
 			// Not find any team and will unlikely find a team
 			lastBuildTeamsFailed = true;
+			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
+			    .detail("Reason", "Unable to find any valid serverTeam")
+			    .detail("Primary", primary)
+			    .detail("BestServerTeam", describe(bestServerTeam))
+			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize);
 			break;
 		}
 
