@@ -215,6 +215,7 @@ protected:
 
 	bool doBuildTeams;
 	bool lastBuildTeamsFailed;
+	Optional<double> buildTeamsFailedStartTime;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
 	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
@@ -348,6 +349,10 @@ protected:
 
 	void evaluateTeamQuality() const;
 
+	void traceBuildTeamFailedForLongTime();
+
+	bool isServerMachineDCLayoutGood() const;
+
 	int overlappingMembers(const std::vector<UID>& team) const;
 
 	int overlappingMachineMembers(std::vector<Standalone<StringRef>> const& team) const;
@@ -422,6 +427,13 @@ protected:
 	// Each server is expected to have targetTeamNumPerServer teams.
 	// Return true if there exists a server that does not have enough teams.
 	bool notEnoughTeamsForAServer() const;
+
+	std::vector<std::string> getServersOnMachineTeamDescription(
+	    const std::vector<Reference<TCMachineInfo>>& machines) const;
+
+	std::tuple<int, int, int> getHealthyStorageServerCountPerMachine() const;
+
+	std::tuple<int, int, int> getMachineCountPerZone() const;
 
 	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
 	// The following are guarantees of the process:

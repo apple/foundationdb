@@ -346,6 +346,9 @@ public:
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
 	bool DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM; // Enable to validate server team count per server after build
 	                                                     // team
+	double DD_BUILD_TEAMS_FAILED_TIMESPAN_AS_ERROR; // Trigger SevError when the time span of successive buildTeam
+	                                                // failures exceeds the specified value
+	                                                // Set to 0 to disable it
 
 	// TeamRemover to remove redundant teams
 	double TR_LOW_SPACE_PIVOT_DELAY_SEC; // teamRedundant data moves can make the min SS available % smaller in
