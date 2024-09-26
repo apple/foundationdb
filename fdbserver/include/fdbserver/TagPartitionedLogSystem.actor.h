@@ -66,6 +66,7 @@ struct OldLogData {
 };
 
 struct IdToInterf : ReferenceCounted<IdToInterf> {
+	Optional<Version> recoverAt = Optional<Version>();
 	std::map<UID, TLogInterface> lockInterf;
 };
 

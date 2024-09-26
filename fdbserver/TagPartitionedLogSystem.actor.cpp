@@ -2406,8 +2406,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				lockResult.epochEnd = old.epochEnd;
 				lockResult.logSet = log;
 				for (int t = 0; t < log->logServers.size(); t++) {
-					lockResult.replies.push_back(
-					    TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t], lockResultsInterf));
+					lockResult.replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, log->logServers[t]));
 				}
 				lockResults.push_back(lockResult);
 			}
@@ -2465,7 +2464,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	}
 
 	state Optional<Version> lastEnd;
-	state Optional<Version> lastRecoverAt;
 	state Version knownCommittedVersion = 0;
 	loop {
 		Version minEnd = std::numeric_limits<Version>::max();
@@ -2501,7 +2499,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 			logSystem->recoverAt = minEnd;
 			lastEnd = minEnd;
-			lastRecoverAt = logSystem->recoverAt;
+			lockResultsInterf->recoverAt = logSystem->recoverAt;
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
@@ -2521,7 +2519,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
 			outLogSystem->set(logSystem);
 		}
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lastEnd.present()) {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lockResultsInterf->recoverAt.present()) {
 			// When a new log system is created, inform the surviving tLogs of the RV.
 			// @todo issues:
 			// - we are not adding entries of a LogSet to "logGroupResults" above if
@@ -2538,12 +2536,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				for (auto tLogResult : replies) {
 					if (tLogResult.isValid() && tLogResult.isReady()) {
 						TraceEvent("SendClusterRecoveryVersion").detail("DestInterf", tLogResult.get().id);
-						wait(transformErrors(throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
-						                                      .setClusterRecoveryVersion.getReplyUnlessFailedFor(
-						                                          setClusterRecoveryVersionRequest(lastRecoverAt.get()),
-						                                          SERVER_KNOBS->TLOG_TIMEOUT,
-						                                          SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-						                     cluster_recovery_failed()));
+						wait(transformErrors(
+						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
+						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
+						                         setClusterRecoveryVersionRequest(lockResultsInterf->recoverAt.get()),
+						                         SERVER_KNOBS->TLOG_TIMEOUT,
+						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+						    cluster_recovery_failed()));
 					}
 				}
 			}
@@ -3423,10 +3422,17 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			         tlog->get().present() ? brokenPromiseToNever(tlog->get().interf().lock.getReply<TLogLockResult>())
 			                               : Never())) {
 				TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
-				if (lockInterf.present()) {
+				state TLogLockResult returnedData = data;
+
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lockInterf.present()) {
 					lockInterf.get()->lockInterf[data.id] = tlog->get().interf();
+					if (lockInterf.get()->recoverAt.present()) {
+						setClusterRecoveryVersionRequest req(lockInterf.get()->recoverAt.get());
+						TraceEvent("SendClusterRecoveryVersion").detail("DestInterf", tlog->get().id());
+						wait(tlog->get().interf().setClusterRecoveryVersion.getReply(req));
+					}
 				}
-				return data;
+				return returnedData;
 			}
 			when(wait(tlog->onChange())) {}
 		}

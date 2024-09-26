@@ -1830,7 +1830,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			wait(timeoutError(logData->clusterRecoveryVersion.onChange(), 100.0));
 		}
 		// Obtain the first unreadable version number of the recovered log.
-		clusterRecoveryVersion = logData->clusterRecoveryVersion.get().get() + 1;
+		clusterRecoveryVersion = logData->clusterRecoveryVersion.get().get();
 		DebugLogTraceEvent("TLogPeekMessagesClusterRecoveryVersion", self->dbgid)
 		    .detail("LogId", logData->logId)
 		    .detail("LogEpoch", logData->epoch())
@@ -2136,7 +2136,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.messages = messagesValue;
 	reply.end = endVersion;
 	if (clusterRecoveryVersion.present() && logData->stopped() && logData->version.get() < reqBegin) {
-		reply.end = clusterRecoveryVersion.get();
+		reply.end = clusterRecoveryVersion.get() + 1;
 	}
 	reply.onlySpilled = onlySpilled;
 
@@ -2832,6 +2832,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && logData->stopped()) {
 				for (auto& oldTLogs : self->dbInfo->get().logSystemConfig.oldTLogs) {
+					// If this tLog's epoch is not in the list, it couldn't have received any commits.
+					// In that case find the recovery version in the next oldest epoch.
 					if (oldTLogs.epoch >= logData->epoch()) {
 						logData->clusterRecoveryVersion.set(oldTLogs.recoverAt);
 						// DebugLogTraceEvent("SetClusterRecoveryVersion",self->dbgid).detail("LogId",logData->logId);
