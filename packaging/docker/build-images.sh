@@ -171,9 +171,9 @@ function build_and_push_images () {
     if [ ${#} -ne 3 ]; then
         loge "INCORRECT NUMBER OF ARGS FOR ${FUNCNAME[0]}"
     fi
-    local dockerfile_name="${1}"
-    local use_development_java_bindings="${2}"
-    local push_docker_images="${3}"
+    local use_development_java_bindings="${1}"
+    local push_docker_images="${2}"
+    local debug_image="${3}"
     declare -a tags_to_push=()
     for image in "${image_list[@]}"; do
         logg "BUILDING ${image}"
@@ -184,7 +184,7 @@ function build_and_push_images () {
         if [ "${image}" == "foundationdb-kubernetes-sidecar" ]; then
             image_tag="${image_tag}-1"
         fi
-        if [ "${dockerfile_name}" == "Dockerfile.eks" ]; then
+        if [ "${debug_image}" == "true" ]; then
             image_tag="${image_tag}-debug"
         fi
         if [ "${image}" == "ycsb" ]; then
@@ -202,7 +202,7 @@ function build_and_push_images () {
             --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
             --build-arg HTTP_PROXY="${HTTP_PROXY}" \
             --tag "${image_tag}" \
-            --file "${dockerfile_name}" \
+            --file Dockerfile \
             --target "${image}" .
         if [ "${image}" == 'foundationdb' ] || [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || [ "${image}" == 'ycsb' ] ; then
             tags_to_push+=("${image_tag}")
@@ -279,11 +279,11 @@ if [ -n "${OKTETO_NAMESPACE+x}" ]; then
 
     # build regular images
     create_fake_website_directory stripped_local
-    build_and_push_images Dockerfile true true
+    build_and_push_images true true false
 
     # build debug images
     create_fake_website_directory unstripped_local
-    build_and_push_images Dockerfile.eks true true
+    build_and_push_images true true true
 else
     echo "Dear ${USER}, you probably need to edit this file before running it. "
     echo "${0} has a very narrow set of situations where it will be successful,"
