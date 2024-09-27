@@ -435,9 +435,9 @@ protected:
 
 	std::vector<size_t> getHealthyMachineCountPerZoneOrDataHall() const;
 
-	bool isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine) const;
+	bool isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine, uint64_t& maxMachineTeamCount) const;
 
-	bool isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine) const;
+	bool isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine, const uint64_t maxMachineTeamCount) const;
 
 	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
 	// The following are guarantees of the process:

@@ -4494,7 +4494,8 @@ void DDTeamCollection::evaluateTeamQuality() const {
 	    .detail("MachineMaxTeams", maxMachineTeams);
 }
 
-bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine) const {
+bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine,
+                                           uint64_t& maxMachineTeamCount) const {
 	// The decision is made based on the tracked healthy SSes
 	// Collect data points from server_info and filter out unhealthy machines
 	std::vector<size_t> tmp = getHealthyMachineCountPerZoneOrDataHall();
@@ -4532,9 +4533,9 @@ bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMa
 
 	// (2) Layout is bad if the number of all healthy machines is not efficient to satisfy the desiredTotalMachineTeams
 	int desiredTotalMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-	uint64_t maxTotalMachineTeamCount =
-	    getNChooseKLowerBound(totalHealthyMachineCount, configuration.storageTeamSize); // wrong!
-	sufficientToCreateEnoughMachineTeams &= (desiredTotalMachineTeams <= maxTotalMachineTeamCount);
+	maxMachineTeamCount = getNChooseKLowerBound(zoneCount, configuration.storageTeamSize) *
+	                      pow(minMachineCountPerZone, configuration.storageTeamSize);
+	sufficientToCreateEnoughMachineTeams &= (desiredTotalMachineTeams <= maxMachineTeamCount);
 
 	TraceEvent(SevInfo, "BuildTeamsDecideMachineGoodLayout", distributorId)
 	    .suppressFor(60.0)
@@ -4546,7 +4547,7 @@ bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMa
 	    .detail("ConfigTeamSize", configuration.storageTeamSize)
 	    .detail("TargetMachineTeamNumPerMachine", targetMachineTeamNumPerMachine)
 	    .detail("MaxMachineTeamsGivenAMachine", maxMachineTeamCountGivenAMachine)
-	    .detail("MaxTotalMachineTeamCount", maxTotalMachineTeamCount)
+	    .detail("MaxMachineTeamCount", maxMachineTeamCount)
 	    .detail("MinMachineCountPerZone", minMachineCountPerZone)
 	    .detail("MaxMachineCountPerZone", maxMachineCountPerZone)
 	    .detail("ZoneCount", zoneCount)
@@ -4556,7 +4557,8 @@ bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMa
 	return sufficientToCreateEnoughMachineTeams;
 }
 
-bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine) const {
+bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine,
+                                          const uint64_t maxMachineTeamCount) const {
 	// The decision is made based on the tracked healthy SSes
 	// Collect data points from server_info and filter out unhealthy SSes
 	std::vector<size_t> tmp = getHealthyStorageServerCountPerMachine();
@@ -4593,8 +4595,7 @@ bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGive
 
 	// (2) Layout is bad if the number of all healthy servers is not efficient to satisfy the desiredTotalServerTeams
 	int desiredTotalServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyServerCount;
-	uint64_t maxTotalServerTeamCount = getNChooseKLowerBound(totalHealthyServerCount, configuration.storageTeamSize);
-	sufficientToCreateEnoughServerTeams &= (desiredTotalServerTeams <= maxTotalServerTeamCount);
+	sufficientToCreateEnoughServerTeams &= (desiredTotalServerTeams <= maxMachineTeamCount);
 
 	TraceEvent(SevInfo, "BuildTeamsDecideServerGoodLayout", distributorId)
 	    .suppressFor(60.0)
@@ -4608,6 +4609,7 @@ bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGive
 	    .detail("ConfigTeamSize", configuration.storageTeamSize)
 	    .detail("TargetTeamNumPerServer", targetTeamNumPerServer)
 	    .detail("MaxMachineTeamsGivenAMachine", maxMachineTeamCountGivenAMachine)
+	    .detail("MaxMachineTeamCount", maxMachineTeamCount)
 	    .detail("DesiredTotalServerTeams", desiredTotalServerTeams)
 	    .detail("TotalHealthyServerCount", totalHealthyServerCount)
 	    .detail("SufficientToCreateEnoughServerTeams", sufficientToCreateEnoughServerTeams);
@@ -4620,9 +4622,12 @@ bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGive
 // too few SSes; (2) machine count is too small Complexity: scan the server_info list
 bool DDTeamCollection::isServerMachineLayoutGood() const {
 	uint64_t maxMachineTeamCountGivenAMachine = 0;
-	bool sufficientToCreateEnoughMachineTeams = isMachineLayoutGood(maxMachineTeamCountGivenAMachine);
-	// maxMachineTeamCountGivenAMachine is updated by isMachineLayoutGood
-	bool sufficientToCreateEnoughServerTeams = isServerLayoutGood(maxMachineTeamCountGivenAMachine);
+	uint64_t maxMachineTeamCount = 0;
+	bool sufficientToCreateEnoughMachineTeams =
+	    isMachineLayoutGood(maxMachineTeamCountGivenAMachine, maxMachineTeamCount);
+	// maxMachineTeamCountGivenAMachine and maxMachineTeamCount updated by isMachineLayoutGood
+	bool sufficientToCreateEnoughServerTeams =
+	    isServerLayoutGood(maxMachineTeamCountGivenAMachine, maxMachineTeamCount);
 	return sufficientToCreateEnoughServerTeams && sufficientToCreateEnoughMachineTeams;
 }
 
