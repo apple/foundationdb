@@ -3477,7 +3477,8 @@ public:
 
 			TraceEvent("DDPrintSnapshotTeamsInfo", self->getDistributorId())
 			    .detail("SnapshotSpeed", now() - snapshotStart)
-			    .detail("Primary", self->isPrimary());
+			    .detail("Primary", self->isPrimary())
+			    .detail("ServerMachineLayoutIsGood", self->isServerMachineLayoutGood());
 
 			// Print to TraceEvents
 			TraceEvent("DDConfig", self->getDistributorId())
