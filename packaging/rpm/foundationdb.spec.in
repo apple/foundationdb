@@ -17,7 +17,7 @@ with full ACID transactions.
 Summary: FoundationDB server
 Requires: foundationdb-clients = %{version}-%{release}
 Conflicts: foundationdb < 0.1.4
-ifdef(`RHEL6', `Requires(post): chkconfig >= 0.9, /sbin/service')
+
 Requires(pre): /usr/sbin/useradd, /usr/sbin/groupadd, /usr/bin/getent
 # This is a heavy hammer, to remove /usr/bin/python as a dependency,
 # as it also removes dependencies like glibc. However, none of the
@@ -45,7 +45,7 @@ This package contains client utilities and libraries.
 rm -rf %{buildroot}
 mkdir -p %{buildroot}
 tar -xzf %{_sourcedir}/install-files.tar.gz -C %{buildroot}
-ifdef(`RHEL6', `rm -r %{buildroot}/lib/systemd', `rm -r %{buildroot}/etc/rc.d')
+rm -r %{buildroot}/etc/rc.d
 
 %pre server
 # This should be ensured by the foundationdb-clients package, but it can't hurt...
@@ -74,31 +74,25 @@ if [ $1 -eq 1 ]; then
         NEWDB=1
     fi
 
-ifdef(`RHEL6', `
-    /sbin/chkconfig --add foundationdb >/dev/null 2>&1
-    /sbin/service foundationdb start >/dev/null 2>&1
-', `
+
     /usr/bin/systemctl enable foundationdb >/dev/null 2>&1
     /usr/bin/systemctl start foundationdb >/dev/null 2>&1
-')
+
 
     if [ "$NEWDB" != "" ]; then
         /usr/bin/fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure new single memory" --timeout 20 >/dev/null 2>&1
     fi
 else
-ifdef(`RHEL6', `/sbin/service foundationdb condrestart >/dev/null 2>&1', `/usr/bin/systemctl condrestart foundationdb >/dev/null 2>&1')
+/usr/bin/systemctl condrestart foundationdb >/dev/null 2>&1
 fi
 exit 0
 
 %preun server
 if [ $1 -eq 0 ]; then
-ifdef(`RHEL6', `
-    /sbin/service foundationdb stop >/dev/null 2>&1
-    /sbin/chkconfig --del foundationdb >/dev/null 2>&1
-', `
+
     /usr/bin/systemctl stop foundationdb >/dev/null 2>&1
     /usr/bin/systemctl disable foundationdb >/dev/null 2>&1
-')
+
 fi
 exit 0
 
@@ -119,7 +113,7 @@ exit 0
 %attr(0700,foundationdb,foundationdb) /var/lib/foundationdb
 %attr(0700,foundationdb,foundationdb) /var/log/foundationdb
 # RPM init scripts should not be marked config (according to http://fedoraproject.org/wiki/Packaging:SysVInitScript#Initscript_packaging)
-ifdef(`RHEL6', `/etc/rc.d/init.d/foundationdb', `/lib/systemd/system/foundationdb.service')
+/lib/systemd/system/foundationdb.service
 /usr/sbin/*
 /usr/lib/foundationdb/fdbmonitor
 /usr/lib/foundationdb/make_public.py
