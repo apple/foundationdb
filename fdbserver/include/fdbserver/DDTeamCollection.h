@@ -351,7 +351,7 @@ protected:
 
 	void traceBuildTeamFailedForLongTime();
 
-	bool isServerMachineDCLayoutGood() const;
+	bool isServerMachineLayoutGood() const;
 
 	int overlappingMembers(const std::vector<UID>& team) const;
 
@@ -431,9 +431,13 @@ protected:
 	std::vector<std::string> getServersOnMachineTeamDescription(
 	    const std::vector<Reference<TCMachineInfo>>& machines) const;
 
-	std::tuple<int, int, int> getHealthyStorageServerCountPerMachine() const;
+	std::vector<size_t> getHealthyStorageServerCountPerMachine() const;
 
-	std::tuple<int, int, int> getMachineCountPerZone() const;
+	std::vector<size_t> getHealthyMachineCountPerZoneOrDataHall() const;
+
+	bool isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine) const;
+
+	bool isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine) const;
 
 	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
 	// The following are guarantees of the process:
