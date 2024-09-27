@@ -8622,7 +8622,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
-			TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
+			TraceEvent(SevVerbose, "FetchKeysUnblocked", data->thisServerID)
 			    .detail("FKID", interval.pairID)
 			    .detail("Version", fetchVersion);
 
