@@ -3,6 +3,7 @@ tenantModes = ['disabled']
 
 [[knobs]]
 enable_commit_user_range_lock = true
+transaction_lock_rejection_retriable = false
 
 [[test]]
 testTitle = 'RangeLocking'
