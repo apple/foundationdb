@@ -35,7 +35,6 @@
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/Error.h"
 #include "flow/network.h"
 
 #include "flow/actorcompiler.h" // has to be last include

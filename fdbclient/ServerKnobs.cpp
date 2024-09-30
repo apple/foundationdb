@@ -664,7 +664,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                   0.5 );
 	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,           5.0 );
 	init( COMMIT_TRIGGER_DELAY,                                  0.01 ); if (randomize && BUGGIFY) COMMIT_TRIGGER_DELAY = deterministicRandom()->random01() * 4;
-	init( ENABLE_COMMIT_USER_RANGE_LOCK,                             false );
+	init( ENABLE_COMMIT_USER_RANGE_LOCK,                        false );
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );

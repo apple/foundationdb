@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "fdbclient/SystemData.h"
-#include "flow/Error.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"

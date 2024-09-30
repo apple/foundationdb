@@ -2005,7 +2005,7 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 }
 
 void rejectMutationsForRangeLock(CommitBatchContext* self) {
-	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked);
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
@@ -2333,7 +2333,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
 	// If a transaction has any mutation accessing to the locked range, reject the transaction with
 	// error_code_transaction_rejected_range_locked
-	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK) {
+	// This feature is disabled when the database is locked
+	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked) {
 		rejectMutationsForRangeLock(self);
 	}
 
