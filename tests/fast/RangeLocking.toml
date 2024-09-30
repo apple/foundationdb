@@ -1,0 +1,12 @@
+[configuration]
+tenantModes = ['disabled']
+
+[[knobs]]
+enable_commit_user_range_lock = true
+
+[[test]]
+testTitle = 'RangeLocking'
+useDB = true
+
+    [[test.workload]]
+    testName = 'RangeLocking'

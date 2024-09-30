@@ -2004,6 +2004,40 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	}
 }
 
+void rejectMutationsForRangeLock(CommitBatchContext* self) {
+	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	std::vector<CommitTransactionRequest>& trs = self->trs;
+	for (int i = self->transactionNum; i < trs.size(); i++) {
+		if (!(self->committed[i] == ConflictBatch::TransactionCommitted &&
+		      (!self->locked || trs[i].isLockAware()))) { // TODO: double check
+			continue;
+		}
+		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
+		bool transactionRejected = false;
+		for (int j = 0; j < pMutations->size(); j++) {
+			MutationRef m = (*pMutations)[j];
+			KeyRange rangeToCheck;
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				rangeToCheck = singleKeyRange(m.param1);
+			} else if (m.type == MutationRef::ClearRange) {
+				rangeToCheck = KeyRangeRef(m.param1, m.param2);
+			}
+			bool isLocked = pProxyCommitData->rangeLock->locked(rangeToCheck);
+			if (isLocked) {
+				TraceEvent("ZheShouldReject").detail("Mutation", m.toString());
+				self->committed[i] = ConflictBatch::TransactionLockReject;
+				trs[i].reply.sendError(transaction_rejected_range_locked());
+				transactionRejected = true;
+			}
+			if (transactionRejected) {
+				break;
+			}
+		}
+	}
+	return;
+}
+
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
 /// tags
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
@@ -2294,6 +2328,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataToCommittedTxn");
+	}
+
+	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
+	// If a transaction has any mutation accessing to the locked range, reject the transaction with
+	// error_code_transaction_rejected_range_locked
+	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK) {
+		rejectMutationsForRangeLock(self);
 	}
 
 	// Second pass
@@ -2643,7 +2684,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
-		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
+		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure ||
+		           self->committed[t] == ConflictBatch::TransactionLockReject) {
 			// We already sent the error
 			ASSERT(tr.reply.isSet());
 		} else {
