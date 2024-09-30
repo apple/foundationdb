@@ -90,7 +90,7 @@ public:
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
-	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch) {
+	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch), rangeLock(proxyCommitData_.rangeLock) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->contains(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID));
@@ -195,6 +195,8 @@ private:
 	// commit
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
+	std::shared_ptr<RangeLock> rangeLock = nullptr;
+
 private:
 	bool dummyConfChange = false;
 
@@ -209,6 +211,24 @@ private:
 			CODE_PROBE(forResolver, "encrypting resolver mutations", probe::decoration::rare);
 			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
+	}
+
+	void checkSetRangeLockPrefix(MutationRef m) {
+		// RangeLock is upated by SetKrmRange which updates a range with two successive mutations
+		if (rangeLock == nullptr) {
+			return;
+		}
+		if (rangeLock->pendingRequest()) {
+			ASSERT(m.param1.startsWith(rangeLockPrefix));
+			Key endKey = m.param1.removePrefix(rangeLockPrefix);
+			rangeLock->consumePendingRequest(endKey);
+		} else if (m.param1.startsWith(rangeLockPrefix)) {
+			ASSERT(!rangeLock->pendingRequest());
+			RangeLockState lockState = m.param2.empty() ? RangeLockState() : decodeRangeLockState(m.param2);
+			Key startKey = m.param1.removePrefix(rangeLockPrefix);
+			rangeLock->setPendingRequest(startKey, lockState);
+		}
+		return;
 	}
 
 	void checkSetKeyServersPrefix(MutationRef m) {
@@ -1516,6 +1536,7 @@ public:
 			}
 
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
+				checkSetRangeLockPrefix(m);
 				checkSetKeyServersPrefix(m);
 				checkSetServerKeysPrefix(m);
 				checkSetCheckpointKeys(m);

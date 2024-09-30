@@ -26,8 +26,9 @@
 
 #include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/Tenant.h"
 
@@ -526,6 +527,11 @@ extern const KeyRangeRef bulkLoadKeys;
 extern const KeyRef bulkLoadPrefix;
 const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
 BulkLoadState decodeBulkLoadState(const ValueRef& value);
+
+extern const KeyRangeRef rangeLockKeys;
+extern const KeyRef rangeLockPrefix;
+const Value rangeLockStateValue(const RangeLockState& rangeLockState);
+RangeLockState decodeRangeLockState(const ValueRef& value);
 
 // Keys to view and control tag throttling
 extern const KeyRangeRef tagThrottleKeys;

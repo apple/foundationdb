@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#include "fdbclient/SystemData.h"
+#include "flow/Error.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -194,6 +196,63 @@ struct ExpectedIdempotencyIdCountForKey {
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
 
+struct RangeLock {
+public:
+	RangeLock() : anyLock(false) { coreMap.insert(allKeys, RangeLockState()); }
+
+	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
+
+	void setPendingRequest(Key startKey, RangeLockState lockState) {
+		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+		ASSERT(!pendingRequest());
+		currentRangeLockStartKey = std::make_pair(startKey, lockState);
+	}
+
+	void consumePendingRequest(Key endKey) {
+		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+		ASSERT(pendingRequest());
+		ASSERT(endKey <= normalKeys.end);
+		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
+		RangeLockState lockState = currentRangeLockStartKey.get().second;
+		coreMap.insert(lockRange, lockState);
+		coreMap.coalesce(allKeys);
+		if (lockState.isValid()) {
+			TraceEvent("ZheSet").detail("Range", lockRange).detail("LockState", lockState.toString());
+			anyLock = true;
+		} else {
+			TraceEvent("ZheUnset").detail("Range", lockRange).detail("LockState", lockState.toString());
+			anyLock = false;
+			for (auto range : coreMap.ranges()) {
+				if (range.value().isValid()) {
+					anyLock = true;
+					break;
+				}
+			}
+		}
+		currentRangeLockStartKey.reset();
+	}
+
+	bool locked(const KeyRef key) const { return locked(singleKeyRange(key)); }
+
+	bool locked(const KeyRangeRef range) const {
+		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+		if (!anyLock) {
+			return false;
+		}
+		for (auto lockRange : coreMap.intersectingRanges(range)) {
+			if (lockRange.value().isValid()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+private:
+	Optional<std::pair<Key, RangeLockState>> currentRangeLockStartKey = Optional<std::pair<Key, RangeLockState>>();
+	KeyRangeMap<RangeLockState> coreMap;
+	bool anyLock = false;
+};
+
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
@@ -274,6 +333,8 @@ struct ProxyCommitData {
 	uint16_t commitProxyIndex; // decided when the cluster controller recruits commit proxies
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 	LogEpoch epoch;
+
+	std::shared_ptr<RangeLock> rangeLock = nullptr;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -360,6 +421,9 @@ struct ProxyCommitData {
 	                   ? std::make_shared<AccumulativeChecksumBuilder>(
 	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
 	                   : nullptr),
+	    rangeLock(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !encryptMode.isEncryptionEnabled()
+	                  ? std::make_shared<RangeLock>()
+	                  : nullptr),
 	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}

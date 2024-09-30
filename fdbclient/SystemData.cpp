@@ -1210,6 +1210,21 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 	return bulkLoadState;
 }
 
+// Range Lock
+const KeyRangeRef rangeLockKeys = KeyRangeRef("\xff/rangeLock/"_sr, "\xff/rangeLock0"_sr);
+const KeyRef rangeLockPrefix = rangeLockKeys.begin;
+
+const Value rangeLockStateValue(const RangeLockState& rangeLockState) {
+	return ObjectWriter::toValue(rangeLockState, IncludeVersion());
+}
+
+RangeLockState decodeRangeLockState(const ValueRef& value) {
+	RangeLockState rangeLockState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockState);
+	return rangeLockState;
+}
+
 // Keys to view and control tag throttling
 const KeyRangeRef tagThrottleKeys = KeyRangeRef("\xff\x02/throttledTags/tag/"_sr, "\xff\x02/throttledTags/tag0"_sr);
 const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;

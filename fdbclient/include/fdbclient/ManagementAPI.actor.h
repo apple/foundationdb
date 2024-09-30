@@ -189,6 +189,15 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
 
+// Lock a user range (the input range must be within normalKeys)
+ACTOR Future<Void> lockUserRange(Database cx, KeyRange range);
+
+// Unlock a user range (the input range must be within normalKeys)
+ACTOR Future<Void> unLockUserRange(Database cx, KeyRange range);
+
+// Get locked ranges intersecting the input range (the input range must be within normalKeys)
+ACTOR Future<std::vector<RangeLockState>> getUserRangeLockStates(Database cx, KeyRange range);
+
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
