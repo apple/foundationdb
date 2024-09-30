@@ -155,10 +155,8 @@ struct hash<Tag> {
 } // namespace std
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
-static const Tag txsTag{ tagLocalitySpecial, 1 };
+static const Tag txsTag{ tagLocalitySpecial, 1 }; // obsolete now
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
-
-enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;

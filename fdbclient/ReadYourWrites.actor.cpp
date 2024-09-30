@@ -2532,7 +2532,7 @@ void ReadYourWritesTransaction::setOption(FDBTransactionOptions::Option option, 
 }
 
 void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	TraceEvent(SevDebug, "TransactionSetOption").detail("Option", option).detail("Value", value);
+	TraceEvent(SevVerbose, "TransactionSetOption").detail("Option", option).detail("Value", value);
 	switch (option) {
 	case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
 		validateOptionValueNotPresent(value);

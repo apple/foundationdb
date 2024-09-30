@@ -67,7 +67,7 @@ backup data and is *NOT* metadata mutations.
 
 When a commit proxy writes metadata mutations to the log system, the proxy assigns a
 "txs" tag to the mutation. Depending on FDB versions, the "txs" tag can be one special
-tag `txsTag{ tagLocalitySpecial, 1 }` for `TLogVersion::V3` (FDB 6.1) or a randomized
+tag `txsTag{ tagLocalitySpecial, 1 }` for `TLogVersion::V3` (FDB 6.1, obsolete now) or a randomized
 "txs" tag for `TLogVersion::V4` (FDB 6.2 and later) and larger. The idea of randomized
 "txs" tag is to spread metadata mutations to all TLogs for faster parallel recovery of
 `txnStateStore`.

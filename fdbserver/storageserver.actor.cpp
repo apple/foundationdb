@@ -8622,7 +8622,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
-			TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
+			TraceEvent(SevVerbose, "FetchKeysUnblocked", data->thisServerID)
 			    .detail("FKID", interval.pairID)
 			    .detail("Version", fetchVersion);
 
@@ -8747,12 +8747,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .suppressFor(1.0)
 					    .detail("FKID", interval.pairID);
 
-					// FIXME: remove when we no longer support upgrades from 5.X
-					if (debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
-						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
-					}
-
 					debug_getRangeRetries++;
 					if (debug_nextRetryToLog == debug_getRangeRetries) {
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
@@ -8804,12 +8798,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 				break;
 			}
-		}
-
-		// FIXME: remove when we no longer support upgrades from 5.X
-		if (!data->cx->enableLocalityLoadBalance) {
-			data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
-			TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
