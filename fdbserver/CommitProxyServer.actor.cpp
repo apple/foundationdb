@@ -2004,12 +2004,15 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	}
 }
 
+// RangeLock takes effect only when the feature flag is on and database is unlocked and the mutation is not encrypted
 void rejectMutationsForRangeLock(CommitBatchContext* self) {
-	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked);
+	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked &&
+	       !self->pProxyCommitData->encryptMode.isEncryptionEnabled());
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	ASSERT(pProxyCommitData->rangeLock != nullptr);
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
-		if (self->committed[i] != ConflictBatch::TransactionCommitted) {
+		if (!(self->committed[i] == ConflictBatch::TransactionCommitted && (!self->locked || trs[i].isLockAware()))) {
 			continue;
 		}
 		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
@@ -2333,7 +2336,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// If a transaction has any mutation accessing to the locked range, reject the transaction with
 	// error_code_transaction_rejected_range_locked
 	// This feature is disabled when the database is locked
-	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked) {
+	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked &&
+	    !pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 		rejectMutationsForRangeLock(self);
 	}
 

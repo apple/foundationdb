@@ -228,7 +228,9 @@ private:
 			Key startKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->setPendingRequest(startKey, lockState);
 		}
-		txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		if (m.param1.startsWith(rangeLockPrefix)) {
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		}
 		return;
 	}
 
