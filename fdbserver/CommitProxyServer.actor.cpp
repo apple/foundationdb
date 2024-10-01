@@ -2027,7 +2027,6 @@ void rejectMutationsForRangeLock(CommitBatchContext* self) {
 			}
 			bool isLocked = pProxyCommitData->rangeLock->locked(rangeToCheck);
 			if (isLocked) {
-				TraceEvent("ZheShouldReject").detail("Mutation", m.toString());
 				self->committed[i] = ConflictBatch::TransactionLockReject;
 				trs[i].reply.sendError(transaction_rejected_range_locked());
 				transactionRejected = true;

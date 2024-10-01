@@ -47,9 +47,13 @@ struct RangeLocking : TestWorkload {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.set(key, value);
 				wait(tr.commit());
+				TraceEvent("RangeLockWorkLoadSetKey").detail("Key", key).detail("Value", value);
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("SetKeyErrorZhe").errorUnsuppressed(e).detail("Key", key).detail("Value", value);
+				TraceEvent("RangeLockWorkLoadSetKeyError")
+				    .errorUnsuppressed(e)
+				    .detail("Key", key)
+				    .detail("Value", value);
 				wait(tr.onError(e));
 			}
 		}
@@ -62,6 +66,7 @@ struct RangeLocking : TestWorkload {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.clear(key);
 				wait(tr.commit());
+				TraceEvent("RangeLockWorkLoadClearKey").detail("Key", key);
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -75,6 +80,9 @@ struct RangeLocking : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> value = wait(tr.get(key));
+				TraceEvent("RangeLockWorkLoadGetKey")
+				    .detail("Key", key)
+				    .detail("Value", value.present() ? value.get() : Value());
 				return value;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -93,29 +101,27 @@ struct RangeLocking : TestWorkload {
 		state std::vector<RangeLockState> rangeLockStates;
 
 		wait(self->setKey(cx, keyUpdate, "1"_sr));
-		TraceEvent("SetKeyZhe").detail("Key", keyUpdate).detail("Value", "1"_sr);
 
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(value.present() && value.get() == "1"_sr);
 
 		wait(self->clearKey(cx, keyUpdate));
-		TraceEvent("ClearKeyZhe").detail("Key", keyUpdate);
 
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
 		wait(lockUserRange(cx, rangeLock));
-		TraceEvent("LockRangeZhe").detail("Range", rangeLock);
+		TraceEvent("RangeLockWorkLoadLockRange").detail("Range", rangeLock);
 
 		wait(store(rangeLockStates, getUserRangeLockStates(cx, normalKeys)));
-		TraceEvent("GetLockedRangeZhe").detail("Range", rangeLock).detail("LockState", describe(rangeLockStates));
+		TraceEvent("RangeLockWorkLoadGetLockedRange")
+		    .detail("Range", rangeLock)
+		    .detail("LockState", describe(rangeLockStates));
 
 		try {
 			wait(self->setKey(cx, keyUpdate, "2"_sr));
-			TraceEvent("SetKeyZhe").detail("Key", keyUpdate).detail("Value", "2"_sr);
 			ASSERT(false);
 		} catch (Error& e) {
-			TraceEvent("SetKeyZheError").detail("Key", keyUpdate).detail("Value", "2"_sr);
 			ASSERT(e.code() == error_code_transaction_rejected_range_locked);
 		}
 
@@ -123,14 +129,15 @@ struct RangeLocking : TestWorkload {
 		ASSERT(!value.present());
 
 		wait(unLockUserRange(cx, rangeLock));
-		TraceEvent("UnlockRangeZhe").detail("Range", rangeLock);
+		TraceEvent("RangeLockWorkLoadUnlockRange").detail("Range", rangeLock);
 
 		rangeLockStates.clear();
 		wait(store(rangeLockStates, getUserRangeLockStates(cx, normalKeys)));
-		TraceEvent("GetLockedRangeZhe").detail("Range", rangeLock).detail("LockState", describe(rangeLockStates));
+		TraceEvent("RangeLockWorkLoadGetLockedRange")
+		    .detail("Range", rangeLock)
+		    .detail("LockState", describe(rangeLockStates));
 
 		wait(self->setKey(cx, keyUpdate, "3"_sr));
-		TraceEvent("SetKeyZhe").detail("Key", keyUpdate).detail("Value", "3"_sr);
 
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(value.present() && value.get() == "3"_sr);
