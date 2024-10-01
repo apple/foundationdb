@@ -1,9 +1,11 @@
 [configuration]
-tenantModes = ['disabled']
+tenantModes = ['disabled'] # do not support tenant
+encryptModes = ['disabled'] # do not support encryption
 
 [[knobs]]
 enable_commit_user_range_lock = true
 transaction_lock_rejection_retriable = false
+proxy_use_resolver_private_mutations = false # do not support version vector
 
 [[test]]
 testTitle = 'RangeLocking'
