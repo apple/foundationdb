@@ -213,7 +213,7 @@ private:
 		}
 	}
 
-	void checkSetRangeLockPrefix(MutationRef m) {
+	void checkSetRangeLockPrefix(const MutationRef& m) {
 		// RangeLock is upated by SetKrmRange which updates a range with two successive mutations
 		if (rangeLock == nullptr) {
 			return;
@@ -228,6 +228,7 @@ private:
 			Key startKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->setPendingRequest(startKey, lockState);
 		}
+		txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		return;
 	}
 
@@ -936,6 +937,19 @@ private:
 		}
 	}
 
+	void checkClearRangeLockPrefix(KeyRangeRef range) {
+		if (rangeLock == nullptr) {
+			return;
+		}
+		if (!rangeLockKeys.intersects(range)) {
+			return;
+		}
+		ASSERT(!initialCommit);
+		KeyRangeRef r = range & rangeLockKeys;
+		txnStateStore->clear(r);
+		return;
+	}
+
 	void checkClearKeyServerKeys(KeyRangeRef range) {
 		if (!keyServersKeys.intersects(range)) {
 			return;
@@ -1562,6 +1576,7 @@ public:
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
 
+				checkClearRangeLockPrefix(range);
 				checkClearKeyServerKeys(range);
 				checkClearConfigKeys(m, range);
 				checkClearServerListKeys(range);
