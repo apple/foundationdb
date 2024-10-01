@@ -150,7 +150,7 @@ class RandomGenerator(object):
 
     def random_range_params(self):
         if random.random() < 0.75:
-            limit = random.randint(1, 1e3)
+            limit = random.randint(1, int(1e3))
         elif random.random() < 0.75:
             limit = 0
         else:
