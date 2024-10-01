@@ -2012,7 +2012,7 @@ void rejectMutationsForRangeLock(CommitBatchContext* self) {
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
-		if (!(self->committed[i] == ConflictBatch::TransactionCommitted && (!self->locked || trs[i].isLockAware()))) {
+		if (self->committed[i] != ConflictBatch::TransactionCommitted) {
 			continue;
 		}
 		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;

@@ -200,13 +200,13 @@ public:
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
-	void setPendingRequest(Key startKey, RangeLockState lockState) {
+	void setPendingRequest(const Key& startKey, const RangeLockState& lockState) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockState);
 	}
 
-	void consumePendingRequest(Key endKey) {
+	void consumePendingRequest(const Key& endKey) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
@@ -228,9 +228,7 @@ public:
 		currentRangeLockStartKey.reset();
 	}
 
-	bool locked(const KeyRef key) const { return locked(singleKeyRange(key)); }
-
-	bool locked(const KeyRangeRef range) const {
+	bool locked(const KeyRange& range) const {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		if (!anyLock) {
 			return false;
