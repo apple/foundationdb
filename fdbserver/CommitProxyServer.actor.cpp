@@ -3752,6 +3752,13 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		for (auto& kv : data) {
 			if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
+				if (kv.key.startsWith(rangeLockPrefix)) {
+					// Make it as mutation pair issued by an identical KrmSetRange
+					// We can set the right end as allKeys.end with rangeLockPrefix since the kvs are in
+					// ascending order of keys
+					mutations.emplace_back(
+					    mutations.arena(), MutationRef::SetValue, allKeys.end.withPrefix(rangeLockPrefix), StringRef());
+				}
 				continue;
 			}
 
