@@ -215,10 +215,8 @@ public:
 		coreMap.insert(lockRange, lockState);
 		coreMap.coalesce(allKeys);
 		if (lockState.isValid()) {
-			TraceEvent("ZheSet").detail("Range", lockRange).detail("LockState", lockState.toString());
 			anyLock = true;
 		} else {
-			TraceEvent("ZheUnset").detail("Range", lockRange).detail("LockState", lockState.toString());
 			anyLock = false;
 			for (auto range : coreMap.ranges()) {
 				if (range.value().isValid()) {
