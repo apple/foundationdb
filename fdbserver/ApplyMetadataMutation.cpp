@@ -214,10 +214,16 @@ private:
 	}
 
 	void checkSetRangeLockPrefix(const MutationRef& m) {
-		// RangeLock is upated by SetKrmRange which updates a range with two successive mutations
-		if (rangeLock == nullptr) {
+		if (!m.param1.startsWith(rangeLockPrefix)) {
+			return;
+		} else if (rangeLock == nullptr) {
+			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
+			    .detail("Mutation", m.toString())
+			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK)
+			    .detail("Encription", encryptMode.isEncryptionEnabled());
 			return;
 		}
+		// RangeLock is upated by SetKrmRange which updates a range with two successive mutations
 		if (rangeLock->pendingRequest()) {
 			ASSERT(m.param1.startsWith(rangeLockPrefix));
 			Key endKey = m.param1.removePrefix(rangeLockPrefix);

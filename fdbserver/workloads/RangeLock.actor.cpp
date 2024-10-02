@@ -74,6 +74,21 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> clearRange(Database cx, KeyRange range) {
+		loop {
+			state Transaction tr(cx);
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.clear(range);
+				wait(tr.commit());
+				TraceEvent("RangeLockWorkLoadClearRange").detail("Range", range);
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Optional<Value>> getKey(Database cx, Key key) {
 		loop {
 			state Transaction tr(cx);
@@ -96,9 +111,10 @@ struct RangeLocking : TestWorkload {
 		}
 
 		state Key keyUpdate = "11"_sr;
+		state KeyRange keyToClear = KeyRangeRef("1"_sr, "3"_sr);
 		state KeyRange rangeLock = KeyRangeRef("1"_sr, "2"_sr);
 		state Optional<Value> value;
-		state std::vector<RangeLockState> rangeLockStates;
+		state std::vector<KeyRange> lockedRanges;
 
 		wait(self->setKey(cx, keyUpdate, "1"_sr));
 
@@ -110,13 +126,13 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(lockUserRange(cx, rangeLock));
+		wait(lockCommitUserRange(cx, rangeLock));
 		TraceEvent("RangeLockWorkLoadLockRange").detail("Range", rangeLock);
 
-		wait(store(rangeLockStates, getUserRangeLockStates(cx, normalKeys)));
+		wait(store(lockedRanges, getCommitLockedUserRanges(cx, normalKeys)));
 		TraceEvent("RangeLockWorkLoadGetLockedRange")
 		    .detail("Range", rangeLock)
-		    .detail("LockState", describe(rangeLockStates));
+		    .detail("LockState", describe(lockedRanges));
 
 		try {
 			wait(self->setKey(cx, keyUpdate, "2"_sr));
@@ -125,17 +141,24 @@ struct RangeLocking : TestWorkload {
 			ASSERT(e.code() == error_code_transaction_rejected_range_locked);
 		}
 
+		try {
+			wait(self->clearRange(cx, keyToClear));
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_transaction_rejected_range_locked);
+		}
+
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(unLockUserRange(cx, rangeLock));
+		wait(unlockCommitUserRange(cx, rangeLock));
 		TraceEvent("RangeLockWorkLoadUnlockRange").detail("Range", rangeLock);
 
-		rangeLockStates.clear();
-		wait(store(rangeLockStates, getUserRangeLockStates(cx, normalKeys)));
+		lockedRanges.clear();
+		wait(store(lockedRanges, getCommitLockedUserRanges(cx, normalKeys)));
 		TraceEvent("RangeLockWorkLoadGetLockedRange")
 		    .detail("Range", rangeLock)
-		    .detail("LockState", describe(rangeLockStates));
+		    .detail("LockState", describe(lockedRanges));
 
 		wait(self->setKey(cx, keyUpdate, "3"_sr));
 
