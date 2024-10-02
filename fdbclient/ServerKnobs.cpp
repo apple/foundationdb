@@ -545,7 +545,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,               4 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,                 20 ); // RocksDB default.
 	init( ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,                     36 ); // RocksDB default.
-	init( ROCKSDB_MAX_TOTAL_WAL_SIZE, isSimulated? 256 <<20 : 1 << 30 ); // 1GB.
+	init( ROCKSDB_MAX_TOTAL_WAL_SIZE, isSimulated? 256 <<20 : 512 << 20 ); // 512MB.
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 300.0 : 15.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
@@ -585,20 +585,20 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,               0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01();
 	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                  10485760 ); // 10MB
 	init( ROCKSDB_MAX_MANIFEST_FILE_SIZE,                  100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
-	init( SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,          100 );
+	init( SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,          500 ); if (isSimulated) SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS = 50;
 	init( SHARDED_ROCKSDB_AVERAGE_FILE_SIZE,                 8 << 20 ); // 8MB
 	init( SHARDED_ROCKSDB_COMPACTION_PERIOD, isSimulated? 3600 : 2592000 ); // 30d
 	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,               3600 ); // 1h
 	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                 -1 );
 	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE,                16 << 20 ); // 16MB
-	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE,           1 << 30 ); // 1GB
+	init( SHARDED_ROCKSDB_TOTAL_WRITE_BUFFER_SIZE,         2LL << 30 ); // 2GB
 	init( SHARDED_ROCKSDB_MEMTABLE_BUDGET,                  64 << 20 ); // 64MB
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,          true );
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 );
-	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated?   128 << 20 : 2LL << 30); // 2GB
+	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated?   128 << 20 : 3LL << 30); // 3GB
 	init( SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO,              0.5 ); /* Share of high priority Index&filter blocks in cache */
 	init( SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS,         true );
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
