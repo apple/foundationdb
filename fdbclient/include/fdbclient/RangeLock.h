@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_RANGELOCK_H
 #define FDBCLIENT_RANGELOCK_H
+#include "flow/Error.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -27,7 +28,7 @@
 
 enum class RangeLockType : uint8_t {
 	Invalid = 0,
-	RejectAll = 1,
+	RejectCommits = 1,
 };
 
 struct RangeLockState {
@@ -36,23 +37,31 @@ struct RangeLockState {
 public:
 	RangeLockState() = default;
 
-	RangeLockState(RangeLockType type) : lockerType(type) {}
+	RangeLockState(RangeLockType type) : lockType(type) {}
 
-	bool isValid() const { return lockerType != RangeLockType::Invalid; }
+	bool isValid() const { return lockType != RangeLockType::Invalid; }
 
-	std::string toString() const {
-		return "RangeLockState: [lockerType]: " + std::to_string(static_cast<uint8_t>(lockerType));
+	std::string rangeLockTypeString() const {
+		if (lockType == RangeLockType::Invalid) {
+			return "invalid";
+		} else if (lockType == RangeLockType::RejectCommits) {
+			return "rejectCommit";
+		} else {
+			UNREACHABLE();
+		}
 	}
 
-	bool operator==(RangeLockState const& r) const { return lockerType == r.lockerType; }
+	std::string toString() const { return "RangeLockState: [lockType]: " + rangeLockTypeString(); }
+
+	bool operator==(RangeLockState const& r) const { return lockType == r.lockType; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lockerType);
+		serializer(ar, lockType);
 	}
 
 private:
-	RangeLockType lockerType;
+	RangeLockType lockType;
 };
 
 #endif
