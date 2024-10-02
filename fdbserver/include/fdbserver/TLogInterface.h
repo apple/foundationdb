@@ -161,7 +161,7 @@ struct TLogLockResult {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion, unknownCommittedVersions, id, logId);
+		serializer(ar, end, knownCommittedVersion, id, unknownCommittedVersions, logId);
 	}
 };
 
@@ -354,13 +354,13 @@ struct TLogCommitRequest : TimedRequest {
 		           version,
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,
-		           seqPrevVersion,
 		           messages,
 		           reply,
 		           debugID,
 		           tLogCount,
-		           tLogLocIds,
 		           spanContext,
+		           seqPrevVersion,
+		           tLogLocIds,
 		           arena);
 	}
 };
